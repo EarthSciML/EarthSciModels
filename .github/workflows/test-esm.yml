@@ -1,0 +1,35 @@
+name: test-esm
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  julia-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - id: check_project
+        run: |
+          if [ -f Project.toml ]; then
+            echo "has_project=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_project=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No Project.toml yet — skipping Julia tests until the shim lands (mdl-8y7)."
+          fi
+      - uses: julia-actions/setup-julia@v2
+        if: steps.check_project.outputs.has_project == 'true'
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+        if: steps.check_project.outputs.has_project == 'true'
+      - uses: julia-actions/julia-buildpkg@v1
+        if: steps.check_project.outputs.has_project == 'true'
+      - uses: julia-actions/julia-runtest@v1
+        if: steps.check_project.outputs.has_project == 'true'
+      # TODO(mdl-08t): extend this to walk .esm files under models/, reaction_systems/,
+      # operators/, data_loaders/, coupling/, interfaces/ and run each file's inline
+      # tests via EarthSciSerialization.jl's parser. Current scope: only the Julia
+      # shim's unit tests from Pkg.test().
