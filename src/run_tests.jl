@@ -1,0 +1,481 @@
+"""
+    run_tests.jl
+
+Discovery + inline-test runner for `.esm` files in this repo.
+
+Each `Model` and `ReactionSystem` may carry a `tests` block (ESM spec §6.6) of
+scalar `(variable, time, expected, [tolerance])` assertions. This module walks
+the repo's component directories, parses every `.esm` file via
+`EarthSciSerialization.load`, simulates each Test on the resulting MTK system,
+samples each Assertion via the solution interpolant, and compares to the
+declared expected value with the tolerance resolved per spec §6.6.4 (assertion
+> test > model > default `rel=1e-6`).
+
+The runner requires `ModelingToolkit`, `OrdinaryDiffEqTsit5` /
+`OrdinaryDiffEqRosenbrock`, and (for `ReactionSystem` tests) `Catalyst` to be
+loaded at the call site so the EarthSciSerialization MTK / Catalyst extensions
+are active.
+
+Public surface:
+- `discover_esm_files(roots)` — recursive `.esm` walk
+- `run_esm_tests(roots; junit_xml=nothing, verbose=true)` — returns
+  `(results, exit_code)` where `exit_code == 0` iff every assertion passed
+- `write_junit_xml(results, path)` — emit a junit-compatible report
+"""
+
+const DEFAULT_ROOTS = ["models", "reaction_systems", "operators",
+                       "data_loaders", "coupling", "interfaces"]
+
+@enum AssertionStatus PASS FAIL ERROR SKIP
+
+"""
+    AssertionResult
+
+Outcome of one `(file, container, test, assertion_idx)` evaluation.
+`message` carries the diff or error text for non-`PASS` results.
+"""
+struct AssertionResult
+    file::String
+    container_kind::Symbol   # :model or :reaction_system
+    container_name::String
+    test_id::String
+    assertion_idx::Int
+    variable::String
+    time::Float64
+    expected::Float64
+    actual::Union{Float64,Nothing}
+    status::AssertionStatus
+    message::String
+    duration_s::Float64
+end
+
+# ---------------------------------------------------------------------------
+# Discovery
+# ---------------------------------------------------------------------------
+
+"""
+    discover_esm_files(roots) -> Vector{String}
+
+Recursively walk each directory in `roots` (relative to `esm_root()` if not
+absolute) and return all `*.esm` paths in deterministic sorted order. Missing
+roots are skipped silently — empty top-level dirs are normal in the migration
+window.
+"""
+function discover_esm_files(roots::AbstractVector{<:AbstractString})
+    base = esm_root()
+    found = String[]
+    for r in roots
+        dir = isabspath(r) ? r : joinpath(base, r)
+        isdir(dir) || continue
+        for (root, _dirs, files) in walkdir(dir)
+            for f in files
+                endswith(f, ".esm") && push!(found, joinpath(root, f))
+            end
+        end
+    end
+    sort!(found)
+    return found
+end
+
+discover_esm_files() = discover_esm_files(DEFAULT_ROOTS)
+
+# ---------------------------------------------------------------------------
+# Tolerance resolution (spec §6.6.4)
+# ---------------------------------------------------------------------------
+
+const _DEFAULT_REL_TOL = 1.0e-6
+
+# Returns (rtol, atol) — the most-specific declared tolerance wins.
+function _resolve_tolerance(model_tol, test_tol, assertion_tol)
+    for candidate in (assertion_tol, test_tol, model_tol)
+        candidate === nothing && continue
+        rel = candidate.rel === nothing ? 0.0 : candidate.rel
+        atol = candidate.abs === nothing ? 0.0 : candidate.abs
+        return (Float64(rel), Float64(atol))
+    end
+    return (_DEFAULT_REL_TOL, 0.0)
+end
+
+# ---------------------------------------------------------------------------
+# Symbol lookup on a compiled MTK system
+# ---------------------------------------------------------------------------
+
+# Variable names in flattened ESM systems are dotted ("Sub.x"); the MTK
+# extension's `_san` rewrites dots to underscores when constructing symbolic
+# names. After mtkcompile, `getproperty(simp, Symbol(name))` returns the
+# symbolic handle for either form, prefixed by the wrapper system's name.
+function _resolve_handle(simp, sys_name::Symbol, var_spec::AbstractString)
+    MTK = _require_mtk()
+    sanitized = replace(String(var_spec), "." => "_")
+    qualified = Symbol(String(sys_name) * "_" * sanitized)
+    if hasproperty(simp, qualified)
+        return getproperty(simp, qualified)
+    end
+    bare = Symbol(sanitized)
+    if hasproperty(simp, bare)
+        return getproperty(simp, bare)
+    end
+    throw(ArgumentError("Variable '$(var_spec)' not found on compiled system " *
+                         "(tried '$(qualified)' and '$(bare)')."))
+end
+
+# Lazy module lookup so this file can `include` without a hard dep on MTK
+# being loaded at module-init time. Mirrors the pattern used by `_to_system`
+# in EarthSciModels.jl.
+function _require_mtk()
+    pkg = Base.PkgId(Base.UUID("961ee093-0014-501f-94e3-6117800e7a78"),
+                     "ModelingToolkit")
+    mod = get(Base.loaded_modules, pkg, nothing)
+    mod === nothing && throw(ArgumentError(
+        "run_esm_tests requires ModelingToolkit to be loaded. " *
+        "Call `using ModelingToolkit` first."))
+    return mod
+end
+
+function _try_require(uuid::AbstractString, name::AbstractString)
+    pkg = Base.PkgId(Base.UUID(uuid), name)
+    return get(Base.loaded_modules, pkg, nothing)
+end
+
+# Pick a solver: prefer Tsit5 (non-stiff, fast); fall back to Rosenbrock23.
+function _pick_solver()
+    tsit = _try_require("b1df2697-797e-41e3-8120-5422d3b24e4a",
+                        "OrdinaryDiffEqTsit5")
+    tsit !== nothing && return (tsit.Tsit5(), :tsit5)
+    rb = _try_require("43230ef6-c299-4910-a778-202eb28ce4ce",
+                      "OrdinaryDiffEqRosenbrock")
+    rb !== nothing && return (rb.Rosenbrock23(), :rosenbrock23)
+    throw(ArgumentError(
+        "run_esm_tests requires an OrdinaryDiffEq solver to be loaded " *
+        "(`using OrdinaryDiffEqTsit5` or `using OrdinaryDiffEqRosenbrock`)."))
+end
+
+# ---------------------------------------------------------------------------
+# Per-container test execution
+# ---------------------------------------------------------------------------
+
+function _check_assertion(actual::Real, expected::Float64,
+                          rtol::Float64, atol::Float64)
+    if rtol == 0.0 && atol == 0.0
+        return Float64(actual) == expected
+    end
+    return isapprox(Float64(actual), expected; rtol=rtol, atol=atol)
+end
+
+function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
+                                container_name::AbstractString,
+                                container_tolerance, tests, simp,
+                                sys_name::Symbol, results::Vector{AssertionResult})
+    isempty(tests) && return
+    MTK = _require_mtk()
+    solver, _solver_kind = _pick_solver()
+
+    for t in tests
+        t_start = time()
+        local sol = nothing
+        local prob_err::Union{Nothing,Exception} = nothing
+        try
+            u0_map = Dict{Any,Float64}()
+            for (spec, val) in t.initial_conditions
+                handle = _resolve_handle(simp, sys_name, spec)
+                u0_map[handle] = Float64(val)
+            end
+            p_map = Dict{Any,Float64}()
+            for (spec, val) in t.parameter_overrides
+                handle = _resolve_handle(simp, sys_name, spec)
+                p_map[handle] = Float64(val)
+            end
+            tspan = (t.time_span.start, t.time_span.stop)
+            # MTK11+ deprecated the (u0, tspan, p) form; merged Dict is the
+            # canonical shape and keeps both initial-condition + parameter
+            # overrides on a single map.
+            merged = isempty(p_map) ? u0_map : merge(u0_map, p_map)
+            prob = MTK.ODEProblem(simp, merged, tspan)
+            sol = MTK.SciMLBase.solve(prob, solver;
+                                       reltol=1e-10, abstol=1e-12)
+        catch err
+            prob_err = err
+        end
+
+        for (i, a) in enumerate(t.assertions)
+            if prob_err !== nothing
+                push!(results, AssertionResult(
+                    file, container_kind, String(container_name), t.id, i,
+                    a.variable, a.time, a.expected, nothing, ERROR,
+                    "Solve setup failed: $(prob_err)",
+                    time() - t_start))
+                continue
+            end
+
+            rtol, atol = _resolve_tolerance(container_tolerance, t.tolerance,
+                                             a.tolerance)
+            local actual_val::Union{Float64,Nothing} = nothing
+            local status::AssertionStatus = FAIL
+            local msg::String = ""
+            try
+                handle = _resolve_handle(simp, sys_name, a.variable)
+                raw = sol(a.time, idxs=handle)
+                actual_val = Float64(raw)
+                if _check_assertion(actual_val, a.expected, rtol, atol)
+                    status = PASS
+                else
+                    msg = "actual=$(actual_val) expected=$(a.expected) " *
+                          "(rtol=$(rtol), atol=$(atol))"
+                end
+            catch err
+                status = ERROR
+                msg = "Sample/compare failed: $(err)"
+            end
+
+            push!(results, AssertionResult(
+                file, container_kind, String(container_name), t.id, i,
+                a.variable, a.time, a.expected, actual_val, status, msg,
+                time() - t_start))
+        end
+    end
+end
+
+function _compile_model(model, name::Symbol)
+    MTK = _require_mtk()
+    sys = MTK.System(model; name=name)
+    return MTK.mtkcompile(sys)
+end
+
+function _compile_reaction_system(rs, name::Symbol)
+    MTK = _require_mtk()
+    cat = _try_require("479239e8-5488-4da2-87a7-35f2df7eef83", "Catalyst")
+    cat === nothing && throw(ArgumentError(
+        "ReactionSystem inline tests require Catalyst to be loaded."))
+    catalyst_rs = cat.ReactionSystem(rs; name=name)
+    complete_rs = MTK.complete(catalyst_rs)
+    return MTK.mtkcompile(MTK.convert(MTK.System, complete_rs))
+end
+
+# ---------------------------------------------------------------------------
+# Per-file driver
+# ---------------------------------------------------------------------------
+
+function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
+    local esm_file
+    try
+        esm_file = EarthSciSerialization.load(String(path))
+    catch err
+        push!(results, AssertionResult(
+            path, :file, "<parse>", "<load>", 0, "", NaN, NaN, nothing,
+            ERROR, "Parse failed: $(err)", 0.0))
+        return
+    end
+
+    if esm_file.models !== nothing
+        for (mname, model) in esm_file.models
+            isempty(model.tests) && continue
+            sys_name = Symbol(mname)
+            local simp
+            try
+                simp = _compile_model(model, sys_name)
+            catch err
+                # One synthetic ERROR row per test so we can see which tests were skipped.
+                for t in model.tests
+                    push!(results, AssertionResult(
+                        path, :model, String(mname), t.id, 0, "", NaN, NaN,
+                        nothing, ERROR, "Model compile failed: $(err)", 0.0))
+                end
+                continue
+            end
+            _run_tests_on_compiled(path, :model, String(mname),
+                                    model.tolerance, model.tests, simp,
+                                    sys_name, results)
+        end
+    end
+
+    if esm_file.reaction_systems !== nothing
+        for (rname, rs) in esm_file.reaction_systems
+            isempty(rs.tests) && continue
+            sys_name = Symbol(rname)
+            local simp
+            try
+                simp = _compile_reaction_system(rs, sys_name)
+            catch err
+                for t in rs.tests
+                    push!(results, AssertionResult(
+                        path, :reaction_system, String(rname), t.id, 0, "",
+                        NaN, NaN, nothing, ERROR,
+                        "ReactionSystem compile failed: $(err)", 0.0))
+                end
+                continue
+            end
+            _run_tests_on_compiled(path, :reaction_system, String(rname),
+                                    rs.tolerance, rs.tests, simp, sys_name,
+                                    results)
+        end
+    end
+end
+
+# ---------------------------------------------------------------------------
+# Top-level
+# ---------------------------------------------------------------------------
+
+"""
+    run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
+                  io::IO=stdout) -> (results, exit_code)
+
+Walk each directory in `roots`, run every inline test in every `.esm` file,
+and return `(results::Vector{AssertionResult}, exit_code::Int)` where
+`exit_code == 0` iff every assertion passed.
+
+Prints a per-file summary table to `io` when `verbose=true`. When
+`junit_xml` is a path, emits a junit-compatible XML report there.
+"""
+function run_esm_tests(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
+                       junit_xml::Union{AbstractString,Nothing}=nothing,
+                       verbose::Bool=true,
+                       io::IO=stdout)
+    files = discover_esm_files(roots)
+    results = AssertionResult[]
+    if isempty(files)
+        verbose && println(io, "No .esm files discovered under: ",
+                            join(roots, ", "))
+    else
+        for f in files
+            run_file_tests!(results, f)
+        end
+    end
+
+    verbose && _print_summary(io, files, results)
+    junit_xml !== nothing && write_junit_xml(results, String(junit_xml))
+
+    n_fail = count(r -> r.status == FAIL || r.status == ERROR, results)
+    exit_code = n_fail == 0 ? 0 : 1
+    return results, exit_code
+end
+
+run_esm_tests(roots::AbstractString...; kwargs...) =
+    run_esm_tests(collect(String, roots); kwargs...)
+
+function _print_summary(io::IO, files::Vector{String},
+                        results::Vector{AssertionResult})
+    base = esm_root()
+    rel(p) = startswith(p, base) ? relpath(p, base) : p
+
+    println(io)
+    println(io, "================ ESM inline-test summary ================")
+    println(io, "Files discovered: ", length(files))
+    println(io, "Assertions:       ", length(results))
+
+    by_file = Dict{String,Vector{AssertionResult}}()
+    for r in results
+        push!(get!(by_file, r.file, AssertionResult[]), r)
+    end
+
+    if isempty(results)
+        println(io, "(no inline tests found)")
+        println(io, "=========================================================")
+        return
+    end
+
+    namepad = max(20, maximum(length(rel(p)) for p in keys(by_file); init=20))
+    @printf(io, "  %-*s  %5s  %5s  %5s\n", namepad, "file", "pass", "fail", "err")
+    println(io, "  ", repeat("-", namepad + 25))
+    for f in sort!(collect(keys(by_file)))
+        rows = by_file[f]
+        np = count(r -> r.status == PASS, rows)
+        nf = count(r -> r.status == FAIL, rows)
+        ne = count(r -> r.status == ERROR, rows)
+        @printf(io, "  %-*s  %5d  %5d  %5d\n", namepad, rel(f), np, nf, ne)
+    end
+    println(io, "  ", repeat("-", namepad + 25))
+
+    total_pass = count(r -> r.status == PASS, results)
+    total_fail = count(r -> r.status == FAIL, results)
+    total_err = count(r -> r.status == ERROR, results)
+    @printf(io, "  %-*s  %5d  %5d  %5d\n", namepad, "TOTAL", total_pass,
+             total_fail, total_err)
+
+    if total_fail + total_err > 0
+        println(io)
+        println(io, "Failures:")
+        for r in results
+            (r.status == PASS) && continue
+            println(io, "  - ", rel(r.file), " :: ", r.container_name, "/",
+                     r.test_id, "[", r.assertion_idx, "] (",
+                     r.variable, "@t=", r.time, ") — ",
+                     r.status == ERROR ? "ERROR" : "FAIL")
+            isempty(r.message) || println(io, "      ", r.message)
+        end
+    end
+    println(io, "=========================================================")
+end
+
+# ---------------------------------------------------------------------------
+# JUnit XML emission
+# ---------------------------------------------------------------------------
+
+function _xml_escape(s::AbstractString)
+    s = replace(String(s), '&' => "&amp;")
+    s = replace(s, '<' => "&lt;")
+    s = replace(s, '>' => "&gt;")
+    s = replace(s, '"' => "&quot;")
+    return s
+end
+
+"""
+    write_junit_xml(results, path)
+
+Emit a junit-compatible XML report covering every `AssertionResult`.
+
+Each unique `(file, container, test_id)` becomes a `<testcase>`; one or more
+failing assertions inside it produce `<failure>` / `<error>` children.
+"""
+function write_junit_xml(results::Vector{AssertionResult}, path::AbstractString)
+    by_test = Dict{Tuple{String,String,String},Vector{AssertionResult}}()
+    order = Tuple{String,String,String}[]
+    for r in results
+        key = (r.file, r.container_name, r.test_id)
+        if !haskey(by_test, key)
+            push!(order, key)
+            by_test[key] = AssertionResult[]
+        end
+        push!(by_test[key], r)
+    end
+
+    n_tests = length(order)
+    n_fail = sum(any(r -> r.status == FAIL, rs) for rs in values(by_test); init=0)
+    n_err = sum(any(r -> r.status == ERROR, rs) for rs in values(by_test); init=0)
+
+    open(path, "w") do io
+        println(io, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+        println(io, "<testsuites tests=\"", n_tests,
+                 "\" failures=\"", n_fail,
+                 "\" errors=\"", n_err, "\">")
+        println(io, "  <testsuite name=\"esm-inline-tests\" tests=\"",
+                 n_tests, "\" failures=\"", n_fail,
+                 "\" errors=\"", n_err, "\">")
+        for key in order
+            file, container, test_id = key
+            rs = by_test[key]
+            classname = _xml_escape(string(file, "::", container))
+            casename = _xml_escape(test_id)
+            duration = sum(r.duration_s for r in rs; init=0.0)
+            println(io, "    <testcase classname=\"", classname,
+                     "\" name=\"", casename,
+                     "\" time=\"", duration, "\">")
+            for r in rs
+                if r.status == FAIL
+                    println(io, "      <failure type=\"AssertionFailure\" ",
+                             "message=\"", _xml_escape(r.message), "\">",
+                             _xml_escape(string(r.variable, "@t=", r.time,
+                                                 " expected=", r.expected,
+                                                 " actual=", r.actual)),
+                             "</failure>")
+                elseif r.status == ERROR
+                    println(io, "      <error type=\"RunnerError\" ",
+                             "message=\"", _xml_escape(r.message), "\"/>")
+                end
+            end
+            println(io, "    </testcase>")
+        end
+        println(io, "  </testsuite>")
+        println(io, "</testsuites>")
+    end
+    return path
+end

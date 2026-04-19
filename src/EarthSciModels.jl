@@ -26,8 +26,10 @@ use `EarthSciSerialization.load(path)` directly and then construct the desired
 module EarthSciModels
 
 import EarthSciSerialization
+using Printf: @printf
 
-export load_esm, esm_root, esm_path
+export load_esm, esm_root, esm_path,
+       discover_esm_files, run_esm_tests, write_junit_xml
 
 """
     load_esm(path::AbstractString)
@@ -80,5 +82,7 @@ esm_root() = pkgdir(@__MODULE__)
 Join `parts` onto the repo root. Example: `esm_path("models", "gaschem", "superfast.esm")`.
 """
 esm_path(parts::AbstractString...) = joinpath(esm_root(), parts...)
+
+include("run_tests.jl")
 
 end # module

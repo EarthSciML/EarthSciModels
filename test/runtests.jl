@@ -1,6 +1,8 @@
 using Test
 using EarthSciModels
 using ModelingToolkit
+using Catalyst
+using OrdinaryDiffEqTsit5
 
 # Placeholder .esm fixture — replaced once real .esm files land. The fixture
 # exists so the shim's parse → System → materialize path is exercised in CI
@@ -12,6 +14,8 @@ const FIXTURE = joinpath(@__DIR__, "fixtures", "minimal_model.esm")
         @test isdefined(EarthSciModels, :load_esm)
         @test isdefined(EarthSciModels, :esm_root)
         @test isdefined(EarthSciModels, :esm_path)
+        @test isdefined(EarthSciModels, :run_esm_tests)
+        @test isdefined(EarthSciModels, :discover_esm_files)
     end
 
     @testset "esm_root / esm_path" begin
@@ -28,5 +32,63 @@ const FIXTURE = joinpath(@__DIR__, "fixtures", "minimal_model.esm")
 
     @testset "load_esm errors on missing file" begin
         @test_throws Exception load_esm(joinpath(@__DIR__, "does_not_exist.esm"))
+    end
+end
+
+@testset "Inline-test runner (mdl-08t)" begin
+    inline_dir = joinpath(@__DIR__, "fixtures", "inline_tests")
+
+    @testset "discover_esm_files" begin
+        found = discover_esm_files([inline_dir])
+        @test length(found) == 2
+        @test all(endswith(f, ".esm") for f in found)
+    end
+
+    @testset "passing fixture → all PASS" begin
+        passing = joinpath(inline_dir, "passing_decay.esm")
+        results, exit_code = run_esm_tests([dirname(passing)]; verbose=false)
+        # Both fixture files in the same dir; filter to just the passing one.
+        passing_results = filter(r -> r.file == passing, results)
+        @test !isempty(passing_results)
+        @test all(r -> r.status == EarthSciModels.PASS, passing_results)
+    end
+
+    @testset "failing fixture → reports FAIL, exit_code != 0" begin
+        failing = joinpath(inline_dir, "failing_decay.esm")
+        results, exit_code = run_esm_tests([dirname(failing)]; verbose=false)
+        failing_results = filter(r -> r.file == failing, results)
+        @test !isempty(failing_results)
+        @test any(r -> r.status == EarthSciModels.FAIL, failing_results)
+        @test exit_code != 0
+    end
+
+    @testset "junit XML emission" begin
+        mktempdir() do tmp
+            xml_path = joinpath(tmp, "report.xml")
+            results, _ = run_esm_tests([inline_dir];
+                                        verbose=false, junit_xml=xml_path)
+            @test isfile(xml_path)
+            content = read(xml_path, String)
+            @test occursin("<testsuites", content)
+            @test occursin("FailingDecay", content)
+            @test occursin("<failure", content)
+        end
+    end
+
+    @testset "live repo: every committed .esm passes" begin
+        # Walk every top-level component dir in the repo root. Empty dirs are
+        # OK (Phase 0/1/2 — no committed components yet). Once .esm files
+        # land, this gate makes sure they all pass on every push.
+        results, exit_code = run_esm_tests()
+        if !isempty(results)
+            failures = filter(r -> r.status != EarthSciModels.PASS, results)
+            for f in failures
+                println(stderr, "FAIL ", f.file, " :: ", f.container_name,
+                        "/", f.test_id, " — ", f.message)
+            end
+            @test exit_code == 0
+        else
+            @info "No committed .esm files yet — runner exercised only against fixtures."
+        end
     end
 end

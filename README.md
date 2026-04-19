@@ -12,6 +12,13 @@ authoritative content is the `.esm` files; the shim exists only so Julia users
 can `load_esm(...)` a single file and get a ready-to-simulate
 `ModelingToolkit.System`.
 
+**How this repo is validated:** every push and PR runs each `.esm` file's
+inline `tests` block (ESM spec §6.6) through `EarthSciModels.run_esm_tests` —
+each scalar `(variable, time, expected)` assertion is checked by simulating
+the model and sampling its solution interpolant. One failed assertion turns
+the build red. See [`src/run_tests.jl`](src/run_tests.jl) and
+[`.github/workflows/test-esm.yml`](.github/workflows/test-esm.yml).
+
 ## Quick links
 
 - [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md) — directory convention.

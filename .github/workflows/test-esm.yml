@@ -8,7 +8,7 @@ on:
 jobs:
   julia-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - id: check_project
@@ -25,11 +25,43 @@ jobs:
           version: '1.12'
       - uses: julia-actions/cache@v2
         if: steps.check_project.outputs.has_project == 'true'
+      # EarthSciSerialization is not yet in the General registry; install it
+      # from its GitHub repo before Pkg.instantiate runs. Drop this step once
+      # the package is registered.
+      - name: Install unregistered deps
+        if: steps.check_project.outputs.has_project == 'true'
+        run: |
+          julia --project=. -e '
+            using Pkg
+            Pkg.add(url="https://github.com/EarthSciML/EarthSciSerialization.git", rev="main")
+          '
       - uses: julia-actions/julia-buildpkg@v1
         if: steps.check_project.outputs.has_project == 'true'
+      # Pkg.test runs test/runtests.jl, which exercises:
+      #   - the Julia shim's unit tests (mdl-8y7), and
+      #   - run_esm_tests over models/, reaction_systems/, operators/,
+      #     data_loaders/, coupling/, interfaces/ — every inline test in every
+      #     committed .esm file (mdl-08t).
       - uses: julia-actions/julia-runtest@v1
         if: steps.check_project.outputs.has_project == 'true'
-      # TODO(mdl-08t): extend this to walk .esm files under models/, reaction_systems/,
-      # operators/, data_loaders/, coupling/, interfaces/ and run each file's inline
-      # tests via EarthSciSerialization.jl's parser. Current scope: only the Julia
-      # shim's unit tests from Pkg.test().
+      # Standalone runner pass that emits a junit-xml summary into the job
+      # output, independently of the Pkg.test() Test.@testset machinery.
+      # Surfaces a per-file pass/fail table in the action log.
+      - name: ESM inline-test runner (junit)
+        if: steps.check_project.outputs.has_project == 'true'
+        run: |
+          julia --project=. -e '
+            using EarthSciModels
+            using ModelingToolkit
+            using Catalyst
+            using OrdinaryDiffEqTsit5
+            results, code = run_esm_tests(; junit_xml="esm-tests.xml", verbose=true)
+            exit(code)
+          '
+      - name: Upload junit XML
+        if: always() && steps.check_project.outputs.has_project == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: esm-inline-tests-junit
+          path: esm-tests.xml
+          if-no-files-found: ignore
