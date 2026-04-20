@@ -22,7 +22,7 @@ const FIXTURE = joinpath(@__DIR__, "fixtures", "minimal_model.esm")
         root = EarthSciModels.esm_root()
         @test root !== nothing
         @test isdir(root)
-        @test EarthSciModels.esm_path("models") == joinpath(root, "models")
+        @test EarthSciModels.esm_path("components") == joinpath(root, "components")
     end
 
     @testset "load_esm on minimal fixture" begin
@@ -76,9 +76,9 @@ end
     end
 
     @testset "live repo: every committed .esm passes" begin
-        # Walk every top-level component dir in the repo root. Empty dirs are
-        # OK (Phase 0/1/2 — no committed components yet). Once .esm files
-        # land, this gate makes sure they all pass on every push.
+        # Walk `components/` (all per-science-domain subdirs). An empty tree
+        # is OK (Phase 0/1/2 — early migration). Once .esm files land, this
+        # gate makes sure they all pass on every push.
         results, exit_code = run_esm_tests()
         if !isempty(results)
             failures = filter(r -> r.status != EarthSciModels.PASS, results)

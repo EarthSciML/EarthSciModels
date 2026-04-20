@@ -5,7 +5,7 @@ Discovery + inline-test runner for `.esm` files in this repo.
 
 Each `Model` and `ReactionSystem` may carry a `tests` block (ESM spec §6.6) of
 scalar `(variable, time, expected, [tolerance])` assertions. This module walks
-the repo's component directories, parses every `.esm` file via
+`components/` (organized by science domain), parses every `.esm` file via
 `EarthSciSerialization.load`, simulates each Test on the resulting MTK system,
 samples each Assertion via the solution interpolant, and compares to the
 declared expected value with the tolerance resolved per spec §6.6.4 (assertion
@@ -23,8 +23,7 @@ Public surface:
 - `write_junit_xml(results, path)` — emit a junit-compatible report
 """
 
-const DEFAULT_ROOTS = ["models", "reaction_systems", "operators",
-                       "data_loaders", "coupling", "interfaces"]
+const DEFAULT_ROOTS = ["components"]
 
 @enum AssertionStatus PASS FAIL ERROR SKIP
 
@@ -349,7 +348,8 @@ end
     run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
                   io::IO=stdout) -> (results, exit_code)
 
-Walk each directory in `roots`, run every inline test in every `.esm` file,
+Walk each directory in `roots` (default: `components/`, which holds all
+per-science-domain subdirs), run every inline test in every `.esm` file,
 and return `(results::Vector{AssertionResult}, exit_code::Int)` where
 `exit_code == 0` iff every assertion passed.
 

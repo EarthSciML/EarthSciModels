@@ -31,21 +31,20 @@ the build red. See [`src/run_tests.jl`](src/run_tests.jl) and
 ## Top-level layout
 
 ```
-models/            # Model entries (ODE / PDE / nonlinear / algebraic)
-reaction_systems/  # Catalyst / @reaction_network entries
-operators/         # Operator entries (stencils, callbacks)
-data_loaders/      # DataLoader entries (ERA5, GEOSFP, NEI, ...)
-coupling/          # Standalone CouplingEntry entries
-interfaces/        # Interface entries (registered functions, ...)
+components/        # All .esm files, grouped by science domain (one subdir per
+                   # upstream earthsciml repo: gaschem/, aerosol/,
+                   # atmospheric_dynamics/, earthsci_data/, ...)
 docs/              # Migration tracker + layout convention
 src/               # Julia shim (EarthSciModels.jl)
 test/              # Shim tests + fixtures
 .github/workflows/ # CI
 ```
 
-Each top-level directory uses per-source-repo subfolders (e.g.
-`models/gaschem/superfast.esm`). One `.esm` file per paper/chapter of content,
-not one per source `.jl` file — see `docs/REPO_LAYOUT.md`.
+Within `components/`, each science-domain subdir holds the `.esm` files for
+that domain (e.g. `components/gaschem/superfast.esm`). A single `.esm` file can
+contain any mix of models, reaction_systems, operators, data_loaders, coupling,
+and interfaces — see the ESM spec. One `.esm` file per paper/chapter of
+content, not one per source `.jl` file — see `docs/REPO_LAYOUT.md`.
 
 ## Julia shim usage
 
@@ -54,7 +53,7 @@ using Pkg; Pkg.add(url="https://github.com/EarthSciML/EarthSciModels")
 using EarthSciModels
 using ModelingToolkit
 
-sys = load_esm(EarthSciModels.esm_path("models", "gaschem", "superfast.esm"))
+sys = load_esm(EarthSciModels.esm_path("components", "gaschem", "superfast.esm"))
 ```
 
 For files with multiple models (or non-`Model` entries like `ReactionSystem` or

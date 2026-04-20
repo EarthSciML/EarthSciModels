@@ -5,10 +5,10 @@ Thin Julia shim over `EarthSciSerialization.jl` for loading `.esm` files from
 this repo as ready-to-simulate `ModelingToolkit.System` / `PDESystem` objects.
 
 This package intentionally contains no model content — the authoritative models
-live in the `.esm` files under `models/`, `reaction_systems/`, `operators/`,
-`data_loaders/`, `coupling/`, and `interfaces/` at the repo root. See
-`docs/REPO_LAYOUT.md` for the directory convention and
-`docs/migration-tracker.md` for the migration inventory.
+live in `.esm` files under `components/<science-domain>/` at the repo root
+(one subdir per upstream earthsciml repo, e.g. `components/gaschem/`,
+`components/aerosol/`). See `docs/REPO_LAYOUT.md` for the directory convention
+and `docs/migration-tracker.md` for the migration inventory.
 
 ## Quickstart
 
@@ -16,7 +16,7 @@ live in the `.esm` files under `models/`, `reaction_systems/`, `operators/`,
 using EarthSciModels
 using ModelingToolkit   # required to materialize System; ESS MTK extension loads
 
-sys = load_esm(joinpath(pkgdir(EarthSciModels), "models/gaschem/superfast.esm"))
+sys = load_esm(joinpath(pkgdir(EarthSciModels), "components/gaschem/superfast.esm"))
 ```
 
 For multi-component files, or to choose which model in a file to materialize,
@@ -79,7 +79,7 @@ esm_root() = pkgdir(@__MODULE__)
 """
     esm_path(parts...) -> String
 
-Join `parts` onto the repo root. Example: `esm_path("models", "gaschem", "superfast.esm")`.
+Join `parts` onto the repo root. Example: `esm_path("components", "gaschem", "superfast.esm")`.
 """
 esm_path(parts::AbstractString...) = joinpath(esm_root(), parts...)
 

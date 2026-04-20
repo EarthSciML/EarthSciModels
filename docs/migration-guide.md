@@ -78,7 +78,7 @@ esm_dict = EarthSciSerialization.mtk2esm(sys; metadata=(;
 ))
 
 # Serialize to disk under the appropriate component dir:
-open("models/gaschem/superfast.esm", "w") do io
+open("components/gaschem/superfast.esm", "w") do io
     JSON3.pretty(io, esm_dict)
 end
 ```
@@ -89,7 +89,9 @@ hand-curated overlay — `name`, `description`, `tags`, `source_ref`,
 `authors`, `version`. `name` overrides `nameof(sys)`.
 
 The Catalyst extension provides a `ReactionSystem` overload that emits
-under `reaction_systems.<name>` instead of `models.<name>`.
+under `reaction_systems.<name>` instead of `models.<name>` (this is the
+schema field, not a directory — both kinds of file live under
+`components/<domain>/`).
 
 ### The `EarthSciModels` shim
 
@@ -99,7 +101,7 @@ Once an `.esm` exists, the consuming side is one line:
 using EarthSciModels
 using ModelingToolkit   # so the ESS MTK extension activates
 
-sys = load_esm(esm_path("models", "gaschem", "superfast.esm"))
+sys = load_esm(esm_path("components", "gaschem", "superfast.esm"))
 ```
 
 `load_esm` delegates to `EarthSciSerialization.load(...)` and asserts the
