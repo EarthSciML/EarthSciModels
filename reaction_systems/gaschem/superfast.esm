@@ -1,0 +1,2478 @@
+{
+  "esm": "0.1.0",
+  "metadata": {
+    "name": "SuperFast",
+    "description": "SuperFast gas-phase atmospheric chemistry mechanism from GasChem.jl. A simplified tropospheric chemistry network (12 active species + 3 quasi-constant reservoirs, ~30 reactions) suitable for background tropospheric ozone simulations. Rate-law wrappers (arrhenius, third-body falloff, JPL 15-10 OH+CO, H2O-dependent HO2+HO2) are inlined as ESM Expression trees. Fractional stoichiometries and isconstantspecies parameters are approximated (see component description for details).",
+    "authors": [
+      "GasChem.jl contributors",
+      "EarthSciModels Phase-2 migration (mdl-dkw)"
+    ],
+    "created": "2026-04-19T00:00:00Z",
+    "tags": [
+      "gas-phase chemistry",
+      "tropospheric",
+      "ozone",
+      "photochemistry",
+      "pilot-migration"
+    ]
+  },
+  "reaction_systems": {
+    "SuperFast": {
+      "coupletype": "SuperFastCoupler",
+      "reference": {
+        "doi": "10.5194/gmd-11-4155-2018",
+        "citation": "Brown-Steiner, B., Selin, N. E., Prinn, R. G., Tilmes, S., Emmons, L., Lamarque, J.-F., and Cameron-Smith, P.: Evaluating simplified chemical mechanisms within present-day simulations of the Community Earth System Model version 1.2 with CAM4 (CESM1.2 CAM-chem): MOZART-4 vs. Reduced Hydrocarbon vs. Super-Fast chemistry, Geoscientific Model Development, 11, 4155-4174, 2018.",
+        "url": "https://gmd.copernicus.org/articles/11/4155/2018/",
+        "notes": "Source SHA: GasChem.jl @ 8c12c048482b515fb8eb2110bf8ab4b4f4e71309. Reactions transcribed from src/SuperFast.jl (Brown-Steiner et al. 2018, Table S2). Migration pilot bead: mdl-dkw. Friction notes (filed as separate beads): (a) ESM schema stoichiometry is integer>=1, so reactions with fractional products (CH3O2+CH3O2 -> 2 CH2O + 0.8 HO2; ISOP+O3 channels; etc.) were decomposed into integer-stoich primary reactions plus null-substrate shadow reactions whose rates carry the fractional coefficients. (b) O2, CH4, H2O are isconstantspecies=true @parameters in the upstream MTK model; they were promoted to species with large default concentrations. Their drift over a 360 s simulation is negligible for O2 (2.1e8 ppb) and H2O (1.8e7 ppb) but small and nonzero for CH4 (1700 ppb). (c) The OH+CO=HO2+CO2 reaction drops CO2 (not tracked in SuperFast)."
+      },
+      "species": {
+        "O3": {
+          "units": "ppb",
+          "default": 40.0,
+          "description": "Ozone"
+        },
+        "OH": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Hydroxyl radical"
+        },
+        "HO2": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Hydroperoxyl radical"
+        },
+        "NO": {
+          "units": "ppb",
+          "default": 0.0004,
+          "description": "Nitric oxide"
+        },
+        "NO2": {
+          "units": "ppb",
+          "default": 0.0004,
+          "description": "Nitrogen dioxide"
+        },
+        "CH3O2": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Methyl peroxy radical"
+        },
+        "CH2O": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Formaldehyde"
+        },
+        "CO": {
+          "units": "ppb",
+          "default": 100.0,
+          "description": "Carbon monoxide"
+        },
+        "CH3OOH": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Methyl hydroperoxide"
+        },
+        "ISOP": {
+          "units": "ppb",
+          "default": 1e-11,
+          "description": "Isoprene"
+        },
+        "H2O2": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Hydrogen peroxide"
+        },
+        "HNO3": {
+          "units": "ppb",
+          "default": 4e-06,
+          "description": "Nitric acid"
+        },
+        "O2": {
+          "units": "ppb",
+          "default": 209500000.0,
+          "description": "Molecular oxygen (quasi-constant reservoir; was isconstantspecies=true parameter in upstream MTK model)"
+        },
+        "CH4": {
+          "units": "ppb",
+          "default": 1700.0,
+          "description": "Methane (quasi-constant reservoir; was isconstantspecies=true parameter in upstream MTK model)"
+        },
+        "H2O": {
+          "units": "ppb",
+          "default": 18390000.0,
+          "description": "Water vapor (quasi-constant reservoir; was isconstantspecies=true parameter in upstream MTK model)"
+        }
+      },
+      "parameters": {
+        "T": {
+          "units": "K",
+          "default": 280.0,
+          "description": "Temperature"
+        },
+        "P": {
+          "units": "Pa",
+          "default": 101325.0,
+          "description": "Pressure"
+        },
+        "jO32OH": {
+          "units": "1/s",
+          "default": 0.000227,
+          "description": "Photolysis of O3 to 2 OH (simplified, includes O1D+H2O)"
+        },
+        "jH2O2": {
+          "units": "1/s",
+          "default": 1.0097e-05,
+          "description": "Photolysis of H2O2"
+        },
+        "jNO2": {
+          "units": "1/s",
+          "default": 0.0149,
+          "description": "Photolysis of NO2"
+        },
+        "jH2COa": {
+          "units": "1/s",
+          "default": 0.00014,
+          "description": "Photolysis of CH2O (radical channel)"
+        },
+        "jH2COb": {
+          "units": "1/s",
+          "default": 0.00014,
+          "description": "Photolysis of CH2O (molecular channel)"
+        },
+        "jCH3OOH": {
+          "units": "1/s",
+          "default": 8.9573e-06,
+          "description": "Photolysis of CH3OOH"
+        }
+      },
+      "reactions": [
+        {
+          "id": "R1",
+          "substrates": [
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              1.7e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      -940,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "O3_OH"
+        },
+        {
+          "id": "R2",
+          "substrates": [
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 2
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              1e-14,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      -490,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "O3_HO2"
+        },
+        {
+          "id": "R3",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              4.8e-11,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      250,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "OH_HO2"
+        },
+        {
+          "id": "R4",
+          "substrates": [
+            {
+              "species": "HO2",
+              "stoichiometry": 2
+            }
+          ],
+          "products": [
+            {
+              "species": "H2O2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      3e-13,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              460.0,
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      72432000.0,
+                      {
+                        "op": "/",
+                        "args": [
+                          "P",
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          2.1e-33,
+                          {
+                            "op": "exp",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  920.0,
+                                  "T"
+                                ]
+                              }
+                            ]
+                          },
+                          72432000.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          7.2432e+16,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      1.4e-21,
+                      "H2O",
+                      {
+                        "op": "*",
+                        "args": [
+                          "H2O",
+                          1e-09,
+                          {
+                            "op": "*",
+                            "args": [
+                              7.2432e+16,
+                              {
+                                "op": "/",
+                                "args": [
+                                  "P",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              2200.0,
+                              "T"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "HO2_HO2"
+        },
+        {
+          "id": "R5",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "H2O2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              1.8e-12,
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "OH_H2O2"
+        },
+        {
+          "id": "R6",
+          "substrates": [
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              3e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      -1500,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "O3_NO"
+        },
+        {
+          "id": "R7",
+          "substrates": [
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              3.3e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      270,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "HO2_NO"
+        },
+        {
+          "id": "R8",
+          "substrates": [
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "HNO3",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          1.8e-30,
+                          {
+                            "op": "^",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  300.0,
+                                  "T"
+                                ]
+                              },
+                              3
+                            ]
+                          },
+                          72432000.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          7.2432e+16,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      0.6,
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "+",
+                            "args": [
+                              1.0,
+                              {
+                                "op": "*",
+                                "args": [
+                                  {
+                                    "op": "log10",
+                                    "args": [
+                                      {
+                                        "op": "/",
+                                        "args": [
+                                          {
+                                            "op": "*",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  1.8e-30,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      3
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  7.2432e+16,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "*",
+                                            "args": [
+                                              2.8e-11,
+                                              72432000.0,
+                                              {
+                                                "op": "/",
+                                                "args": [
+                                                  "P",
+                                                  "T"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "log10",
+                                    "args": [
+                                      {
+                                        "op": "/",
+                                        "args": [
+                                          {
+                                            "op": "*",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  1.8e-30,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      3
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  7.2432e+16,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "*",
+                                            "args": [
+                                              2.8e-11,
+                                              72432000.0,
+                                              {
+                                                "op": "/",
+                                                "args": [
+                                                  "P",
+                                                  "T"
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              1.8e-30,
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      300.0,
+                                      "T"
+                                    ]
+                                  },
+                                  3
+                                ]
+                              },
+                              72432000.0,
+                              {
+                                "op": "/",
+                                "args": [
+                                  "P",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "*",
+                            "args": [
+                              7.2432e+16,
+                              {
+                                "op": "/",
+                                "args": [
+                                  "P",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          2.8e-11,
+                          72432000.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "NO2_OH_M"
+        },
+        {
+          "id": "R9",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "CH4",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              2.45e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      -1775,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "OH_CH4"
+        },
+        {
+          "id": "R10",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "CO",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          5.9e-33,
+                          {
+                            "op": "^",
+                            "args": [
+                              {
+                                "op": "/",
+                                "args": [
+                                  300.0,
+                                  "T"
+                                ]
+                              },
+                              1
+                            ]
+                          },
+                          72432000.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          7.2432e+16,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "^",
+                        "args": [
+                          0.6,
+                          {
+                            "op": "/",
+                            "args": [
+                              1.0,
+                              {
+                                "op": "+",
+                                "args": [
+                                  1.0,
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      {
+                                        "op": "log10",
+                                        "args": [
+                                          {
+                                            "op": "/",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      5.9e-33,
+                                                      {
+                                                        "op": "^",
+                                                        "args": [
+                                                          {
+                                                            "op": "/",
+                                                            "args": [
+                                                              300.0,
+                                                              "T"
+                                                            ]
+                                                          },
+                                                          1
+                                                        ]
+                                                      },
+                                                      72432000.0,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      7.2432e+16,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  1.1e-12,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      -1.3
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "log10",
+                                        "args": [
+                                          {
+                                            "op": "/",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      5.9e-33,
+                                                      {
+                                                        "op": "^",
+                                                        "args": [
+                                                          {
+                                                            "op": "/",
+                                                            "args": [
+                                                              300.0,
+                                                              "T"
+                                                            ]
+                                                          },
+                                                          1
+                                                        ]
+                                                      },
+                                                      72432000.0,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      7.2432e+16,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  1.1e-12,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      -1.3
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      1.0,
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  5.9e-33,
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      {
+                                        "op": "/",
+                                        "args": [
+                                          300.0,
+                                          "T"
+                                        ]
+                                      },
+                                      1
+                                    ]
+                                  },
+                                  72432000.0,
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "P",
+                                      "T"
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "*",
+                                "args": [
+                                  7.2432e+16,
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "P",
+                                      "T"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "*",
+                            "args": [
+                              1.1e-12,
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      300.0,
+                                      "T"
+                                    ]
+                                  },
+                                  -1.3
+                                ]
+                              },
+                              72432000.0,
+                              {
+                                "op": "/",
+                                "args": [
+                                  "P",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          1.5e-13,
+                          72432000.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              "P",
+                              "T"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "^",
+                        "args": [
+                          0.6,
+                          {
+                            "op": "/",
+                            "args": [
+                              1.0,
+                              {
+                                "op": "+",
+                                "args": [
+                                  1.0,
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      {
+                                        "op": "log10",
+                                        "args": [
+                                          {
+                                            "op": "/",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      1.5e-13,
+                                                      72432000.0,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      7.2432e+16,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  2100000000.0,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      -6.1
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "log10",
+                                        "args": [
+                                          {
+                                            "op": "/",
+                                            "args": [
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      1.5e-13,
+                                                      72432000.0,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  },
+                                                  {
+                                                    "op": "*",
+                                                    "args": [
+                                                      7.2432e+16,
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          "P",
+                                                          "T"
+                                                        ]
+                                                      }
+                                                    ]
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "*",
+                                                "args": [
+                                                  2100000000.0,
+                                                  {
+                                                    "op": "^",
+                                                    "args": [
+                                                      {
+                                                        "op": "/",
+                                                        "args": [
+                                                          300.0,
+                                                          "T"
+                                                        ]
+                                                      },
+                                                      -6.1
+                                                    ]
+                                                  },
+                                                  72432000.0,
+                                                  {
+                                                    "op": "/",
+                                                    "args": [
+                                                      "P",
+                                                      "T"
+                                                    ]
+                                                  }
+                                                ]
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      1.0,
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  1.5e-13,
+                                  72432000.0,
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "P",
+                                      "T"
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "*",
+                                "args": [
+                                  7.2432e+16,
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "P",
+                                      "T"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "*",
+                            "args": [
+                              2100000000.0,
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      300.0,
+                                      "T"
+                                    ]
+                                  },
+                                  -6.1
+                                ]
+                              },
+                              72432000.0,
+                              {
+                                "op": "/",
+                                "args": [
+                                  "P",
+                                  "T"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "OH_CO"
+        },
+        {
+          "id": "R11",
+          "substrates": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CO",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              5.5e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      125,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH2O_OH"
+        },
+        {
+          "id": "R12",
+          "substrates": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH3OOH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              4.1e-13,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      750,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH3O2_HO2"
+        },
+        {
+          "id": "R13",
+          "substrates": [
+            {
+              "species": "CH3OOH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              2.66e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      200,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH3OOH_OH_a"
+        },
+        {
+          "id": "R14",
+          "substrates": [
+            {
+              "species": "CH3OOH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            },
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              1.14e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      200,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH3OOH_OH_b"
+        },
+        {
+          "id": "R15",
+          "substrates": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              2.8e-12,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      300,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH3O2_NO"
+        },
+        {
+          "id": "R16",
+          "substrates": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 2
+            }
+          ],
+          "products": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 2
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              9.5e-14,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      390,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "CH3O2_CH3O2_main"
+        },
+        {
+          "id": "R17",
+          "substrates": null,
+          "products": [
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              0.8,
+              {
+                "op": "*",
+                "args": [
+                  9.5e-14,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          390,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "CH3O2",
+              "CH3O2"
+            ]
+          },
+          "name": "CH3O2_CH3O2_frac_HO2"
+        },
+        {
+          "id": "R18",
+          "substrates": [
+            {
+              "species": "H2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": null,
+          "rate": {
+            "op": "*",
+            "args": [
+              4e-24,
+              {
+                "op": "*",
+                "args": [
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "name": "H2O_NO2_main_consume"
+        },
+        {
+          "id": "R19",
+          "substrates": null,
+          "products": [
+            {
+              "species": "HNO3",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              0.5,
+              {
+                "op": "*",
+                "args": [
+                  4e-24,
+                  {
+                    "op": "*",
+                    "args": [
+                      72432000.0,
+                      {
+                        "op": "/",
+                        "args": [
+                          "P",
+                          "T"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "H2O",
+              "NO2"
+            ]
+          },
+          "name": "H2O_NO2_frac_HNO3"
+        },
+        {
+          "id": "R20",
+          "substrates": [
+            {
+              "species": "ISOP",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 2
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              2.7e-11,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      390,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "ISOP_OH_i"
+        },
+        {
+          "id": "R21",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": null,
+          "rate": {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2.7e-11,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          390,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP"
+            ]
+          },
+          "name": "ISOP_OH_ii_net"
+        },
+        {
+          "id": "R22",
+          "substrates": [
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": null,
+          "rate": {
+            "op": "*",
+            "args": [
+              0.5,
+              {
+                "op": "*",
+                "args": [
+                  2.7e-11,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          390,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP"
+            ]
+          },
+          "name": "ISOP_OH_iii_net"
+        },
+        {
+          "id": "R23",
+          "substrates": [
+            {
+              "species": "ISOP",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            }
+          ],
+          "products": null,
+          "rate": {
+            "op": "*",
+            "args": [
+              5.59e-15,
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      -1814,
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              72432000.0,
+              {
+                "op": "/",
+                "args": [
+                  "P",
+                  "T"
+                ]
+              }
+            ]
+          },
+          "name": "ISOP_O3_consume"
+        },
+        {
+          "id": "R24",
+          "substrates": null,
+          "products": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              0.87,
+              {
+                "op": "*",
+                "args": [
+                  5.59e-15,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          -1814,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP",
+              "O3"
+            ]
+          },
+          "name": "ISOP_O3_CH2O"
+        },
+        {
+          "id": "R25",
+          "substrates": null,
+          "products": [
+            {
+              "species": "CH3O2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              1.86,
+              {
+                "op": "*",
+                "args": [
+                  5.59e-15,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          -1814,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP",
+              "O3"
+            ]
+          },
+          "name": "ISOP_O3_CH3O2"
+        },
+        {
+          "id": "R26",
+          "substrates": null,
+          "products": [
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              0.06,
+              {
+                "op": "*",
+                "args": [
+                  5.59e-15,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          -1814,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP",
+              "O3"
+            ]
+          },
+          "name": "ISOP_O3_HO2"
+        },
+        {
+          "id": "R27",
+          "substrates": null,
+          "products": [
+            {
+              "species": "CO",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": {
+            "op": "*",
+            "args": [
+              0.05,
+              {
+                "op": "*",
+                "args": [
+                  5.59e-15,
+                  {
+                    "op": "exp",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          -1814,
+                          "T"
+                        ]
+                      }
+                    ]
+                  },
+                  72432000.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      "P",
+                      "T"
+                    ]
+                  }
+                ]
+              },
+              "ISOP",
+              "O3"
+            ]
+          },
+          "name": "ISOP_O3_CO"
+        },
+        {
+          "id": "R28",
+          "substrates": [
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "OH",
+              "stoichiometry": 2
+            }
+          ],
+          "rate": "jO32OH",
+          "name": "O3_photolysis"
+        },
+        {
+          "id": "R29",
+          "substrates": [
+            {
+              "species": "H2O2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "OH",
+              "stoichiometry": 2
+            }
+          ],
+          "rate": "jH2O2",
+          "name": "H2O2_photolysis"
+        },
+        {
+          "id": "R30",
+          "substrates": [
+            {
+              "species": "NO2",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "NO",
+              "stoichiometry": 1
+            },
+            {
+              "species": "O3",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": "jNO2",
+          "name": "NO2_photolysis"
+        },
+        {
+          "id": "R31",
+          "substrates": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "HO2",
+              "stoichiometry": 2
+            },
+            {
+              "species": "CO",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": "jH2COa",
+          "name": "CH2O_photolysis_a"
+        },
+        {
+          "id": "R32",
+          "substrates": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CO",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": "jH2COb",
+          "name": "CH2O_photolysis_b"
+        },
+        {
+          "id": "R33",
+          "substrates": [
+            {
+              "species": "CH3OOH",
+              "stoichiometry": 1
+            }
+          ],
+          "products": [
+            {
+              "species": "CH2O",
+              "stoichiometry": 1
+            },
+            {
+              "species": "HO2",
+              "stoichiometry": 1
+            },
+            {
+              "species": "OH",
+              "stoichiometry": 1
+            }
+          ],
+          "rate": "jCH3OOH",
+          "name": "CH3OOH_photolysis"
+        }
+      ],
+      "tests": [
+        {
+          "id": "base_case_O3_at_360s",
+          "description": "Base case from GasChem.jl test/superfast_test.jl: integrate from t=0 to t=360s with default initial conditions and parameters. Upstream Rosenbrock23 run yields O3 \u2248 36.49962612813341 ppb at t=360. We use a moderately loose relative tolerance (1e-2) because fractional-stoichiometry reactions are split into integer-stoichiometry base reactions plus null-substrate shadow reactions (whose rates depend on species concentrations), and because O2/CH4/H2O were promoted to species (with large defaults) rather than isconstantspecies parameters \u2014 neither is a schema-exact representation.",
+          "time_span": {
+            "start": 0.0,
+            "end": 360.0
+          },
+          "assertions": [
+            {
+              "variable": "O3",
+              "time": 360.0,
+              "expected": 36.49962612813341,
+              "tolerance": {
+                "rel": 0.01
+              }
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "default_run_line",
+          "description": "Illustrative example from docs/src/superfast.md: run SuperFast with default initial conditions over 24 hours (3600*24 s) and plot O3 concentration vs. time.",
+          "time_span": {
+            "start": 0.0,
+            "end": 86400.0
+          },
+          "plots": [
+            {
+              "id": "O3_vs_time",
+              "type": "line",
+              "description": "Ozone concentration over 24 hours of integration.",
+              "x": {
+                "variable": "t",
+                "label": "time (s)"
+              },
+              "y": {
+                "variable": "O3",
+                "label": "O3 (ppb)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

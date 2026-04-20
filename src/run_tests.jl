@@ -165,22 +165,46 @@ end
 function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
                                 container_name::AbstractString,
                                 container_tolerance, tests, simp,
-                                sys_name::Symbol, results::Vector{AssertionResult})
+                                sys_name::Symbol, results::Vector{AssertionResult};
+                                esm_container=nothing)
     isempty(tests) && return
     MTK = _require_mtk()
     solver, _solver_kind = _pick_solver()
+
+    # For reaction_system containers, species and parameter defaults declared
+    # in the ESM file are NOT propagated through the Catalyst.@species /
+    # @parameters metadata by the EarthSciSerialization Catalyst extension
+    # (the Core.eval path builds bare symbolics). Compensate by seeding u0
+    # and p from the ESM defaults here — a pure-Model path still works as
+    # before because `esm_container` is nothing and the maps stay empty.
+    defaults_u0 = Dict{Any,Float64}()
+    defaults_p  = Dict{Any,Float64}()
+    if container_kind === :reaction_system && esm_container !== nothing
+        for sp in esm_container.species
+            sp.default === nothing && continue
+            handle = try _resolve_handle(simp, sys_name, sp.name) catch; nothing end
+            handle === nothing && continue
+            defaults_u0[handle] = Float64(sp.default)
+        end
+        for pr in esm_container.parameters
+            pr.default === nothing && continue
+            handle = try _resolve_handle(simp, sys_name, pr.name) catch; nothing end
+            handle === nothing && continue
+            defaults_p[handle] = Float64(pr.default)
+        end
+    end
 
     for t in tests
         t_start = time()
         local sol = nothing
         local prob_err::Union{Nothing,Exception} = nothing
         try
-            u0_map = Dict{Any,Float64}()
+            u0_map = copy(defaults_u0)
             for (spec, val) in t.initial_conditions
                 handle = _resolve_handle(simp, sys_name, spec)
                 u0_map[handle] = Float64(val)
             end
-            p_map = Dict{Any,Float64}()
+            p_map = copy(defaults_p)
             for (spec, val) in t.parameter_overrides
                 handle = _resolve_handle(simp, sys_name, spec)
                 p_map[handle] = Float64(val)
@@ -190,7 +214,14 @@ function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
             # canonical shape and keeps both initial-condition + parameter
             # overrides on a single map.
             merged = isempty(p_map) ? u0_map : merge(u0_map, p_map)
-            prob = MTK.ODEProblem(simp, merged, tspan)
+            prob = if container_kind === :reaction_system
+                # Catalyst.ReactionSystem → ODEProblem directly; disables
+                # combinatoric rate-law multipliers so macroscopic rate
+                # coefficients match the upstream SuperFast convention.
+                MTK.ODEProblem(simp, merged, tspan; combinatoric_ratelaws=false)
+            else
+                MTK.ODEProblem(simp, merged, tspan)
+            end
             sol = MTK.SciMLBase.solve(prob, solver;
                                        reltol=1e-10, abstol=1e-12)
         catch err
@@ -247,8 +278,7 @@ function _compile_reaction_system(rs, name::Symbol)
     cat === nothing && throw(ArgumentError(
         "ReactionSystem inline tests require Catalyst to be loaded."))
     catalyst_rs = cat.ReactionSystem(rs; name=name)
-    complete_rs = MTK.complete(catalyst_rs)
-    return MTK.mtkcompile(MTK.convert(MTK.System, complete_rs))
+    return MTK.complete(catalyst_rs)
 end
 
 # ---------------------------------------------------------------------------
@@ -306,7 +336,7 @@ function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
             end
             _run_tests_on_compiled(path, :reaction_system, String(rname),
                                     rs.tolerance, rs.tests, simp, sys_name,
-                                    results)
+                                    results; esm_container=rs)
         end
     end
 end

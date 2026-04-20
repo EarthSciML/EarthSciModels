@@ -495,7 +495,7 @@ Repo purpose: gas-phase chemistry (SuperFast, GEOS-Chem full-chem, Pollu, Fast-J
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| SuperFast | `src/SuperFast.jl:205` | ReactionSystem | reaction_systems.species/reactions, ReactionSystem rate-law wrappers (constant_k/arrh/arr_3rd/rate_2HO2/rate_OH_CO) | none | L | Y | Y | `models/gaschem/superfast.esm` | — |
+| SuperFast | `src/SuperFast.jl:205` | ReactionSystem | reaction_systems.species/reactions, ReactionSystem rate-law wrappers (constant_k/arrh/arr_3rd/rate_2HO2/rate_OH_CO) | none | L | Y | Y | `reaction_systems/gaschem/superfast.esm` | — | **status: complete, sha: 8c12c048482b515fb8eb2110bf8ab4b4f4e71309** (mdl-dkw; friction: mdl-adq fractional stoich, mdl-kez isconstantspecies, mdl-uao no scaffolder) |
 | SuperFast rate-law helpers (constant_k, arrh, arr_3rd, rate_2HO2, rate_OH_CO, rate_toppb) | `src/SuperFast.jl:6,33,64,102,142` | Interface | builder fns producing sub-ReactionSystems | none | S | Y | Y | `models/gaschem/superfast_ratelaws.esm` | — |
 | GEOSChemGasPhase | `src/geoschem_fullchem.jl:62` | ReactionSystem | reaction_systems (~hundreds of reactions), ReactionSystem rate-law wrappers | none | XL | Y | Y | `models/gaschem/geoschem_fullchem.esm` | — |
 | geoschem_ratelaws (constant_k, regress_T, ...) | `src/geoschem_ratelaws.jl:11,27,35,...` | Interface | builder fns producing sub-ReactionSystems | none | M | Y | Y | `models/gaschem/geoschem_ratelaws.esm` | — |
