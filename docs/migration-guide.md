@@ -36,8 +36,10 @@ Resolution order (the script picks the first that works):
 2. A Gas Town workspace checkout, in priority order:
    - `../../../../EarthSciSerialization/refinery/rig/packages/EarthSciSerialization.jl`
    - `../../../../EarthSciSerialization/mayor/rig/packages/EarthSciSerialization.jl`
-3. Fallback: `Pkg.add(url="https://github.com/EarthSciML/EarthSciSerialization.git", rev="main")`
-   (override the rev with `EARTHSCI_SERIALIZATION_REV=<sha>`).
+3. Fallback: `Pkg.add(url="https://github.com/EarthSciML/EarthSciSerialization.git", rev="main", subdir="packages/EarthSciSerialization.jl")`
+   (override the rev with `EARTHSCI_SERIALIZATION_REV=<sha>`). The `subdir` is
+   required because the Julia package lives at `packages/EarthSciSerialization.jl/`
+   in the upstream repo, not at repo root.
 
 The script is idempotent — re-running it on an already-resolved env is a
 no-op aside from `Pkg.instantiate`.

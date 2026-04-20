@@ -49,5 +49,5 @@ if [[ -n "$ess_path" ]]; then
 else
   rev="${EARTHSCI_SERIALIZATION_REV:-main}"
   echo "No local EarthSciSerialization.jl checkout found; Pkg.add from GitHub (rev=$rev)"
-  julia --project=. -e "using Pkg; Pkg.add(url=\"https://github.com/EarthSciML/EarthSciSerialization.git\", rev=\"$rev\"); Pkg.instantiate()"
+  julia --project=. -e "using Pkg; Pkg.add(url=\"https://github.com/EarthSciML/EarthSciSerialization.git\", rev=\"$rev\", subdir=\"packages/EarthSciSerialization.jl\"); Pkg.instantiate()"
 fi
