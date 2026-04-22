@@ -79,7 +79,11 @@ end
         # Walk `components/` (all per-science-domain subdirs). An empty tree
         # is OK (Phase 0/1/2 — early migration). Once .esm files land, this
         # gate makes sure they all pass on every push.
-        results, exit_code = run_esm_tests()
+        # CI sets ESM_TESTS_JUNIT_XML to collect a junit artifact in the same
+        # pass — avoids a second `julia --project=.` invocation which can't
+        # see MTK (it's a test-only dep).
+        junit_xml = get(ENV, "ESM_TESTS_JUNIT_XML", nothing)
+        results, exit_code = run_esm_tests(; junit_xml=junit_xml)
         if !isempty(results)
             failures = filter(r -> r.status != EarthSciModels.PASS, results)
             for f in failures
