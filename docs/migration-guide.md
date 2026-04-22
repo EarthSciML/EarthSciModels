@@ -202,6 +202,94 @@ it gets picked up automatically — no workflow changes needed.
 
 ---
 
+## 6. Fleshing out `tests` and `examples`
+
+`mtk2esm` scaffolds the structural parts of the `.esm` (variables,
+equations, events) but leaves the `tests` and `examples` blocks thin
+or empty. Those blocks are how downstream users and conformance
+harnesses verify the migrated component behaves correctly — they are
+**not optional**, and a migration with a thin `tests`/`examples` block
+is an incomplete migration even if the round-trip validator passes.
+
+### 6.1 `tests` — thorough behavioral coverage
+
+The `tests` block should **thoroughly exercise the behavior of the
+model component**, not just smoke-test that it runs. Build it by
+reading the upstream Julia test suite of the component you're
+migrating and translating those tests into `.esm` form.
+
+Minimum coverage:
+
+- Every scenario covered by the upstream Julia package's `test/`
+  directory should have a counterpart entry in the `tests` list.
+  If the Julia tests assert a decay curve for `OH`, check the same
+  variable at the same time points with comparable tolerances.
+- Exercise the full range of species / variables the model tracks,
+  not just one or two representative ones.
+- Sample at multiple time points spanning short, medium, and long
+  dynamics so stiff and slow modes are both covered.
+- Include parameter-sweep tests wherever the upstream tests vary
+  inputs (temperature, pressure, boundary conditions, etc.).
+- Reproduce any regression-test fixtures the upstream package keeps
+  (reference trajectories pinned from a trusted run).
+
+Practical workflow:
+
+1. Open the upstream package's `test/runtests.jl` (or equivalent)
+   alongside the migrated `.esm`.
+2. For each Julia test case, add a matching entry to the `tests`
+   list with `assertions` capturing the same numeric checks.
+3. Re-run the round-trip validator (section 3) with a tolerance at
+   least as tight as the upstream tests used.
+
+`tests` is the physics-level trust signal. Round-trip passing tells
+you the *trajectory* matches; dense `tests` tells a reviewer the
+migration actually captures the model's scientific behavior.
+
+### 6.2 `examples` — reproduce the paper's figures
+
+The `examples` block should surface the **scientific behavior** of
+the component the way a paper or documentation page would. For any
+component migrated from a published model, the target is to include
+versions of **as many of the figures from the original paper as
+possible**.
+
+Draw from two upstream sources:
+
+- **The original paper** (cited in `reference`): each figure showing
+  a canonical run, parameter sweep, regime comparison, or sensitivity
+  analysis is a candidate example. Reproduce it via an `examples`
+  entry with the appropriate `initial_state`, `time_span`, parameter
+  overrides, and `Plot` block(s).
+- **The upstream Julia package's documentation pages** (typically
+  under `docs/src/` or the rendered Documenter.jl site). Doc pages
+  are already distilled, often with runnable scripts that map almost
+  one-to-one to `.esm` examples. They may also cover runs the paper
+  did not include (updated parameters, extended time horizons, etc.).
+
+Practical workflow:
+
+1. Catalog figures from the paper and the doc pages. Each one is a
+   candidate `examples[*]` entry.
+2. For plots run at specific conditions, reproduce those conditions
+   as `initial_state` + parameter overrides.
+3. For plots showing a parameter sweep, use `sweep` in the example
+   spec rather than producing one entry per sweep point.
+4. Pick plot types that match the data: `line` for trajectories,
+   `heatmap` for 2-param sweeps, `field_slice` / `field_snapshot`
+   for PDE components (see esm-spec.md §6.7).
+5. Where the paper or docs provide reference values, include
+   `expected` markers in any supporting `tests` entry so CI can
+   catch regressions in the figure-reproducing runs.
+
+The bar: someone reading the `.esm` should be able to reproduce the
+headline visualizations of the upstream publication without
+touching the Julia source. An `examples` block that only runs the
+model once with defaults is a migration gap even if everything else
+about the file is correct.
+
+---
+
 ## References
 
 - **Tool**: [`gt-dod2`](https://github.com/EarthSciML/EarthSciSerialization)
