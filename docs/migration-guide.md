@@ -290,6 +290,48 @@ about the file is correct.
 
 ---
 
+## 7. Done checklist
+
+Before you run `gt done`, you **must** locally verify every one of the
+following. A round-trip-only pass is **not** sufficient — `tests` and
+`examples` are part of the behavioral contract, not optional decoration.
+The merge queue will re-run the same gates, but the point of this
+checklist is to catch failures at the polecat, not at the refinery.
+
+1. **Round-trip passes with a realistic timespan.**
+   `scripts/roundtrip.jl` (see §3) exits 0 when invoked with a
+   `--tspan` that actually exercises the component's dynamics — not a
+   trivial `0,1`. Pick a span that covers the short, medium, and long
+   modes the model cares about (the same span you used when writing
+   the `tests` block is usually the right answer).
+
+2. **Every `tests:` entry passes via the inline-test walker.**
+   Run the same code path CI uses (the `mdl-08t` ESM inline-test
+   walker) locally against your new `.esm`. Every entry in the
+   committed file's `tests:` block must pass. A zero-test `.esm` is
+   **not** acceptable — see §6.1 for the coverage bar.
+
+3. **Every `examples:` entry actually runs.**
+   Load the `.esm` and simulate each example with its declared
+   `initial_state`, parameter overrides, and `time_span`. Confirm no
+   simulation errors. If an example has `expected` markers, they must
+   satisfy. A syntactically valid `examples` block whose entries fail
+   to simulate is a regression, not a migration.
+
+4. **No `TODO_GAP` markers remain.**
+   Grep the committed `.esm` for `TODO_GAP` — there should be none.
+   The only exception is when the bead's `blocking_gap` field
+   explicitly tolerates a gap; in that case, cite the tracked upstream
+   bead id in your commit message and leave the marker in place. See
+   §4 for the full gap-handling protocol.
+
+If any one of these fails, do **not** run `gt done`. Fix the
+underlying issue (or escalate per §4 / the stuck-polecat protocol) and
+re-verify from the top. The checklist is a hard gate, not a
+suggestion.
+
+---
+
 ## References
 
 - **Tool**: [`gt-dod2`](https://github.com/EarthSciML/EarthSciSerialization)
