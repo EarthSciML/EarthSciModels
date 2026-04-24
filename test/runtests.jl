@@ -3,6 +3,7 @@ using EarthSciModels
 using ModelingToolkit
 using Catalyst
 using OrdinaryDiffEqTsit5
+using OrdinaryDiffEqNonlinearSolve
 
 # Placeholder .esm fixture — replaced once real .esm files land. The fixture
 # exists so the shim's parse → System → materialize path is exercised in CI
