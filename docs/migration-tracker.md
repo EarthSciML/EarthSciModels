@@ -100,7 +100,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | CloudWaterProperties | `src/cloud_physics.jl:15` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/cloud_physics/cloud_water_properties.esm` | — |
 | CloudKelvinEffect | `src/cloud_physics.jl:181` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/cloud_physics/cloud_kelvin.esm` | — |
 | KohlerTheory | `src/cloud_physics.jl:232` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/cloud_physics/kohler.esm` | — |
-| DropletGrowth | `src/cloud_physics.jl:322` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/cloud_physics/droplet_growth.esm` | — |
+| DropletGrowth | `src/cloud_physics.jl:322` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/cloud_physics/droplet_growth.esm` | — | **status: complete, sha: c8c640bb636b22f2425460e9ed5cba50793bfee1** (mdl-43a; mtk2esm-scaffolded, round-trip passes, 7 tests / 38 assertions, 4 Köhler-style examples) |
 | CloudDynamics | `src/cloud_physics.jl:455` | Model | variables, parameters, equations, coupling.couple | none | L | Y | Y | `components/aerosol/cloud_physics/cloud_dynamics.esm` | DropletGrowth, CloudKelvinEffect |
 | IcePhysics | `src/cloud_physics.jl:525` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/cloud_physics/ice_physics.esm` | — |
 | RainFormation | `src/cloud_physics.jl:604` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/cloud_physics/rain_formation.esm` | — |
