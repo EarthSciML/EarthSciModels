@@ -1,0 +1,294 @@
+{
+    "esm": "0.1.0",
+    "models": {
+        "DiameterGrowthRate": {
+            "variables": {
+                "R_gas": {
+                    "default": 8.314,
+                    "type": "parameter",
+                    "description": "Universal gas constant"
+                },
+                "T": {
+                    "default": 298,
+                    "type": "parameter",
+                    "description": "Temperature"
+                },
+                "D_diff": {
+                    "default": 1.0e-5,
+                    "type": "parameter",
+                    "description": "Diffusion coefficient of condensing species"
+                },
+                "M_i": {
+                    "default": 0.1,
+                    "type": "parameter",
+                    "description": "Molecular weight of condensing species"
+                },
+                "ρ_p": {
+                    "default": 1000,
+                    "type": "parameter",
+                    "description": "Particle density"
+                },
+                "Δp": {
+                    "default": 0.0001,
+                    "type": "parameter",
+                    "description": "Vapor pressure difference (p_i - p_eq)"
+                },
+                "D_p": {
+                    "type": "state",
+                    "description": "Particle diameter"
+                },
+                "I_D": {
+                    "type": "state",
+                    "description": "Diameter growth rate"
+                },
+                "A": {
+                    "type": "state",
+                    "description": "Growth parameter"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["D_p"]},
+                    "rhs": "I_D"
+                },
+                {
+                    "lhs": "A",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [4, "D_diff", "M_i", "Δp"]},
+                            {"op": "*", "args": ["R_gas", "T", "ρ_p"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "I_D",
+                    "rhs": {"op": "/", "args": ["A", "D_p"]}
+                }
+            ],
+            "tolerance": {"rel": 1.0e-4},
+            "tests": [
+                {
+                    "id": "figure_13_2_small_particle_growth_curve",
+                    "description": "Seinfeld & Pandis Fig. 13.2 reference case — D_p0 = 0.2 µm in the continuum regime with constant supersaturation. Checks D_p at t = 0, 60, 300, 600, 900, 1200 s and the algebraic growth rate I_D at t = 0, 300, 1200 s. Mirrors the 'DiameterGrowthRate analytical solution' test in Aerosol.jl/test/dynamics_test.jl but samples more densely. Also pins the growth parameter A (constant in this simplification of Eq. 13.11-13.13).",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-7,
+                        "I_D": 8.072419287916e-10,
+                        "A": 1.614483857583e-16
+                    },
+                    "assertions": [
+                        {"variable": "D_p", "time": 0, "expected": 2.0e-7},
+                        {"variable": "D_p", "time": 60, "expected": 2.436674093062e-7},
+                        {"variable": "D_p", "time": 300, "expected": 3.699581474844e-7},
+                        {"variable": "D_p", "time": 600, "expected": 4.834646455265e-7},
+                        {"variable": "D_p", "time": 900, "expected": 5.749844287122e-7},
+                        {"variable": "D_p", "time": 1200, "expected": 6.538165842082e-7},
+                        {"variable": "I_D", "time": 0, "expected": 8.072419287916e-10},
+                        {"variable": "I_D", "time": 300, "expected": 4.363963514687e-10},
+                        {"variable": "I_D", "time": 1200, "expected": 2.469322278722e-10},
+                        {"variable": "A", "time": 0, "expected": 1.614483857583e-16},
+                        {"variable": "A", "time": 1200, "expected": 1.614483857583e-16}
+                    ]
+                },
+                {
+                    "id": "figure_13_2_medium_particle_growth",
+                    "description": "Seinfeld & Pandis Fig. 13.2 — D_p0 = 0.5 µm. Same continuum-regime conditions as the 0.2 µm case, but growth in diameter is slower because I_D = A/D_p is inversely proportional to size. Verifies the size-dependent slowdown.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 5.0e-7,
+                        "I_D": 3.228967715166e-10,
+                        "A": 1.614483857583e-16
+                    },
+                    "assertions": [
+                        {"variable": "D_p", "time": 0, "expected": 5.0e-7},
+                        {"variable": "D_p", "time": 600, "expected": 6.661366705188e-7},
+                        {"variable": "D_p", "time": 1200, "expected": 7.984210203951e-7}
+                    ]
+                },
+                {
+                    "id": "figure_13_2_large_particle_growth",
+                    "description": "Seinfeld & Pandis Fig. 13.2 — D_p0 = 2.0 µm. Growth in absolute diameter is nearly negligible over 20 min because the large initial size suppresses I_D; the same ΔD_p² = 2At increment now spans a much larger D_p.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-6,
+                        "I_D": 8.072419287916e-11,
+                        "A": 1.614483857583e-16
+                    },
+                    "assertions": [
+                        {"variable": "D_p", "time": 0, "expected": 2.0e-6},
+                        {"variable": "D_p", "time": 600, "expected": 2.047861827101e-6},
+                        {"variable": "D_p", "time": 1200, "expected": 2.094630307672e-6}
+                    ]
+                },
+                {
+                    "id": "supersaturation_sensitivity",
+                    "description": "Parameter-sensitivity check: raising the vapor-pressure difference Δp by 5× (5 × 10⁻⁴ Pa) scales the growth parameter A linearly (A ∝ Δp in Eq. 13.12). Verifies that the Δp handle drives a proportional change in A and hence accelerates D_p growth.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-7,
+                        "I_D": 4.036209643958e-9,
+                        "A": 8.072419287916e-16
+                    },
+                    "parameter_overrides": {"Δp": 5.0e-4},
+                    "assertions": [
+                        {"variable": "A", "time": 0, "expected": 8.072419287916e-16},
+                        {"variable": "A", "time": 1200, "expected": 8.072419287916e-16},
+                        {"variable": "D_p", "time": 600, "expected": 1.004335758959e-6},
+                        {"variable": "D_p", "time": 1200, "expected": 1.406193666957e-6}
+                    ]
+                },
+                {
+                    "id": "temperature_sensitivity",
+                    "description": "Parameter-sensitivity check: raising temperature from 298 K to 350 K reduces A by the ratio 298/350 ≈ 0.851 (A ∝ 1/T). Verifies the T handle and the predicted slower-growth regime.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-7,
+                        "I_D": 6.873088422286e-10,
+                        "A": 1.374617684457e-16
+                    },
+                    "parameter_overrides": {"T": 350.0},
+                    "assertions": [
+                        {"variable": "A", "time": 0, "expected": 1.374617684457e-16},
+                        {"variable": "D_p", "time": 1200, "expected": 6.082008255826e-7}
+                    ]
+                },
+                {
+                    "id": "diffusion_coefficient_sensitivity",
+                    "description": "Parameter-sensitivity check: halving the diffusion coefficient D_diff from 1×10⁻⁵ to 5×10⁻⁶ m²/s halves A (A ∝ D_diff). Because D_p² - D_p0² = 2At is linear in A, the final D_p² moves predictably.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-7,
+                        "I_D": 4.036209643958e-10,
+                        "A": 8.072419287916e-17
+                    },
+                    "parameter_overrides": {"D_diff": 5.0e-6},
+                    "assertions": [
+                        {"variable": "A", "time": 0, "expected": 8.072419287916e-17},
+                        {"variable": "D_p", "time": 1200, "expected": 4.834646449239e-7}
+                    ]
+                },
+                {
+                    "id": "analytical_sqrt_law_agreement",
+                    "description": "Cross-checks numerical D_p(t) against the closed-form solution D_p(t) = √(D_p0² + 2At) from Eq. 13.21 (Aerosol.jl test/dynamics_test.jl 'DiameterGrowthRate analytical solution'). Under default parameters A = 4·D_diff·M_i·Δp / (R_gas·T·ρ_p) = 1.614483857583×10⁻¹⁶ m²/s. Tolerance is 1e-3 relative, matching the upstream test.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_conditions": {
+                        "D_p": 2.0e-7,
+                        "I_D": 8.072419287916e-10,
+                        "A": 1.614483857583e-16
+                    },
+                    "tolerance": {"rel": 1.0e-3},
+                    "assertions": [
+                        {"variable": "D_p", "time": 300, "expected": 3.699581482479e-7},
+                        {"variable": "D_p", "time": 600, "expected": 4.834646449431e-7},
+                        {"variable": "D_p", "time": 1200, "expected": 6.538165842344e-7}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "figure_13_2_small_particle",
+                    "description": "Seinfeld & Pandis Fig. 13.2, 0.2 µm initial particle — growth in diameter over 20 min of condensation in the continuum regime with constant supersaturation. The fastest-growing of the three initial sizes shown in the paper figure.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "D_p": 2.0e-7,
+                            "I_D": 8.072419287916e-10,
+                            "A": 1.614483857583e-16
+                        }
+                    },
+                    "plots": [
+                        {
+                            "id": "Dp_vs_time_0p2um",
+                            "type": "line",
+                            "description": "D_p(t) over 20 min for D_p0 = 0.2 µm — smallest initial size on Figure 13.2.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "D_p", "label": "D_p (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_13_2_medium_particle",
+                    "description": "Seinfeld & Pandis Fig. 13.2, 0.5 µm initial particle — intermediate curve on the paper figure.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "D_p": 5.0e-7,
+                            "I_D": 3.228967715166e-10,
+                            "A": 1.614483857583e-16
+                        }
+                    },
+                    "plots": [
+                        {
+                            "id": "Dp_vs_time_0p5um",
+                            "type": "line",
+                            "description": "D_p(t) over 20 min for D_p0 = 0.5 µm.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "D_p", "label": "D_p (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_13_2_large_particle",
+                    "description": "Seinfeld & Pandis Fig. 13.2, 2.0 µm initial particle — slowest-growing curve on the paper figure. The diameter barely increases because I_D = A/D_p is much smaller for large D_p.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "D_p": 2.0e-6,
+                            "I_D": 8.072419287916e-11,
+                            "A": 1.614483857583e-16
+                        }
+                    },
+                    "plots": [
+                        {
+                            "id": "Dp_vs_time_2um",
+                            "type": "line",
+                            "description": "D_p(t) over 20 min for D_p0 = 2.0 µm — largest size on Figure 13.2.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "D_p", "label": "D_p (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "elevated_supersaturation",
+                    "description": "Illustrative sensitivity run (not in the paper): a 0.2 µm particle under 5× reference supersaturation (Δp = 5×10⁻⁴ Pa). Growth is correspondingly faster because A ∝ Δp; D_p reaches ~1.4 µm in the same 20 min window.",
+                    "time_span": {"start": 0, "end": 1200},
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "D_p": 2.0e-7,
+                            "I_D": 4.036209643958e-9,
+                            "A": 8.072419287916e-16
+                        }
+                    },
+                    "parameters": {"Δp": 5.0e-4},
+                    "plots": [
+                        {
+                            "id": "Dp_vs_time_high_supersat",
+                            "type": "line",
+                            "description": "D_p(t) at 5× reference supersaturation — illustrates the A ∝ Δp dependence.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "D_p", "label": "D_p (m)"}
+                        }
+                    ]
+                }
+            ],
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N.: Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd edition, John Wiley & Sons, 2006. Chapter 13, Eqs. 13.11-13.13 and Figure 13.2.",
+                "notes": "Source: Aerosol.jl src/dynamics.jl:22 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (mdl-drx). Scaffolded via mtk2esm (ESS gt-dod2). The component implements the continuum-regime, constant-supersaturation simplification I_D = A/D_p of the general Eq. 13.11. A is algebraic (serialized as a state to keep 1:1 symmetry with the upstream MTK @variables block; mtkcompile eliminates it as observed at test time). Tests and examples are derived from Aerosol.jl test/dynamics_test.jl ('DiameterGrowthRate analytical solution') and docs/src/dynamics.md (Figure 13.2 reproduction block)."
+            }
+        }
+    },
+    "metadata": {
+        "name": "DiameterGrowthRate",
+        "description": "Diameter growth rate due to vapor condensation in the continuum regime (Seinfeld & Pandis 2006, Ch. 13, Eq. 13.11-13.13). Algebraic growth parameter A = 4·D_diff·M_i·Δp / (R_gas·T·ρ_p), algebraic growth rate I_D = A/D_p, ODE D(D_p) = I_D. Source: Aerosol.jl@c8c640bb:src/dynamics.jl:22.",
+        "tags": ["aerosol", "dynamics", "condensation", "seinfeld-pandis"],
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (mdl-drx)"
+        ]
+    }
+}
