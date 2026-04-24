@@ -1,0 +1,352 @@
+{
+    "esm": "0.1.0",
+    "metadata": {
+        "name": "AerosolScavenging",
+        "tags": [
+            "aerosol",
+            "cloud_physics"
+        ],
+        "description": "Aerosol scavenging by cloud droplets (Seinfeld & Pandis 2006, Eqs. 17.84-17.92). Computes mass and number scavenging ratios and the scavenging coefficient for a monodisperse cloud-droplet population."
+    },
+    "models": {
+        "AerosolScavenging": {
+            "variables": {
+                "C_0": {
+                    "default": 1.0e9,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Initial aerosol mass concentration"
+                },
+                "C_int": {
+                    "default": 5.0e8,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Interstitial aerosol mass concentration"
+                },
+                "N_0": {
+                    "default": 1.0e9,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Initial aerosol number concentration"
+                },
+                "N_int": {
+                    "default": 3.0e8,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Interstitial aerosol number concentration"
+                },
+                "K_coll": {
+                    "default": 1.0e-12,
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "description": "Collision coefficient"
+                },
+                "N_d": {
+                    "default": 1.0e8,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Cloud droplet number concentration"
+                },
+                "F_mass": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Mass scavenging ratio (dimensionless)"
+                },
+                "F_number": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Number scavenging ratio (dimensionless)"
+                },
+                "Λ": {
+                    "type": "state",
+                    "units": "1/s",
+                    "description": "Scavenging coefficient"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_mass",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    "C_0",
+                                    {
+                                        "op": "*",
+                                        "args": [-1, "C_int"]
+                                    }
+                                ]
+                            },
+                            "C_0"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_number",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [-1, "N_int"]
+                                    },
+                                    "N_0"
+                                ]
+                            },
+                            "N_0"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Λ",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["N_d", "K_coll"]
+                    }
+                }
+            ],
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/cloud_physics.jl:693\nSeinfeld, J. H. and Pandis, S. N. (2006), Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Wiley, Ch. 17. Key equations 17.84 (mass scavenging ratio), 17.85 (number scavenging ratio), and 17.92 (scavenging coefficient, monodisperse cloud-droplet approximation)."
+            },
+            "tolerance": {
+                "rel": 1.0e-8,
+                "abs": 1.0e-12
+            },
+            "tests": [
+                {
+                    "id": "defaults_behavior_multi_time",
+                    "description": "Reference run at upstream Aerosol.jl defaults (C_0=1e9, C_int=5e8, N_0=1e9, N_int=3e8, N_d=1e8, K_coll=1e-12). Reproduces upstream Aerosol test/cloud_physics_test.jl 'AerosolScavenging physical behavior': F_mass=0.5, F_number=0.7, Λ=1e-4 s^-1. Sampled at t=0, 60, 600, 3600 s to confirm the algebraic constraints hold across the full tspan (the RHS is time-independent, so every sample must return the same constant).",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "F_mass",   "time":    0.0, "expected": 0.5 },
+                        { "variable": "F_mass",   "time":   60.0, "expected": 0.5 },
+                        { "variable": "F_mass",   "time":  600.0, "expected": 0.5 },
+                        { "variable": "F_mass",   "time": 3600.0, "expected": 0.5 },
+                        { "variable": "F_number", "time":    0.0, "expected": 0.7 },
+                        { "variable": "F_number", "time":   60.0, "expected": 0.7 },
+                        { "variable": "F_number", "time":  600.0, "expected": 0.7 },
+                        { "variable": "F_number", "time": 3600.0, "expected": 0.7 },
+                        { "variable": "Λ",        "time":    0.0, "expected": 1.0e-4 },
+                        { "variable": "Λ",        "time":   60.0, "expected": 1.0e-4 },
+                        { "variable": "Λ",        "time":  600.0, "expected": 1.0e-4 },
+                        { "variable": "Λ",        "time": 3600.0, "expected": 1.0e-4 }
+                    ]
+                },
+                {
+                    "id": "no_scavenging_floor",
+                    "description": "Interstitial = initial concentration → zero scavenging ratio. Lower bound of S&P Eqs. 17.84-17.85. F_mass and F_number must evaluate to exactly 0 when the cloud fails to remove any aerosol.",
+                    "parameter_overrides": {
+                        "C_int": 1.0e9,
+                        "N_int": 1.0e9
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "F_mass",   "time":  60.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_mass",   "time": 600.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_number", "time":  60.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_number", "time": 600.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "complete_scavenging_ceiling",
+                    "description": "Interstitial = 0 → full scavenging. Upper bound of S&P Eqs. 17.84-17.85. F_mass and F_number must evaluate to exactly 1 when the cloud removes all aerosol.",
+                    "parameter_overrides": {
+                        "C_int": 0.0,
+                        "N_int": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "F_mass",   "time":  60.0, "expected": 1.0 },
+                        { "variable": "F_mass",   "time": 600.0, "expected": 1.0 },
+                        { "variable": "F_number", "time":  60.0, "expected": 1.0 },
+                        { "variable": "F_number", "time": 600.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "asymmetric_mass_vs_number",
+                    "description": "Mass and number scavenging ratios differ when aerosols partition such that different fractions of mass vs number end up in cloud droplets. Exercises S&P Eqs. 17.84 and 17.85 as independent channels. F_mass = (2e9 - 1e9)/2e9 = 0.5; F_number = (1e9 - 2e8)/1e9 = 0.8.",
+                    "parameter_overrides": {
+                        "C_0":   2.0e9,
+                        "C_int": 1.0e9,
+                        "N_0":   1.0e9,
+                        "N_int": 2.0e8
+                    },
+                    "time_span": { "start": 0.0, "end": 300.0 },
+                    "assertions": [
+                        { "variable": "F_mass",   "time": 300.0, "expected": 0.5 },
+                        { "variable": "F_number", "time": 300.0, "expected": 0.8 }
+                    ]
+                },
+                {
+                    "id": "scavenging_coeff_low_droplet_density",
+                    "description": "Low cloud-droplet number density (N_d=1e6 m^-3, K_coll=1e-12 m^3/s) yields a much smaller scavenging coefficient. Exercises the monodisperse S&P Eq. 17.92 scaling Λ = N_d * K_coll under a 100x decrease in droplet density.",
+                    "parameter_overrides": {
+                        "N_d":    1.0e6,
+                        "K_coll": 1.0e-12
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "Λ", "time":  60.0, "expected": 1.0e-6 },
+                        { "variable": "Λ", "time": 600.0, "expected": 1.0e-6 }
+                    ]
+                },
+                {
+                    "id": "scavenging_coeff_high_collision_kernel",
+                    "description": "High collision kernel (K_coll=5e-11 m^3/s) with default N_d=1e8 m^-3 yields Λ=5e-3 s^-1 (t_scav~200 s). Representative of efficient below-cloud impaction scavenging in S&P §17.6.2. Exercises Eq. 17.92 at the opposite end of the K_coll range from the defaults.",
+                    "parameter_overrides": {
+                        "K_coll": 5.0e-11
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "Λ", "time":  60.0, "expected": 5.0e-3 },
+                        { "variable": "Λ", "time": 600.0, "expected": 5.0e-3 }
+                    ]
+                },
+                {
+                    "id": "scavenging_ratio_bounds_check",
+                    "description": "S&P 17.84-17.85 require 0 <= F_mass, F_number <= 1 for all physically meaningful inputs. This test confirms a realistic intermediate case (F_mass=0.25, F_number=0.55) lies strictly in the open interval, complementing the 0-floor and 1-ceiling tests.",
+                    "parameter_overrides": {
+                        "C_0":   4.0e9,
+                        "C_int": 3.0e9,
+                        "N_0":   2.0e9,
+                        "N_int": 9.0e8
+                    },
+                    "time_span": { "start": 0.0, "end": 1200.0 },
+                    "assertions": [
+                        { "variable": "F_mass",   "time": 1200.0, "expected": 0.25 },
+                        { "variable": "F_number", "time": 1200.0, "expected": 0.55 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "defaults_trajectory",
+                    "description": "Reference-run trajectories of F_mass, F_number, and Λ at upstream Aerosol.jl defaults over a 1-hour window. All three states are time-independent under S&P Eqs. 17.84-17.92, so the line plots are horizontal and make the algebraic-constraint structure of the model visually obvious.",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "plots": [
+                        {
+                            "id": "scavenging_ratios_vs_time",
+                            "type": "line",
+                            "description": "F_mass and F_number remain at their algebraic values (0.5 and 0.7) for the full hour.",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "F_mass", "label": "scavenging ratio (dimensionless)" },
+                            "series": [
+                                { "name": "F_mass",   "variable": "F_mass" },
+                                { "name": "F_number", "variable": "F_number" }
+                            ]
+                        },
+                        {
+                            "id": "scavenging_coefficient_vs_time",
+                            "type": "line",
+                            "description": "Λ trajectory at defaults. Constant at N_d * K_coll = 1e-4 s^-1 (timescale ~ 2.8 hours).",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "Λ", "label": "Λ (1/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "mass_scavenging_ratio_sweep",
+                    "description": "Sweep the interstitial mass concentration from 0 up to C_0 at fixed C_0=1e9 m^-3, tracing out the full physically meaningful range of F_mass (0 to 1). This is the mass-scavenging-efficiency curve implied by S&P Eq. 17.84: F_mass = 1 - C_int/C_0.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "C_int",
+                                "range": { "start": 0.0, "stop": 1.0e9, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_mass_vs_C_int",
+                            "type": "line",
+                            "description": "F_mass as a function of interstitial mass concentration (S&P Fig. 17.19-style efficiency curve).",
+                            "x": { "variable": "C_int", "label": "C_{int} (m^-3)" },
+                            "y": { "variable": "F_mass", "label": "F_mass" }
+                        }
+                    ]
+                },
+                {
+                    "id": "number_scavenging_ratio_sweep",
+                    "description": "Companion to the mass-efficiency sweep: varies N_int from 0 to N_0 at fixed N_0=1e9 m^-3 to trace the number-scavenging-efficiency curve (S&P Eq. 17.85). Useful for comparing mass vs number scavenging selectivity for representative aerosol size distributions — fine-mode-dominated populations scavenge less efficiently by number than by mass, which shows up as different slopes across this sweep and the mass sweep above.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N_int",
+                                "range": { "start": 0.0, "stop": 1.0e9, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_number_vs_N_int",
+                            "type": "line",
+                            "description": "F_number as a function of interstitial number concentration.",
+                            "x": { "variable": "N_int", "label": "N_{int} (m^-3)" },
+                            "y": { "variable": "F_number", "label": "F_number" }
+                        }
+                    ]
+                },
+                {
+                    "id": "scavenging_coefficient_vs_droplet_density",
+                    "description": "Sweep cloud-droplet number density N_d across four orders of magnitude (1e6 to 1e10 m^-3) at fixed K_coll=1e-12 m^3/s. Λ = N_d * K_coll (S&P Eq. 17.92 in the monodisperse approximation) gives the canonical linear scaling — on a log-log axis the trajectory is a straight line, covering scavenging timescales from ~1 second (heavy cumulus) to ~12 days (thin cirrus).",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N_d",
+                                "range": { "start": 1.0e6, "stop": 1.0e10, "count": 21, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_vs_Nd",
+                            "type": "line",
+                            "description": "Scavenging coefficient Λ vs cloud-droplet density.",
+                            "x": { "variable": "N_d", "label": "N_d (m^-3)" },
+                            "y": { "variable": "Λ",   "label": "Λ (1/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "collision_kernel_vs_droplet_density_heatmap",
+                    "description": "Two-dimensional sweep over cloud-droplet density and collision kernel, producing a heatmap of the scavenging coefficient Λ. Spans the joint range covered by the representative aerosol size distributions in S&P §17.6.2: N_d from stratiform (~1e7 m^-3) to convective (~1e9 m^-3), K_coll from below-cloud impaction of fine aerosols (~1e-13 m^3/s) up to in-cloud Brownian/turbulent scavenging of coarse aerosols (~1e-10 m^3/s). The product structure of Eq. 17.92 makes this a textbook 'grid of constants' exhibition — useful for reviewers sanity-checking the parameter ranges implied by a downstream coupled model.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N_d",
+                                "range": { "start": 1.0e7, "stop": 1.0e9, "count": 9, "scale": "log" }
+                            },
+                            {
+                                "parameter": "K_coll",
+                                "range": { "start": 1.0e-13, "stop": 1.0e-10, "count": 7, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_heatmap",
+                            "type": "heatmap",
+                            "description": "Λ = N_d * K_coll over the (N_d, K_coll) plane.",
+                            "x": { "variable": "N_d",    "label": "N_d (m^-3)" },
+                            "y": { "variable": "K_coll", "label": "K_{coll} (m^3/s)" },
+                            "value": { "variable": "Λ", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
