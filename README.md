@@ -77,6 +77,27 @@ Phase-3 per-component migration beads draw from the migration tracker. Each
 landing bead adds one `.esm` file plus verification that its inline tests pass
 under CI. See the tracker for the current queue.
 
+## Authoring model components (.esm files)
+
+Components declare reactions, parameters, and rate expressions. Rate
+laws should be written as ExpressionNode AST trees using existing ops
+(`+ - * / ^ exp log10 sqrt max min ifelse` etc.) — see
+[EarthSciSerialization esm-spec.md §4.2](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md#42-expressionnode-ops)
+for the full op enum and
+[§9.2](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md#92-when-a-call-op-is-justified)
+for when (rarely) a `call` op is justified.
+
+Do NOT:
+- Reach for `{op: "call", fn: "…"}` to hide math that's expressible in AST
+- Write a per-binding helper function for a model-specific formula
+- Register a function for anything that fits on paper as a finite expression
+
+Legitimate uses of `call`: tabulated photolysis coefficients,
+empirical formulas without closed-form (e.g. Wesely canopy resistance),
+implicit solvers. See §9.2 for the decision tree.
+
+When in doubt: AST.
+
 ## License
 
 See [LICENSE](LICENSE).
