@@ -10,10 +10,11 @@ site is a view over them.
 | Piece | Purpose |
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
+| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example's `parameter_sweep`, and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
 | [Hugo](https://gohugo.io) | Static site generator; renders taxonomies and markdown. |
 | [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded via CDN in `layouts/partials/head.html`). |
 | [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` in CI. Lazy-loads, no server required. |
-| `.github/workflows/docs.yml` | Generate → build → index → deploy on every push to `main`. |
+| `.github/workflows/docs.yml` | Generate plots → generate pages → build → index → deploy on every push to `main`. |
 
 ## Adding a new component
 
@@ -45,11 +46,15 @@ Taxonomies configured in `hugo.toml` (`domain`, `component_type`, `subdomain`,
 ## Local development
 
 ```bash
+# Render example plots from .esm files (requires matplotlib + numpy).
+python tools/render_example_plots.py
+
 # Generate pages from .esm files.
 python tools/esm_to_docs.py
 
-# Run the generator's unit tests (AST → LaTeX renderer coverage).
+# Run the generators' unit tests.
 python -m unittest tools/esm_to_docs_test.py
+python -m unittest tools/render_example_plots_test.py
 
 # Build the site (requires Hugo extended ≥ 0.131).
 hugo --source docs --minify --destination public
@@ -62,7 +67,8 @@ npx pagefind@1 --site docs/public
 ```
 
 Generated content (`docs/content/components/**/index.md`, `docs/data/components-index.json`,
-`docs/public/`, `docs/resources/`) is gitignored; CI regenerates on every run.
+`docs/public/`, `docs/resources/`, `components/**/*.plots/`) is gitignored; CI regenerates on
+every run.
 
 ## Layout overview
 
@@ -85,39 +91,73 @@ docs/
     └── components-index.json              # GENERATED — faceted search feed
 ```
 
-## Example plots — path forward
+## Example plots
 
 Examples in the `.esm` schema carry declarative plot specs (`type: line` /
 `heatmap`, axis labels, variable bindings — see
-[ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). The doc
-generator will render static images alongside each example if artifacts are
-shipped under the convention:
+[ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). At
+build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
+walks `components/**/*.esm`, evaluates each example's `parameter_sweep`,
+and writes a PNG per declared plot under
 
 ```
-components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.{png,svg,jpg,webp}
+components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.png
 ```
 
-Artifacts are copied into `docs/static/plots/<slug>/` at generate time and
-referenced from the rendered page. If no artifact exists for a given plot, the
-example renders without a figure (no placeholder).
+`tools/esm_to_docs.py` then copies the artifact into `docs/static/plots/<slug>/`
+and inlines it on the rendered page. The `.plots/` tree is gitignored — CI
+regenerates it on every run. Custom hand-shipped artifacts for a specific
+example are still supported by simply checking them into the same path
+(but you'll need to remove the gitignore rule if you do).
 
-**Today, no `.esm` ships plot artifacts**, so examples render description-only.
-Two follow-up options are tracked separately:
+### Coverage
 
-- **Runtime plot generation** — execute each example at CI time, integrate the
-  model with the declared `parameter_sweep`, and emit a PNG. Requires wiring
-  the Julia component back through `EarthSciModels.jl` at doc-build time.
+Today the renderer handles **algebraic-only components**: a `model` whose
+`equations` list is empty and whose state variables are computed entirely
+from `observed` expressions over parameters. That covers the
+`CloudAlbedo` Seinfeld & Pandis Fig 24.16 reproduction (mdl-icq) and any
+future model in the same shape.
+
+Examples that need an ODE/DAE integration (`reaction_systems`, models
+with non-trivial `equations`, or examples without a `parameter_sweep` —
+e.g. `SuperFast`'s 24-hour run, `DiameterGrowthRate`'s trajectory tests)
+are skipped with a diagnostic line and tracked as a follow-up. Driving
+them through MTK requires Julia + `EarthSciModels.jl` in the docs CI
+image; the algebraic-only path runs in pure Python (`matplotlib +
+numpy`) and adds ~1 s to the docs build per .esm.
+
+### Build-time impact
+
+For the current 6 components × ~25 example plots:
+
+| Stage | Local time | Notes |
+| --- | --- | --- |
+| `pip install matplotlib numpy` | ~10–15 s | Cached across CI runs once the wheel is in place. |
+| `python tools/render_example_plots.py` | ~1 s | Scales linearly in the number of algebraic examples × sweep grid size. |
+| `python tools/esm_to_docs.py` | <0.5 s | Unchanged. |
+
+The `Render example plots` step grows roughly proportional to the total
+sweep grid count across all examples, but stays well under 10 s in
+practice. If a future ODE-driven path lands, expect that step to dwarf
+this one.
+
+### Follow-up — interactive embeds
+
+Tracked separately:
+
 - **Client-side interactive embeds** — render the plot spec as Vega-Lite /
-  Plotly JSON and let the browser draw it from the integration result. Still
-  needs a server-side evaluation step to produce the data.
-
-Either option is a larger lift than this POC.
+  Plotly JSON and let the browser draw it from the integration result.
+  Still needs a server-side evaluation step to produce the data.
+- **ODE/DAE plot rendering** — wire `EarthSciModels.jl` (Julia + MTK +
+  Catalyst + a solver stack) into the docs CI to integrate
+  `reaction_systems` and DAE models, then emit PNGs through the same
+  `<esm_stem>.plots/` convention.
 
 ## Out of scope (tracked elsewhere)
 
 - Connectors (not yet a distinct `.esm` section)
 - Discretization rules (lives in ESD, not ESM)
 - Versioned docs (history of a component across `.esm` versions)
-- Runtime plot generation (see "Example plots — path forward" above)
+- ODE/DAE plot rendering (see "Example plots → Follow-up" above)
 - Algolia DocSearch swap (revisit only if we outgrow Pagefind at >10k pages)
 - PDF export
