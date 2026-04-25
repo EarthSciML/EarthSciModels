@@ -325,11 +325,15 @@ class RenderMarkdownTest(unittest.TestCase):
             "## Parameters",
             "## Observed",
             "## Equations",
-            "## Tests",
             "## Examples",
             "## Raw .esm",
         ):
             self.assertIn(section, md, f"missing section: {section}")
+
+    def test_tests_section_not_rendered(self):
+        # Tests are dev-only; they must not appear on user-facing pages.
+        md = mod.render_markdown(self._make_entry())
+        self.assertNotIn("## Tests", md)
 
     def test_equation_renders_as_display_math(self):
         md = mod.render_markdown(self._make_entry())

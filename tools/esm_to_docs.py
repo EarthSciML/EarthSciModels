@@ -611,35 +611,143 @@ def _format_reaction_side(side: list) -> str:
     return " + ".join(parts)
 
 
-def _render_tests_section(entry: ComponentEntry) -> str:
-    tests = entry.body.get("tests")
-    if not isinstance(tests, list) or not tests:
+_PLOT_IMG_EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp")
+
+
+def _find_plot_artifacts(entry: ComponentEntry, example: dict, repo_root: Path) -> list[tuple[str, str]]:
+    """Return [(image_relpath, caption)] for any plot artifacts shipped alongside
+    the .esm for the given example.
+
+    Convention: an artifact for plot `<plot_id>` under example `<example_id>` of
+    `foo.esm` lives at `<esm_dir>/foo.plots/<example_id>-<plot_id>.<ext>` where
+    `<ext>` is png / svg / jpg / jpeg / webp. Artifacts get copied into the
+    Hugo `static/plots/<slug>/` tree and linked below the example prose.
+
+    Returns an empty list if no artifacts are present — today every .esm hits
+    this path (see docs/README.md "Example plots — path forward").
+    """
+    example_id = example.get("id") or ""
+    if not example_id:
+        return []
+    plots_meta = example.get("plots") or []
+    if not isinstance(plots_meta, list) or not plots_meta:
+        return []
+    esm_abs = (repo_root / entry.esm_path).resolve()
+    plots_dir = esm_abs.parent / (esm_abs.stem + ".plots")
+    if not plots_dir.is_dir():
+        return []
+    found: list[tuple[str, str]] = []
+    for plot in plots_meta:
+        if not isinstance(plot, dict):
+            continue
+        plot_id = plot.get("id") or ""
+        if not plot_id:
+            continue
+        caption = plot.get("description") or plot_id
+        for ext in _PLOT_IMG_EXTS:
+            candidate = plots_dir / f"{example_id}-{plot_id}{ext}"
+            if candidate.is_file():
+                found.append((str(candidate), caption))
+                break
+    return found
+
+
+def _copy_and_link_plots(
+    entry: ComponentEntry,
+    example: dict,
+    repo_root: Path,
+    static_dir: Path,
+) -> list[str]:
+    """Copy plot artifacts into the Hugo static tree and return markdown image
+    lines. Empty list when no artifacts exist for this example."""
+    artifacts = _find_plot_artifacts(entry, example, repo_root)
+    if not artifacts:
+        return []
+    dest_rel = Path("plots") / entry.slug
+    dest_abs = static_dir / dest_rel
+    dest_abs.mkdir(parents=True, exist_ok=True)
+    lines: list[str] = []
+    for src_path_str, caption in artifacts:
+        src = Path(src_path_str)
+        dest = dest_abs / src.name
+        dest.write_bytes(src.read_bytes())
+        url = "/" + str(dest_rel / src.name).replace(os.sep, "/")
+        # Escape caption chars that break markdown image syntax.
+        alt = caption.replace("[", "(").replace("]", ")")
+        lines.append(f"![{alt}]({url})")
+    return lines
+
+
+def _render_examples_section(
+    entry: ComponentEntry,
+    repo_root: Path,
+    static_dir: Path,
+) -> str:
+    examples = entry.body.get("examples")
+    if not isinstance(examples, list) or not examples:
         return ""
     blocks = []
-    for t in tests:
-        if not isinstance(t, dict):
+    for ex in examples:
+        if not isinstance(ex, dict):
             continue
-        tid = t.get("id", "")
-        desc = t.get("description", "")
-        span = t.get("time_span") or {}
-        start = span.get("start")
-        end = span.get("end")
-        tolerance = t.get("tolerance") or {}
-        assertions = t.get("assertions") or []
-        lines = [f"### {tid or 'test'}"]
+        title = ex.get("title") or ex.get("id") or "Example"
+        desc = ex.get("description") or ""
+        code = ex.get("code") or ""
+        lang = ex.get("language") or "julia"
+        parts = [f"### {title}"]
         if desc:
-            lines.append(desc)
-        if start is not None or end is not None:
-            lines.append(f"- **Time span**: {start} → {end}")
-        if tolerance:
-            lines.append(f"- **Tolerance**: `{json.dumps(tolerance)}`")
-        if assertions:
-            lines.append(f"- **Assertions**: {len(assertions)}")
-        blocks.append("\n".join(lines))
-    return _section("Tests", "\n\n".join(blocks))
+            parts.append(desc)
+        if code:
+            parts.append(f"```{lang}\n{code}\n```")
+        plot_lines = _copy_and_link_plots(entry, ex, repo_root, static_dir)
+        if plot_lines:
+            parts.append("\n\n".join(plot_lines))
+        blocks.append("\n\n".join(parts))
+    return _section("Examples", "\n\n".join(blocks))
 
 
-def _render_examples_section(entry: ComponentEntry) -> str:
+def _render_raw_section(entry: ComponentEntry) -> str:
+    # Compact, collapsed raw JSON for reference.
+    raw = json.dumps(entry.body, indent=2, ensure_ascii=False)
+    body = (
+        "<details><summary>Raw .esm JSON (this component)</summary>\n\n"
+        f"```json\n{raw}\n```\n\n"
+        "</details>"
+    )
+    return _section("Raw .esm", body)
+
+
+def render_markdown(
+    entry: ComponentEntry,
+    repo_root: Path | None = None,
+    static_dir: Path | None = None,
+) -> str:
+    """Render one component entry as a Hugo markdown page (frontmatter + body).
+
+    `repo_root` and `static_dir` control where example plot artifacts are
+    looked up and copied; when omitted, no plots are emitted (useful for
+    pure-render unit tests).
+    """
+    parts = [_frontmatter(entry)]
+    parts.append(_render_description_section(entry))
+    parts.append(_render_reference_section(entry))
+    # Models / operators use `variables`; reaction_systems use `parameters` + `species` + `reactions`.
+    parts.append(_render_variables_sections(entry))
+    parts.append(_render_parameters_section(entry))
+    parts.append(_render_species_section(entry))
+    parts.append(_render_equations_section(entry))
+    parts.append(_render_reactions_section(entry))
+    if repo_root is not None and static_dir is not None:
+        parts.append(_render_examples_section(entry, repo_root, static_dir))
+    else:
+        parts.append(_render_examples_section_no_plots(entry))
+    parts.append(_render_raw_section(entry))
+    return "".join(parts)
+
+
+def _render_examples_section_no_plots(entry: ComponentEntry) -> str:
+    """Variant of the examples renderer that skips plot-artifact lookup —
+    used by tests that don't need filesystem access to the components tree."""
     examples = entry.body.get("examples")
     if not isinstance(examples, list) or not examples:
         return ""
@@ -658,34 +766,6 @@ def _render_examples_section(entry: ComponentEntry) -> str:
             parts.append(f"```{lang}\n{code}\n```")
         blocks.append("\n\n".join(parts))
     return _section("Examples", "\n\n".join(blocks))
-
-
-def _render_raw_section(entry: ComponentEntry) -> str:
-    # Compact, collapsed raw JSON for reference.
-    raw = json.dumps(entry.body, indent=2, ensure_ascii=False)
-    body = (
-        "<details><summary>Raw .esm JSON (this component)</summary>\n\n"
-        f"```json\n{raw}\n```\n\n"
-        "</details>"
-    )
-    return _section("Raw .esm", body)
-
-
-def render_markdown(entry: ComponentEntry) -> str:
-    """Render one component entry as a Hugo markdown page (frontmatter + body)."""
-    parts = [_frontmatter(entry)]
-    parts.append(_render_description_section(entry))
-    parts.append(_render_reference_section(entry))
-    # Models / operators use `variables`; reaction_systems use `parameters` + `species` + `reactions`.
-    parts.append(_render_variables_sections(entry))
-    parts.append(_render_parameters_section(entry))
-    parts.append(_render_species_section(entry))
-    parts.append(_render_equations_section(entry))
-    parts.append(_render_reactions_section(entry))
-    parts.append(_render_tests_section(entry))
-    parts.append(_render_examples_section(entry))
-    parts.append(_render_raw_section(entry))
-    return "".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -724,7 +804,7 @@ def build_index(entries: list[ComponentEntry]) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def run(repo_root: Path, content_dir: Path, data_dir: Path) -> int:
+def run(repo_root: Path, content_dir: Path, data_dir: Path, static_dir: Path | None = None) -> int:
     components_root = repo_root / "components"
     if not components_root.exists():
         print(f"error: components/ not found at {components_root}", file=sys.stderr)
@@ -748,10 +828,13 @@ def run(repo_root: Path, content_dir: Path, data_dir: Path) -> int:
         _clean_generated(components_out)
     components_out.mkdir(parents=True, exist_ok=True)
 
+    if static_dir is None:
+        static_dir = (content_dir.parent / "static").resolve()
+
     for e in entries:
         target_dir = components_out / e.slug
         target_dir.mkdir(parents=True, exist_ok=True)
-        md = render_markdown(e)
+        md = render_markdown(e, repo_root=repo_root, static_dir=static_dir)
         (target_dir / "index.md").write_text(md, encoding="utf-8")
 
     # Write the faceted-search index.
@@ -808,11 +891,18 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Hugo data directory (default: <repo-root>/docs/data).",
     )
+    parser.add_argument(
+        "--static-dir",
+        type=Path,
+        default=None,
+        help="Hugo static directory for plot artifacts (default: <repo-root>/docs/static).",
+    )
     args = parser.parse_args(argv)
     repo_root = args.repo_root.resolve()
     content_dir = (args.content_dir or (repo_root / "docs" / "content")).resolve()
     data_dir = (args.data_dir or (repo_root / "docs" / "data")).resolve()
-    return run(repo_root, content_dir, data_dir)
+    static_dir = (args.static_dir or (repo_root / "docs" / "static")).resolve()
+    return run(repo_root, content_dir, data_dir, static_dir)
 
 
 if __name__ == "__main__":

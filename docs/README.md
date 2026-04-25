@@ -24,8 +24,9 @@ site is a view over them.
 
 The generator reads each top-level component (`models.*`, `reaction_systems.*`,
 etc.) and emits sections for: description, reference, variables, parameters,
-constants, observed expressions, equations, reactions (if any), tests,
-examples, and a collapsed raw JSON block.
+constants, observed expressions, equations, reactions (if any), examples,
+and a collapsed raw JSON block. (Tests live in the `.esm` source for CI
+validation but are intentionally not rendered on user-facing pages.)
 
 Frontmatter fields set from the `.esm`:
 
@@ -84,11 +85,39 @@ docs/
     └── components-index.json              # GENERATED — faceted search feed
 ```
 
+## Example plots — path forward
+
+Examples in the `.esm` schema carry declarative plot specs (`type: line` /
+`heatmap`, axis labels, variable bindings — see
+[ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). The doc
+generator will render static images alongside each example if artifacts are
+shipped under the convention:
+
+```
+components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.{png,svg,jpg,webp}
+```
+
+Artifacts are copied into `docs/static/plots/<slug>/` at generate time and
+referenced from the rendered page. If no artifact exists for a given plot, the
+example renders without a figure (no placeholder).
+
+**Today, no `.esm` ships plot artifacts**, so examples render description-only.
+Two follow-up options are tracked separately:
+
+- **Runtime plot generation** — execute each example at CI time, integrate the
+  model with the declared `parameter_sweep`, and emit a PNG. Requires wiring
+  the Julia component back through `EarthSciModels.jl` at doc-build time.
+- **Client-side interactive embeds** — render the plot spec as Vega-Lite /
+  Plotly JSON and let the browser draw it from the integration result. Still
+  needs a server-side evaluation step to produce the data.
+
+Either option is a larger lift than this POC.
+
 ## Out of scope (tracked elsewhere)
 
 - Connectors (not yet a distinct `.esm` section)
 - Discretization rules (lives in ESD, not ESM)
 - Versioned docs (history of a component across `.esm` versions)
-- Plots / figures (explicitly excluded for POC)
+- Runtime plot generation (see "Example plots — path forward" above)
 - Algolia DocSearch swap (revisit only if we outgrow Pagefind at >10k pages)
 - PDF export
