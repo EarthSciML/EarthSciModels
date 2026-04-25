@@ -11,13 +11,18 @@ PNG per plot under
 `tools/esm_to_docs.py` already understands this convention and will inline
 the artifacts on the rendered Hugo page (mdl-f42).
 
-Coverage today: algebraic-only components — i.e. models whose `equations`
-list is empty and whose `observed` expressions are pure functions of
-parameters and other observed values. CloudAlbedo (Seinfeld & Pandis Fig
-24.16) is the canonical case. Components with non-trivial ODE / DAE
-dynamics (e.g. SuperFast's 24-hour integration) are skipped with a
-diagnostic line and tracked as a follow-up — driving them through MTK
-would require Julia in the docs CI image.
+Expression evaluation is delegated to the `earthsci_toolkit` Python binding
+(ESS) — this file imports `load` and `evaluate` from there and walks each
+sweep grid point through the ESS evaluator. That keeps op semantics
+single-sourced with the rest of the toolchain (Rust ndarray runtime,
+Julia SymbolicUtils path, conformance fixtures).
+
+Renderable components: any model whose `equations` contain no time
+derivative (`D` op). Algebraic-equation components (e.g. WaterEquilibrium
+with `K_w = K_w_298 * exp(...)`) and observed-only components (e.g.
+CloudAlbedo) both qualify. Components with ODE / DAE dynamics (e.g.
+SuperFast's 24-hour integration) are skipped with a diagnostic line —
+driving them through MTK would require Julia in the docs CI image.
 
 Entry points:
     python3 tools/render_example_plots.py                   # from repo root
@@ -26,13 +31,12 @@ Entry points:
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 # Headless backend so this works in CI without a display.
 import matplotlib
@@ -42,243 +46,252 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-
-# ---------------------------------------------------------------------------
-# AST evaluator (mirrors esm_to_docs.ast_to_latex but produces numeric values)
-# ---------------------------------------------------------------------------
-
-
-_BINARY_FUNCS = {
-    "+": lambda a, b: a + b,
-    "-": lambda a, b: a - b,
-    "*": lambda a, b: a * b,
-    "/": lambda a, b: a / b,
-    "^": lambda a, b: a ** b,
-}
-
-_UNARY_FUNCS = {
-    "exp": np.exp,
-    "log": np.log,
-    "log10": np.log10,
-    "log2": np.log2,
-    "sqrt": np.sqrt,
-    "sin": np.sin,
-    "cos": np.cos,
-    "tan": np.tan,
-    "abs": np.abs,
-}
+from earthsci_toolkit import (  # noqa: E402
+    EsmFile,
+    ExprNode,
+    Model,
+    evaluate,
+    free_variables,
+    from_sympy,
+    load,
+    to_sympy,
+)
+from earthsci_toolkit.esm_types import (  # noqa: E402
+    Example,
+    ParameterSweep,
+    Plot,
+    PlotAxis,
+    PlotValue,
+    SweepDimension,
+)
 
 
 class UnsupportedExpression(Exception):
-    """Raised when the evaluator hits an op or pattern it cannot handle."""
+    """Raised when an example or expression cannot be rendered here.
 
-
-def evaluate(node: Any, env: dict[str, Any]) -> Any:
-    """Evaluate an .esm expression AST against a numeric environment.
-
-    `env` maps variable names (parameters and previously-evaluated observed
-    values) to scalars or numpy arrays. Returns a numpy-broadcastable value.
+    Wraps both renderer-side problems (missing variable bindings, unsupported
+    plot types, sweep shapes) and ESS-side errors propagated from
+    `earthsci_toolkit.evaluate` (unbound symbols, unsupported ops including
+    `call` and time-derivatives reached at evaluation time).
     """
-    if isinstance(node, bool):
-        return 1.0 if node else 0.0
-    if isinstance(node, (int, float)):
-        return float(node)
-    if isinstance(node, str):
-        if node not in env:
-            raise UnsupportedExpression(f"unbound variable: {node!r}")
-        return env[node]
-    if not isinstance(node, dict):
-        raise UnsupportedExpression(f"unsupported AST node type: {type(node).__name__}")
-
-    op = node.get("op")
-    args = node.get("args") or []
-    if op is None:
-        raise UnsupportedExpression("AST node missing 'op'")
-
-    if op in _UNARY_FUNCS and len(args) == 1:
-        return _UNARY_FUNCS[op](evaluate(args[0], env))
-
-    if op == "+":
-        if not args:
-            return 0.0
-        out = evaluate(args[0], env)
-        for a in args[1:]:
-            out = out + evaluate(a, env)
-        return out
-    if op == "-":
-        if len(args) == 1:
-            return -evaluate(args[0], env)
-        out = evaluate(args[0], env)
-        for a in args[1:]:
-            out = out - evaluate(a, env)
-        return out
-    if op == "*":
-        if not args:
-            return 1.0
-        out = evaluate(args[0], env)
-        for a in args[1:]:
-            out = out * evaluate(a, env)
-        return out
-    if op == "/":
-        if len(args) < 2:
-            raise UnsupportedExpression("'/' requires at least 2 args")
-        out = evaluate(args[0], env)
-        for a in args[1:]:
-            out = out / evaluate(a, env)
-        return out
-    if op == "^":
-        if len(args) != 2:
-            raise UnsupportedExpression("'^' requires exactly 2 args")
-        return evaluate(args[0], env) ** evaluate(args[1], env)
-
-    raise UnsupportedExpression(f"unsupported op: {op!r}")
 
 
 # ---------------------------------------------------------------------------
-# Sweep + plot evaluation
+# Sweep + grid evaluation (delegates op semantics to ESS)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _Variable:
-    name: str
-    kind: str
-    default: Any
-    expression: Any
+def _has_time_derivative(node: Any) -> bool:
+    """True if the expression tree contains a `D` (time-derivative) op anywhere."""
+    if isinstance(node, ExprNode):
+        if node.op == "D":
+            return True
+        return any(_has_time_derivative(a) for a in node.args)
+    return False
 
 
-def _collect_variables(component: dict) -> dict[str, _Variable]:
-    out: dict[str, _Variable] = {}
-    raw = component.get("variables") or {}
-    if not isinstance(raw, dict):
-        return out
-    for name, spec in raw.items():
-        if not isinstance(spec, dict):
-            continue
-        out[name] = _Variable(
-            name=name,
-            kind=spec.get("type", "variable"),
-            default=spec.get("default"),
-            expression=spec.get("expression"),
-        )
-    return out
+def _component_has_dynamics(model: Model) -> bool:
+    """A model has dynamics if any equation rhs contains a time derivative."""
+    for eq in model.equations or []:
+        if _has_time_derivative(eq.rhs):
+            return True
+    return False
 
 
-def _is_algebraic_only(component: dict) -> bool:
-    """A component is renderable here when it has no time-evolving state.
+def _baseline_bindings(model: Model, example: Example) -> dict[str, float]:
+    """Initial bindings: parameter / constant defaults, then example overrides."""
+    bindings: dict[str, float] = {}
+    for name, mv in model.variables.items():
+        if mv.type in ("parameter", "constant") and mv.default is not None:
+            bindings[name] = float(mv.default)
+    for name, val in (example.parameters or {}).items():
+        bindings[name] = float(val)
+    return bindings
 
-    Concretely: an empty `equations` list (or none) and at least one
-    observed variable to plot. ReactionSystems are excluded — their state
-    is the species concentration vector, which needs an ODE solve.
+
+def _build_sweep_grid(
+    sweep: ParameterSweep,
+) -> tuple[list[str], list[np.ndarray], list[str]]:
+    """Return (names, values, scales) for a 1D or 2D cartesian sweep.
+
+    `scales` parallels `names`: "linear" or "log" per dimension. Dimensions
+    given as an explicit `values` list are treated as "linear" unless every
+    value is positive and they span >1 decade, in which case "log" is a
+    reasonable default for axis presentation.
     """
-    eqs = component.get("equations")
-    if isinstance(eqs, list) and eqs:
-        return False
-    if "reactions" in component or "species" in component:
-        return False
-    vars_ = component.get("variables") or {}
-    if not isinstance(vars_, dict) or not vars_:
-        return False
-    return any(
-        isinstance(v, dict) and v.get("type") == "observed" for v in vars_.values()
-    )
-
-
-def _build_sweep_grid(parameter_sweep: dict) -> tuple[list[str], list[np.ndarray]]:
-    """Return (names, values) for a 1D or 2D cartesian sweep."""
-    if not isinstance(parameter_sweep, dict):
-        raise UnsupportedExpression("parameter_sweep is not a dict")
-    if parameter_sweep.get("type") != "cartesian":
-        raise UnsupportedExpression(
-            f"unsupported sweep type: {parameter_sweep.get('type')!r}"
-        )
-    dims = parameter_sweep.get("dimensions") or []
-    if not isinstance(dims, list) or not dims:
+    if sweep.type != "cartesian":
+        raise UnsupportedExpression(f"unsupported sweep type: {sweep.type!r}")
+    if not sweep.dimensions:
         raise UnsupportedExpression("parameter_sweep has no dimensions")
     names: list[str] = []
     values: list[np.ndarray] = []
-    for d in dims:
-        if not isinstance(d, dict):
-            raise UnsupportedExpression("dimension is not a dict")
-        param = d.get("parameter")
-        rng = d.get("range") or {}
-        if not isinstance(param, str) or not isinstance(rng, dict):
-            raise UnsupportedExpression("dimension missing parameter or range")
-        start = float(rng.get("start"))
-        stop = float(rng.get("stop"))
-        count = int(rng.get("count", 50))
-        scale = rng.get("scale", "linear")
-        if scale == "log":
-            arr = np.logspace(math.log10(start), math.log10(stop), count)
+    scales: list[str] = []
+    for d in sweep.dimensions:
+        if not isinstance(d, SweepDimension):
+            raise UnsupportedExpression("dimension is not a SweepDimension")
+        if d.values is not None:
+            arr = np.asarray(d.values, dtype=float)
+            scale = "linear"
+            if arr.size > 1 and np.all(arr > 0):
+                if float(arr.max()) / float(arr.min()) >= 10.0:
+                    scale = "log"
+        elif d.range is not None:
+            rng = d.range
+            scale = rng.scale or "linear"
+            if scale == "log":
+                arr = np.logspace(math.log10(rng.start), math.log10(rng.stop), rng.count)
+            else:
+                arr = np.linspace(rng.start, rng.stop, rng.count)
         else:
-            arr = np.linspace(start, stop, count)
-        names.append(param)
+            raise UnsupportedExpression(
+                f"dimension {d.parameter!r} has neither values nor range"
+            )
+        names.append(d.parameter)
         values.append(arr)
-    return names, values
+        scales.append(scale)
+    return names, values, scales
 
 
-def _evaluate_observed(
-    variables: dict[str, _Variable], env: dict[str, Any]
-) -> dict[str, Any]:
-    """Evaluate every observed variable into `env` (which already contains
-    parameters + constants). Loops up to N passes to resolve dependency order.
+def _solve_for_unbound(lhs: Any, rhs: Any, target_name: str) -> Any | None:
+    """Symbolically solve `lhs = rhs` for `target_name` (must appear in
+    exactly one side as a free variable). Returns the ESS expression that
+    computes `target_name`, or None if the solver couldn't find a closed
+    form.
     """
-    pending = {
-        name: v
-        for name, v in variables.items()
-        if v.kind == "observed" and v.expression is not None
-    }
-    max_passes = len(pending) + 1
-    for _ in range(max_passes):
-        if not pending:
-            break
+    import sympy as sp
+
+    lhs_sym = to_sympy(lhs) if not isinstance(lhs, str) else sp.Symbol(lhs)
+    rhs_sym = to_sympy(rhs) if not isinstance(rhs, str) else sp.Symbol(rhs)
+    try:
+        sols = sp.solve(sp.Eq(lhs_sym, rhs_sym), sp.Symbol(target_name))
+    except (NotImplementedError, ValueError, TypeError):
+        return None
+    if not sols:
+        return None
+    return from_sympy(sols[0])
+
+
+def _build_resolution_plan(
+    model: Model, base_bound_names: set[str]
+) -> list[tuple[str, Any]]:
+    """Build a dependency-ordered list of `(target, expr)` pairs.
+
+    Each step in the plan defines one variable from a closed-form expression
+    over previously-bound symbols (parameters + sweep axes + earlier targets).
+
+    Three sources contribute targets:
+    - Observed variables with `.expression` (always forward).
+    - Equations where `lhs` is a bare name not yet bound: forward as
+      `(lhs, rhs)`.
+    - Equations where `lhs` is bound (constraint): symbolically solve for
+      the single unbound variable in `rhs` and add as a target.
+
+    Targets that can't be resolved (cyclic deps, multi-unbound constraints,
+    constraint with no closed form) raise `UnsupportedExpression`.
+    """
+    bound: set[str] = set(base_bound_names)
+    plan: list[tuple[str, Any]] = []
+
+    for vname, mv in model.variables.items():
+        if mv.type == "observed" and mv.expression is not None:
+            plan.append((vname, mv.expression))
+            bound.add(vname)
+
+    pending = list(model.equations or [])
+    while pending:
         progress = False
-        for name in list(pending.keys()):
-            try:
-                env[name] = evaluate(pending[name].expression, env)
-            except UnsupportedExpression:
+        still_pending = []
+        for eq in pending:
+            if not isinstance(eq.lhs, str):
+                still_pending.append(eq)
                 continue
-            pending.pop(name)
-            progress = True
+            rhs_vars = free_variables(eq.rhs)
+            unbound_in_rhs = rhs_vars - bound
+            if eq.lhs not in bound:
+                if not unbound_in_rhs:
+                    plan.append((eq.lhs, eq.rhs))
+                    bound.add(eq.lhs)
+                    progress = True
+                else:
+                    still_pending.append(eq)
+            else:
+                if len(unbound_in_rhs) == 1:
+                    target = next(iter(unbound_in_rhs))
+                    solved = _solve_for_unbound(eq.lhs, eq.rhs, target)
+                    if solved is None:
+                        raise UnsupportedExpression(
+                            f"could not symbolically solve {eq.lhs}={eq.rhs} "
+                            f"for {target!r}"
+                        )
+                    plan.append((target, solved))
+                    bound.add(target)
+                    progress = True
+                else:
+                    still_pending.append(eq)
         if not progress:
-            break
-    if pending:
-        names = sorted(pending.keys())
-        raise UnsupportedExpression(
-            f"could not resolve observed variables: {names}"
-        )
-    return env
+            missing = []
+            for eq in still_pending:
+                if isinstance(eq.lhs, str) and eq.lhs not in bound:
+                    missing.append(eq.lhs)
+            raise UnsupportedExpression(
+                f"could not resolve equations (cyclic or under-determined): "
+                f"{sorted(set(missing))!r}"
+            )
+        pending = still_pending
+
+    return plan
 
 
-def _baseline_env(
-    variables: dict[str, _Variable], example: dict
-) -> dict[str, float]:
-    """Initial environment: parameter / constant defaults, optionally
-    overridden by the example's `parameters` map."""
-    env: dict[str, float] = {}
-    for name, v in variables.items():
-        if v.kind in ("parameter", "constant") and v.default is not None:
-            env[name] = float(v.default)
-    overrides = example.get("parameters") or {}
-    if isinstance(overrides, dict):
-        for name, val in overrides.items():
-            env[name] = float(val)
-    return env
-
-
-def _grid_envs(
-    base_env: dict[str, float],
+def _evaluate_grid(
+    model: Model,
+    base_bindings: dict[str, float],
     sweep_names: list[str],
     sweep_values: list[np.ndarray],
 ) -> dict[str, np.ndarray]:
-    """Broadcast the sweep onto base_env. Returns env where every value is
-    a numpy array of shape `tuple(len(v) for v in sweep_values)` (or scalar
-    for non-sweep parameters)."""
+    """Evaluate every observed/algebraic target across the cartesian sweep.
+
+    Returns a dict mapping every known name (parameters, sweep axes,
+    resolved targets) to a numpy array shaped like the sweep grid (or to
+    a 0-d array for parameters that don't vary).
+
+    The resolution plan is built once symbolically (handling forward
+    definitions and constraint equations alike) and then evaluated per
+    grid point through ESS's scalar `evaluate()`.
+    """
     grids = np.meshgrid(*sweep_values, indexing="ij")
-    env: dict[str, Any] = dict(base_env)
+    shape = grids[0].shape
+    flat_grids = [g.ravel() for g in grids]
+    n = int(np.prod(shape))
+
+    bound_names = set(base_bindings.keys()) | set(sweep_names)
+    plan = _build_resolution_plan(model, bound_names)
+    target_names = [name for name, _ in plan]
+    point_results: dict[str, np.ndarray] = {
+        name: np.empty(n, dtype=float) for name in target_names
+    }
+
+    for i in range(n):
+        env: dict[str, float] = dict(base_bindings)
+        for name, fg in zip(sweep_names, flat_grids):
+            env[name] = float(fg[i])
+        for name, expr in plan:
+            try:
+                env[name] = float(evaluate(expr, env))
+            except (ValueError, TypeError) as exc:
+                raise UnsupportedExpression(
+                    f"could not evaluate {name!r} at grid point {i}: {exc}"
+                ) from exc
+        for name in target_names:
+            point_results[name][i] = env[name]
+
+    out: dict[str, np.ndarray] = {}
+    for name, val in base_bindings.items():
+        out[name] = np.asarray(val)
     for name, grid in zip(sweep_names, grids):
-        env[name] = grid
-    return env
+        out[name] = grid
+    for name, arr in point_results.items():
+        out[name] = arr.reshape(shape)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -286,42 +299,111 @@ def _grid_envs(
 # ---------------------------------------------------------------------------
 
 
+def _axis_scale(
+    var_name: str | None,
+    sweep_names: list[str],
+    sweep_scales: list[str],
+) -> str:
+    """Determine axis scale from the sweep dimension scale for `var_name`,
+    or "linear" if the variable isn't a swept parameter.
+
+    (`PlotAxis` itself doesn't carry a `scale` field in the current ESS
+    schema; if/when it adds one this fn should consult it first.)
+    """
+    if var_name and var_name in sweep_names:
+        return sweep_scales[sweep_names.index(var_name)]
+    return "linear"
+
+
+def _axis_label(axis: PlotAxis | PlotValue | None, model: Model) -> str:
+    """Compose an axis label. Honors explicit `axis.label`; if absent, falls
+    back to the variable name plus its `units` if the model declares them."""
+    if axis is None:
+        return ""
+    var_name = axis.variable
+    label = getattr(axis, "label", None)
+    if label:
+        return label
+    units = None
+    if var_name and var_name in model.variables:
+        units = model.variables[var_name].units
+    if units:
+        return f"{var_name} [{units}]"
+    return var_name or ""
+
+
+def _require_var(env: dict[str, np.ndarray], name: str | None, role: str) -> np.ndarray:
+    if name is None or name not in env:
+        raise UnsupportedExpression(
+            f"{role} references unbound variable: {name!r}"
+        )
+    return np.asarray(env[name])
+
+
 def _render_line_plot(
-    plot: dict,
+    plot: Plot,
     sweep_names: list[str],
     sweep_values: list[np.ndarray],
+    sweep_scales: list[str],
     env: dict[str, Any],
+    model: Model,
     out_path: Path,
 ) -> None:
     if len(sweep_values) != 1:
         raise UnsupportedExpression(
             f"line plot needs 1D sweep, got {len(sweep_values)}D"
         )
-    x_spec = plot.get("x") or {}
-    y_spec = plot.get("y") or {}
-    x_name = x_spec.get("variable")
-    y_name = y_spec.get("variable")
-    if x_name not in env or y_name not in env:
-        raise UnsupportedExpression(
-            f"line plot references unbound variables: x={x_name!r} y={y_name!r}"
-        )
-    x_vals = np.asarray(env[x_name])
-    y_vals = np.asarray(env[y_name])
-    # Broadcast a scalar y onto the sweep axis (rare but safe).
+    x_vals = _require_var(env, plot.x.variable, "line plot x")
+    y_vals = _require_var(env, plot.y.variable, "line plot y")
     if y_vals.ndim == 0:
         y_vals = np.full_like(x_vals, float(y_vals))
 
     fig, ax = plt.subplots(figsize=(6.0, 4.0))
     ax.plot(x_vals, y_vals, color="#1f4d8a", linewidth=2)
-    ax.set_xlabel(x_spec.get("label") or x_name)
-    ax.set_ylabel(y_spec.get("label") or y_name)
-    # Detect log axis from the sweep dimension's scale (heuristic via spread).
-    if x_vals.size > 1 and x_vals[0] > 0:
-        ratio = x_vals[-1] / x_vals[0]
-        if ratio > 50.0:
-            ax.set_xscale("log")
+    ax.set_xlabel(_axis_label(plot.x, model))
+    ax.set_ylabel(_axis_label(plot.y, model))
+    if _axis_scale(plot.x.variable, sweep_names, sweep_scales) == "log":
+        ax.set_xscale("log")
+    if _axis_scale(plot.y.variable, sweep_names, sweep_scales) == "log":
+        ax.set_yscale("log")
     ax.grid(True, which="both", alpha=0.3)
-    title = plot.get("description") or plot.get("id") or ""
+    title = plot.description or plot.id or ""
+    if title:
+        ax.set_title(title, fontsize=10)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+
+
+def _render_scatter_plot(
+    plot: Plot,
+    sweep_names: list[str],
+    sweep_values: list[np.ndarray],
+    sweep_scales: list[str],
+    env: dict[str, Any],
+    model: Model,
+    out_path: Path,
+) -> None:
+    if len(sweep_values) != 1:
+        raise UnsupportedExpression(
+            f"scatter plot needs 1D sweep, got {len(sweep_values)}D"
+        )
+    x_vals = _require_var(env, plot.x.variable, "scatter plot x")
+    y_vals = _require_var(env, plot.y.variable, "scatter plot y")
+    if y_vals.ndim == 0:
+        y_vals = np.full_like(x_vals, float(y_vals))
+
+    fig, ax = plt.subplots(figsize=(6.0, 4.0))
+    ax.scatter(x_vals, y_vals, color="#1f4d8a", s=24, alpha=0.85)
+    ax.set_xlabel(_axis_label(plot.x, model))
+    ax.set_ylabel(_axis_label(plot.y, model))
+    if _axis_scale(plot.x.variable, sweep_names, sweep_scales) == "log":
+        ax.set_xscale("log")
+    if _axis_scale(plot.y.variable, sweep_names, sweep_scales) == "log":
+        ax.set_yscale("log")
+    ax.grid(True, which="both", alpha=0.3)
+    title = plot.description or plot.id or ""
     if title:
         ax.set_title(title, fontsize=10)
     fig.tight_layout()
@@ -331,22 +413,23 @@ def _render_line_plot(
 
 
 def _render_heatmap_plot(
-    plot: dict,
+    plot: Plot,
     sweep_names: list[str],
     sweep_values: list[np.ndarray],
+    sweep_scales: list[str],
     env: dict[str, Any],
+    model: Model,
     out_path: Path,
 ) -> None:
     if len(sweep_values) != 2:
         raise UnsupportedExpression(
             f"heatmap plot needs 2D sweep, got {len(sweep_values)}D"
         )
-    x_spec = plot.get("x") or {}
-    y_spec = plot.get("y") or {}
-    v_spec = plot.get("value") or {}
-    x_name = x_spec.get("variable")
-    y_name = y_spec.get("variable")
-    v_name = v_spec.get("variable")
+    if plot.value is None:
+        raise UnsupportedExpression("heatmap plot is missing 'value' axis")
+    x_name = plot.x.variable
+    y_name = plot.y.variable
+    v_name = plot.value.variable
     if x_name not in env or y_name not in env or v_name not in env:
         raise UnsupportedExpression(
             f"heatmap references unbound: x={x_name} y={y_name} value={v_name}"
@@ -354,9 +437,9 @@ def _render_heatmap_plot(
     x_vals = sweep_values[sweep_names.index(x_name)]
     y_vals = sweep_values[sweep_names.index(y_name)]
     z = np.asarray(env[v_name])
-    # Orient: rows = y, cols = x. Our meshgrid uses indexing="ij" so
-    # env[v_name] is shaped (len(sweep[0]), len(sweep[1])). Transpose to
-    # match the conventional (y, x) imshow orientation.
+    # Orient: rows = y, cols = x. _evaluate_grid uses meshgrid(indexing="ij")
+    # so the result is shaped (len(sweep[0]), len(sweep[1])); transpose when
+    # the first axis isn't the y axis.
     if sweep_names.index(x_name) == 0:
         z_yx = z.T
     else:
@@ -371,15 +454,15 @@ def _render_heatmap_plot(
         extent=extent,
         cmap="viridis",
     )
-    ax.set_xlabel(x_spec.get("label") or x_name)
-    ax.set_ylabel(y_spec.get("label") or y_name)
-    if x_vals.size > 1 and x_vals[0] > 0 and x_vals[-1] / x_vals[0] > 50.0:
+    ax.set_xlabel(_axis_label(plot.x, model))
+    ax.set_ylabel(_axis_label(plot.y, model))
+    if _axis_scale(x_name, sweep_names, sweep_scales) == "log":
         ax.set_xscale("log")
-    if y_vals.size > 1 and y_vals[0] > 0 and y_vals[-1] / y_vals[0] > 50.0:
+    if _axis_scale(y_name, sweep_names, sweep_scales) == "log":
         ax.set_yscale("log")
     cbar = fig.colorbar(im, ax=ax)
-    cbar.set_label(v_spec.get("label") or v_name)
-    title = plot.get("description") or plot.get("id") or ""
+    cbar.set_label(_axis_label(plot.value, model))
+    title = plot.description or plot.id or ""
     if title:
         ax.set_title(title, fontsize=10)
     fig.tight_layout()
@@ -390,6 +473,7 @@ def _render_heatmap_plot(
 
 _PLOT_RENDERERS = {
     "line": _render_line_plot,
+    "scatter": _render_scatter_plot,
     "heatmap": _render_heatmap_plot,
 }
 
@@ -397,16 +481,6 @@ _PLOT_RENDERERS = {
 # ---------------------------------------------------------------------------
 # Per-file driver
 # ---------------------------------------------------------------------------
-
-
-_COMPONENT_SECTIONS = (
-    "models",
-    "reaction_systems",
-    "operators",
-    "data_loaders",
-    "coupling",
-    "interfaces",
-)
 
 
 @dataclass
@@ -418,97 +492,86 @@ class _RenderStats:
     elapsed_s: float = 0.0
 
 
-def render_examples_for_file(
-    esm_path: Path, stats: _RenderStats, log: Iterable | None = None
-) -> None:
-    with esm_path.open("r", encoding="utf-8") as fp:
-        data = json.load(fp)
+def render_examples_for_file(esm_path: Path, stats: _RenderStats) -> None:
+    try:
+        esm: EsmFile = load(str(esm_path))
+    except Exception as exc:
+        # Stay liberal on parse errors — surface and move on.
+        print(f"[skip] {esm_path.name}: ESS load failed: {exc}", file=sys.stderr)
+        return
     plots_dir = esm_path.parent / (esm_path.stem + ".plots")
 
-    for section in _COMPONENT_SECTIONS:
-        block = data.get(section)
-        if not isinstance(block, dict):
+    for cname, model in (esm.models or {}).items():
+        if not model.examples:
             continue
-        for cname, body in block.items():
-            if not isinstance(body, dict):
-                continue
-            examples = body.get("examples")
-            if not isinstance(examples, list) or not examples:
-                continue
-            for example in examples:
-                if not isinstance(example, dict):
-                    continue
-                _render_one_example(
-                    esm_path, cname, body, example, plots_dir, stats
-                )
+        for example in model.examples:
+            _render_one_example(esm_path, cname, model, example, plots_dir, stats)
 
 
 def _render_one_example(
     esm_path: Path,
     component_name: str,
-    component_body: dict,
-    example: dict,
+    model: Model,
+    example: Example,
     plots_dir: Path,
     stats: _RenderStats,
 ) -> None:
-    plots = example.get("plots")
-    if not isinstance(plots, list) or not plots:
+    plots = example.plots or []
+    if not plots:
         return
-    if "parameter_sweep" not in example:
+    if example.parameter_sweep is None:
         # Examples without a sweep cannot be rendered into a plot here.
         # (e.g. SuperFast's `default_run_24h` is a time-series ODE run.)
-        for plot in plots:
+        for _ in plots:
             stats.plots_skipped += 1
             print(
                 f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.get('id')!r}: no parameter_sweep "
+                f"{example.id!r}: no parameter_sweep "
                 f"(time-series examples need an ODE solver — see docs/README.md)"
             )
         return
 
-    if not _is_algebraic_only(component_body):
-        for plot in plots:
+    if _component_has_dynamics(model):
+        for _ in plots:
             stats.plots_skipped += 1
             print(
                 f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.get('id')!r}: component has non-algebraic dynamics"
+                f"{example.id!r}: component has time-derivative "
+                f"dynamics (needs an ODE solver)"
             )
         return
 
     stats.examples_seen += 1
-    variables = _collect_variables(component_body)
-    base_env = _baseline_env(variables, example)
+    base_bindings = _baseline_bindings(model, example)
 
     try:
-        sweep_names, sweep_values = _build_sweep_grid(example["parameter_sweep"])
-        env = _grid_envs(base_env, sweep_names, sweep_values)
-        env = _evaluate_observed(variables, env)
+        sweep_names, sweep_values, sweep_scales = _build_sweep_grid(
+            example.parameter_sweep
+        )
+        env = _evaluate_grid(model, base_bindings, sweep_names, sweep_values)
     except UnsupportedExpression as exc:
-        for plot in plots:
+        for _ in plots:
             stats.plots_skipped += 1
             print(
                 f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.get('id')!r}: {exc}"
+                f"{example.id!r}: {exc}"
             )
         return
 
-    example_id = example.get("id") or "example"
+    example_id = example.id or "example"
     for plot in plots:
-        if not isinstance(plot, dict):
-            continue
-        plot_id = plot.get("id") or "plot"
-        plot_type = plot.get("type") or "line"
-        renderer = _PLOT_RENDERERS.get(plot_type)
+        plot_id = plot.id or "plot"
+        renderer = _PLOT_RENDERERS.get(plot.type)
         if renderer is None:
             stats.plots_skipped += 1
             print(
                 f"[skip] {esm_path.name}::{component_name} example "
-                f"{example_id} plot {plot_id}: unsupported plot type {plot_type!r}"
+                f"{example_id} plot {plot_id}: unsupported plot type {plot.type!r}"
             )
             continue
         out_path = plots_dir / f"{example_id}-{plot_id}.png"
         try:
-            renderer(plot, sweep_names, sweep_values, env, out_path)
+            renderer(plot, sweep_names, sweep_values, sweep_scales, env, model, out_path)
         except UnsupportedExpression as exc:
             stats.plots_skipped += 1
             print(
@@ -546,11 +609,7 @@ def run(components_root: Path) -> int:
     t0 = time.time()
     for f in files:
         stats.files_seen += 1
-        try:
-            render_examples_for_file(f, stats)
-        except json.JSONDecodeError as exc:
-            print(f"error: invalid JSON in {f}: {exc}", file=sys.stderr)
-            return 2
+        render_examples_for_file(f, stats)
     stats.elapsed_s = time.time() - t0
     print()
     print(

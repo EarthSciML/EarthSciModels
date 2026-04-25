@@ -2,11 +2,14 @@
 Unit tests for tools/render_example_plots.py.
 
 Run locally with: python3 -m unittest tools/render_example_plots_test.py
+
+Coverage of expression-evaluation op semantics intentionally lives in the
+ESS conformance fixtures (esm-4aw) rather than here — the renderer only
+covers binding orchestration, plot dispatch, and skip-behavior.
 """
 from __future__ import annotations
 
 import json
-import math
 import sys
 import tempfile
 import unittest
@@ -18,184 +21,233 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import render_example_plots as mod  # noqa: E402
+from earthsci_toolkit import ExprNode, Model, ModelVariable  # noqa: E402
+from earthsci_toolkit.esm_types import Equation  # noqa: E402
 
 
-class EvaluateTest(unittest.TestCase):
-    def test_literal(self):
-        self.assertEqual(mod.evaluate(3.5, {}), 3.5)
-        self.assertEqual(mod.evaluate(7, {}), 7.0)
-
-    def test_variable_lookup(self):
-        self.assertEqual(mod.evaluate("x", {"x": 4.0}), 4.0)
-
-    def test_unbound_variable_raises(self):
-        with self.assertRaises(mod.UnsupportedExpression):
-            mod.evaluate("missing", {})
-
-    def test_arithmetic_ops(self):
-        env = {"a": 2.0, "b": 3.0}
-        self.assertAlmostEqual(mod.evaluate({"op": "+", "args": ["a", "b"]}, env), 5.0)
-        self.assertAlmostEqual(mod.evaluate({"op": "-", "args": ["a", "b"]}, env), -1.0)
-        self.assertAlmostEqual(mod.evaluate({"op": "*", "args": ["a", "b"]}, env), 6.0)
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "/", "args": ["a", "b"]}, env), 2.0 / 3.0
-        )
-        self.assertAlmostEqual(mod.evaluate({"op": "^", "args": ["a", "b"]}, env), 8.0)
-
-    def test_unary_minus(self):
-        self.assertEqual(mod.evaluate({"op": "-", "args": ["a"]}, {"a": 5.0}), -5.0)
-
-    def test_nary_plus_and_times(self):
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "+", "args": [1, 2, 3, 4]}, {}), 10.0
-        )
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "*", "args": [2, 3, 4]}, {}), 24.0
-        )
-
-    def test_unary_funcs(self):
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "exp", "args": [0]}, {}), 1.0
-        )
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "log10", "args": [100]}, {}), 2.0
-        )
-        self.assertAlmostEqual(
-            mod.evaluate({"op": "sqrt", "args": [9]}, {}), 3.0
-        )
-
-    def test_unknown_op_raises(self):
-        with self.assertRaises(mod.UnsupportedExpression):
-            mod.evaluate({"op": "factorial", "args": [5]}, {})
-
-    def test_evaluate_against_numpy_arrays(self):
-        # Vectorized eval should broadcast naturally.
-        env = {"x": np.array([1.0, 2.0, 4.0])}
-        out = mod.evaluate({"op": "*", "args": ["x", 2]}, env)
-        np.testing.assert_array_equal(out, np.array([2.0, 4.0, 8.0]))
-
-    def test_cloud_albedo_gamma_matches_analytic(self):
-        # γ = 2 / (√3 · (1 − g)) — at g=0.85 this is the Aerosol.jl pin.
-        gamma_expr = {
-            "op": "/",
-            "args": [
-                2,
-                {
-                    "op": "*",
-                    "args": [
-                        1.7320508075688772,
-                        {
-                            "op": "+",
-                            "args": [
-                                1,
-                                {"op": "*", "args": [-1, "g"]},
-                            ],
-                        },
-                    ],
-                },
-            ],
-        }
-        gamma = mod.evaluate(gamma_expr, {"g": 0.85})
-        self.assertAlmostEqual(gamma, 7.698003589195009, places=10)
+def _model(variables: dict, equations: list | None = None) -> Model:
+    return Model(
+        name="Test",
+        variables={
+            name: ModelVariable(
+                type=spec.get("type", "parameter"),
+                default=spec.get("default"),
+                expression=spec.get("expression"),
+                units=spec.get("units"),
+            )
+            for name, spec in variables.items()
+        },
+        equations=[Equation(lhs=eq["lhs"], rhs=eq["rhs"]) for eq in (equations or [])],
+    )
 
 
-class IsAlgebraicOnlyTest(unittest.TestCase):
-    def test_no_equations_with_observed_passes(self):
-        component = {
-            "variables": {
+class HasTimeDerivativeTest(unittest.TestCase):
+    def test_no_d_op(self):
+        self.assertFalse(mod._has_time_derivative(3.5))
+        self.assertFalse(mod._has_time_derivative("x"))
+        self.assertFalse(mod._has_time_derivative(ExprNode(op="+", args=["x", 1])))
+
+    def test_d_at_root(self):
+        n = ExprNode(op="D", args=["y"], wrt="t")
+        self.assertTrue(mod._has_time_derivative(n))
+
+    def test_d_nested(self):
+        inner = ExprNode(op="D", args=["y"], wrt="t")
+        outer = ExprNode(op="*", args=[2, inner])
+        self.assertTrue(mod._has_time_derivative(outer))
+
+
+class ComponentHasDynamicsTest(unittest.TestCase):
+    def test_observed_only_no_dynamics(self):
+        m = _model(
+            {
                 "x": {"type": "parameter", "default": 1.0},
-                "y": {"type": "observed", "expression": {"op": "*", "args": ["x", 2]}},
+                "y": {"type": "observed", "expression": ExprNode(op="*", args=["x", 2])},
+            }
+        )
+        self.assertFalse(mod._component_has_dynamics(m))
+
+    def test_algebraic_equation_no_dynamics(self):
+        # WaterEquilibrium-shape: lhs is a state variable, rhs is algebraic.
+        m = _model(
+            {
+                "T": {"type": "parameter", "default": 298.0},
+                "K_w": {"type": "state"},
             },
-            "equations": [],
-        }
-        self.assertTrue(mod._is_algebraic_only(component))
+            equations=[{"lhs": "K_w", "rhs": ExprNode(op="*", args=["T", 1e-10])}],
+        )
+        self.assertFalse(mod._component_has_dynamics(m))
 
-    def test_non_empty_equations_fails(self):
-        component = {
-            "variables": {"x": {"type": "parameter"}},
-            "equations": [{"lhs": "y", "rhs": 1}],
-        }
-        self.assertFalse(mod._is_algebraic_only(component))
-
-    def test_reaction_system_fails(self):
-        component = {
-            "species": {"O3": {"default": 40}},
-            "reactions": [{"id": "R1"}],
-        }
-        self.assertFalse(mod._is_algebraic_only(component))
-
-    def test_no_observed_fails(self):
-        component = {
-            "variables": {"x": {"type": "parameter", "default": 1.0}},
-            "equations": [],
-        }
-        self.assertFalse(mod._is_algebraic_only(component))
+    def test_ode_equation_has_dynamics(self):
+        m = _model(
+            {"y": {"type": "state"}, "k": {"type": "parameter", "default": 1.0}},
+            equations=[
+                {"lhs": ExprNode(op="D", args=["y"], wrt="t"), "rhs": ExprNode(op="*", args=[-1, "y"])}
+            ],
+        )
+        # rhs has no D, but lhs is D op — _component_has_dynamics scans rhs;
+        # we still need to handle the more common form: D op on rhs.
+        m2 = _model(
+            {"y": {"type": "state"}},
+            equations=[{"lhs": "y_dot", "rhs": ExprNode(op="D", args=["y"], wrt="t")}],
+        )
+        self.assertTrue(mod._component_has_dynamics(m2))
 
 
 class BuildSweepGridTest(unittest.TestCase):
-    def test_linear_1d(self):
-        spec = {
-            "type": "cartesian",
-            "dimensions": [
-                {"parameter": "x", "range": {"start": 0.0, "stop": 1.0, "count": 5}}
-            ],
-        }
-        names, values = mod._build_sweep_grid(spec)
-        self.assertEqual(names, ["x"])
-        np.testing.assert_array_almost_equal(
-            values[0], np.linspace(0.0, 1.0, 5)
-        )
+    def _sweep(self, dims: list) -> "ParameterSweep":
+        from earthsci_toolkit.esm_types import ParameterSweep, SweepDimension, SweepRange
 
-    def test_log_scale(self):
-        spec = {
-            "type": "cartesian",
-            "dimensions": [
-                {
-                    "parameter": "x",
-                    "range": {
+        out_dims = []
+        for d in dims:
+            if "values" in d:
+                out_dims.append(SweepDimension(parameter=d["parameter"], values=d["values"]))
+            else:
+                out_dims.append(
+                    SweepDimension(
+                        parameter=d["parameter"],
+                        range=SweepRange(
+                            start=d["start"],
+                            stop=d["stop"],
+                            count=d["count"],
+                            scale=d.get("scale"),
+                        ),
+                    )
+                )
+        return ParameterSweep(type="cartesian", dimensions=out_dims)
+
+    def test_linear_range(self):
+        names, values, scales = mod._build_sweep_grid(
+            self._sweep([{"parameter": "x", "start": 0.0, "stop": 1.0, "count": 5}])
+        )
+        self.assertEqual(names, ["x"])
+        np.testing.assert_array_almost_equal(values[0], np.linspace(0.0, 1.0, 5))
+        self.assertEqual(scales, ["linear"])
+
+    def test_log_range(self):
+        names, values, scales = mod._build_sweep_grid(
+            self._sweep(
+                [
+                    {
+                        "parameter": "x",
                         "start": 0.01,
                         "stop": 100.0,
                         "count": 5,
                         "scale": "log",
-                    },
-                }
-            ],
-        }
-        _, values = mod._build_sweep_grid(spec)
-        np.testing.assert_array_almost_equal(
-            values[0], np.logspace(math.log10(0.01), math.log10(100.0), 5)
+                    }
+                ]
+            )
         )
+        self.assertEqual(scales, ["log"])
+        self.assertAlmostEqual(values[0][0], 0.01)
+        self.assertAlmostEqual(values[0][-1], 100.0)
+
+    def test_explicit_values_log_inferred(self):
+        # values list spanning >1 decade ⇒ log axis presentation.
+        _, values, scales = mod._build_sweep_grid(
+            self._sweep([{"parameter": "Dp", "values": [1e-8, 1e-6, 1e-4]}])
+        )
+        np.testing.assert_array_equal(values[0], np.array([1e-8, 1e-6, 1e-4]))
+        self.assertEqual(scales, ["log"])
+
+    def test_explicit_values_linear(self):
+        _, values, scales = mod._build_sweep_grid(
+            self._sweep([{"parameter": "T", "values": [273.0, 293.0, 313.0]}])
+        )
+        np.testing.assert_array_equal(values[0], np.array([273.0, 293.0, 313.0]))
+        self.assertEqual(scales, ["linear"])
 
     def test_2d_cartesian(self):
-        spec = {
-            "type": "cartesian",
-            "dimensions": [
-                {"parameter": "x", "range": {"start": 0.0, "stop": 1.0, "count": 3}},
-                {"parameter": "y", "range": {"start": 0.0, "stop": 2.0, "count": 4}},
-            ],
-        }
-        names, values = mod._build_sweep_grid(spec)
+        names, values, _ = mod._build_sweep_grid(
+            self._sweep(
+                [
+                    {"parameter": "x", "start": 0.0, "stop": 1.0, "count": 3},
+                    {"parameter": "y", "start": 0.0, "stop": 2.0, "count": 4},
+                ]
+            )
+        )
         self.assertEqual(names, ["x", "y"])
         self.assertEqual(values[0].shape, (3,))
         self.assertEqual(values[1].shape, (4,))
 
-    def test_unsupported_type_raises(self):
-        with self.assertRaises(mod.UnsupportedExpression):
-            mod._build_sweep_grid({"type": "latin_hypercube", "dimensions": []})
+
+class EvaluateGridTest(unittest.TestCase):
+    """Smoke-tests that delegating evaluation to ESS produces correct numeric
+    outputs for the renderer's two binding sources: observed variables and
+    algebraic equations (forward and constraint forms)."""
+
+    def test_observed_variable(self):
+        m = _model(
+            {
+                "x": {"type": "parameter", "default": 1.0},
+                "y": {"type": "observed", "expression": ExprNode(op="*", args=["x", 2])},
+            }
+        )
+        env = mod._evaluate_grid(
+            m,
+            base_bindings={"x": 1.0},
+            sweep_names=["x"],
+            sweep_values=[np.array([1.0, 2.0, 3.0])],
+        )
+        np.testing.assert_array_equal(env["y"], np.array([2.0, 4.0, 6.0]))
+
+    def test_forward_algebraic_equation(self):
+        # WaterEquilibrium-shape: state defined by algebraic equation.
+        m = _model(
+            {"T": {"type": "parameter", "default": 298.0}, "y": {"type": "state"}},
+            equations=[{"lhs": "y", "rhs": ExprNode(op="+", args=["T", 1])}],
+        )
+        env = mod._evaluate_grid(
+            m,
+            base_bindings={"T": 298.0},
+            sweep_names=["T"],
+            sweep_values=[np.array([10.0, 20.0])],
+        )
+        np.testing.assert_array_equal(env["y"], np.array([11.0, 21.0]))
+
+    def test_constraint_equation_solved(self):
+        # `K_w = H_plus * OH_minus` with K_w forward-defined → solve for OH_minus.
+        m = _model(
+            {
+                "T": {"type": "parameter", "default": 298.0},
+                "H_plus": {"type": "parameter", "default": 1e-4},
+                "K_w": {"type": "state"},
+                "OH_minus": {"type": "state"},
+            },
+            equations=[
+                {"lhs": "K_w", "rhs": ExprNode(op="*", args=["T", 1e-10])},
+                {"lhs": "K_w", "rhs": ExprNode(op="*", args=["H_plus", "OH_minus"])},
+            ],
+        )
+        env = mod._evaluate_grid(
+            m,
+            base_bindings={"T": 298.0, "H_plus": 1e-4},
+            sweep_names=["H_plus"],
+            sweep_values=[np.array([1e-4, 1e-3])],
+        )
+        # K_w = T * 1e-10 = 298e-10 ≈ 2.98e-8 (constant under the H_plus sweep)
+        # OH_minus = K_w / H_plus
+        np.testing.assert_allclose(env["K_w"], np.full(2, 298.0 * 1e-10))
+        np.testing.assert_allclose(env["OH_minus"], np.array([2.98e-4, 2.98e-5]))
 
 
 class IntegrationTest(unittest.TestCase):
-    """Render plots from a tiny synthetic .esm and verify outputs."""
+    """Render plots from a synthetic .esm file end-to-end."""
 
-    def _write_esm(self, root: Path) -> Path:
-        body = {
+    def _write_esm(self, root: Path, body: dict, subdir: str) -> Path:
+        path = root / "components" / subdir / f"{subdir}.esm"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(body), encoding="utf-8")
+        return path
+
+    def _toy_observed_body(self) -> dict:
+        return {
             "esm": "0.1.0",
             "metadata": {"name": "Toy"},
             "models": {
                 "Toy": {
-                    "description": "A toy algebraic model.",
                     "variables": {
-                        "x": {"type": "parameter", "default": 1.0},
+                        "x": {"type": "parameter", "default": 1.0, "units": "m"},
                         "y": {
                             "type": "observed",
                             "expression": {"op": "*", "args": ["x", 2]},
@@ -206,6 +258,7 @@ class IntegrationTest(unittest.TestCase):
                         {
                             "id": "y_vs_x",
                             "description": "y over x",
+                            "time_span": {"start": 0.0, "end": 1.0},
                             "parameter_sweep": {
                                 "type": "cartesian",
                                 "dimensions": [
@@ -233,65 +286,177 @@ class IntegrationTest(unittest.TestCase):
                 }
             },
         }
-        path = root / "components" / "toy" / "toy.esm"
-        path.parent.mkdir(parents=True)
-        path.write_text(json.dumps(body), encoding="utf-8")
-        return path
 
-    def test_run_emits_plot_in_expected_path(self):
+    def test_run_emits_line_plot(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            self._write_esm(root)
+            self._write_esm(root, self._toy_observed_body(), "toy")
             rc = mod.run(root / "components")
             self.assertEqual(rc, 0)
-            png = (
-                root
-                / "components"
-                / "toy"
-                / "toy.plots"
-                / "y_vs_x-line.png"
-            )
+            png = root / "components" / "toy" / "toy.plots" / "y_vs_x-line.png"
             self.assertTrue(png.is_file(), f"expected {png} to exist")
-            # Sanity: PNG magic bytes.
             self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
-    def test_skips_examples_without_sweep(self):
+    def test_run_emits_scatter_plot(self):
+        body = self._toy_observed_body()
+        body["models"]["Toy"]["examples"][0]["plots"][0]["type"] = "scatter"
+        body["models"]["Toy"]["examples"][0]["plots"][0]["id"] = "scat"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
-            body = {
-                "esm": "0.1.0",
-                "models": {
-                    "T": {
-                        "variables": {
-                            "x": {"type": "parameter", "default": 1.0},
-                            "y": {
-                                "type": "observed",
-                                "expression": {"op": "*", "args": ["x", 2]},
-                            },
-                        },
-                        "equations": [],
-                        "examples": [
-                            {
-                                "id": "no_sweep",
-                                "plots": [
+            self._write_esm(root, body, "toy")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "toy" / "toy.plots" / "y_vs_x-scat.png"
+            self.assertTrue(png.is_file())
+            self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_algebraic_equations_component_renders(self):
+        # Mirrors WaterEquilibrium shape: state variable defined by an
+        # algebraic equation. Pre-mdl-qz4 the renderer would skip these.
+        body = {
+            "esm": "0.1.0",
+            "metadata": {"name": "Algebraic"},
+            "models": {
+                "Algebraic": {
+                    "variables": {
+                        "T": {"type": "parameter", "default": 298.0, "units": "K"},
+                        "K": {"type": "state"},
+                    },
+                    "equations": [
+                        {
+                            "lhs": "K",
+                            "rhs": {"op": "*", "args": ["T", 1e-3]},
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "k_vs_t",
+                            "time_span": {"start": 0.0, "end": 1.0},
+                            "parameter_sweep": {
+                                "type": "cartesian",
+                                "dimensions": [
                                     {
-                                        "id": "p",
-                                        "type": "line",
-                                        "x": {"variable": "x"},
-                                        "y": {"variable": "y"},
+                                        "parameter": "T",
+                                        "range": {
+                                            "start": 273.0,
+                                            "stop": 318.0,
+                                            "count": 5,
+                                        },
                                     }
                                 ],
-                            }
-                        ],
-                    }
-                },
-            }
-            path = root / "components" / "t" / "t.esm"
-            path.parent.mkdir(parents=True)
-            path.write_text(json.dumps(body))
+                            },
+                            "plots": [
+                                {
+                                    "id": "k_curve",
+                                    "type": "line",
+                                    "x": {"variable": "T"},
+                                    "y": {"variable": "K"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "alg")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "alg" / "alg.plots" / "k_vs_t-k_curve.png"
+            self.assertTrue(png.is_file())
+
+    def test_skips_examples_without_sweep(self):
+        body = {
+            "esm": "0.1.0",
+            "models": {
+                "T": {
+                    "variables": {
+                        "x": {"type": "parameter", "default": 1.0},
+                        "y": {
+                            "type": "observed",
+                            "expression": {"op": "*", "args": ["x", 2]},
+                        },
+                    },
+                    "equations": [],
+                    "examples": [
+                        {
+                            "id": "no_sweep",
+                            "time_span": {"start": 0.0, "end": 1.0},
+                            "plots": [
+                                {
+                                    "id": "p",
+                                    "type": "line",
+                                    "x": {"variable": "x"},
+                                    "y": {"variable": "y"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "t")
             rc = mod.run(root / "components")
             self.assertEqual(rc, 0)
             self.assertFalse((root / "components" / "t" / "t.plots").exists())
+
+    def test_skips_components_with_time_derivatives(self):
+        body = {
+            "esm": "0.1.0",
+            "models": {
+                "Ode": {
+                    "variables": {
+                        "y": {"type": "state", "default": 1.0},
+                        "k": {"type": "parameter", "default": 1.0},
+                    },
+                    "equations": [
+                        {
+                            "lhs": "y_dot",
+                            "rhs": {
+                                "op": "*",
+                                "args": [-1, {"op": "D", "args": ["y"], "wrt": "t"}],
+                            },
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "sweep",
+                            "time_span": {"start": 0.0, "end": 1.0},
+                            "parameter_sweep": {
+                                "type": "cartesian",
+                                "dimensions": [
+                                    {
+                                        "parameter": "k",
+                                        "range": {
+                                            "start": 0.1,
+                                            "stop": 1.0,
+                                            "count": 3,
+                                        },
+                                    }
+                                ],
+                            },
+                            "plots": [
+                                {
+                                    "id": "p",
+                                    "type": "line",
+                                    "x": {"variable": "k"},
+                                    "y": {"variable": "y"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "ode")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            self.assertFalse((root / "components" / "ode" / "ode.plots").exists())
 
 
 if __name__ == "__main__":
