@@ -110,7 +110,54 @@ class IsAlgebraicOnlyTest(unittest.TestCase):
         }
         self.assertTrue(mod._is_algebraic_only(component))
 
-    def test_non_empty_equations_fails(self):
+    def test_algebraic_equations_with_state_output_passes(self):
+        # Mirrors water.esm: state outputs defined by algebraic equations
+        # (no `D` op anywhere) — must be classified as algebraic-only so
+        # the doc renderer evaluates the sweep.
+        component = {
+            "variables": {
+                "T": {"type": "parameter", "default": 298.0},
+                "K_w_298": {"type": "parameter", "default": 1e-8},
+                "K_w": {"type": "state"},
+            },
+            "equations": [
+                {
+                    "lhs": "K_w",
+                    "rhs": {"op": "*", "args": ["K_w_298", "T"]},
+                }
+            ],
+        }
+        self.assertTrue(mod._is_algebraic_only(component))
+
+    def test_ode_equation_with_lhs_derivative_fails(self):
+        # Mirrors diameter_growth.esm: D(D_p) ~ I_D — D op on the LHS
+        # signals an ODE. Must be skipped (needs an integrator).
+        component = {
+            "variables": {
+                "D_p": {"type": "state"},
+                "I_D": {"type": "state"},
+            },
+            "equations": [
+                {"lhs": {"op": "D", "wrt": "t", "args": ["D_p"]}, "rhs": "I_D"},
+                {"lhs": "I_D", "rhs": {"op": "*", "args": [2, "D_p"]}},
+            ],
+        }
+        self.assertFalse(mod._is_algebraic_only(component))
+
+    def test_ode_equation_with_rhs_derivative_fails(self):
+        # Defensive: a D op nested in the RHS also marks the system as
+        # non-algebraic, even if no equation has D on the LHS.
+        component = {
+            "variables": {"y": {"type": "state"}},
+            "equations": [
+                {"lhs": "y", "rhs": {"op": "+", "args": [1, {"op": "D", "args": ["y"]}]}}
+            ],
+        }
+        self.assertFalse(mod._is_algebraic_only(component))
+
+    def test_non_empty_equations_without_observed_state_fails(self):
+        # Algebraic equations are fine, but you still need at least one
+        # observed/state variable to plot.
         component = {
             "variables": {"x": {"type": "parameter"}},
             "equations": [{"lhs": "y", "rhs": 1}],
@@ -124,12 +171,29 @@ class IsAlgebraicOnlyTest(unittest.TestCase):
         }
         self.assertFalse(mod._is_algebraic_only(component))
 
-    def test_no_observed_fails(self):
+    def test_no_observed_or_state_fails(self):
         component = {
             "variables": {"x": {"type": "parameter", "default": 1.0}},
             "equations": [],
         }
         self.assertFalse(mod._is_algebraic_only(component))
+
+
+class HasTimeDerivativeTest(unittest.TestCase):
+    def test_direct_d_op(self):
+        self.assertTrue(mod._has_time_derivative({"op": "D", "args": ["x"]}))
+
+    def test_nested_d_op(self):
+        node = {"op": "+", "args": [1, {"op": "*", "args": [2, {"op": "D", "args": ["y"]}]}]}
+        self.assertTrue(mod._has_time_derivative(node))
+
+    def test_no_d_op(self):
+        self.assertFalse(mod._has_time_derivative({"op": "*", "args": ["x", 2]}))
+
+    def test_scalar_or_string(self):
+        self.assertFalse(mod._has_time_derivative(3.14))
+        self.assertFalse(mod._has_time_derivative("x"))
+        self.assertFalse(mod._has_time_derivative(None))
 
 
 class BuildSweepGridTest(unittest.TestCase):

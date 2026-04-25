@@ -12,12 +12,14 @@ PNG per plot under
 the artifacts on the rendered Hugo page (mdl-f42).
 
 Coverage today: algebraic-only components — i.e. models whose `equations`
-list is empty and whose `observed` expressions are pure functions of
-parameters and other observed values. CloudAlbedo (Seinfeld & Pandis Fig
-24.16) is the canonical case. Components with non-trivial ODE / DAE
-dynamics (e.g. SuperFast's 24-hour integration) are skipped with a
-diagnostic line and tracked as a follow-up — driving them through MTK
-would require Julia in the docs CI image.
+contain no `D` (time-derivative) op, so every output (`observed` or
+`state`) is a pure function of parameters and other algebraic outputs.
+CloudAlbedo (Seinfeld & Pandis Fig 24.16) is the canonical case;
+WaterEquilibrium, AerosolScavenging and DropletGrowth also qualify.
+Components with non-trivial ODE / DAE dynamics (e.g. SuperFast's 24-hour
+integration, DiameterGrowthRate) are skipped with a diagnostic line and
+tracked as a follow-up — driving them through MTK would require Julia in
+the docs CI image.
 
 Entry points:
     python3 tools/render_example_plots.py                   # from repo root
@@ -164,23 +166,38 @@ def _collect_variables(component: dict) -> dict[str, _Variable]:
     return out
 
 
+def _has_time_derivative(node: Any) -> bool:
+    """True iff `node` (an .esm AST fragment) contains a `D` (time-derivative) op."""
+    if isinstance(node, dict):
+        if node.get("op") == "D":
+            return True
+        return any(_has_time_derivative(c) for c in node.get("args") or [])
+    return False
+
+
 def _is_algebraic_only(component: dict) -> bool:
     """A component is renderable here when it has no time-evolving state.
 
-    Concretely: an empty `equations` list (or none) and at least one
-    observed variable to plot. ReactionSystems are excluded — their state
-    is the species concentration vector, which needs an ODE solve.
+    Algebraic-only means: no `D` (time-derivative) op anywhere in the
+    component's equations, no reaction/species block, and at least one
+    plottable output variable (type `observed` or `state` — both can be
+    defined by purely algebraic equations).
     """
-    eqs = component.get("equations")
-    if isinstance(eqs, list) and eqs:
-        return False
     if "reactions" in component or "species" in component:
         return False
+    eqs = component.get("equations") or []
+    if isinstance(eqs, list):
+        for eq in eqs:
+            if not isinstance(eq, dict):
+                continue
+            if _has_time_derivative(eq.get("lhs")) or _has_time_derivative(eq.get("rhs")):
+                return False
     vars_ = component.get("variables") or {}
     if not isinstance(vars_, dict) or not vars_:
         return False
     return any(
-        isinstance(v, dict) and v.get("type") == "observed" for v in vars_.values()
+        isinstance(v, dict) and v.get("type") in ("observed", "state")
+        for v in vars_.values()
     )
 
 
@@ -201,53 +218,206 @@ def _build_sweep_grid(parameter_sweep: dict) -> tuple[list[str], list[np.ndarray
         if not isinstance(d, dict):
             raise UnsupportedExpression("dimension is not a dict")
         param = d.get("parameter")
-        rng = d.get("range") or {}
-        if not isinstance(param, str) or not isinstance(rng, dict):
-            raise UnsupportedExpression("dimension missing parameter or range")
-        start = float(rng.get("start"))
-        stop = float(rng.get("stop"))
-        count = int(rng.get("count", 50))
-        scale = rng.get("scale", "linear")
-        if scale == "log":
-            arr = np.logspace(math.log10(start), math.log10(stop), count)
+        if not isinstance(param, str):
+            raise UnsupportedExpression("dimension missing parameter name")
+        if isinstance(d.get("values"), list) and d["values"]:
+            arr = np.asarray([float(v) for v in d["values"]], dtype=float)
         else:
-            arr = np.linspace(start, stop, count)
+            rng = d.get("range")
+            if not isinstance(rng, dict):
+                raise UnsupportedExpression(
+                    "dimension needs either 'values' list or 'range' dict"
+                )
+            start = float(rng.get("start"))
+            stop = float(rng.get("stop"))
+            count = int(rng.get("count", 50))
+            scale = rng.get("scale", "linear")
+            if scale == "log":
+                arr = np.logspace(math.log10(start), math.log10(stop), count)
+            else:
+                arr = np.linspace(start, stop, count)
         names.append(param)
         values.append(arr)
     return names, values
 
 
-def _evaluate_observed(
-    variables: dict[str, _Variable], env: dict[str, Any]
-) -> dict[str, Any]:
-    """Evaluate every observed variable into `env` (which already contains
-    parameters + constants). Loops up to N passes to resolve dependency order.
+def _names_in(node: Any) -> set[str]:
+    """All variable names referenced in an .esm AST fragment."""
+    if isinstance(node, str):
+        return {node}
+    if isinstance(node, dict):
+        out: set[str] = set()
+        for c in node.get("args") or []:
+            out |= _names_in(c)
+        return out
+    return set()
+
+
+def _invert_op(op: str, target: Any, others: list, idx: int, n_args: int) -> Any:
+    """Given `op(args) == target` and `args[idx]` is the lone unknown with
+    every other arg already evaluated to `others`, return the value the
+    unknown must take. Raises UnsupportedExpression if the op isn't invertible.
     """
-    pending = {
-        name: v
-        for name, v in variables.items()
-        if v.kind == "observed" and v.expression is not None
-    }
+    if op == "*":
+        prod = others[0]
+        for o in others[1:]:
+            prod = prod * o
+        return target / prod
+    if op == "+":
+        s = others[0] if others else 0
+        for o in others[1:]:
+            s = s + o
+        return target - s
+    if op == "-":
+        if n_args == 1:
+            return -target
+        if n_args == 2:
+            return target + others[0] if idx == 0 else others[0] - target
+        # n-ary subtraction is left-fold: a - b - c - ... == target
+        if idx == 0:
+            s = others[0]
+            for o in others[1:]:
+                s = s + o
+            return target + s
+        # idx > 0: a - others_left - unknown - others_right = target
+        # → unknown = a - sum(others_left) - sum(others_right) - target
+        s = others[0]
+        for o in others[1:]:
+            s = s - o
+        return s - target
+    if op == "/":
+        if n_args == 2:
+            return target * others[0] if idx == 0 else others[0] / target
+        # n-ary division is left-fold: a / b / c / ... == target
+        if idx == 0:
+            d = others[0]
+            for o in others[1:]:
+                d = d * o
+            return target * d
+        # later positions: hard to invert without re-folding; leave to caller
+        raise UnsupportedExpression(f"cannot invert n-ary '/' at position {idx}")
+    if op == "^":
+        if n_args != 2:
+            raise UnsupportedExpression("'^' inversion needs 2 args")
+        if idx == 0:
+            return target ** (1.0 / others[0])
+        return np.log(target) / np.log(others[0])
+    if op == "exp":
+        return np.log(target)
+    if op == "log":
+        return np.exp(target)
+    if op == "log10":
+        return 10.0 ** target
+    if op == "log2":
+        return 2.0 ** target
+    if op == "sqrt":
+        return target ** 2
+    raise UnsupportedExpression(f"cannot invert op {op!r}")
+
+
+def _solve_for(target: Any, expr: Any, unknown: str, env: dict[str, Any]) -> Any:
+    """Solve `expr == target` for `unknown`, where `unknown` appears exactly
+    once in `expr` and every other leaf is evaluable in `env`.
+    """
+    if isinstance(expr, str):
+        if expr == unknown:
+            return target
+        raise UnsupportedExpression(f"unknown {unknown!r} missing from leaf {expr!r}")
+    if not isinstance(expr, dict):
+        raise UnsupportedExpression(f"cannot invert through literal {expr!r}")
+    op = expr.get("op")
+    args = expr.get("args") or []
+    contain = [unknown in _names_in(a) for a in args]
+    n = sum(contain)
+    if n != 1:
+        raise UnsupportedExpression(
+            f"unknown {unknown!r} appears {n} times under {op!r}; need exactly 1"
+        )
+    idx = contain.index(True)
+    others = [evaluate(a, env) for i, a in enumerate(args) if i != idx]
+    sub_target = _invert_op(op, target, others, idx, len(args))
+    return _solve_for(sub_target, args[idx], unknown, env)
+
+
+def _resolve_equations(
+    variables: dict[str, _Variable],
+    env: dict[str, Any],
+    equations: list | None = None,
+) -> dict[str, Any]:
+    """Iteratively solve the component's algebraic system into `env`.
+
+    Accepts both observed-variable expressions and ``equations`` of the
+    form ``{lhs, rhs}``. Each pass tries every unresolved equation:
+    - direct binding (lhs is a variable name and rhs is fully evaluable),
+    - or a single-unknown algebraic constraint solvable via ``_solve_for``.
+    Loops until a fixed point or until no further progress is possible.
+    """
+    pending: list[tuple[Any, Any]] = []
+    for name, v in variables.items():
+        if v.kind == "observed" and v.expression is not None:
+            pending.append((name, v.expression))
+    if isinstance(equations, list):
+        for eq in equations:
+            if not isinstance(eq, dict):
+                continue
+            lhs = eq.get("lhs")
+            rhs = eq.get("rhs")
+            if rhs is None and lhs is None:
+                continue
+            pending.append((lhs, rhs))
+
+    known_vars = set(variables.keys())
     max_passes = len(pending) + 1
     for _ in range(max_passes):
         if not pending:
             break
         progress = False
-        for name in list(pending.keys()):
-            try:
-                env[name] = evaluate(pending[name].expression, env)
-            except UnsupportedExpression:
+        remaining: list[tuple[Any, Any]] = []
+        for lhs, rhs in pending:
+            unknowns = (_names_in(lhs) | _names_in(rhs)) - env.keys()
+            unknowns &= known_vars  # ignore symbols like 't' that aren't variables
+            if not unknowns:
+                # Already-determined constraint or pure consistency check; skip.
+                progress = True
                 continue
-            pending.pop(name)
+            if len(unknowns) > 1:
+                remaining.append((lhs, rhs))
+                continue
+            unknown = next(iter(unknowns))
+            try:
+                if isinstance(lhs, str) and lhs == unknown:
+                    env[unknown] = evaluate(rhs, env)
+                elif isinstance(rhs, str) and rhs == unknown:
+                    env[unknown] = evaluate(lhs, env)
+                elif unknown in _names_in(rhs):
+                    env[unknown] = _solve_for(evaluate(lhs, env), rhs, unknown, env)
+                else:
+                    env[unknown] = _solve_for(evaluate(rhs, env), lhs, unknown, env)
+            except UnsupportedExpression:
+                remaining.append((lhs, rhs))
+                continue
             progress = True
+        pending = remaining
         if not progress:
             break
-    if pending:
-        names = sorted(pending.keys())
+
+    unresolved = sorted(
+        {name for name, _ in pending if isinstance(name, str) and name not in env}
+        | {
+            u
+            for _, expr in pending
+            for u in (_names_in(expr) - env.keys()) & known_vars
+        }
+    )
+    if unresolved:
         raise UnsupportedExpression(
-            f"could not resolve observed variables: {names}"
+            f"could not resolve observed variables: {unresolved}"
         )
     return env
+
+
+# Backwards-compatible alias for tests/external callers.
+_evaluate_observed = _resolve_equations
 
 
 def _baseline_env(
@@ -482,7 +652,7 @@ def _render_one_example(
     try:
         sweep_names, sweep_values = _build_sweep_grid(example["parameter_sweep"])
         env = _grid_envs(base_env, sweep_names, sweep_values)
-        env = _evaluate_observed(variables, env)
+        env = _evaluate_observed(variables, env, component_body.get("equations"))
     except UnsupportedExpression as exc:
         for plot in plots:
             stats.plots_skipped += 1
