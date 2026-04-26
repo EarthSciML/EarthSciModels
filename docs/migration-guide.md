@@ -298,37 +298,98 @@ following. A round-trip-only pass is **not** sufficient — `tests` and
 The merge queue will re-run the same gates, but the point of this
 checklist is to catch failures at the polecat, not at the refinery.
 
-1. **Round-trip passes with a realistic timespan.**
-   `scripts/roundtrip.jl` (see §3) exits 0 when invoked with a
-   `--tspan` that actually exercises the component's dynamics — not a
-   trivial `0,1`. Pick a span that covers the short, medium, and long
-   modes the model cares about (the same span you used when writing
-   the `tests` block is usually the right answer).
+> **The walker is the gate.** The `mdl-08t` inline-test walker
+> (`run_esm_tests`) is the only code path that determines whether a
+> migration lands. Round-trip passing is *necessary* but not
+> *sufficient*; "all examples simulated" claims via `scripts/roundtrip.jl`
+> or ad-hoc Julia scripts do **not** clear the gate. The walker uses a
+> distinct compile + solve path — see §7.3 — and CI runs the walker, not
+> roundtrip. If the walker fails, the migration fails, regardless of
+> what other scripts say.
 
-2. **Every `tests:` entry passes via the inline-test walker.**
-   Run the same code path CI uses (the `mdl-08t` ESM inline-test
-   walker) locally against your new `.esm`. Every entry in the
-   committed file's `tests:` block must pass. A zero-test `.esm` is
-   **not** acceptable — see §6.1 for the coverage bar.
+### 7.1 Run the walker locally — exact invocation
 
-3. **Every `examples:` entry actually runs.**
-   Load the `.esm` and simulate each example with its declared
-   `initial_state`, parameter overrides, and `time_span`. Confirm no
-   simulation errors. If an example has `expected` markers, they must
-   satisfy. A syntactically valid `examples` block whose entries fail
-   to simulate is a regression, not a migration.
+CI invokes the walker via `julia-actions/julia-runtest@v1`, which is
+equivalent to `Pkg.test()`. Run the **same** command locally before
+`gt done`:
 
-4. **No `TODO_GAP` markers remain.**
-   Grep the committed `.esm` for `TODO_GAP` — there should be none.
-   The only exception is when the bead's `blocking_gap` field
-   explicitly tolerates a gap; in that case, cite the tracked upstream
-   bead id in your commit message and leave the marker in place. See
-   §4 for the full gap-handling protocol.
+```bash
+scripts/setup_polecat_env.sh                       # idempotent; once per worktree
+julia --project=. -e 'using Pkg; Pkg.test()'       # this IS the walker
+```
 
-If any one of these fails, do **not** run `gt done`. Fix the
-underlying issue (or escalate per §4 / the stuck-polecat protocol) and
-re-verify from the top. The checklist is a hard gate, not a
-suggestion.
+This loads `test/runtests.jl`, which calls
+`run_esm_tests()` over `components/` — the same call CI makes. Do not
+substitute `julia --project=. test/runtests.jl` (it bypasses `Pkg.test`'s
+test environment), and do not paraphrase the command — copy it.
+
+### 7.2 Report the assertion count
+
+The walker's summary block ends with a line of the form:
+
+```
+================ ESM inline-test summary ================
+Files discovered: <N>
+Assertions:       <M>
+...
+TOTAL                              <pass>      <fail>      <err>
+```
+
+The polecat **must** report the `Assertions:` count and the per-file
+TOTAL row in:
+
+- the migration commit message (one line: `walker: M assertions, all pass`), and
+- a `bd update <id> --notes "..."` on the assigned bead, before `gt done`.
+
+This lets the witness/mayor sanity-check the count against the new
+`.esm`'s declared `tests:` block. A migration that adds 40 assertions
+to the file but reports a delta of 0 is suspicious by construction.
+
+A zero-assertion run is **not** acceptable — it means either no test
+file is present or your `.esm` was not picked up by
+`discover_esm_files`. See §6.1 for the coverage bar.
+
+### 7.3 Walker ≠ `scripts/roundtrip.jl` — they are different code paths
+
+These are commonly confused. They are not interchangeable:
+
+| | `scripts/roundtrip.jl` | Walker (`run_esm_tests`) |
+|---|---|---|
+| **Lives in** | `EarthSciSerialization.jl` | `EarthSciModels` (`src/run_tests.jl`) |
+| **Input** | An upstream MTK `.jl` file | Every committed `.esm` under `components/` |
+| **What it checks** | `mtk → esm → mtk` trajectory drift on the upstream system | The committed `.esm`'s `tests:` assertions, sample-by-sample |
+| **Solve path** | Whatever `roundtrip.jl` configures (Tsit5, default reltol/abstol) | `run_esm_tests` solver pick (Tsit5 → Rosenbrock23 fallback), `reltol=1e-10`, `abstol=1e-12`, `combinatoric_ratelaws=false` for ReactionSystems |
+| **CI runs it?** | No (one-shot polecat-side validation) | **Yes** — this is the gate |
+
+A roundtrip pass tells you the scaffolder didn't drift the trajectory.
+The walker tells you the assertions a reviewer actually reads pass on
+the committed file with the solver tolerances CI enforces. **Never
+substitute one for the other.** Past incident: `mdl-drx` reported "all
+4 examples simulate cleanly" via `roundtrip.jl` and was contradicted
+by 4 walker assertion failures on CI.
+
+### 7.4 Every `examples:` entry actually runs
+
+Load the `.esm` and simulate each example with its declared
+`initial_state`, parameter overrides, and `time_span`. Confirm no
+simulation errors. If an example has `expected` markers, they must
+satisfy. A syntactically valid `examples` block whose entries fail
+to simulate is a regression, not a migration.
+
+### 7.5 No `TODO_GAP` markers remain
+
+Grep the committed `.esm` for `TODO_GAP` — there should be none.
+The only exception is when the bead's `blocking_gap` field explicitly
+tolerates a gap; in that case, cite the tracked upstream bead id in
+your commit message and leave the marker in place. See §4 for the
+full gap-handling protocol.
+
+### 7.6 Hard gate
+
+If any one of §7.1–§7.5 fails, do **not** run `gt done`. Fix the
+underlying issue (or escalate per §4 / the stuck-polecat protocol)
+and re-verify from the top. "All my other scripts pass" is not a
+substitute for §7.1. The checklist is a hard gate, not a suggestion.
 
 ---
 
