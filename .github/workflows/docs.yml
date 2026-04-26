@@ -87,22 +87,23 @@ jobs:
       - name: Build Pagefind search index
         run: pagefind --site docs/public
 
-      # Stage the built site under its deployed base path so root-relative
-      # URLs (href="/EarthSciModels/...") resolve to real files when lychee
-      # walks them with --base docs/_check. Without this step, lychee tries
-      # to resolve /EarthSciModels/components/ against docs/public/ and 404s
-      # on every internal link.
-      - name: Stage site under base path for link-check
+      # Hugo emits root-relative hrefs of the form /EarthSciModels/...
+      # because the GitHub-Pages baseURL has that path component. The local
+      # build tree lives at docs/public/, so we stage it under a parent dir
+      # that mirrors the deployed path layout. Lychee's --root-dir then
+      # resolves those hrefs to real files. Absolute paths are required —
+      # lychee 0.23+ rejects relative --base/--root-dir values.
+      - name: Stage built site for link-checking
         run: |
-          rm -rf docs/_check
-          mkdir -p docs/_check
-          cp -r docs/public docs/_check/EarthSciModels
+          rm -rf /tmp/lychee-root
+          mkdir -p /tmp/lychee-root/EarthSciModels
+          cp -r docs/public/. /tmp/lychee-root/EarthSciModels/
 
       # Internal-link guard: catches the class of bug where a Hugo template
       # emits root-relative URLs that drop the project-Pages baseURL prefix
       # (e.g. href="/components/" instead of "/EarthSciModels/components/").
-      # --offline skips network checks; external links are not validated here
-      # to keep CI hermetic and free of third-party rate-limit flake.
+      # --offline + scheme excludes keep CI hermetic and free of third-party
+      # rate-limit flake.
       - name: Check internal links (lychee)
         uses: lycheeverse/lychee-action@v2
         with:
@@ -110,9 +111,12 @@ jobs:
             --offline
             --no-progress
             --include-fragments
-            --base docs/_check
-            'docs/_check/EarthSciModels/**/*.html'
+            --root-dir /tmp/lychee-root
+            --exclude '^https?://'
+            --exclude '^mailto:'
+            '/tmp/lychee-root/EarthSciModels/**/*.html'
           fail: true
+          format: detailed
 
       - name: Upload Pages artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
