@@ -64,6 +64,7 @@ from earthsci_toolkit import (  # noqa: E402
     to_sympy,
 )
 from earthsci_toolkit.esm_types import (  # noqa: E402
+    Equation,
     Example,
     ParameterSweep,
     Plot,
@@ -680,6 +681,218 @@ def _initial_state_values(example: Example) -> dict[str, float] | None:
     return None
 
 
+def _state_defaults(model: Any) -> dict[str, float]:
+    """Initial-condition fallback: every state variable that declares a default.
+
+    Used when an example has no `initial_state` but the model carries enough
+    species/state defaults to seed an integration. Non-state variables are
+    skipped (parameters / constants are picked up by `_baseline_bindings`).
+    """
+    out: dict[str, float] = {}
+    for name, mv in model.variables.items():
+        if mv.type == "state" and mv.default is not None:
+            out[name] = float(mv.default)
+    return out
+
+
+def _render_final_state_vs_sweep_plot(
+    plot: Plot,
+    sweep_name: str,
+    sweep_values: np.ndarray,
+    sweep_scale: str,
+    trajectories: list[tuple[str | None, dict[str, np.ndarray]]],
+    model: Any,
+    out_path: Path,
+) -> None:
+    """Plot the final-time value of `plot.y.variable` against the swept parameter.
+
+    Used for examples that combine `time_span` with a 1D `parameter_sweep`
+    and whose plot's x-axis is the swept parameter (not `t`) — e.g. an
+    "O3 vs jNO2" steady-state-style sweep where each grid point drives an
+    independent integration and only the endpoint matters.
+    """
+    if plot.type != "line":
+        raise UnsupportedExpression(
+            f"final-state-vs-sweep plot type {plot.type!r} not supported "
+            f"(use 'line')"
+        )
+    y_name = plot.y.variable
+    if y_name is None:
+        raise UnsupportedExpression("plot y has no variable")
+    if len(trajectories) != len(sweep_values):
+        raise UnsupportedExpression(
+            f"final-state plot expected {len(sweep_values)} trajectories, "
+            f"got {len(trajectories)}"
+        )
+    y_finals: list[float] = []
+    for _, env in trajectories:
+        if y_name not in env:
+            raise UnsupportedExpression(
+                f"final-state plot y references unbound variable: {y_name!r}"
+            )
+        y_arr = np.asarray(env[y_name])
+        if y_arr.ndim == 0:
+            y_finals.append(float(y_arr))
+        else:
+            y_finals.append(float(y_arr[-1]))
+    fig, ax = plt.subplots(figsize=(6.0, 4.0))
+    ax.plot(sweep_values, y_finals, color="#1f4d8a", linewidth=2, marker="o")
+    ax.set_xlabel(_axis_label(plot.x, model))
+    ax.set_ylabel(_axis_label(plot.y, model))
+    if sweep_scale == "log":
+        ax.set_xscale("log")
+    ax.grid(True, which="both", alpha=0.3)
+    title = plot.description or plot.id or ""
+    if title:
+        ax.set_title(title, fontsize=10)
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# Reaction-system adapter (treat ReactionSystem as a Model for rendering)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _AdapterVariable:
+    """Lightweight stand-in for ModelVariable when rendering reaction_systems.
+
+    The rendering helpers query a small subset of ModelVariable's surface:
+    `.type`, `.default`, `.units`, `.expression`. This dataclass mirrors that
+    surface so the existing baseline-bindings / axis-labeling / resolution-plan
+    code paths run unchanged on a ReactionSystem.
+    """
+    type: str
+    default: Any | None = None
+    units: str | None = None
+    expression: Any | None = None
+
+
+@dataclass
+class _AdapterModel:
+    """Model-shaped adapter wrapping a ReactionSystem.
+
+    Synthesizes one `D(species, wrt=t) = rhs` equation per non-constant
+    species using mass-action kinetics: rate_r = k_r * prod_{(s,n) in
+    reactants_r} s^n, with each species's net contribution from reaction r
+    being `(products_r[s] - reactants_r[s]) * rate_r`.
+    """
+    name: str
+    variables: dict[str, _AdapterVariable]
+    equations: list[Any]
+    examples: list[Any]
+
+
+def _build_rate_expression(rate_constant: Any, reactants: dict[str, float]) -> Any:
+    """Build `k * prod_{(s,n) in reactants} s^n` as a left-folded ExprNode tree.
+
+    Reactant stoichiometries are typically 1 (omit the `^1` factor) and
+    occasionally 2 (e.g. HO2+HO2 → ... uses `HO2^2`). Fractional reactant
+    stoichiometry is rare in real mechanisms but handled for completeness.
+    """
+    factors: list[Any] = [rate_constant]
+    for sp, n in reactants.items():
+        if n == 1:
+            factors.append(sp)
+        elif float(n).is_integer():
+            factors.append(ExprNode(op="^", args=[sp, int(n)]))
+        else:
+            factors.append(ExprNode(op="^", args=[sp, float(n)]))
+    if len(factors) == 1:
+        return factors[0]
+    expr = factors[0]
+    for f in factors[1:]:
+        expr = ExprNode(op="*", args=[expr, f])
+    return expr
+
+
+def _build_species_ode_rhs(species_name: str, reactions: list[Any]) -> Any | None:
+    """Sum net-stoichiometry-weighted rate terms over every reaction touching the species.
+
+    Returns None if the species appears in no reaction (its derivative is
+    identically zero — the caller skips emitting an equation rather than
+    forcing a trivial constraint into the resolution plan).
+    """
+    terms: list[Any] = []
+    for r in reactions:
+        net = float(r.products.get(species_name, 0.0)) - float(
+            r.reactants.get(species_name, 0.0)
+        )
+        if net == 0.0:
+            continue
+        rate_expr = _build_rate_expression(r.rate_constant, r.reactants)
+        if net == 1.0:
+            terms.append(rate_expr)
+        elif net == -1.0:
+            terms.append(ExprNode(op="*", args=[-1.0, rate_expr]))
+        else:
+            terms.append(ExprNode(op="*", args=[net, rate_expr]))
+    if not terms:
+        return None
+    expr = terms[0]
+    for t in terms[1:]:
+        expr = ExprNode(op="+", args=[expr, t])
+    return expr
+
+
+def _reaction_system_to_model(rs: Any) -> _AdapterModel:
+    """Convert a ReactionSystem into a renderable Model adapter.
+
+    Mapping:
+    - Parameters and constant species (`constant=True`) become `parameter`
+      variables seeded with their declared defaults.
+    - Non-constant species become `state` variables; their declared defaults
+      are surfaced as initial-state fallback when an example omits
+      `initial_state` (a common shape for reaction_system examples).
+    - One `D(species, wrt=t) = rhs` equation is synthesized per non-constant
+      species, with rhs summing net-stoichiometry-weighted rate terms over
+      the reactions list.
+    """
+    variables: dict[str, _AdapterVariable] = {}
+    for p in rs.parameters or []:
+        variables[p.name] = _AdapterVariable(
+            type="parameter",
+            default=p.value,
+            units=getattr(p, "units", None),
+        )
+    for sp in rs.species or []:
+        if sp.constant:
+            variables[sp.name] = _AdapterVariable(
+                type="parameter",
+                default=sp.default,
+                units=sp.units,
+            )
+        else:
+            variables[sp.name] = _AdapterVariable(
+                type="state",
+                default=sp.default,
+                units=sp.units,
+            )
+    reactions = rs.reactions or []
+    equations: list[Any] = []
+    for sp in rs.species or []:
+        if sp.constant:
+            continue
+        rhs = _build_species_ode_rhs(sp.name, reactions)
+        if rhs is None:
+            continue
+        equations.append(
+            Equation(
+                lhs=ExprNode(op="D", args=[sp.name], wrt="t"),
+                rhs=rhs,
+            )
+        )
+    return _AdapterModel(
+        name=rs.name,
+        variables=variables,
+        equations=equations,
+        examples=list(rs.examples or []),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-file driver
 # ---------------------------------------------------------------------------
@@ -709,6 +922,13 @@ def render_examples_for_file(esm_path: Path, stats: _RenderStats) -> None:
         for example in model.examples:
             _render_one_example(esm_path, cname, model, example, plots_dir, stats)
 
+    for cname, rs in (esm.reaction_systems or {}).items():
+        if not getattr(rs, "examples", None):
+            continue
+        adapter = _reaction_system_to_model(rs)
+        for example in adapter.examples:
+            _render_one_example(esm_path, cname, adapter, example, plots_dir, stats)
+
 
 def _render_one_example(
     esm_path: Path,
@@ -724,6 +944,13 @@ def _render_one_example(
 
     has_dynamics = _component_has_dynamics(model)
     initial_values = _initial_state_values(example)
+    if has_dynamics and initial_values is None:
+        # Fall back to per-state defaults when the example omits initial_state —
+        # reaction_system species typically declare reservoir defaults that
+        # serve as plausible t=0 initial conditions for time-series rendering.
+        fallback = _state_defaults(model)
+        if fallback:
+            initial_values = fallback
 
     # Route ODE/time-series examples (`time_span` + `initial_state`) through
     # the integration path. Falls back to the algebraic skip below if the
@@ -819,12 +1046,17 @@ def _render_time_series_example(
     stats.examples_seen += 1
     base_bindings = _baseline_bindings(model, example)
 
+    sweep_name: str | None = None
+    sweep_axis_values: np.ndarray | None = None
+    sweep_axis_scale: str = "linear"
     sweep_runs: list[tuple[str | None, dict[str, float]]]
     if example.parameter_sweep is None:
         sweep_runs = [(None, base_bindings)]
     else:
         try:
-            sweep_names, sweep_values, _ = _build_sweep_grid(example.parameter_sweep)
+            sweep_names, sweep_values, sweep_scales = _build_sweep_grid(
+                example.parameter_sweep
+            )
         except UnsupportedExpression as exc:
             for _ in plots:
                 stats.plots_skipped += 1
@@ -842,12 +1074,14 @@ def _render_time_series_example(
                     f"got {len(sweep_values)}D"
                 )
             return
-        name = sweep_names[0]
+        sweep_name = sweep_names[0]
+        sweep_axis_values = sweep_values[0]
+        sweep_axis_scale = sweep_scales[0]
         runs: list[tuple[str | None, dict[str, float]]] = []
-        for v in sweep_values[0]:
+        for v in sweep_axis_values:
             b = dict(base_bindings)
-            b[name] = float(v)
-            runs.append((f"{name}={float(v):.3g}", b))
+            b[sweep_name] = float(v)
+            runs.append((f"{sweep_name}={float(v):.3g}", b))
         sweep_runs = runs
 
     trajectories: list[tuple[str | None, dict[str, np.ndarray]]] = []
@@ -871,7 +1105,25 @@ def _render_time_series_example(
         plot_id = plot.id or "plot"
         out_path = plots_dir / f"{example_id}-{plot_id}.png"
         try:
-            _render_time_series_line_plot(plot, trajectories, model, out_path)
+            # Dispatch on plot.x.variable: `t` ⇒ classic time-series; the
+            # swept parameter ⇒ collapse each trajectory to its endpoint and
+            # plot final-state vs sweep value (steady-state-style sweeps).
+            if (
+                sweep_name is not None
+                and plot.x.variable == sweep_name
+                and sweep_axis_values is not None
+            ):
+                _render_final_state_vs_sweep_plot(
+                    plot,
+                    sweep_name,
+                    sweep_axis_values,
+                    sweep_axis_scale,
+                    trajectories,
+                    model,
+                    out_path,
+                )
+            else:
+                _render_time_series_line_plot(plot, trajectories, model, out_path)
         except UnsupportedExpression as exc:
             stats.plots_skipped += 1
             print(

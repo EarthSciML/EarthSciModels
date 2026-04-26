@@ -589,6 +589,109 @@ class IntegrationTest(unittest.TestCase):
             self.assertTrue(png.is_file())
             self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
+    def test_reaction_system_renders_time_series_with_default_initial_state(self):
+        # First-order isomerization A -> B, k = 0.5/s. Tests three things at once:
+        # (1) reaction_systems are discovered alongside models;
+        # (2) species defaults seed the integration when no initial_state present;
+        # (3) plot.x='t' on a reaction_system example draws a time-series curve.
+        body = {
+            "esm": "0.3.0",
+            "metadata": {"name": "AB"},
+            "reaction_systems": {
+                "AB": {
+                    "species": {
+                        "A": {"default": 1.0, "units": "M"},
+                        "B": {"default": 0.0, "units": "M"},
+                    },
+                    "parameters": {"k": {"default": 0.5, "units": "1/s"}},
+                    "reactions": [
+                        {
+                            "id": "R1",
+                            "substrates": [{"species": "A", "stoichiometry": 1}],
+                            "products": [{"species": "B", "stoichiometry": 1}],
+                            "rate": "k",
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "decay",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "plots": [
+                                {
+                                    "id": "A_vs_t",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "A"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "ab")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "ab" / "ab.plots" / "decay-A_vs_t.png"
+            self.assertTrue(png.is_file())
+            self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_reaction_system_renders_final_state_vs_sweep(self):
+        # A -> B with k swept; plot final-state B vs k. Exercises the new
+        # final-state-vs-sweep dispatch path: plot.x is the swept parameter,
+        # not 't', so each grid point's endpoint becomes one data point.
+        body = {
+            "esm": "0.3.0",
+            "metadata": {"name": "AB"},
+            "reaction_systems": {
+                "AB": {
+                    "species": {
+                        "A": {"default": 1.0},
+                        "B": {"default": 0.0},
+                    },
+                    "parameters": {"k": {"default": 0.5}},
+                    "reactions": [
+                        {
+                            "id": "R1",
+                            "substrates": [{"species": "A", "stoichiometry": 1}],
+                            "products": [{"species": "B", "stoichiometry": 1}],
+                            "rate": "k",
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "k_sweep",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "parameter_sweep": {
+                                "type": "cartesian",
+                                "dimensions": [
+                                    {"parameter": "k", "values": [0.25, 0.5, 1.0]}
+                                ],
+                            },
+                            "plots": [
+                                {
+                                    "id": "B_vs_k",
+                                    "type": "line",
+                                    "x": {"variable": "k"},
+                                    "y": {"variable": "B"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "ab")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "ab" / "ab.plots" / "k_sweep-B_vs_k.png"
+            self.assertTrue(png.is_file())
+            self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
     def test_skips_components_with_time_derivatives(self):
         body = {
             "esm": "0.1.0",
