@@ -10,7 +10,7 @@ site is a view over them.
 | Piece | Purpose |
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
-| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example's `parameter_sweep`, and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
+| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via `scipy.integrate.solve_ivp` (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
 | [Hugo](https://gohugo.io) | Static site generator; renders taxonomies and markdown. |
 | [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded via CDN in `layouts/partials/head.html`). |
 | [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` in CI. Lazy-loads, no server required. |
@@ -97,8 +97,10 @@ Examples in the `.esm` schema carry declarative plot specs (`type: line` /
 `heatmap`, axis labels, variable bindings — see
 [ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). At
 build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
-walks `components/**/*.esm`, evaluates each example's `parameter_sweep`,
-and writes a PNG per declared plot under
+walks `components/**/*.esm`, evaluates each example (cartesian
+`parameter_sweep` for algebraic models, `scipy.integrate.solve_ivp`
+integration of `time_span` + `initial_state` for ODE models), and writes
+a PNG per declared plot under
 
 ```
 components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.png
@@ -112,19 +114,26 @@ example are still supported by simply checking them into the same path
 
 ### Coverage
 
-Today the renderer handles **algebraic-only components**: a `model` whose
-`equations` list is empty and whose state variables are computed entirely
-from `observed` expressions over parameters. That covers the
-`CloudAlbedo` Seinfeld & Pandis Fig 24.16 reproduction (mdl-icq) and any
-future model in the same shape.
+The renderer handles two example shapes:
 
-Examples that need an ODE/DAE integration (`reaction_systems`, models
-with non-trivial `equations`, or examples without a `parameter_sweep` —
-e.g. `SuperFast`'s 24-hour run, `DiameterGrowthRate`'s trajectory tests)
-are skipped with a diagnostic line and tracked as a follow-up. Driving
-them through MTK requires Julia + `EarthSciModels.jl` in the docs CI
-image; the algebraic-only path runs in pure Python (`matplotlib +
-numpy`) and adds ~1 s to the docs build per .esm.
+- **Algebraic models** (no `D` op in `equations`) drive the cartesian
+  `parameter_sweep` path: each grid point is evaluated through ESS and
+  fed to one PNG per declared plot. Covers `CloudAlbedo`,
+  `WaterEquilibrium`, `DropletGrowth`, `AerosolScavenging`, etc.
+- **ODE models** (one or more `D(state)/dt = rhs` equations) drive the
+  time-series path when the example carries `time_span` + `initial_state`
+  (`per_variable` form). Each example integrates via
+  `scipy.integrate.solve_ivp` (LSODA, `rtol=1e-8`, `atol=1e-12`) and
+  emits one PNG per plot of state/algebraic trajectories vs `t`. A
+  1-D `parameter_sweep` is allowed and produces a family of curves on
+  one axes (one integration per grid point). Covers
+  `DiameterGrowthRate`'s Fig. 13.2 reproductions (mdl-hxx).
+
+Reaction systems (`reaction_systems`), DAE-only models (algebraics that
+won't reduce to forward-defined targets), and examples missing both
+`parameter_sweep` and `initial_state` are skipped with a diagnostic
+line. Both supported paths run in pure Python (`matplotlib`, `numpy`,
+`scipy`) and add ~1 s per .esm to the docs build.
 
 ### Build-time impact
 
@@ -132,14 +141,13 @@ For the current 6 components × ~25 example plots:
 
 | Stage | Local time | Notes |
 | --- | --- | --- |
-| `pip install matplotlib numpy` | ~10–15 s | Cached across CI runs once the wheel is in place. |
-| `python tools/render_example_plots.py` | ~1 s | Scales linearly in the number of algebraic examples × sweep grid size. |
+| `pip install matplotlib numpy scipy` | ~10–15 s | Cached across CI runs once the wheels are in place. |
+| `python tools/render_example_plots.py` | <20 s | Algebraic examples scale with sweep grid size; ODE examples scale with integration cost (LSODA stops on stiffness). |
 | `python tools/esm_to_docs.py` | <0.5 s | Unchanged. |
 
 The `Render example plots` step grows roughly proportional to the total
-sweep grid count across all examples, but stays well under 10 s in
-practice. If a future ODE-driven path lands, expect that step to dwarf
-this one.
+sweep grid count plus the integration time of any ODE examples, but
+stays well under 30 s in practice for the current component set.
 
 ### Follow-up — interactive embeds
 
@@ -148,16 +156,17 @@ Tracked separately:
 - **Client-side interactive embeds** — render the plot spec as Vega-Lite /
   Plotly JSON and let the browser draw it from the integration result.
   Still needs a server-side evaluation step to produce the data.
-- **ODE/DAE plot rendering** — wire `EarthSciModels.jl` (Julia + MTK +
-  Catalyst + a solver stack) into the docs CI to integrate
-  `reaction_systems` and DAE models, then emit PNGs through the same
-  `<esm_stem>.plots/` convention.
+- **`reaction_systems` + DAE-only rendering** — pure-Python ODE coverage
+  landed in mdl-hxx, but `reaction_systems` and DAE models with
+  irreducible algebraics still skip. Wiring `EarthSciModels.jl` (Julia +
+  MTK + Catalyst + a solver stack) into the docs CI would close the
+  remaining gap through the same `<esm_stem>.plots/` convention.
 
 ## Out of scope (tracked elsewhere)
 
 - Connectors (not yet a distinct `.esm` section)
 - Discretization rules (lives in ESD, not ESM)
 - Versioned docs (history of a component across `.esm` versions)
-- ODE/DAE plot rendering (see "Example plots → Follow-up" above)
+- `reaction_systems` and DAE-only plot rendering (see "Example plots → Follow-up" above)
 - Algolia DocSearch swap (revisit only if we outgrow Pagefind at >10k pages)
 - PDF export

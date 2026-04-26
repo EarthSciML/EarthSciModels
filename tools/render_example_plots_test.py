@@ -79,14 +79,15 @@ class ComponentHasDynamicsTest(unittest.TestCase):
         self.assertFalse(mod._component_has_dynamics(m))
 
     def test_ode_equation_has_dynamics(self):
+        # Canonical form: D(state, wrt=t) on lhs (DiameterGrowthRate shape).
         m = _model(
             {"y": {"type": "state"}, "k": {"type": "parameter", "default": 1.0}},
             equations=[
                 {"lhs": ExprNode(op="D", args=["y"], wrt="t"), "rhs": ExprNode(op="*", args=[-1, "y"])}
             ],
         )
-        # rhs has no D, but lhs is D op — _component_has_dynamics scans rhs;
-        # we still need to handle the more common form: D op on rhs.
+        self.assertTrue(mod._component_has_dynamics(m))
+        # D buried inside rhs expression tree (less common but valid).
         m2 = _model(
             {"y": {"type": "state"}},
             equations=[{"lhs": "y_dot", "rhs": ExprNode(op="D", args=["y"], wrt="t")}],
@@ -229,6 +230,88 @@ class EvaluateGridTest(unittest.TestCase):
         # OH_minus = K_w / H_plus
         np.testing.assert_allclose(env["K_w"], np.full(2, 298.0 * 1e-10))
         np.testing.assert_allclose(env["OH_minus"], np.array([2.98e-4, 2.98e-5]))
+
+
+class ExtractOdeEquationsTest(unittest.TestCase):
+    def test_separates_ode_from_algebraic(self):
+        m = _model(
+            {"D_p": {"type": "state"}, "I_D": {"type": "state"}, "A": {"type": "state"}},
+            equations=[
+                {"lhs": ExprNode(op="D", args=["D_p"], wrt="t"), "rhs": "I_D"},
+                {"lhs": "A", "rhs": ExprNode(op="*", args=[1.0, 2.0])},
+                {"lhs": "I_D", "rhs": ExprNode(op="/", args=["A", "D_p"])},
+            ],
+        )
+        ode_map, alg_eqs = mod._extract_ode_equations(m)
+        self.assertEqual(set(ode_map.keys()), {"D_p"})
+        self.assertEqual(ode_map["D_p"], "I_D")
+        self.assertEqual([eq.lhs for eq in alg_eqs], ["A", "I_D"])
+
+    def test_no_ode_returns_empty_map(self):
+        m = _model({"y": {"type": "state"}}, equations=[{"lhs": "y", "rhs": 1.0}])
+        ode_map, alg_eqs = mod._extract_ode_equations(m)
+        self.assertEqual(ode_map, {})
+        self.assertEqual(len(alg_eqs), 1)
+
+
+class SolveTimeSeriesTest(unittest.TestCase):
+    """Smoke-tests for the ODE integration path."""
+
+    def test_exponential_decay(self):
+        # dy/dt = -k*y, y(0)=1 → y(t) = exp(-k*t).
+        from earthsci_toolkit.esm_types import TimeSpan
+
+        m = _model(
+            {"k": {"type": "parameter", "default": 0.5}, "y": {"type": "state"}},
+            equations=[
+                {
+                    "lhs": ExprNode(op="D", args=["y"], wrt="t"),
+                    "rhs": ExprNode(op="*", args=[-1, "k", "y"]),
+                }
+            ],
+        )
+        env = mod._solve_time_series(
+            m,
+            base_bindings={"k": 0.5},
+            initial_state_values={"y": 1.0},
+            time_span=TimeSpan(start=0.0, end=4.0),
+            n_points=101,
+        )
+        np.testing.assert_allclose(env["t"][[0, -1]], [0.0, 4.0])
+        np.testing.assert_allclose(
+            env["y"], np.exp(-0.5 * env["t"]), rtol=1e-5, atol=1e-7
+        )
+
+    def test_algebraic_observed_trajectory(self):
+        # DiameterGrowthRate-shape: D(D_p)/dt = I_D, A = const, I_D = A/D_p
+        # ⇒ D_p² = D_p0² + 2A*t. Verifies algebraic-equation post-processing.
+        from earthsci_toolkit.esm_types import TimeSpan
+
+        m = _model(
+            {
+                "A": {"type": "state"},
+                "D_p": {"type": "state"},
+                "I_D": {"type": "state"},
+                "k": {"type": "parameter", "default": 1.0e-16},
+            },
+            equations=[
+                {"lhs": ExprNode(op="D", args=["D_p"], wrt="t"), "rhs": "I_D"},
+                {"lhs": "A", "rhs": "k"},
+                {"lhs": "I_D", "rhs": ExprNode(op="/", args=["A", "D_p"])},
+            ],
+        )
+        env = mod._solve_time_series(
+            m,
+            base_bindings={"k": 1.0e-16},
+            initial_state_values={"D_p": 2.0e-7},
+            time_span=TimeSpan(start=0.0, end=1200.0),
+            n_points=51,
+        )
+        # Analytical: D_p(t) = sqrt(D_p0² + 2*A*t)
+        expected = np.sqrt(2.0e-7**2 + 2.0 * 1.0e-16 * env["t"])
+        np.testing.assert_allclose(env["D_p"], expected, rtol=1e-4)
+        # I_D trajectory comes from algebraic post-processing
+        np.testing.assert_allclose(env["I_D"], 1.0e-16 / env["D_p"], rtol=1e-4)
 
 
 class IntegrationTest(unittest.TestCase):
@@ -402,6 +485,109 @@ class IntegrationTest(unittest.TestCase):
             rc = mod.run(root / "components")
             self.assertEqual(rc, 0)
             self.assertFalse((root / "components" / "t" / "t.plots").exists())
+
+    def test_time_series_ode_renders(self):
+        # ODE component with time_span + initial_state should render
+        # one curve per plot via the integration path (mirrors
+        # DiameterGrowthRate's figure_13_2 examples).
+        body = {
+            "esm": "0.1.0",
+            "metadata": {"name": "Decay"},
+            "models": {
+                "Decay": {
+                    "variables": {
+                        "k": {"type": "parameter", "default": 0.5},
+                        "y": {"type": "state"},
+                    },
+                    "equations": [
+                        {
+                            "lhs": {"op": "D", "wrt": "t", "args": ["y"]},
+                            "rhs": {"op": "*", "args": [-1, "k", "y"]},
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "decay",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "initial_state": {
+                                "type": "per_variable",
+                                "values": {"y": 1.0},
+                            },
+                            "plots": [
+                                {
+                                    "id": "y_curve",
+                                    "type": "line",
+                                    "x": {"variable": "t", "label": "t"},
+                                    "y": {"variable": "y", "label": "y"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "decay")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "decay" / "decay.plots" / "decay-y_curve.png"
+            self.assertTrue(png.is_file(), f"expected {png} to exist")
+            self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_time_series_ode_with_sweep_renders(self):
+        # ODE + 1-D parameter_sweep: one integration per grid point, one
+        # plot with multiple curves overlaid.
+        body = {
+            "esm": "0.1.0",
+            "metadata": {"name": "Decay"},
+            "models": {
+                "Decay": {
+                    "variables": {
+                        "k": {"type": "parameter", "default": 0.5},
+                        "y": {"type": "state"},
+                    },
+                    "equations": [
+                        {
+                            "lhs": {"op": "D", "wrt": "t", "args": ["y"]},
+                            "rhs": {"op": "*", "args": [-1, "k", "y"]},
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "decay_sweep",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "initial_state": {
+                                "type": "per_variable",
+                                "values": {"y": 1.0},
+                            },
+                            "parameter_sweep": {
+                                "type": "cartesian",
+                                "dimensions": [
+                                    {"parameter": "k", "values": [0.25, 0.5, 1.0]}
+                                ],
+                            },
+                            "plots": [
+                                {
+                                    "id": "family",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "y"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "decay")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "decay" / "decay.plots" / "decay_sweep-family.png"
+            self.assertTrue(png.is_file())
+            self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
     def test_skips_components_with_time_derivatives(self):
         body = {
