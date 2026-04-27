@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Generate components/gaschem/fastjx.esm — esm-tzp soak test (revised target).
+"""Generate components/gaschem/fastjx.esm — full 13-J-rate version (mdl-09u).
 
-Migrates GasChem.jl `FastJX_interpolation_troposphere` (interpolations_FastJX.jl):
-  - Actinic flux at 18 wavelengths interpolated bilinearly from precomputed BSpline
-    tables (Z_all in tropospheric_interpolation_data.bson) keyed on (P, cosSZA).
-    No carried-state radiative transfer scan — bilinear over a static 2D grid.
-  - cosSZA via §4.7 inclusion of lib/solar.esm (Solar.cos_zenith).
-  - 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_NO3a, j_NO3b, j_N2O5, j_O31D,
-    j_o32OH, j_CH3OOH, j_NO2, j_ActAld, j_PAN) as AST sum-products of σ_X(T) and F_i.
+Migrates GasChem.jl `FastJX_interpolation_troposphere` (interpolations_FastJX.jl)
+using the v0.3 named tensor-interpolation primitives `interp.linear` and
+`interp.bilinear` (esm-spec §9.2 / esm-94w / esm-q7a):
+
+  - 18 actinic-flux observed F_i = interp.bilinear(Z_all[i], P_axis, cosSZA_axis,
+    P, cos_sza). Replaces the upstream BSpline-Linear extrapolate(_, Flat()) flux
+    interpolators. One symbolic node per F_i instead of ~30 inlined searchsorted+
+    clamp+blend nodes — sized for MTK structural_simplify.
+  - σ_X observed per (species, bin) = interp.linear(σ_table_per_T_at_bin, T_grid, T)
+    Replaces the prior chained searchsorted+index AST. One symbolic node per σ.
+  - ϕ_O31D observed per bin = interp.linear(...). Same shape.
+  - 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_O31D, j_o32OH, j_NO2, j_NO3a,
+    j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, j_PAN) as AST sum-products.
+  - cos_sza accepted as an input parameter. (mdl-0u6 mounted lib/solar.esm via §4.7
+    and read Solar.cos_zenith, but the ESS Julia binding's namespace_expr drops
+    subsystem-scoped refs in parent expressions — see mdl-2aq. Until that bug
+    is fixed, downstream callers feed cos_sza directly; this keeps numeric
+    agreement testable end-to-end without dropping the bilinear flux pipeline.)
   - adjust_j_o31D inline (no carried state).
 
 Inputs (read at gen time):
@@ -39,132 +50,70 @@ def Op(o, *args):
     return {"op": o, "args": list(args)}
 
 
-def Idx(arr, *idxs):
-    return {"op": "index", "args": [arr, *idxs]}
-
-
 # ---------------------------------------------------------------------------
-# Search / index / linear-blend helpers
+# Primitive-based interpolation expressions
 # ---------------------------------------------------------------------------
 
-def clamp_idx(raw, lo, hi):
-    """max(lo, min(hi, raw)) — keep i-1 and i in valid 1..N range for index ops."""
-    return Op("max", lo, Op("min", hi, raw))
+def bilinear_F(z_const_2d, p_grid_const, c_grid_const):
+    """interp.bilinear(table, axis_x, axis_y, x, y) for an actinic-flux bin.
 
+    Single fn-op node — the binding handles searchsorted + corner blend +
+    flat extrapolation in one closed-form primitive.
 
-def linear_blend_1d(table_const, grid_const, i_clamp_lo, i_clamp_hi, x_var, prefix=""):
-    """AST for linear interpolation of `table_const` at `x_var` over `grid_const`.
-
-    Caller declares `prefix`-named observed variables for the searchsorted index.
-    Returns the AST expression for the interpolated value at x_var.
-
-    Recipe (from lib/interp.esm):
-        i_raw  = searchsorted(grid, x)
-        i      = max(i_clamp_lo, min(i_clamp_hi, i_raw))
-        t_raw  = (x - grid[i-1]) / (grid[i] - grid[i-1])
-        t      = clamp(t_raw, 0, 1)
-        y      = table[i-1] + t * (table[i] - table[i-1])
+    NB: Julia JSON.jl serializes a 23×61 Matrix as 61 outer rows × 23 inner
+    columns (column-major, the column ends up as the outer JSON dimension).
+    Z_all[i] is Float64 indexed as (P, cosSZA) but its JSON is (cosSZA, P).
+    So at the binding boundary axis_x = cosSZA (61) and axis_y = P (23), and
+    the query is interp.bilinear(table, cosSZA_axis, P_axis, cos_sza, P).
     """
-    i_raw = fn("interp.searchsorted", x_var, grid_const)
-    i = clamp_idx(i_raw, i_clamp_lo, i_clamp_hi)
-    i_minus_1 = Op("-", i, 1)
-    g_lo = Idx(grid_const, i_minus_1)
-    g_hi = Idx(grid_const, i)
-    t_raw = Op("/", Op("-", x_var, g_lo), Op("-", g_hi, g_lo))
-    t = Op("max", 0.0, Op("min", 1.0, t_raw))
-    y_lo = Idx(table_const, i_minus_1)
-    y_hi = Idx(table_const, i)
-    return Op("+", y_lo, Op("*", t, Op("-", y_hi, y_lo)))
-
-
-def bilinear_F(z_const_2d, p_grid_const, c_grid_const, P_n, C_n):
-    """AST for bilinear interpolation of a 2D (P, cosSZA) table at (P, cos_sza).
-
-    The table z[i_P, i_C] is a 2D const array; grids are 1D const arrays.
-    Out-of-range queries clamp to the boundary value (matching extrapolate(_, Flat()).
-    Returns the scalar AST expression for the interpolated table value.
-    """
-    iP_raw = fn("interp.searchsorted", "P", p_grid_const)
-    iP = clamp_idx(iP_raw, 2, P_n)
-    iP_m1 = Op("-", iP, 1)
-    pG_lo = Idx(p_grid_const, iP_m1)
-    pG_hi = Idx(p_grid_const, iP)
-    aP = Op("max", 0.0,
-           Op("min", 1.0,
-              Op("/", Op("-", "P", pG_lo), Op("-", pG_hi, pG_lo))))
-
-    iC_raw = fn("interp.searchsorted", "cos_sza", c_grid_const)
-    iC = clamp_idx(iC_raw, 2, C_n)
-    iC_m1 = Op("-", iC, 1)
-    cG_lo = Idx(c_grid_const, iC_m1)
-    cG_hi = Idx(c_grid_const, iC)
-    aC = Op("max", 0.0,
-           Op("min", 1.0,
-              Op("/", Op("-", "cos_sza", cG_lo), Op("-", cG_hi, cG_lo))))
-
-    z00 = Idx(z_const_2d, iP_m1, iC_m1)
-    z10 = Idx(z_const_2d, iP,    iC_m1)
-    z01 = Idx(z_const_2d, iP_m1, iC)
-    z11 = Idx(z_const_2d, iP,    iC)
-
-    one_aP = Op("-", 1.0, aP)
-    one_aC = Op("-", 1.0, aC)
-    return Op("+",
-              Op("*", one_aP, one_aC, z00),
-              Op("*", aP,     one_aC, z10),
-              Op("*", one_aP, aC,     z01),
-              Op("*", aP,     aC,     z11))
+    return fn("interp.bilinear", z_const_2d, c_grid_const, p_grid_const, "cos_sza", "P")
 
 
 def sigma_at_T(T_grid, sigmas_per_T, bin_idx):
-    """AST for σ_X[bin_idx](T) — piecewise-linear T interpolation with flat extrapolation.
+    """interp.linear(table, axis, T) for σ_X[bin_idx](T).
 
-    For 2-T grid: degenerates to single linear blend with t clamp.
-    For 3-T grid: chained ifelse on T < T_grid[2], using lo-mid then mid-hi blend.
+    For T-independent species the caller passes sigma_const directly — this
+    helper is only invoked when T_grid is non-empty. Returns a single fn-op.
     """
     n = len(T_grid)
-    if n == 0:
-        # T-independent (CH3OOH-style): return a literal scalar
-        return float(sigmas_per_T[0][bin_idx])  # caller handles
-    grid = C(T_grid)
-    table = C([sigmas_per_T[k][bin_idx] for k in range(n)])
-    if n == 2:
-        return linear_blend_1d(table, grid, 2, n, "T")
-    # n == 3 — handle by chaining: ifelse(T < T_grid[2], blend(1,2), blend(2,3))
-    # Use searchsorted-based two-step: search returns 1, 2, 3, or 4.
-    # i_clamp = max(2, min(3, i_raw))  → bracket between (1,2) for low T or (2,3) for high T
-    i_raw = fn("interp.searchsorted", "T", grid)
-    i = clamp_idx(i_raw, 2, n)
-    i_m1 = Op("-", i, 1)
-    g_lo = Idx(grid, i_m1)
-    g_hi = Idx(grid, i)
-    t_raw = Op("/", Op("-", "T", g_lo), Op("-", g_hi, g_lo))
-    t = Op("max", 0.0, Op("min", 1.0, t_raw))
-    y_lo = Idx(table, i_m1)
-    y_hi = Idx(table, i)
-    return Op("+", y_lo, Op("*", t, Op("-", y_hi, y_lo)))
+    assert n >= 2, f"sigma_at_T expects ≥2-point T grid, got {T_grid}"
+    table = [sigmas_per_T[k][bin_idx] for k in range(n)]
+    return fn("interp.linear", C(table), C(T_grid), "T")
 
 
 def phi_O31D_at_T(phi_T_grid, phi_per_T, bin_idx):
-    """AST for ϕ_O31D[bin_idx](T) — same 3-T-grid pattern as σ."""
-    grid = C(phi_T_grid)
-    table = C([phi_per_T[k][bin_idx] for k in range(len(phi_T_grid))])
+    """interp.linear(table, axis, T) for ϕ_O31D[bin_idx](T)."""
     n = len(phi_T_grid)
-    i_raw = fn("interp.searchsorted", "T", grid)
-    i = clamp_idx(i_raw, 2, n)
-    i_m1 = Op("-", i, 1)
-    g_lo = Idx(grid, i_m1)
-    g_hi = Idx(grid, i)
-    t_raw = Op("/", Op("-", "T", g_lo), Op("-", g_hi, g_lo))
-    t = Op("max", 0.0, Op("min", 1.0, t_raw))
-    y_lo = Idx(table, i_m1)
-    y_hi = Idx(table, i)
-    return Op("+", y_lo, Op("*", t, Op("-", y_hi, y_lo)))
+    table = [phi_per_T[k][bin_idx] for k in range(n)]
+    return fn("interp.linear", C(table), C(phi_T_grid), "T")
 
 
 # ---------------------------------------------------------------------------
 # Build .esm
 # ---------------------------------------------------------------------------
+
+# Map .esm species name → upstream (sigma source, phi handling). For NO3a/NO3b
+# the upstream applies a fixed branching ratio onto the shared σ_NO3 mean rate:
+#   j_NO3a = j_mean(σ_NO3, ϕ=1.0) · 0.886
+#   j_NO3b = j_mean(σ_NO3, ϕ=1.0) · 0.114
+#
+# Otherwise j_X = (Σ_i F_i · σ_X_i) · ϕ_X for constant ϕ, or
+#           j_O31D = Σ_i F_i · σ_O3_i · ϕ_O31D_i(T).
+J_RATE_SPECS = [
+    # (j_var, sigma_species, phi_var | phi_const | None, branch_ratio)
+    ("j_H2O2",   "H2O2",   None,        None),
+    ("j_H2COa",  "H2COa",  None,        None),
+    ("j_H2COb",  "H2COb",  None,        None),
+    ("j_O3",     "O3",     None,        None),
+    ("j_NO2",    "NO2",    None,        None),
+    ("j_NO3a",   "NO3",    None,        0.886),
+    ("j_NO3b",   "NO3",    None,        0.114),
+    ("j_N2O5",   "N2O5",   None,        None),
+    ("j_CH3OOH", "CH3OOH", None,        None),
+    ("j_ActAld", "ActAld", None,        None),
+    ("j_PAN",    "PAN",    None,        None),
+]
+
 
 def build():
     data = json.loads(DATA_PATH.read_text())
@@ -185,21 +134,6 @@ def build():
     v = {}
 
     # Inputs
-    v["t_utc"] = {
-        "type": "parameter", "units": "s", "default": 0.0,
-        "description": (
-            "UTC seconds since the Unix epoch. Forward to Solar.t_utc via "
-            "parameter_overrides at use time. Defines the cosSZA evaluation moment."
-        ),
-    }
-    v["lat"] = {
-        "type": "parameter", "units": "deg", "default": 40.0,
-        "description": "Latitude (deg N). Forward to Solar.lat at use time.",
-    }
-    v["lon"] = {
-        "type": "parameter", "units": "deg", "default": -97.0,
-        "description": "Longitude (deg E). Forward to Solar.lon at use time.",
-    }
     v["T"] = {
         "type": "parameter", "units": "K", "default": 298.0,
         "description": "Air temperature (K). Drives σ_X(T) and ϕ_O31D(T) and adjust_j_o31D.",
@@ -215,50 +149,35 @@ def build():
         "type": "parameter", "units": "ppb", "default": 450.0,
         "description": "Water vapor mixing ratio (ppb). Feeds adjust_j_o31D.",
     }
-
-    # cos_sza — pulled from the Solar subsystem
     v["cos_sza"] = {
-        "type": "observed", "units": "1",
+        "type": "parameter", "units": "1", "default": 0.0,
         "description": (
-            "Cosine of the solar zenith angle, sourced from the standard-library "
-            "Solar subsystem (lib/solar.esm) via §4.6 scoped reference. Replaces the "
-            "upstream @register_symbolic cos_solar_zenith_angle (closed-function-registry "
-            "compliant)."
+            "Cosine of the solar zenith angle. Input — provided by the caller "
+            "(typically lib/solar.esm via Solar.cos_zenith once mdl-2aq fixes "
+            "the §4.6 cross-subsystem ref handling in the ESS Julia binding)."
         ),
-        "expression": "Solar.cos_zenith",
     }
 
-    # 18 actinic-flux INPUT parameters. Originally migrated as bilinear AST over
-    # the precomputed (P, cosSZA) Z_all table, but MTK 11.x structural-simplify on
-    # the resulting expression tree (18 bilinear nodes × ~30 const-indexed AST nodes
-    # = ~540 nodes, multiplied by sum-products against ~110 σ observed) doesn't
-    # complete in tractable wall time on this hardware. The bilinear pipeline is
-    # numerically equivalent to a 2D linear interpolation; rather than bloat the
-    # MTK system, F_i are accepted as INPUT PARAMETERS (callers pin them per
-    # atmospheric column from any compatible flux source). Inline tests pin F_i
-    # to upstream-computed reference values so j_X agreement is still checked
-    # end-to-end.
+    # 18 actinic-flux observed F_i — interp.bilinear over Z_all[i] table at (P, cos_sza).
+    # Each F_i is a single fn-op node, replacing the upstream flux_interp_i
+    # @register_symbolic call. The binding's @register_symbolic on
+    # interp.bilinear keeps these from being expanded at structural_simplify time.
     for i in range(18):
         v[f"F_{i+1}"] = {
-            "type": "parameter", "units": "1/s", "default": 0.0,
+            "type": "observed", "units": "1/s",
             "description": (
-                f"Actinic flux at wavelength bin {i+1} ({data['WL'][i]:.0f} nm). "
-                "Input — provided by an external flux source (the upstream Fast-JX "
-                "BSpline-Linear interpolation over the precomputed Z_all (P, cosSZA) "
-                "table is a natural choice). The inline tests pin F_i to reference "
-                "values computed from GasChem.jl/src/tropospheric_interpolation_data.bson "
-                "at the test scenario's (P, cosSZA)."
+                f"Actinic flux at wavelength bin {i+1} ({data['WL'][i]:.0f} nm), "
+                f"bilinearly interpolated from the precomputed Z_all[{i+1}] table "
+                f"({P_n}×{C_n}) on the (tropospheric_P, cosSZA) grid via interp.bilinear. "
+                "Replaces the upstream BSpline-Linear extrapolate(_, Flat()) flux interpolator."
             ),
+            "expression": bilinear_F(C(Z_all[i]), p_grid_const, c_grid_const),
         }
 
-    # σ_X(T) per-bin variables — one observed σ per (species, bin).
-    # Limit to the SuperFast subset to keep the MTK simplification tractable on the
-    # large expression tree (full 13-species set takes >> 10 min in MTK 11.x; the
-    # 5-species subset matches the SuperFast coupling and is sufficient to soak-test
-    # the closed-function-registry + §4.7 inclusion + searchsorted+index pipeline).
-    SUPERFAST_SPECIES = {"NO2", "H2O2", "H2COa", "H2COb", "CH3OOH", "O3"}
-    species = {k: v for k, v in species.items() if k in SUPERFAST_SPECIES}
-    for sp_name, sp in species.items():
+    # σ_X(T) per-bin variables — one observed σ per (species, bin), full 10-species set.
+    SIGMA_SPECIES = sorted(species.keys())
+    for sp_name in SIGMA_SPECIES:
+        sp = species[sp_name]
         for bin_i in range(18):
             if "sigma_const" in sp:
                 # T-independent (e.g. CH3OOH)
@@ -268,7 +187,7 @@ def build():
                 expr = sigma_at_T(sp["T_grid"], sp["sigma"], bin_i)
                 desc_extra = (
                     f" Linearly interpolated in T over the {len(sp['T_grid'])}-point grid "
-                    f"{sp['T_grid']} K with flat extrapolation."
+                    f"{sp['T_grid']} K with flat extrapolation (interp.linear)."
                 )
             v[f"sigma_{sp_name}_{bin_i+1}"] = {
                 "type": "observed", "units": "1",
@@ -286,74 +205,67 @@ def build():
             "description": (
                 f"ϕ_O31D quantum yield at wavelength bin {bin_i+1}, "
                 "linearly interpolated in T over the 3-point grid "
-                f"{phi_O31D['T_grid']} K (Burkholder/JPL-10)."
+                f"{phi_O31D['T_grid']} K (Burkholder/JPL-10) via interp.linear."
             ),
             "expression": phi_O31D_at_T(phi_O31D["T_grid"], phi_O31D["phi"], bin_i),
         }
 
-    # j_X = sum_i F_i * σ_X_i * ϕ_X (constant ϕ for most species)
-    def sum_product(species_name, phi_var=None, phi_const=None):
-        terms = []
-        for i in range(1, 19):
-            if phi_var is None:
-                # constant ϕ: F_i * σ_i * phi
-                terms.append(Op("*", f"F_{i}", f"sigma_{species_name}_{i}"))
-            else:
-                # T-dependent ϕ_O31D: F_i * σ_i * phi_O31D_i
-                terms.append(Op("*", f"F_{i}", f"sigma_{species_name}_{i}", f"{phi_var}_{i}"))
+    # j_X = (Σ_i F_i · σ_X_i) · ϕ_X (constant) or Σ_i F_i · σ_X_i · ϕ_O31D_i (T-dep)
+    def sum_product_const_phi(sp_name, phi_const, branch=None):
+        terms = [Op("*", f"F_{i}", f"sigma_{sp_name}_{i}") for i in range(1, 19)]
         s = Op("+", *terms)
-        if phi_var is None:
-            return Op("*", s, phi_const)
-        return s
+        factor = phi_const if branch is None else (phi_const * branch)
+        return Op("*", s, factor)
 
-    v["j_H2O2"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_H2O2 = (Σ_i F_i · σ_H2O2_i) · ϕ_H2O2.",
-        "expression": sum_product("H2O2", phi_const=species["H2O2"]["phi"]),
-    }
-    v["j_H2COa"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_H2COa = (Σ_i F_i · σ_H2COa_i) · ϕ_H2COa.",
-        "expression": sum_product("H2COa", phi_const=species["H2COa"]["phi"]),
-    }
-    v["j_H2COb"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_H2COb = (Σ_i F_i · σ_H2COb_i) · ϕ_H2COb.",
-        "expression": sum_product("H2COb", phi_const=species["H2COb"]["phi"]),
-    }
-    v["j_O3"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_O3 = (Σ_i F_i · σ_O3_i) · ϕ_O3.",
-        "expression": sum_product("O3", phi_const=species["O3"]["phi"]),
-    }
+    def sum_product_phi_O31D(sp_name):
+        terms = [
+            Op("*", f"F_{i}", f"sigma_{sp_name}_{i}", f"phi_O31D_{i}")
+            for i in range(1, 19)
+        ]
+        return Op("+", *terms)
+
+    for j_var, sigma_sp, _phi_var, branch in J_RATE_SPECS:
+        phi_const = species[sigma_sp]["phi"]
+        if branch is None:
+            desc = f"j_{sigma_sp} = (Σ_i F_i · σ_{sigma_sp}_i) · ϕ_{sigma_sp}."
+        else:
+            desc = (
+                f"{j_var} = (Σ_i F_i · σ_NO3_i) · ϕ_NO3 · {branch} "
+                f"(branching ratio for the {'(NO + O2)' if branch == 0.886 else '(NO2 + O)'} channel; "
+                "upstream FastJX_interpolation_troposphere applies this fixed split to the shared "
+                "j_NO3 mean rate)."
+            )
+        v[j_var] = {
+            "type": "observed", "units": "1/s",
+            "description": desc,
+            "expression": sum_product_const_phi(sigma_sp, phi_const, branch),
+        }
+
+    # j_O31D — sigma_O3 with T-dependent phi_O31D (special case)
     v["j_O31D"] = {
         "type": "observed", "units": "1/s",
         "description": (
             "j_O31D = Σ_i F_i · σ_O3_i · ϕ_O31D_i(T). Uses σ_O3 with the temperature-"
             "dependent ϕ_O31D quantum yield (Burkholder/JPL-10)."
         ),
-        "expression": sum_product("O3", phi_var="phi_O31D"),
+        "expression": sum_product_phi_O31D("O3"),
     }
-    v["j_NO2"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_NO2 = (Σ_i F_i · σ_NO2_i) · ϕ_NO2.",
-        "expression": sum_product("NO2", phi_const=species["NO2"]["phi"]),
-    }
-    v["j_CH3OOH"] = {
-        "type": "observed", "units": "1/s",
-        "description": "j_CH3OOH = (Σ_i F_i · σ_CH3OOH_i) · ϕ_CH3OOH (T-independent σ).",
-        "expression": sum_product("CH3OOH", phi_const=species["CH3OOH"]["phi"]),
-    }
-    # adjust_j_o31D — inline AST (no carried state)
-    A = 6.02e23
-    R = 8.314e6
+
+    # adjust_j_o31D — inline AST (no carried state).
+    # NB: A is factored as a product of factors each < Int64.max to avoid mdl-ntu —
+    # the ESS Julia binding's NumExpr int-coercion overflows Int64 for any
+    # integer-valued Float64 literal > Int64.max (~9.2e18). 6.02e23 is split as
+    # 6.02 (fractional, not int-coerced) * 1e15 * 1e8 (each ≤ 2^53, Int64-safe).
+    # R = 8.314e6 is left as a literal: 8.314 has fractional bits in Float64,
+    # so the product has fractional bits and is not coerced.
+    A_ast = Op("*", 6.02, 1.0e15, 1.0e8)  # Avogadro (molec/mol)
     v["num_density"] = {
         "type": "observed", "units": "1",
         "description": (
             "Air number density (molec/cm^3, expressed unitless to match the upstream "
             "adjust_j_o31D convention): A · P / (R · T)."
         ),
-        "expression": Op("/", Op("*", A, "P"), Op("*", R, "T")),
+        "expression": Op("/", Op("*", A_ast, "P"), Op("*", 8.314e6, "T")),
     }
     v["C_H2O"] = {
         "type": "observed", "units": "1",
@@ -427,43 +339,42 @@ def build():
     ]
 
     # ---- Tests ----
-    # Each scenario sets t_utc / Solar.t_utc, lat, Solar.lat, lon, Solar.lon, T, P, H2O
-    # and asserts the 13 j-rates against gaschem.jl reference values within tolerance.
     tests = []
     for sc in scenarios:
         po = {
-            "t_utc": sc["t_unix"], "lat": sc["lat"], "lon": sc["long"],
             "T": sc["T"], "P": sc["P"], "H2O": sc["H2O"],
-            "Solar.t_utc": sc["t_unix"], "Solar.lat": sc["lat"], "Solar.lon": sc["long"],
+            "cos_sza": sc["cosSZA"],
         }
-        # Pin F_i to upstream reference flux values for this (P, cosSZA).
-        for i in range(18):
-            po[f"F_{i+1}"] = sc["F"][i]
-        # Reference values
+        # Reference values — full 13 J-rates plus a few observed F_i spot-checks.
+        # cos_sza is now an input parameter, pinned via parameter_overrides.
         asserts = [
-            {"variable": "cos_sza",  "time": 0.0, "expected": sc["cosSZA"]},
             {"variable": "j_O3",     "time": 0.0, "expected": sc["j_O3"]},
             {"variable": "j_O31D",   "time": 0.0, "expected": sc["j_O31D"]},
             {"variable": "j_o32OH",  "time": 0.0, "expected": sc["j_o32OH"]},
             {"variable": "j_NO2",    "time": 0.0, "expected": sc["j_NO2"]},
+            {"variable": "j_NO3a",   "time": 0.0, "expected": sc["j_NO3a"]},
+            {"variable": "j_NO3b",   "time": 0.0, "expected": sc["j_NO3b"]},
+            {"variable": "j_N2O5",   "time": 0.0, "expected": sc["j_N2O5"]},
             {"variable": "j_H2O2",   "time": 0.0, "expected": sc["j_H2O2"]},
             {"variable": "j_H2COa",  "time": 0.0, "expected": sc["j_H2COa"]},
             {"variable": "j_H2COb",  "time": 0.0, "expected": sc["j_H2COb"]},
             {"variable": "j_CH3OOH", "time": 0.0, "expected": sc["j_CH3OOH"]},
+            {"variable": "j_ActAld", "time": 0.0, "expected": sc["j_ActAld"]},
+            {"variable": "j_PAN",    "time": 0.0, "expected": sc["j_PAN"]},
+            # Spot-check the bilinear flux pipeline by pinning a couple of F_i
+            # to the reference values from the same upstream interpolators.
+            {"variable": "F_12",     "time": 0.0, "expected": sc["F"][11]},  # 295 nm
+            {"variable": "F_14",     "time": 0.0, "expected": sc["F"][13]},  # 310 nm
         ]
-        # cosSZA derives from Solar.cos_zenith — the lib uses a NOAA formula that
-        # may differ at the few-arcminute level from the upstream cos_solar_zenith_angle.
-        # Use a slightly looser cosSZA tolerance to absorb that, and a tighter rel
-        # tolerance for the j-rates (the dominant source of numerical drift is the
-        # 2D bilinear interpolation, accurate to <1% by inspection).
         tests.append({
             "id": sc["id"],
             "description": (
-                f"Reference scenario: t_unix={sc['t_unix']:.0f} s, lat={sc['lat']}°, "
-                f"lon={sc['long']}°, T={sc['T']} K, P={sc['P']:.0f} Pa, H2O={sc['H2O']} ppb. "
-                "Compares the migrated component's 8 J-rates (SuperFast subset + j_O3/j_O31D) "
-                "against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at "
-                "the same conditions (see scripts/migrations/extract_fastjx_data.jl)."
+                f"Reference scenario: cos_sza={sc['cosSZA']:.4f} (pinned from "
+                f"t_unix={sc['t_unix']:.0f} s, lat={sc['lat']}°, lon={sc['long']}°), "
+                f"T={sc['T']} K, P={sc['P']:.0f} Pa, H2O={sc['H2O']} ppb. "
+                "Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes "
+                "against the upstream GasChem.jl FastJX_interpolation_troposphere reference "
+                "computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl)."
             ),
             "parameter_overrides": po,
             "time_span": {"start": 0.0, "end": 1.0},
@@ -485,45 +396,49 @@ def build():
             "values": {"NO2": 1.0e-9},
         },
         "parameters": {
-            "t_utc": sc0["t_unix"], "lat": sc0["lat"], "lon": sc0["long"],
             "T": sc0["T"], "P": sc0["P"], "H2O": sc0["H2O"],
-            "Solar.t_utc": sc0["t_unix"], "Solar.lat": sc0["lat"], "Solar.lon": sc0["long"],
+            "cos_sza": sc0["cosSZA"],
         },
         "time_span": {"start": 0.0, "end": 3600.0},
     }]
 
     notes = (
-        "\n\n=== MIGRATION NOTES (mdl-0u6) ===\n"
-        "Migration scope: soak test of esm-tzp v0.3 spec changes — REVISED TARGET.\n"
+        "\n\n=== MIGRATION NOTES (mdl-09u) ===\n"
+        "Migration scope: full 13-J-rate FastJX_interpolation_troposphere using the v0.3\n"
+        "named tensor-interpolation primitives (esm-94w / esm-q7a). Follows mdl-0u6's\n"
+        "trimmed soak test, which deferred the bilinear flux pipeline + 5 J-rates because\n"
+        "the previous inlined-AST formulation (~10 nodes per lookup × 18 wavelengths\n"
+        "+ 220 σ chains) blew MTK 11.x structural_simplify wall time past 5 minutes.\n"
         "\n"
         "Source: GasChem.jl/src/interpolations_FastJX.jl (FastJX_interpolation_troposphere).\n"
-        "This is the simpler interpolation-based variant; the radiative-transfer Fast-JX\n"
-        "in src/Fast-JX.jl was deferred (sphere2J / Beer-Lambert needs a sequential-reduction\n"
-        "primitive not in the v0.3 closed function registry).\n"
         "\n"
         "Mappings:\n"
-        "  - cos_solar_zenith_angle(t+t_ref, lat, long)  →  Solar.cos_zenith via §4.7\n"
-        "    inclusion of lib/solar.esm. Replaces the upstream @register_symbolic call.\n"
-        "  - flux_interp_1..18(P, csa)  →  18 observed F_i variables, each a bilinear AST\n"
-        "    over (P, cosSZA) of the precomputed Z_all[i] table (23×61 floats), composed\n"
-        "    from interp.searchsorted (§9.2) + index (§4.3.3) + clamp/blend AST. Replaces\n"
-        "    18 @register_symbolic calls.\n"
-        "  - σ_X interp(T)  →  18 observed σ_X_i per species, each a 2- or 3-T-grid linear\n"
-        "    blend with flat extrapolation, composed from interp.searchsorted + index.\n"
-        "  - ϕ_O31D(T) interp  →  18 observed phi_O31D_i with the same pattern.\n"
+        "  - flux_interp_1..18(P, csa)  →  18 observed F_i = interp.bilinear(Z_all[i],\n"
+        "    P_axis, cosSZA_axis, P, cos_sza). Single fn-op per F_i, kept opaque to MTK\n"
+        "    structural_simplify by the @register_symbolic on the binding side.\n"
+        "  - σ_X interp(T)  →  σ_X_i = interp.linear(σ_per_T, T_grid, T) for each\n"
+        "    (species, bin). T-independent species use a literal scalar.\n"
+        "  - ϕ_O31D(T) interp  →  phi_O31D_i = interp.linear(...) — same shape.\n"
         "  - j_mean_X(T, fluxes)  →  observed j_X = (Σ_i F_i · σ_X_i [· phi_O31D_i]) · ϕ_X.\n"
+        "  - j_NO3a / j_NO3b      →  shared j_NO3 mean rate scaled by 0.886 / 0.114\n"
+        "    (NO3 → NO + O2 vs NO3 → NO2 + O branching ratio).\n"
         "  - adjust_j_o31D(T, P, H2O)  →  inline observed C_H2O / C_O2 / C_N2 / C_H2 +\n"
         "    rate-constant AST + j_O31D_adj = RO1DplH2O / RO1D. j_o32OH = j_O31D · j_O31D_adj.\n"
         "\n"
         "All upstream registered functions are recovered as AST compositions of the closed\n"
-        "function registry + AST ops. No registered functions remain in the migrated component.\n"
+        "function registry (interp.linear + interp.bilinear) + AST ops. No registered\n"
+        "functions remain in the migrated component.\n"
         "\n"
-        "Note on Solar.t_utc routing:\n"
-        "  The Solar subsystem declares t_utc / lat / lon as parameters. In coupled use,\n"
-        "  callers must pin Solar.t_utc (etc.) to the same values as FastJX.t_utc — the\n"
-        "  inline tests do this via parameter_overrides. The upstream FastJX uses time-\n"
-        "  varying cosSZA(t + t_ref); for box-model tests at a fixed evaluation moment, a\n"
-        "  parameter-pinned t_utc is mathematically equivalent.\n"
+        "Note on cos_sza routing:\n"
+        "  mdl-0u6 mounted lib/solar.esm via §4.7 inclusion and read Solar.cos_zenith\n"
+        "  through a §4.6 scoped reference. The ESS Julia binding's namespace_expr\n"
+        "  short-circuits on dotted names and never rewrites Sub.x → Parent.Sub.x for\n"
+        "  parent-model expressions, so the prior file failed to load (see mdl-2aq).\n"
+        "  Until that bug is fixed, cos_sza is exposed as a FastJX parameter and the\n"
+        "  caller pins it (typically by mounting Solar at a higher level and forwarding\n"
+        "  cos_sza ← Solar.cos_zenith there). Tests pin cos_sza to lib/solar.esm's\n"
+        "  reference value computed in extract_fastjx_data.jl using the same NOAA\n"
+        "  Spencer-Fourier formula.\n"
     )
 
     doc = {
@@ -534,18 +449,20 @@ def build():
                 notes +
                 "\n=== END MIGRATION NOTES ===\n\n"
                 "Fast-JX UV photolysis rates (interpolation-based variant). "
-                "0-D component computing 8 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, "
-                "j_O31D, j_o32OH, j_NO2, j_CH3OOH — the SuperFast coupling subset plus "
-                "j_O3) from atmospheric (t_utc, lat, lon, T, P, H2O). Mounts the standard-library Solar subsystem "
-                "via §4.7 reference for solar-zenith-angle geometry. Migrated as a soak test "
-                "of the esm-tzp v0.3 spec changes (closed function registry: datetime.* + "
-                "interp.searchsorted; removal of §9 + call op)."
+                "0-D component computing 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, "
+                "j_O31D, j_o32OH, j_NO2, j_NO3a, j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, "
+                "j_PAN) from atmospheric (cos_sza, T, P, H2O). Uses the v0.3 named "
+                "tensor-interpolation primitives interp.linear (σ_X(T) and ϕ_O31D(T)) "
+                "and interp.bilinear (actinic flux F_i on a (P, cosSZA) grid) so MTK "
+                "structural_simplify sees one symbolic node per interpolation rather "
+                "than a deeply-nested chain."
             ),
             "authors": ["EarthSciML"],
             "created": "2026-04-26T00:00:00Z",
             "tags": [
-                "chemistry", "photolysis", "fast-jx", "soak-test", "esm-tzp",
-                "closed-function-registry", "interp-searchsorted", "subsystem-inclusion",
+                "chemistry", "photolysis", "fast-jx",
+                "closed-function-registry", "interp-linear", "interp-bilinear",
+                "subsystem-inclusion",
             ],
             "references": [
                 {"citation":
@@ -568,7 +485,6 @@ def build():
         "models": {
             "FastJX": {
                 "coupletype": "FastJX",
-                "subsystems": {"Solar": {"ref": "../../lib/solar.esm"}},
                 "variables": v,
                 "equations": eqs,
                 "tests": tests,
