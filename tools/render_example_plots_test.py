@@ -638,6 +638,115 @@ class IntegrationTest(unittest.TestCase):
             self.assertTrue(png.is_file())
             self.assertEqual(png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
 
+    def test_reaction_system_rate_constant_referencing_reactant_species(self):
+        # A + B -> C with rate_constant `k/A` (mass-action multiplier of A
+        # cancels symbolically — a pattern used by GEOS-Chem fullchem's R1,
+        # R4, R12 for SO2/SALAAL/SALCAL aqueous channels). Without symbolic
+        # simplification at adapter-build time the renderer would compute
+        # `(k/A) * A * B = k * B` by evaluating `k/A` first and dividing
+        # by zero whenever [A] hits 0 along the trajectory. This test
+        # exercises that exact case with A starting at 0 — integration
+        # must succeed and the plot must render.
+        body = {
+            "esm": "0.3.0",
+            "metadata": {"name": "ABC"},
+            "reaction_systems": {
+                "ABC": {
+                    "species": {
+                        "A": {"default": 0.0},
+                        "B": {"default": 1.0},
+                        "C": {"default": 0.0},
+                    },
+                    "parameters": {"k": {"default": 0.1}},
+                    "reactions": [
+                        {
+                            "id": "R1",
+                            "substrates": [
+                                {"species": "A", "stoichiometry": 1},
+                                {"species": "B", "stoichiometry": 1},
+                            ],
+                            "products": [{"species": "C", "stoichiometry": 1}],
+                            "rate": {"op": "/", "args": ["k", "A"]},
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "cancel",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "plots": [
+                                {
+                                    "id": "C_vs_t",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "C"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "abc")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "abc" / "abc.plots" / "cancel-C_vs_t.png"
+            self.assertTrue(png.is_file())
+
+    def test_reaction_system_initial_state_merges_with_defaults(self):
+        # A reaction system with two species — only one is named in the
+        # example's `initial_state.values`. The other should fall back to
+        # its declared species default rather than triggering a "missing
+        # ODE state" error. Lets fullchem-scale examples (272 species) name
+        # only the few they care about (mdl-dtm).
+        body = {
+            "esm": "0.3.0",
+            "metadata": {"name": "AB"},
+            "reaction_systems": {
+                "AB": {
+                    "species": {
+                        "A": {"default": 1.0},
+                        "B": {"default": 0.0},
+                    },
+                    "parameters": {"k": {"default": 0.5}},
+                    "reactions": [
+                        {
+                            "id": "R1",
+                            "substrates": [{"species": "A", "stoichiometry": 1}],
+                            "products": [{"species": "B", "stoichiometry": 1}],
+                            "rate": "k",
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "partial_ic",
+                            "time_span": {"start": 0.0, "end": 4.0},
+                            "initial_state": {
+                                "type": "per_variable",
+                                "values": {"A": 2.0},
+                            },
+                            "plots": [
+                                {
+                                    "id": "A_vs_t",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "A"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "ab2")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            png = root / "components" / "ab2" / "ab2.plots" / "partial_ic-A_vs_t.png"
+            self.assertTrue(png.is_file())
+
     def test_reaction_system_renders_final_state_vs_sweep(self):
         # A -> B with k swept; plot final-state B vs k. Exercises the new
         # final-state-vs-sweep dispatch path: plot.x is the swept parameter,

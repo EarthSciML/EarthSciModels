@@ -45,6 +45,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# Big reaction systems (e.g. geoschem_fullchem with 819 reactions × 272 species)
+# build per-species rhs trees hundreds of `+` ops deep, which the recursive
+# `evaluate` walks once per integration step. Default 1000 is too tight.
+sys.setrecursionlimit(max(sys.getrecursionlimit(), 10000))
+
 # Headless backend so this works in CI without a display.
 import matplotlib
 
@@ -346,6 +351,90 @@ def _extract_ode_equations(model: Model) -> tuple[dict[str, Any], list[Any]]:
     return ode_map, alg_eqs
 
 
+_COMPILED_RHS_CACHE: dict[int, tuple[Any, list[str]] | None] = {}
+
+
+def _compile_rhs_lambdify(
+    model: Any,
+    ode_map: dict[str, Any],
+    state_names: list[str],
+    plan: list[tuple[str, Any]],
+    base_bindings: dict[str, float],
+) -> Any | None:
+    """Compile the ODE rhs to a numpy-backed callable via sympy.lambdify.
+
+    The Python recursive `evaluate()` is fine for a handful of equations
+    but chokes on large mechanisms (geoschem_fullchem: 272 states, rhs
+    trees ~300 deep, ~3.5 s per evaluation × thousands of LSODA steps =
+    untractable). lambdify with cse=True produces a single closed-form
+    numpy expression that evaluates ~3000x faster, making the 819-reaction
+    system tractable.
+
+    Falls back (returns None) if lambdify or to_sympy can't handle some op
+    in the tree — caller uses the recursive path. Algebraic plan items are
+    inlined into each ode rhs by symbolic substitution so the compiled rhs
+    is a pure function of (t, state, parameters).
+
+    The compiled function is cached per `id(model)` because compilation
+    takes ~20 s for fullchem and is shared across all examples on the same
+    reaction system.
+    """
+    if not ode_map:
+        return None
+    try:
+        import sympy as sp
+    except ImportError:
+        return None
+
+    cache_key = id(model)
+    cached = _COMPILED_RHS_CACHE.get(cache_key)
+    if cached is None and cache_key not in _COMPILED_RHS_CACHE:
+        try:
+            plan_subs: dict[Any, Any] = {}
+            for name, expr in plan:
+                plan_subs[sp.Symbol(name)] = to_sympy(expr).subs(plan_subs)
+
+            sym_rhs = []
+            for s in state_names:
+                sym_rhs.append(to_sympy(ode_map[s]).subs(plan_subs))
+        except (NotImplementedError, ValueError, TypeError):
+            _COMPILED_RHS_CACHE[cache_key] = None
+            return None
+
+        free_syms: set[Any] = set()
+        for r in sym_rhs:
+            free_syms |= r.free_symbols
+        state_set = {sp.Symbol(s) for s in state_names}
+        t_sym = sp.Symbol("t")
+        param_syms = sorted(free_syms - state_set - {t_sym}, key=lambda s: s.name)
+        param_names = [s.name for s in param_syms]
+
+        state_syms = [sp.Symbol(s) for s in state_names]
+        try:
+            compiled = sp.lambdify(
+                [t_sym, state_syms, param_syms],
+                sym_rhs,
+                modules="numpy",
+                cse=True,
+            )
+        except (NotImplementedError, ValueError, TypeError):
+            _COMPILED_RHS_CACHE[cache_key] = None
+            return None
+
+        cached = (compiled, param_names)
+        _COMPILED_RHS_CACHE[cache_key] = cached
+
+    if cached is None:
+        return None
+    compiled, param_names = cached
+    param_values = [float(base_bindings.get(n, 0.0)) for n in param_names]
+
+    def rhs(t: float, y: np.ndarray) -> list[float]:
+        return list(compiled(float(t), list(y), param_values))
+
+    return rhs
+
+
 def _solve_time_series(
     model: Model,
     base_bindings: dict[str, float],
@@ -383,14 +472,16 @@ def _solve_time_series(
     bound = set(base_bindings.keys()) | set(state_names) | {"t"}
     plan = _build_resolution_plan(model, bound, equations=alg_eqs)
 
-    def rhs(t: float, y: np.ndarray) -> list[float]:
-        env: dict[str, float] = dict(base_bindings)
-        env["t"] = float(t)
-        for i, s in enumerate(state_names):
-            env[s] = float(y[i])
-        for name, expr in plan:
-            env[name] = float(evaluate(expr, env))
-        return [float(evaluate(ode_map[s], env)) for s in state_names]
+    rhs = _compile_rhs_lambdify(model, ode_map, state_names, plan, base_bindings)
+    if rhs is None:
+        def rhs(t: float, y: np.ndarray) -> list[float]:
+            env: dict[str, float] = dict(base_bindings)
+            env["t"] = float(t)
+            for i, s in enumerate(state_names):
+                env[s] = float(y[i])
+            for name, expr in plan:
+                env[name] = float(evaluate(expr, env))
+            return [float(evaluate(ode_map[s], env)) for s in state_names]
 
     y0 = [float(initial_state_values[s]) for s in state_names]
     t0, t1 = float(time_span.start), float(time_span.end)
@@ -792,6 +883,13 @@ def _build_rate_expression(rate_constant: Any, reactants: dict[str, float]) -> A
     Reactant stoichiometries are typically 1 (omit the `^1` factor) and
     occasionally 2 (e.g. HO2+HO2 → ... uses `HO2^2`). Fractional reactant
     stoichiometry is rare in real mechanisms but handled for completeness.
+
+    When `rate_constant` references a reactant species (e.g. GEOS-Chem's
+    aqueous channels with rate `k/SO2` × mass-action `SO2·HMS·OH` to express
+    a zero-order-in-SO2 channel), the species cancels symbolically. The
+    raw left-folded form would compute `k/SO2` first and divide by zero
+    whenever `[SO2] = 0` along the trajectory; route through sympy so the
+    cancellation happens at build time.
     """
     factors: list[Any] = [rate_constant]
     for sp, n in reactants.items():
@@ -806,6 +904,13 @@ def _build_rate_expression(rate_constant: Any, reactants: dict[str, float]) -> A
     expr = factors[0]
     for f in factors[1:]:
         expr = ExprNode(op="*", args=[expr, f])
+
+    rate_free = free_variables(rate_constant) if isinstance(rate_constant, ExprNode) else set()
+    if rate_free & set(reactants.keys()):
+        try:
+            expr = from_sympy(to_sympy(expr))
+        except (NotImplementedError, ValueError, TypeError):
+            pass
     return expr
 
 
@@ -943,14 +1048,21 @@ def _render_one_example(
         return
 
     has_dynamics = _component_has_dynamics(model)
-    initial_values = _initial_state_values(example)
-    if has_dynamics and initial_values is None:
-        # Fall back to per-state defaults when the example omits initial_state —
-        # reaction_system species typically declare reservoir defaults that
-        # serve as plausible t=0 initial conditions for time-series rendering.
-        fallback = _state_defaults(model)
-        if fallback:
-            initial_values = fallback
+    explicit_ic = _initial_state_values(example)
+    initial_values = None
+    if has_dynamics:
+        # Reaction-system species typically declare reservoir defaults that
+        # serve as plausible t=0 initial conditions; merge any explicit
+        # `initial_state.values` over the defaults so an example only has to
+        # name the species it actually cares about (the GEOS-Chem fullchem
+        # mechanism has 272 states — listing them all per example is not
+        # workable).
+        defaults = _state_defaults(model)
+        if defaults or explicit_ic:
+            merged = dict(defaults or {})
+            if explicit_ic:
+                merged.update(explicit_ic)
+            initial_values = merged
 
     # Route ODE/time-series examples (`time_span` + `initial_state`) through
     # the integration path. Falls back to the algebraic skip below if the
