@@ -184,6 +184,12 @@ def _render_inner(node: Any) -> _Rendered:
             right = _render(args[1], _PREC_LOW)
             return _Rendered(f"{left} = {right}", _PREC_LOW)
 
+    if op == "apply_expression_template":
+        name = node.get("name", "?")
+        bindings = node.get("bindings", {}) or {}
+        parts = [f"{_fmt_varname(k)}={_render(v, _PREC_LOW)}" for k, v in bindings.items()]
+        return _Rendered(f"\\mathrm{{{name}}}\\left({', '.join(parts)}\\right)", _PREC_ATOM)
+
     # Unknown op — emit as \op(args, ...).
     rendered_args = ", ".join(_render(a, _PREC_LOW) for a in args)
     return _Rendered(f"\\mathrm{{{op}}}\\left({rendered_args}\\right)", _PREC_ATOM)
