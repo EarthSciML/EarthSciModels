@@ -14,12 +14,9 @@ declared expected value with the spec §6.6.4 tolerance precedence
 Single-pathway rule (CLAUDE.md "Simulation Pathway — ABSOLUTE Rule"):
 this driver invokes ``earthsci_toolkit.simulation.simulate`` as the
 **official ESS Python runner** — no homebrew lambdify+solve_ivp, no
-parallel evaluator. The cse=False knob is enforced by pre-populating
-``flat._simulate_compile_cache`` with a hand-built ``_CompiledRhs``
-whose lambdified RHS uses ``cse=False``, exactly as the canonical
-``test_simulation_csefalse_geoschem.py`` reference test does upstream
-(esm-5gk). This is configuration of the official runner, not a parallel
-runner.
+parallel evaluator. The cse=False knob is requested via the public
+``cse: bool`` kwarg on ``simulate`` (esm-5gk, ESS audit follow-up
+mdl-167); the runner handles compile-cache population internally.
 
 OOM guardrails (per bead mdl-w1j scope):
   * Each .esm is processed in its own subprocess via
@@ -55,7 +52,6 @@ import resource
 import subprocess
 import sys
 import time
-import warnings
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -163,76 +159,6 @@ def _check(actual: float, expected: float, rtol: float, atol: float) -> bool:
     return abs(actual - expected) <= atol + rtol * abs(expected)
 
 
-def _build_cse_false_cache(flat) -> None:
-    """Pre-populate ``flat._simulate_compile_cache`` with a cse=False
-    ``_CompiledRhs``.
-
-    Mirrors the upstream ``test_simulation_csefalse_geoschem.py`` pattern
-    (esm-5gk): use the runner's own _flat_to_sympy_rhs + _CompiledRhs +
-    _LAMBDIFY_MODULES, only flipping the lambdify cse flag. No new
-    runtime path is introduced; simulate() walks the cache exactly as
-    it does on its default path.
-    """
-    import sympy as sp
-    from earthsci_toolkit.simulation import (
-        _CompiledRhs,
-        _flat_to_sympy_rhs,
-    )
-    # _LAMBDIFY_MODULES landed in earthsci_toolkit alongside esm-5gk
-    # (the cse=False real-domain fix). On a runner predating that fix,
-    # fall back to plain ``"numpy"`` — small models still work; the
-    # geoschem_fullchem complex-decomposition is what _LAMBDIFY_MODULES
-    # specifically guards against.
-    try:
-        from earthsci_toolkit.simulation import _LAMBDIFY_MODULES
-    except ImportError:
-        _LAMBDIFY_MODULES = "numpy"
-
-    if getattr(flat, "_simulate_compile_cache", None) is not None:
-        return
-
-    (
-        state_names,
-        parameter_names,
-        symbol_map,
-        rhs_exprs,
-        algebraic_state_names,
-        algebraic_value_exprs,
-    ) = _flat_to_sympy_rhs(flat)
-
-    if not state_names:
-        return  # let simulate() emit its native SimulationError
-
-    state_symbols = [symbol_map[n] for n in state_names]
-    param_symbols = [symbol_map[n] for n in parameter_names]
-    all_args = state_symbols + param_symbols
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", RuntimeWarning)
-        rhs_vector_func = sp.lambdify(
-            all_args, rhs_exprs, modules=_LAMBDIFY_MODULES, cse=False
-        )
-        if algebraic_state_names:
-            alg_value_list = [
-                algebraic_value_exprs[n] for n in algebraic_state_names
-            ]
-            algebraic_vector_func = sp.lambdify(
-                all_args, alg_value_list,
-                modules=_LAMBDIFY_MODULES, cse=False,
-            )
-        else:
-            algebraic_vector_func = None
-
-    flat._simulate_compile_cache = _CompiledRhs(
-        state_names=state_names,
-        parameter_names=parameter_names,
-        symbol_map=symbol_map,
-        algebraic_state_names=algebraic_state_names,
-        rhs_vector_func=rhs_vector_func,
-        algebraic_vector_func=algebraic_vector_func,
-    )
-
-
 def _seed_denom_ic(
     initial_conditions: Dict[str, float],
     flat,
@@ -293,6 +219,7 @@ def _run_tests_for_container(
                 initial_conditions=ic,
                 rtol=1e-10,
                 atol=1e-12,
+                cse=False,
             )
         except Exception as err:  # noqa: BLE001
             for i, a in enumerate(t.assertions):
@@ -442,26 +369,6 @@ def run_worker(file_path: str) -> int:
                         assertion_idx=i, variable=a.variable, time=a.time,
                         expected=a.expected, actual=None, status="ERROR",
                         message=f"flatten failed: {type(err).__name__}: {err}",
-                        duration_s=0.0,
-                    ))
-        _emit_worker_results(rows)
-        return 1
-
-    try:
-        _build_cse_false_cache(flat)
-    except Exception as err:  # noqa: BLE001
-        for kind, name, _tol, tests in containers:
-            for t in tests:
-                for i, a in enumerate(t.assertions):
-                    rows.append(AssertionRow(
-                        file=file_path, container_kind=kind,
-                        container_name=name, test_id=t.id,
-                        assertion_idx=i, variable=a.variable, time=a.time,
-                        expected=a.expected, actual=None, status="ERROR",
-                        message=(
-                            f"cse=False compile failed: "
-                            f"{type(err).__name__}: {err}"
-                        ),
                         duration_s=0.0,
                     ))
         _emit_worker_results(rows)
