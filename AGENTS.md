@@ -93,29 +93,31 @@ homebrew `sympy.lambdify` / `scipy.solve_ivp` branch back in; if simulate
 lacks a feature the doc-build needs, file a bead to extend simulate rather
 than re-introducing a side channel.
 
-## 4. `scripts/migrations/*` is historical
+## 4. `scripts/_archive/*` is historical
 
-Files under `scripts/migrations/` (e.g. `migrate_geoschem_fullchem.jl`,
-`gen_fastjx_esm.py`, `inject_tests_into_esm.py`, `rewrite_max_in_esm.py`,
-`reference_values*.jl`, `run_*.jl`, `verify_*.jl`, `probe_*.jl`,
-`roundtrip_wrapper.jl`, `post_process_*.py`, `extract_fastjx_data.jl`) are
-**one-shot legacy bridge tools** that already ran during Phase-0 → Phase-3
-migrations. They produced the `.esm` files in `components/`; their job is done.
+Files under `scripts/_archive/` (currently `scripts/_archive/migrations/`,
+e.g. `migrate_geoschem_fullchem.jl`, `gen_fastjx_esm.py`,
+`inject_tests_into_esm.py`, `rewrite_max_in_esm.py`, `reference_values*.jl`,
+`run_*.jl`, `verify_*.jl`, `probe_*.jl`, `roundtrip_wrapper.jl`,
+`post_process_*.py`, `extract_fastjx_data.jl`) are **one-shot legacy bridge
+tools** that already ran during Phase-0 → Phase-3 migrations. They produced
+the `.esm` files in `components/`; their job is done. See
+[`scripts/_archive/README.md`](scripts/_archive/README.md) for the canonical
+archive policy.
 
-Rules for `scripts/migrations/`:
+Rules for `scripts/_archive/`:
 
 - **MAY NOT** be invoked from CI (`.github/workflows/*`).
 - **MAY NOT** be invoked from runtime code (`src/`, the Julia shim, the
   `earthsci_toolkit` Python/Rust bindings, or any consumer repo).
 - **MAY NOT** be imported by `tools/` or `test/` for ongoing functionality.
+- **MAY NOT** be added to `Project.toml`, `runtests.jl`, or any other
+  active build/test manifest.
 - **MAY** be read for archaeological reference (how was this `.esm` produced?).
 - **MAY** be re-run by hand by a maintainer if a migration needs to be
-  redone — but the output of that re-run goes through normal review like any
-  other `.esm` change.
-
-Archiving `scripts/migrations/` out of the active tree is tracked separately
-(`mdl-archive-migrations`). Until that lands, treat the directory as read-only
-historical material.
+  redone — but in that case move the script back out of `_archive/` first,
+  so the archive stays a clean "no live code" boundary, and the output of
+  that re-run goes through normal review like any other `.esm` change.
 
 ## 5. Cross-references
 
