@@ -1,5 +1,9 @@
 #!/usr/bin/env julia
-# tools/diagnose_geoschem_oom.jl  (mdl-i5j)
+# scripts/_archive/diagnostics/diagnose_geoschem_oom.jl  (mdl-i5j)
+#
+# ARCHIVED — kept for git-log archeology only (see scripts/_archive/README.md).
+# Do not invoke from CI, runtime, or test runners. mdl-i5j is closed; the
+# diagnostic value here is the phase breakdown documented below.
 #
 # Localize the memory peak of compiling
 # components/gaschem/geoschem_fullchem.esm (275 species x 819 reactions) by
@@ -18,7 +22,7 @@
 #
 # Invocation (uses the @esm-test-env env, which has MTK + Catalyst + ESS):
 #   julia --threads=1,1 --check-bounds=no --project=@esm-test-env \
-#       tools/diagnose_geoschem_oom.jl
+#       scripts/_archive/diagnostics/diagnose_geoschem_oom.jl
 #
 # Exit codes:
 #   0  pipeline ran end-to-end

@@ -9,6 +9,9 @@ git-log archeology only.
   Catalyst components into the committed `.esm` files under `components/`.
   Reference values produced by these scripts are now baked into `.esm` test
   assertions; the scripts themselves are no longer on any execution path.
+- `diagnostics/` — closed-bead memory/perf diagnostic scripts. Kept for the
+  phase breakdowns documented at the top of each file; the scripts are not
+  invoked by any runner.
 
 ## Policy
 
