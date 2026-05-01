@@ -9,14 +9,23 @@ tests pass.
 
 ```
 components/        # All .esm files, grouped by science domain
+lib/               # Standard-library .esm subsystems (included from
+                   # components via §4.7 reference; e.g. solar.esm)
 docs/              # Migration tracker + layout convention
 src/               # Julia shim (EarthSciModels.jl)
 test/              # Shim tests + fixtures
 .github/workflows/ # CI
 ```
 
-Everything authoritative lives under `components/`. The shim, tests, and CI
-exist to load and validate those files.
+Everything authoritative lives under `components/` and `lib/`. The shim, tests,
+and CI exist to load and validate those files.
+
+`lib/` is reserved for reusable, low-dependency subsystems that components
+include rather than redefine — currently `lib/solar.esm` (NOAA Spencer-Fourier
+solar declination, equation of time, zenith angle). Stdlib files use the same
+`.esm` schema as components and are validated by the same inline-test
+machinery; they are *not* organized by science domain because they cut across
+domains.
 
 ## Why one flat `components/` tree (not per-schema-section dirs)
 

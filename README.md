@@ -34,11 +34,19 @@ the build red. See [`src/run_tests.jl`](src/run_tests.jl) and
 components/        # All .esm files, grouped by science domain (one subdir per
                    # upstream earthsciml repo: gaschem/, aerosol/,
                    # atmospheric_dynamics/, earthsci_data/, ...)
+lib/               # Standard-library .esm subsystems (e.g. solar.esm — solar
+                   # geometry; included from components via §4.7 reference)
 docs/              # Migration tracker + layout convention
 src/               # Julia shim (EarthSciModels.jl)
 test/              # Shim tests + fixtures
 .github/workflows/ # CI
 ```
+
+`lib/` holds reusable, dependency-light subsystems that other `.esm` files in
+`components/` include via §4.7 references — currently `lib/solar.esm` (NOAA
+Spencer-Fourier solar declination, equation of time, and zenith angle). Stdlib
+files use the same `.esm` schema as components and are validated by the same
+inline-test machinery.
 
 Within `components/`, each science-domain subdir holds the `.esm` files for
 that domain (e.g. `components/gaschem/superfast.esm`). A single `.esm` file can
