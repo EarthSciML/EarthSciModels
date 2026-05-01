@@ -10,7 +10,7 @@ site is a view over them.
 | Piece | Purpose |
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
-| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via `scipy.integrate.solve_ivp` (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
+| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via the canonical Python ESS runner (`earthsci_toolkit.simulation.simulate`) (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
 | [Hugo](https://gohugo.io) | Static site generator; renders taxonomies and markdown. |
 | [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded via CDN in `layouts/partials/head.html`). |
 | [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` in CI. Lazy-loads, no server required. |
