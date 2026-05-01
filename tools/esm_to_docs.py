@@ -581,6 +581,36 @@ def _render_equations_section(entry: ComponentEntry) -> str:
     return _section("Equations", "\n\n".join(blocks))
 
 
+def _render_expression_templates_section(entry: ComponentEntry) -> str:
+    """Render declared expression_templates so reaction rates that
+    `apply_expression_template(name, ...)` are self-documenting.
+
+    Template schema (per .esm spec): ``{name: {"params": [..], "body": <AST>}}``.
+    Body params appear as plain variable names in the AST and pass through the
+    standard LaTeX renderer.
+    """
+    templates = entry.body.get("expression_templates")
+    if not isinstance(templates, dict) or not templates:
+        return ""
+    blocks = []
+    for name, spec in templates.items():
+        if not isinstance(spec, dict):
+            continue
+        params = spec.get("params") or []
+        body = spec.get("body")
+        block = [f"### `{name}`"]
+        if isinstance(params, list) and params:
+            params_str = ", ".join(f"`{p}`" for p in params)
+            block.append(f"**Parameters:** {params_str}")
+        if body is not None:
+            latex = ast_to_latex(body)
+            block.append(f"$$\n{latex}\n$$")
+        blocks.append("\n\n".join(block))
+    if not blocks:
+        return ""
+    return _section("Expression Templates", "\n\n".join(blocks))
+
+
 def _render_reactions_section(entry: ComponentEntry) -> str:
     reactions = entry.body.get("reactions")
     if not isinstance(reactions, list) or not reactions:
@@ -742,6 +772,7 @@ def render_markdown(
     parts.append(_render_parameters_section(entry))
     parts.append(_render_species_section(entry))
     parts.append(_render_equations_section(entry))
+    parts.append(_render_expression_templates_section(entry))
     parts.append(_render_reactions_section(entry))
     if repo_root is not None and static_dir is not None:
         parts.append(_render_examples_section(entry, repo_root, static_dir))

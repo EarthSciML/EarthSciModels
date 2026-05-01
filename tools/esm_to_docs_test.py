@@ -342,6 +342,83 @@ class RenderMarkdownTest(unittest.TestCase):
         self.assertIn(r"2 \cdot x", md)
 
 
+class ExpressionTemplatesSectionTest(unittest.TestCase):
+    """Render expression_templates as a documented section on the component page."""
+
+    def _entry_with_templates(self) -> mod.ComponentEntry:
+        return mod.ComponentEntry(
+            section="reaction_systems",
+            name="HasTemplates",
+            body={
+                "description": "rxn system with templates",
+                "expression_templates": {
+                    "arrhenius_M": {
+                        "params": ["A", "B"],
+                        "body": {
+                            "op": "*",
+                            "args": [
+                                "A",
+                                {"op": "exp", "args": [{"op": "/", "args": ["B", "T"]}]},
+                                "num_density",
+                            ],
+                        },
+                    },
+                    "scaled_M": {
+                        "params": ["A"],
+                        "body": {"op": "*", "args": ["A", "num_density"]},
+                    },
+                },
+                "species": {"O3": {"units": "mol/m^3"}},
+            },
+            esm_path=Path("components/gaschem/has_templates.esm"),
+            esm_version="0.1.0",
+            file_metadata={},
+        )
+
+    def _entry_without_templates(self) -> mod.ComponentEntry:
+        return mod.ComponentEntry(
+            section="reaction_systems",
+            name="NoTemplates",
+            body={
+                "description": "rxn system without templates",
+                "species": {"O3": {"units": "mol/m^3"}},
+            },
+            esm_path=Path("components/gaschem/no_templates.esm"),
+            esm_version="0.1.0",
+            file_metadata={},
+        )
+
+    def test_section_emitted_when_templates_present(self):
+        md = mod.render_markdown(self._entry_with_templates())
+        self.assertIn("## Expression Templates", md)
+        self.assertIn("arrhenius_M", md)
+        self.assertIn("scaled_M", md)
+
+    def test_template_body_renders_as_latex(self):
+        md = mod.render_markdown(self._entry_with_templates())
+        # The arrhenius_M body A * exp(B/T) * num_density renders through ast_to_latex.
+        self.assertIn(r"A \cdot e^{\frac{B}{T}} \cdot num", md)
+        # The scaled_M body A * num_density renders likewise.
+        self.assertIn(r"A \cdot num", md)
+
+    def test_template_params_listed(self):
+        md = mod.render_markdown(self._entry_with_templates())
+        # Both A and B should appear as backtick-fenced params for arrhenius_M.
+        self.assertIn("**Parameters:**", md)
+        self.assertIn("`A`", md)
+        self.assertIn("`B`", md)
+
+    def test_no_section_when_templates_absent(self):
+        md = mod.render_markdown(self._entry_without_templates())
+        self.assertNotIn("Expression Templates", md)
+
+    def test_no_section_when_templates_empty(self):
+        entry = self._entry_without_templates()
+        entry.body["expression_templates"] = {}
+        md = mod.render_markdown(entry)
+        self.assertNotIn("Expression Templates", md)
+
+
 class BuildIndexTest(unittest.TestCase):
     def test_index_record_shape(self):
         entry = mod.ComponentEntry(
