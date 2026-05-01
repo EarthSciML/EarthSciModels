@@ -84,11 +84,14 @@ CI pipelines that exercise `tools/` count as runtime for the purposes of §1:
 the parallel-evaluator anti-pattern is just as forbidden in
 `.github/workflows/*` as in `src/`.
 
-`tools/render_example_plots.py` currently still contains a homebrew
-`sympy.lambdify` + `scipy.solve_ivp` path. Retiring that path onto the
-canonical runner is tracked separately (`mdl-render-plots-canonical`); until
-that bead lands, do not extend the homebrew path or copy its pattern into new
-tooling.
+`tools/render_example_plots.py`'s time-series path now drives
+`earthsci_toolkit.simulation.simulate` — the canonical Python ESS runner —
+for every ODE integration (mdl-5xp). The renderer keeps its own resolution
+plan only to recover *observed* variables from the integrated state via
+`earthsci_toolkit.evaluate` (the canonical AST evaluator). Do not add a
+homebrew `sympy.lambdify` / `scipy.solve_ivp` branch back in; if simulate
+lacks a feature the doc-build needs, file a bead to extend simulate rather
+than re-introducing a side channel.
 
 ## 4. `scripts/migrations/*` is historical
 

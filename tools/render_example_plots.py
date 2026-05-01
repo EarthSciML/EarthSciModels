@@ -23,10 +23,11 @@ Renderable components:
   produce one PNG per plot spec.
 - ODE models (one or more `D(state)/dt = rhs` equations) drive the
   time-series path when the example carries `initial_state` (per_variable
-  form). Each example integrates via `scipy.integrate.solve_ivp` and plots
-  state/algebraic trajectories vs `t`. A 1-D `parameter_sweep` is allowed
-  and produces a family of curves on one axes (one integration per grid
-  point). DiameterGrowthRate's Fig. 13.2 examples drive this path.
+  form). Each example integrates via the canonical Python runner
+  (`earthsci_toolkit.simulation.simulate`) and plots state/algebraic
+  trajectories vs `t`. A 1-D `parameter_sweep` is allowed and produces a
+  family of curves on one axes (one integration per grid point).
+  DiameterGrowthRate's Fig. 13.2 examples drive this path.
 
 Components with `D` ops but no `initial_state` are skipped — there's
 nothing to integrate.
@@ -39,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -71,12 +73,16 @@ from earthsci_toolkit import (  # noqa: E402
 from earthsci_toolkit.esm_types import (  # noqa: E402
     Equation,
     Example,
+    Metadata,
+    ModelVariable,
     ParameterSweep,
     Plot,
     PlotAxis,
     PlotValue,
     SweepDimension,
 )
+from earthsci_toolkit.flatten import FlattenedSystem, flatten  # noqa: E402
+from earthsci_toolkit.simulation import simulate  # noqa: E402
 
 
 class UnsupportedExpression(Exception):
@@ -206,10 +212,10 @@ def _build_resolution_plan(
     - Equations where `lhs` is bound (constraint): symbolically solve for
       the single unbound variable in `rhs` and add as a target.
 
-    `equations` defaults to `model.equations`. The ODE-solver path passes the
-    algebraic-only subset (after `_extract_ode_equations` strips D-op rows)
-    so this resolver doesn't trip on time-derivative equations it can't
-    handle in closed form.
+    `equations` defaults to `model.equations`. Callers that want to scope
+    the resolver to a subset (e.g. an algebraic-only slice) may pass their
+    own list — `_extract_ode_equations` produces such a slice by stripping
+    `D(state)/dt = rhs` rows.
 
     Targets that can't be resolved (cyclic deps, multi-unbound constraints,
     constraint with no closed form) raise `UnsupportedExpression`.
@@ -351,172 +357,161 @@ def _extract_ode_equations(model: Model) -> tuple[dict[str, Any], list[Any]]:
     return ode_map, alg_eqs
 
 
-_COMPILED_RHS_CACHE: dict[int, tuple[Any, list[str]] | None] = {}
+def _wrap_model_as_esm(model: Any) -> EsmFile:
+    """Wrap a Model or _AdapterModel into a minimal EsmFile for `simulate`.
 
-
-def _compile_rhs_lambdify(
-    model: Any,
-    ode_map: dict[str, Any],
-    state_names: list[str],
-    plan: list[tuple[str, Any]],
-    base_bindings: dict[str, float],
-) -> Any | None:
-    """Compile the ODE rhs to a numpy-backed callable via sympy.lambdify.
-
-    The Python recursive `evaluate()` is fine for a handful of equations
-    but chokes on large mechanisms (geoschem_fullchem: 272 states, rhs
-    trees ~300 deep, ~3.5 s per evaluation × thousands of LSODA steps =
-    untractable). lambdify with cse=True produces a single closed-form
-    numpy expression that evaluates ~3000x faster, making the 819-reaction
-    system tractable.
-
-    Falls back (returns None) if lambdify or to_sympy can't handle some op
-    in the tree — caller uses the recursive path. Algebraic plan items are
-    inlined into each ode rhs by symbolic substitution so the compiled rhs
-    is a pure function of (t, state, parameters).
-
-    The compiled function is cached per `id(model)` because compilation
-    takes ~20 s for fullchem and is shared across all examples on the same
-    reaction system.
+    The renderer iterates per top-level component (one Model or one
+    ReactionSystem-derived _AdapterModel at a time), but the canonical
+    Python runner consumes an EsmFile (which it flattens internally). This
+    helper materialises a single-component EsmFile around the renderer's
+    in-hand model so the simulate call has the shape it expects, without
+    making the renderer track the originating EsmFile through every layer.
     """
-    if not ode_map:
-        return None
-    try:
-        import sympy as sp
-    except ImportError:
-        return None
-
-    cache_key = id(model)
-    cached = _COMPILED_RHS_CACHE.get(cache_key)
-    if cached is None and cache_key not in _COMPILED_RHS_CACHE:
-        try:
-            plan_subs: dict[Any, Any] = {}
-            for name, expr in plan:
-                plan_subs[sp.Symbol(name)] = to_sympy(expr).subs(plan_subs)
-
-            sym_rhs = []
-            for s in state_names:
-                sym_rhs.append(to_sympy(ode_map[s]).subs(plan_subs))
-        except (NotImplementedError, ValueError, TypeError):
-            _COMPILED_RHS_CACHE[cache_key] = None
-            return None
-
-        free_syms: set[Any] = set()
-        for r in sym_rhs:
-            free_syms |= r.free_symbols
-        state_set = {sp.Symbol(s) for s in state_names}
-        t_sym = sp.Symbol("t")
-        param_syms = sorted(free_syms - state_set - {t_sym}, key=lambda s: s.name)
-        param_names = [s.name for s in param_syms]
-
-        state_syms = [sp.Symbol(s) for s in state_names]
-        try:
-            compiled = sp.lambdify(
-                [t_sym, state_syms, param_syms],
-                sym_rhs,
-                modules="numpy",
-                cse=True,
+    if isinstance(model, _AdapterModel):
+        real_variables = {
+            name: ModelVariable(
+                type=v.type,  # type: ignore[arg-type]
+                default=v.default,
+                units=v.units,
+                expression=v.expression,
             )
-        except (NotImplementedError, ValueError, TypeError):
-            _COMPILED_RHS_CACHE[cache_key] = None
-            return None
-
-        cached = (compiled, param_names)
-        _COMPILED_RHS_CACHE[cache_key] = cached
-
-    if cached is None:
-        return None
-    compiled, param_names = cached
-    param_values = [float(base_bindings.get(n, 0.0)) for n in param_names]
-
-    def rhs(t: float, y: np.ndarray) -> list[float]:
-        return list(compiled(float(t), list(y), param_values))
-
-    return rhs
+            for name, v in model.variables.items()
+        }
+        wrapped: Model = Model(
+            name=model.name,
+            variables=real_variables,
+            equations=list(model.equations),
+            metadata={},
+            subsystems={},
+            boundary_conditions={},
+            tests=[],
+            examples=[],
+            initialization_equations=[],
+            guesses={},
+        )
+    else:
+        wrapped = model
+    title = getattr(model, "name", None) or "Renderer"
+    return EsmFile(
+        version="0.1.0",
+        metadata=Metadata(
+            title=title,
+            authors=[],
+            references=[],
+            keywords=[],
+            custom={},
+        ),
+        models={wrapped.name: wrapped},
+        reaction_systems={},
+        events=[],
+        data_loaders={},
+        operators=[],
+        registered_functions={},
+        coupling=[],
+        enums={},
+        function_tables={},
+        domains={},
+        grids={},
+        staggering_rules={},
+        discretizations={},
+    )
 
 
 def _solve_time_series(
-    model: Model,
+    model: Any,
     base_bindings: dict[str, float],
     initial_state_values: dict[str, float],
     time_span: Any,
     n_points: int = 200,
+    flat: FlattenedSystem | None = None,
 ) -> dict[str, np.ndarray]:
     """Integrate the model's ODE system over `time_span` and return trajectories.
 
-    Returns a dict mapping every name (parameters as 0-d arrays, ODE states,
-    algebraic targets, and `t`) to a 1-D numpy array of length `n_points`
-    sampled uniformly across `[time_span.start, time_span.end]`.
+    Routes through `earthsci_toolkit.simulation.simulate` — the canonical
+    Python ESS runner — per CLAUDE.md "Simulation Pathway — ABSOLUTE Rule".
+    The runner handles ODE compilation (sympy lambdify with shared CSE),
+    integration, dense output, and algebraic-state trajectory recovery
+    internally. simulate's `vars` only surface state variables; observed
+    variables (e.g. fastjx's `j_NO2 = Σ F_i·σ_i`) are recovered here by
+    walking the model's resolution plan against each saved time sample,
+    using `earthsci_toolkit.evaluate` — the canonical Python AST evaluator
+    — at every point. That's a post-integration consumer of the integrated
+    state, not a parallel ODE pipeline.
 
-    The ODE state set is exactly the set of names appearing on the lhs of
-    `D(name, wrt=t)` equations. Algebraic vars (including ones declared
-    `state` in the schema for upstream-MTK symmetry but defined by an
-    algebraic equation, e.g. `I_D = A/D_p`) are computed at each saved time
-    point from the resolution plan, post-integration. Initial values for
-    algebraic vars in `initial_state_values` are ignored — they're derived.
+    `flat` is an optional pre-built :class:`FlattenedSystem`. Passing it
+    lets sweep loops reuse simulate's `_simulate_compile_cache` (attached
+    to the flat instance) across every sweep point, which dominates wall
+    time on large mechanisms (geoschem_fullchem: ~30 s lambdify per
+    integration). When `flat` is None — the test path — this function
+    wraps `model` into a fresh single-component EsmFile and lets simulate
+    flatten internally.
+
+    Returns a dict mapping every name (parameters as 0-d arrays, ODE
+    states, algebraic-recovered states, observed-variable trajectories,
+    and `t`) to a 1-D numpy array of length `n_points` sampled uniformly
+    across `[time_span.start, time_span.end]`. simulate produces a dense
+    ~10k-point grid via `dense_output=True`; we resample to `n_points` so
+    plotters / fixtures can keep their current grid expectations.
     """
-    from scipy.integrate import solve_ivp
-
-    ode_map, alg_eqs = _extract_ode_equations(model)
-    if not ode_map:
-        raise UnsupportedExpression(
-            "time-series example requires at least one D(state)/dt equation"
-        )
-    state_names = sorted(ode_map.keys())
-    missing = [s for s in state_names if s not in initial_state_values]
-    if missing:
-        raise UnsupportedExpression(
-            f"initial_state.values is missing ODE state(s): {missing!r}"
-        )
-
-    bound = set(base_bindings.keys()) | set(state_names) | {"t"}
-    plan = _build_resolution_plan(model, bound, equations=alg_eqs)
-
-    rhs = _compile_rhs_lambdify(model, ode_map, state_names, plan, base_bindings)
-    if rhs is None:
-        def rhs(t: float, y: np.ndarray) -> list[float]:
-            env: dict[str, float] = dict(base_bindings)
-            env["t"] = float(t)
-            for i, s in enumerate(state_names):
-                env[s] = float(y[i])
-            for name, expr in plan:
-                env[name] = float(evaluate(expr, env))
-            return [float(evaluate(ode_map[s], env)) for s in state_names]
-
-    y0 = [float(initial_state_values[s]) for s in state_names]
+    sim_input: Any = flat if flat is not None else _wrap_model_as_esm(model)
     t0, t1 = float(time_span.start), float(time_span.end)
-    t_eval = np.linspace(t0, t1, n_points)
-    sol = solve_ivp(
-        rhs,
-        (t0, t1),
-        y0,
-        t_eval=t_eval,
+    result = simulate(
+        sim_input,
+        tspan=(t0, t1),
+        parameters=dict(base_bindings),
+        initial_conditions=dict(initial_state_values),
         method="LSODA",
         rtol=1e-8,
         atol=1e-12,
     )
-    if not sol.success:
-        raise UnsupportedExpression(f"ODE integration failed: {sol.message}")
+    if not result.success:
+        raise UnsupportedExpression(f"ODE integration failed: {result.message}")
 
-    out: dict[str, np.ndarray] = {"t": np.asarray(sol.t, dtype=float)}
-    for i, s in enumerate(state_names):
-        out[s] = np.asarray(sol.y[i], dtype=float)
-
-    alg_names = [name for name, _ in plan]
-    alg_arrs = {name: np.empty(len(sol.t), dtype=float) for name in alg_names}
-    for k in range(len(sol.t)):
-        env = dict(base_bindings)
-        env["t"] = float(sol.t[k])
-        for i, s in enumerate(state_names):
-            env[s] = float(sol.y[i, k])
-        for name, expr in plan:
-            env[name] = float(evaluate(expr, env))
-            alg_arrs[name][k] = env[name]
-    out.update(alg_arrs)
+    t_dense = np.asarray(result.t, dtype=float)
+    t_out = np.linspace(t0, t1, n_points)
+    out: dict[str, np.ndarray] = {"t": t_out}
+    for i, name in enumerate(result.vars):
+        bare = name.rsplit(".", 1)[-1]
+        y_dense = np.asarray(result.y[i], dtype=float)
+        out[bare] = np.interp(t_out, t_dense, y_dense)
+        out.setdefault(name, out[bare])
 
     for name, val in base_bindings.items():
         if name not in out:
             out[name] = np.asarray(val)
+
+    # Observed-variable recovery. simulate returns only state-variable
+    # trajectories, but the renderer's plot specs may name observed vars
+    # (e.g. fastjx's `j_NO2`). Build a resolution plan over the algebraic
+    # subset of model equations and run the canonical AST evaluator at
+    # each saved time sample.
+    _, alg_eqs = _extract_ode_equations(model)
+    bound = set(out.keys()) | set(base_bindings.keys()) | {"t"}
+    try:
+        plan = _build_resolution_plan(model, bound, equations=alg_eqs)
+    except UnsupportedExpression:
+        plan = []
+    if plan:
+        n = len(t_out)
+        plan_arrs = {name: np.empty(n, dtype=float) for name, _ in plan}
+        for k in range(n):
+            env: dict[str, Any] = dict(base_bindings)
+            env["t"] = float(t_out[k])
+            for name in out:
+                v = out[name]
+                if isinstance(v, np.ndarray) and v.ndim == 1 and v.size == n:
+                    env[name] = float(v[k])
+                else:
+                    env[name] = float(np.asarray(v))
+            for name, expr in plan:
+                try:
+                    env[name] = float(evaluate(expr, env))
+                except (ValueError, TypeError, KeyError, ZeroDivisionError):
+                    env[name] = float("nan")
+                plan_arrs[name][k] = env[name]
+        for name, arr in plan_arrs.items():
+            out.setdefault(name, arr)
+
     return out
 
 
@@ -1021,18 +1016,29 @@ def render_examples_for_file(esm_path: Path, stats: _RenderStats) -> None:
         return
     plots_dir = esm_path.parent / (esm_path.stem + ".plots")
 
+    # Build the FlattenedSystem once per top-level component and pass it to
+    # every example on that component. simulate caches its compiled rhs on
+    # the FlattenedSystem (`_simulate_compile_cache`); reusing the same flat
+    # across all examples on geoschem_fullchem cuts ~30 s of sympy.lambdify
+    # work per extra example after the first (3 examples × ~30 s saved).
     for cname, model in (esm.models or {}).items():
         if not model.examples:
             continue
+        flat = flatten(_wrap_model_as_esm(model)) if _component_has_dynamics(model) else None
         for example in model.examples:
-            _render_one_example(esm_path, cname, model, example, plots_dir, stats)
+            _render_one_example(
+                esm_path, cname, model, example, plots_dir, stats, flat=flat
+            )
 
     for cname, rs in (esm.reaction_systems or {}).items():
         if not getattr(rs, "examples", None):
             continue
         adapter = _reaction_system_to_model(rs)
+        flat = flatten(_wrap_model_as_esm(adapter)) if _component_has_dynamics(adapter) else None
         for example in adapter.examples:
-            _render_one_example(esm_path, cname, adapter, example, plots_dir, stats)
+            _render_one_example(
+                esm_path, cname, adapter, example, plots_dir, stats, flat=flat
+            )
 
 
 def _render_one_example(
@@ -1042,6 +1048,7 @@ def _render_one_example(
     example: Example,
     plots_dir: Path,
     stats: _RenderStats,
+    flat: FlattenedSystem | None = None,
 ) -> None:
     plots = example.plots or []
     if not plots:
@@ -1069,7 +1076,14 @@ def _render_one_example(
     # component has dynamics but no initial state was supplied.
     if has_dynamics and initial_values is not None:
         _render_time_series_example(
-            esm_path, component_name, model, example, plots_dir, stats, initial_values
+            esm_path,
+            component_name,
+            model,
+            example,
+            plots_dir,
+            stats,
+            initial_values,
+            flat=flat,
         )
         return
 
@@ -1146,6 +1160,7 @@ def _render_time_series_example(
     plots_dir: Path,
     stats: _RenderStats,
     initial_values: dict[str, float],
+    flat: FlattenedSystem | None = None,
 ) -> None:
     """Render plots for a `time_span` + `initial_state` example via ODE integration.
 
@@ -1153,6 +1168,14 @@ def _render_time_series_example(
     With sweep: each grid point overrides parameters in `base_bindings`,
     integrate per-point, draw the family of curves on a single axes labeled
     by the sweep value.
+
+    `flat` is the per-component :class:`FlattenedSystem` materialised by the
+    file driver (`render_examples_for_file`). Passing it through lets every
+    sweep-point integration share simulate's `_simulate_compile_cache`,
+    avoiding a ~30 s lambdify per sweep step on large mechanisms. When None
+    (e.g. test entry points exercising `_render_time_series_example` in
+    isolation), `_solve_time_series` falls back to wrapping the model into a
+    fresh EsmFile per call.
     """
     plots = example.plots or []
     stats.examples_seen += 1
@@ -1200,7 +1223,7 @@ def _render_time_series_example(
     try:
         for label, bindings in sweep_runs:
             env = _solve_time_series(
-                model, bindings, initial_values, example.time_span
+                model, bindings, initial_values, example.time_span, flat=flat
             )
             trajectories.append((label, env))
     except UnsupportedExpression as exc:
@@ -1259,6 +1282,42 @@ def discover_esm_files(components_root: Path) -> list[Path]:
     return sorted(p for p in components_root.rglob("*.esm") if p.is_file())
 
 
+# Defensive memory budget for the doc-build path. simulate() compiles each
+# mechanism via sympy.lambdify(..., cse=True), which has a known memory
+# cliff on very large reaction systems. The CI doc-build runner has ~7 GB
+# available; aborting here at 6 GB lets us emit a diagnostic instead of
+# being SIGKILLed by the OOM killer mid-plot. Only enforced on Linux where
+# /proc/self/status is available.
+_RSS_HARD_ABORT_GB = 6.0
+
+
+def _read_rss_gb() -> float | None:
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return float(line.split()[1]) / 1024.0 / 1024.0
+    except OSError:
+        return None
+    return None
+
+
+def _check_rss_budget(label: str) -> None:
+    rss = _read_rss_gb()
+    if rss is None:
+        return
+    if rss > _RSS_HARD_ABORT_GB:
+        print(
+            f"\n[render_example_plots] HARD ABORT after {label}: RSS={rss:.2f} GB "
+            f"exceeds {_RSS_HARD_ABORT_GB:.1f} GB budget. simulate() likely hit "
+            f"its lambdify memory cliff on a large mechanism — file a bead to "
+            f"extend simulate's API (e.g. cse=False knob) rather than re-adding "
+            f"a homebrew solver path.",
+            file=sys.stderr,
+        )
+        os._exit(99)
+
+
 def run(components_root: Path) -> int:
     if not components_root.exists():
         print(
@@ -1274,6 +1333,7 @@ def run(components_root: Path) -> int:
     for f in files:
         stats.files_seen += 1
         render_examples_for_file(f, stats)
+        _check_rss_budget(f.name)
     stats.elapsed_s = time.time() - t0
     print()
     print(
