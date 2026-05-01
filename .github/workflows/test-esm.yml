@@ -57,3 +57,44 @@ jobs:
           name: esm-inline-tests-junit
           path: esm-tests.xml
           if-no-files-found: ignore
+
+  # Python inline-test gate (mdl-w1j).
+  #
+  # Walks components/**/*.esm and runs every inline test through the canonical
+  # ESS Python runner (earthsci_toolkit.simulation.simulate, cse=False). One
+  # subprocess per file (Python's per-process GC is the OOM guardrail; cf.
+  # bead mdl-w1j scope and the esm-9ms phase-wise RSS diagnostic showing peak
+  # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
+  # job timeout.
+  #
+  # During the ~1-week soak window the job is continue-on-error: true so
+  # surface-level Python runner gaps (filed as follow-up ESS beads) do not
+  # block the workflow while the Julia full-chemistry inline test (above) is
+  # being retired. Flip to required once the soak follow-up bead lands.
+  python-inline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Install the canonical Python runner from EarthSciSerialization main.
+      # The package isn't on PyPI yet (matching the unregistered Julia state
+      # handled by setup_polecat_env.sh).
+      - name: Install earthsci_toolkit (from EarthSciSerialization main)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "earthsci_toolkit @ git+https://github.com/EarthSciML/EarthSciSerialization.git@main#subdirectory=packages/earthsci_toolkit"
+      - name: Run Python inline-test gate (cse=False, per-file subprocess)
+        run: |
+          python tools/run_esm_inline_tests.py --junit-xml python-esm-tests.xml
+      - name: Upload junit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-esm-inline-tests-junit
+          path: python-esm-tests.xml
+          if-no-files-found: ignore
