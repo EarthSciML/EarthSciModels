@@ -46,10 +46,16 @@ jobs:
       # ESM_TESTS_JUNIT_XML tells runtests.jl to emit a junit artifact in the
       # same pass. We can't run a second `julia --project=.` walker because
       # ModelingToolkit is a test-only dep (see mdl-89o).
+      # ESM_TESTS_SKIP_PATTERNS skips files whose Julia/MTK build OOMs the
+      # 16 GB GitHub runner — geoschem_fullchem.esm peaks at ~13 GB on a
+      # single MTK pass (mdl-w1j root cause). The Python inline-test gate
+      # (python-inline-tests job below) is the gate of record for the
+      # skipped files (mdl-lvu).
       - uses: julia-actions/julia-runtest@v1
         if: steps.check_project.outputs.has_project == 'true'
         env:
           ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/esm-tests.xml
+          ESM_TESTS_SKIP_PATTERNS: components/gaschem/geoschem_fullchem.esm
       - name: Upload junit XML
         if: always() && steps.check_project.outputs.has_project == 'true'
         uses: actions/upload-artifact@v4
@@ -67,10 +73,15 @@ jobs:
   # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
   # job timeout.
   #
-  # During the ~1-week soak window the job is continue-on-error: true so
-  # surface-level Python runner gaps (filed as follow-up ESS beads) do not
-  # block the workflow while the Julia full-chemistry inline test (above) is
-  # being retired. Flip to required once the soak follow-up bead lands.
+  # This is the gate of record for components whose Julia/MTK build OOMs the
+  # GitHub runner (currently components/gaschem/geoschem_fullchem.esm — see
+  # the ESM_TESTS_SKIP_PATTERNS env var on the julia-test job above).
+  #
+  # continue-on-error: true while Python-runner-gap follow-up beads (filed
+  # off mdl-w1j: ESS fastjx symbol resolution, ESS water.esm flatten, ESS
+  # cloud_albedo algebraic-only support, ESM superfast tolerance recalibration)
+  # are still open. Flip to required once those land — tracked under mdl-lvu's
+  # third done criterion.
   python-inline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25

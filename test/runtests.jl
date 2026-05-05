@@ -83,8 +83,17 @@ end
         # CI sets ESM_TESTS_JUNIT_XML to collect a junit artifact in the same
         # pass — avoids a second `julia --project=.` invocation which can't
         # see MTK (it's a test-only dep).
+        # ESM_TESTS_SKIP_PATTERNS is a comma-separated list of substrings;
+        # matching .esm files are skipped from the live-repo walk. The
+        # canonical Python inline-test gate (mdl-w1j) is the gate of record
+        # for files skipped here. Used in CI to skip files whose Julia/MTK
+        # build OOMs the 16 GB GitHub runner (mdl-lvu — geoschem_fullchem.esm
+        # peaks at ~13 GB on a single MTK pass).
         junit_xml = get(ENV, "ESM_TESTS_JUNIT_XML", nothing)
-        results, exit_code = run_esm_tests(; junit_xml=junit_xml)
+        skip_patterns = String.(filter(!isempty,
+            strip.(split(get(ENV, "ESM_TESTS_SKIP_PATTERNS", ""), ','))))
+        results, exit_code = run_esm_tests(;
+            junit_xml=junit_xml, skip_patterns=skip_patterns)
         if !isempty(results)
             failures = filter(r -> r.status != EarthSciModels.PASS, results)
             for f in failures

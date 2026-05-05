@@ -53,14 +53,20 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    discover_esm_files(roots) -> Vector{String}
+    discover_esm_files(roots; skip_patterns=String[]) -> Vector{String}
 
 Recursively walk each directory in `roots` (relative to `esm_root()` if not
 absolute) and return all `*.esm` paths in deterministic sorted order. Missing
 roots are skipped silently — empty top-level dirs are normal in the migration
 window.
+
+`skip_patterns` is a list of substrings; any discovered path that matches at
+least one pattern is dropped. Used by CI to skip components whose MTK build
+exceeds the runner's memory (mdl-lvu) — those files are covered by the
+canonical Python inline-test gate (mdl-w1j) instead.
 """
-function discover_esm_files(roots::AbstractVector{<:AbstractString})
+function discover_esm_files(roots::AbstractVector{<:AbstractString};
+                            skip_patterns::AbstractVector{<:AbstractString}=String[])
     base = esm_root()
     found = String[]
     for r in roots
@@ -68,7 +74,10 @@ function discover_esm_files(roots::AbstractVector{<:AbstractString})
         isdir(dir) || continue
         for (root, _dirs, files) in walkdir(dir)
             for f in files
-                endswith(f, ".esm") && push!(found, joinpath(root, f))
+                endswith(f, ".esm") || continue
+                path = joinpath(root, f)
+                any(p -> occursin(p, path), skip_patterns) && continue
+                push!(found, path)
             end
         end
     end
@@ -76,7 +85,7 @@ function discover_esm_files(roots::AbstractVector{<:AbstractString})
     return found
 end
 
-discover_esm_files() = discover_esm_files(DEFAULT_ROOTS)
+discover_esm_files(; kwargs...) = discover_esm_files(DEFAULT_ROOTS; kwargs...)
 
 # ---------------------------------------------------------------------------
 # Tolerance resolution (spec §6.6.4)
@@ -346,7 +355,7 @@ end
 
 """
     run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
-                  io::IO=stdout) -> (results, exit_code)
+                  io::IO=stdout, skip_patterns=String[]) -> (results, exit_code)
 
 Walk each directory in `roots` (default: `components/`, which holds all
 per-science-domain subdirs), run every inline test in every `.esm` file,
@@ -355,12 +364,14 @@ and return `(results::Vector{AssertionResult}, exit_code::Int)` where
 
 Prints a per-file summary table to `io` when `verbose=true`. When
 `junit_xml` is a path, emits a junit-compatible XML report there.
+`skip_patterns` is forwarded to `discover_esm_files` (see its docstring).
 """
 function run_esm_tests(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
                        junit_xml::Union{AbstractString,Nothing}=nothing,
                        verbose::Bool=true,
-                       io::IO=stdout)
-    files = discover_esm_files(roots)
+                       io::IO=stdout,
+                       skip_patterns::AbstractVector{<:AbstractString}=String[])
+    files = discover_esm_files(roots; skip_patterns=skip_patterns)
     results = AssertionResult[]
     if isempty(files)
         verbose && println(io, "No .esm files discovered under: ",
