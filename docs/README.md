@@ -98,9 +98,9 @@ Examples in the `.esm` schema carry declarative plot specs (`type: line` /
 [ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). At
 build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
 walks `components/**/*.esm`, evaluates each example (cartesian
-`parameter_sweep` for algebraic models, `scipy.integrate.solve_ivp`
-integration of `time_span` + `initial_state` for ODE models), and writes
-a PNG per declared plot under
+`parameter_sweep` for algebraic models, or via the canonical Python ESS
+runner (`earthsci_toolkit.simulation.simulate`) of `time_span` +
+`initial_state` for ODE models), and writes a PNG per declared plot under
 
 ```
 components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.png
@@ -122,9 +122,9 @@ The renderer handles two example shapes:
   `WaterEquilibrium`, `DropletGrowth`, `AerosolScavenging`, etc.
 - **ODE models** (one or more `D(state)/dt = rhs` equations) drive the
   time-series path when the example carries `time_span` + `initial_state`
-  (`per_variable` form). Each example integrates via
-  `scipy.integrate.solve_ivp` (LSODA, `rtol=1e-8`, `atol=1e-12`) and
-  emits one PNG per plot of state/algebraic trajectories vs `t`. A
+  (`per_variable` form). Each example integrates via the canonical Python
+  ESS runner (`earthsci_toolkit.simulation.simulate`) and emits one PNG
+  per plot of state/algebraic trajectories vs `t`. A
   1-D `parameter_sweep` is allowed and produces a family of curves on
   one axes (one integration per grid point). Covers
   `DiameterGrowthRate`'s Fig. 13.2 reproductions (mdl-hxx).
@@ -142,7 +142,7 @@ For the current 6 components × ~25 example plots:
 | Stage | Local time | Notes |
 | --- | --- | --- |
 | `pip install matplotlib numpy scipy` | ~10–15 s | Cached across CI runs once the wheels are in place. |
-| `python tools/render_example_plots.py` | <20 s | Algebraic examples scale with sweep grid size; ODE examples scale with integration cost (LSODA stops on stiffness). |
+| `python tools/render_example_plots.py` | <20 s | Algebraic examples scale with sweep grid size; ODE examples scale with the canonical-runner integration cost. |
 | `python tools/esm_to_docs.py` | <0.5 s | Unchanged. |
 
 The `Render example plots` step grows roughly proportional to the total
