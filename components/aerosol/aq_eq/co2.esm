@@ -1,0 +1,285 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CO2Equilibria",
+        "description": "CO2 dissolution and dissociation equilibria with van't Hoff temperature dependence (Seinfeld & Pandis Ch 7 §7.3.2, Eqs 7.14–7.24). Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:140 (`CO2Equilibria` @component). Parameterized as observed-only: T, H_plus, p_CO2 are inputs and the carbonate-system species (CO2_aq, HCO3-, CO3^2-, total dissolved C, effective Henry constant) are algebraic outputs.",
+        "tags": [
+            "aerosol",
+            "aqueous_equilibria",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (mdl-5b1)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Section 7.3.2 (CO2 dissolution and dissociation, Eqs 7.14–7.24) and Table 7.4 (equilibrium-constant temperature dependence). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "CO2Equilibria": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:140\nUpstream `CO2Equilibria` is an MTK `@component` where T, H_plus, and p_CO2 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the bead's `(S, observed-only)` classification. The seven algebraic equations are unchanged from upstream.\n\nNote on dH_Kc1: upstream Aerosol.jl literal is 7657.12 J/mol (1.83 kcal/mol per S&P Table 7.4 with 1 kcal = 4184 J nominally yields 7656.72; the upstream value is preserved verbatim for bit-for-bit fidelity with the source — see source_ref).\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/multiply/divide expressions of the van't Hoff K_c1/K_c2/H_CO2 closed forms across the atmospheric T range (273–318 K) and multi-decade [H+]/p_CO2 sweeps, including the H_CO2_eff sum which adds K_c1*K_c2/[H+]^2 (small for [H+]>1e-7 mol/m^3 but reaches O(1) at high pH)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Temperature"
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Hydrogen ion concentration (1e-4 mol/m^3 = pH 7 in pure water at 298 K)"
+                },
+                "p_CO2": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 40.0,
+                    "description": "Partial pressure of CO2 (≈ 400 ppm at 1 atm = 40.5 Pa; rounded to 40 Pa)"
+                },
+                "R_gas": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Gas constant"
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Reference temperature"
+                },
+                "H_CO2_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 0.0003355539106834444,
+                    "description": "Henry's law constant for CO2 at 298 K (3.4e-2 M/atm × 1000 mol·m⁻³/M ÷ 101325 Pa/atm)"
+                },
+                "dH_H_CO2": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -20292.4,
+                    "description": "Heat of dissolution for CO2 (-4.85 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "K_c1_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 4.3e-4,
+                    "description": "First dissociation constant K_c1 at 298 K (4.3e-7 M × 1000 mol·m⁻³/M)"
+                },
+                "K_c2_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 4.7e-8,
+                    "description": "Second dissociation constant K_c2 at 298 K (4.7e-11 M × 1000 mol·m⁻³/M)"
+                },
+                "dH_Kc1": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": 7657.12,
+                    "description": "Enthalpy for K_c1 (1.83 kcal/mol; upstream literal preserved verbatim per source_ref)"
+                },
+                "dH_Kc2": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": 14853.2,
+                    "description": "Enthalpy for K_c2 (3.55 kcal/mol converted to J/mol)"
+                },
+                "H_CO2": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Henry's law constant for CO2 at temperature T"
+                },
+                "K_c1": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "First dissociation constant K_c1 at temperature T"
+                },
+                "K_c2": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Second dissociation constant K_c2 at temperature T"
+                },
+                "CO2_aq": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Aqueous CO2 concentration [CO2·H2O]"
+                },
+                "HCO3_minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Bicarbonate concentration [HCO3-]"
+                },
+                "CO3_2minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Carbonate concentration [CO3^2-]"
+                },
+                "C_total": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Total dissolved inorganic carbon (CO2_aq + HCO3- + CO3^2-)"
+                },
+                "H_CO2_eff": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Effective Henry's law constant for CO2 (S&P Eq 7.24)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_CO2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_CO2_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "/", "args": ["dH_H_CO2", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T_ref"] },
+                                                    { "op": "/", "args": [-1, "T"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_c1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_c1_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Kc1", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_c2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_c2_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Kc2", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "CO2_aq",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["H_CO2", "p_CO2"]
+                    }
+                },
+                {
+                    "lhs": "HCO3_minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_c1", "CO2_aq"] },
+                            "H_plus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "CO3_2minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_c2", "HCO3_minus"] },
+                            "H_plus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "C_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["CO2_aq", "HCO3_minus", "CO3_2minus"]
+                    }
+                },
+                {
+                    "lhs": "H_CO2_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_CO2",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    { "op": "/", "args": ["K_c1", "H_plus"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            { "op": "*", "args": ["K_c1", "K_c2"] },
+                                            { "op": "^", "args": ["H_plus", 2] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [],
+            "examples": []
+        }
+    }
+}
