@@ -1,0 +1,302 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DynamicFuelLoadTransfer",
+        "description": "Dynamic fuel load transfer from live herbaceous to dead herbaceous fuel based on live-herbaceous fuel moisture, per Andrews (2018) Table 6c. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:320 (`DynamicFuelLoadTransfer` @component). Observed-only: w0_live_herb and Mf_live_herb are inputs (parameters); T_fraction, w0_dead_herb, and w0_live_herb_remaining are algebraic outputs.",
+        "tags": [
+            "wildland_fire",
+            "rothermel",
+            "fuel_load",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-l5ea)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. 121 p. — Equation T (transfer fraction), Table 6c."
+            }
+        ]
+    },
+    "models": {
+        "DynamicFuelLoadTransfer": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:320\nUpstream `DynamicFuelLoadTransfer` is an MTK `@component` whose two physical inputs (w0_live_herb in kg/m^2; Mf_live_herb dimensionless) are `@parameters` and whose three outputs (T_fraction, w0_dead_herb, w0_live_herb_remaining) are time-indexed `@variables` defined by three algebraic equations (the standalone component is observed-only with no D(x) terms). The four upstream `@constants` (c_T_1=-1.11, c_T_2=1.33, zero=0.0, one=1.0) are preserved here as zero-default parameters with the upstream defaults — this matches the pattern used elsewhere in the rig (see components/wildland_fire/rothermel/live_fuel_moisture_extinction.esm) where `@constants` and `@parameters` are unified into ESM `parameter` declarations.\n\nThe equations are the Andrews (2018) Table 6c form:\n  T_fraction = max(zero, min(one, c_T_1 * Mf_live_herb + c_T_2))\n  w0_dead_herb = T_fraction * w0_live_herb\n  w0_live_herb_remaining = w0_live_herb - w0_dead_herb\n— with the clamp [0, 1] enforcing physical bounds on the transfer fraction (an unclamped −1.11·Mf+1.33 line crosses 1 at Mf≈0.297 and 0 at Mf≈1.198). Mass-balance: w0_dead_herb + w0_live_herb_remaining = w0_live_herb (verified by the two equations as written).\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are a chain of multiply, add, max, and min on hardware-supported intrinsics — so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless transfer fractions and kg/m^2 fuel loads."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "w0_live_herb": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.5,
+                    "description": "Initial live herbaceous fuel load"
+                },
+                "Mf_live_herb": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Live herbaceous fuel moisture content (dimensionless mass fraction)"
+                },
+                "c_T_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -1.11,
+                    "description": "Transfer fraction coefficient 1 (dimensionless), Andrews (2018) Table 6c"
+                },
+                "c_T_2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.33,
+                    "description": "Transfer fraction coefficient 2 (dimensionless), Andrews (2018) Table 6c"
+                },
+                "zero": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Zero dimensionless constant for clamping (preserved from upstream MTK @constants)"
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Unity dimensionless constant for clamping (preserved from upstream MTK @constants)"
+                },
+                "T_fraction": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Transfer fraction from live herbaceous to dead herbaceous (dimensionless, clamped to [0, 1])"
+                },
+                "w0_dead_herb": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Dead herbaceous fuel load created by transfer"
+                },
+                "w0_live_herb_remaining": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Remaining live herbaceous fuel load after transfer"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "T_fraction",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "zero",
+                            {
+                                "op": "min",
+                                "args": [
+                                    "one",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["c_T_1", "Mf_live_herb"]
+                                            },
+                                            "c_T_2"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w0_dead_herb",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["T_fraction", "w0_live_herb"]
+                    }
+                },
+                {
+                    "lhs": "w0_live_herb_remaining",
+                    "rhs": {
+                        "op": "-",
+                        "args": ["w0_live_herb", "w0_dead_herb"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "dry_full_transfer",
+                    "description": "Very dry live herbaceous fuel (Mf_live_herb = 0). Inner = -1.11·0 + 1.33 = 1.33; min(1, 1.33) = 1.0; max(0, 1.0) = 1.0. All live load transfers to dead: w0_dead_herb = w0_live_herb = 0.5; w0_live_herb_remaining = 0.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 0.5,
+                        "Mf_live_herb": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 1.0 },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 0.5 },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "wet_no_transfer",
+                    "description": "Saturated live herbaceous fuel (Mf_live_herb = 1.5). Inner = -1.11·1.5 + 1.33 = -0.335; min(1, -0.335) = -0.335; max(0, -0.335) = 0. No transfer: w0_dead_herb = 0; w0_live_herb_remaining = w0_live_herb = 0.8.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 0.8,
+                        "Mf_live_herb": 1.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.8 }
+                    ]
+                },
+                {
+                    "id": "partial_transfer_midrange",
+                    "description": "Mid-range moisture (Mf_live_herb = 0.5, w0_live_herb = 1.0). Inner = -1.11·0.5 + 1.33 = 0.775; clamps inactive (0 ≤ 0.775 ≤ 1). T_fraction = 0.775; w0_dead_herb = 0.775·1.0 = 0.775; w0_live_herb_remaining = 1.0 − 0.775 = 0.225.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 1.0,
+                        "Mf_live_herb": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 0.775 },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 0.775 },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.225 }
+                    ]
+                },
+                {
+                    "id": "upper_clamp_active",
+                    "description": "Low live moisture (Mf_live_herb = 0.1) makes the unclamped inner exceed 1: inner = -1.11·0.1 + 1.33 = 1.219. min(1, 1.219) = 1.0; max(0, 1.0) = 1.0. Upper clamp activates → full transfer; w0_dead_herb = w0_live_herb = 2.0; w0_live_herb_remaining = 0.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 2.0,
+                        "Mf_live_herb": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 1.0 },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 2.0 },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "lower_clamp_active_high_moisture",
+                    "description": "Very wet live herbaceous fuel (Mf_live_herb = 2.0) drives the unclamped inner negative: inner = -1.11·2.0 + 1.33 = -0.89. min(1, -0.89) = -0.89; max(0, -0.89) = 0. Lower clamp activates → no transfer.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 0.6,
+                        "Mf_live_herb": 2.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.6 }
+                    ]
+                },
+                {
+                    "id": "boundary_lower_zero_transfer",
+                    "description": "Exact lower-clamp boundary: Mf_live_herb = c_T_2 / |c_T_1| = 1.33 / 1.11 ≈ 1.198198198198198. Inner = -1.11·(1.33/1.11) + 1.33 = 0 exactly (in real arithmetic; minor ULP slack covered by abs tolerance). T_fraction = max(0, min(1, 0)) = 0 (or one ULP from 0).",
+                    "parameter_overrides": {
+                        "w0_live_herb": 1.0,
+                        "Mf_live_herb": 1.1981981981981981
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-14 } }
+                    ]
+                },
+                {
+                    "id": "boundary_upper_full_transfer",
+                    "description": "Exact upper-clamp boundary: -1.11·Mf + 1.33 = 1 ⇒ Mf = 0.33/1.11 = 0.2972972972972973. Inner = 1 (within ULP); min(1, 1) = 1; T_fraction = 1.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 1.0,
+                        "Mf_live_herb": 0.2972972972972973
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 1.0, "tolerance": { "abs": 1.0e-14 } }
+                    ]
+                },
+                {
+                    "id": "mass_balance_partial",
+                    "description": "Mass balance in the unclamped (interior) regime: w0_dead_herb + w0_live_herb_remaining = w0_live_herb identically. Mf_live_herb = 0.7 → inner = -1.11·0.7 + 1.33 = 0.553; T_fraction = 0.553; w0_dead_herb = 0.553·1.5 = 0.8295; w0_live_herb_remaining = 1.5 − 0.8295 = 0.6705.",
+                    "parameter_overrides": {
+                        "w0_live_herb": 1.5,
+                        "Mf_live_herb": 0.7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "T_fraction", "time": 0.0, "expected": 0.553 },
+                        { "variable": "w0_dead_herb", "time": 0.0, "expected": 0.8295 },
+                        { "variable": "w0_live_herb_remaining", "time": 0.0, "expected": 0.6705 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "transfer_fraction_vs_moisture_sweep",
+                    "description": "Sweep Mf_live_herb across the physical range [0, 1.5] to surface the clamped piecewise structure of T_fraction: upper clamp at low moisture, linear ramp through the unclamped band, lower clamp at high moisture.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "w0_live_herb": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mf_live_herb",
+                                "range": { "start": 0.0, "stop": 1.5, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "T_fraction_vs_Mf",
+                            "type": "line",
+                            "description": "Transfer fraction vs live herbaceous moisture — upper-clamped at 1 below Mf≈0.297, lower-clamped at 0 above Mf≈1.198, linear in between.",
+                            "x": { "variable": "Mf_live_herb", "label": "Mf_live_herb (mass fraction)" },
+                            "y": { "variable": "T_fraction", "label": "T_fraction (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "fuel_load_partition_heatmap",
+                    "description": "Two-dimensional sweep over (Mf_live_herb, w0_live_herb) showing how the dead-herbaceous fuel load created by transfer scales with both inputs. Reveals the linear-in-load, piecewise-linear-in-moisture surface w0_dead_herb(Mf, w0_live).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mf_live_herb",
+                                "range": { "start": 0.0, "stop": 1.5, "count": 21, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "w0_live_herb",
+                                "range": { "start": 0.0, "stop": 2.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w0_dead_herb_surface",
+                            "type": "heatmap",
+                            "description": "w0_dead_herb(Mf_live_herb, w0_live_herb) — partitioned dead-herbaceous load surface.",
+                            "x": { "variable": "Mf_live_herb", "label": "Mf_live_herb (mass fraction)" },
+                            "y": { "variable": "w0_live_herb", "label": "w0_live_herb (kg/m^2)" },
+                            "value": { "variable": "w0_dead_herb", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
