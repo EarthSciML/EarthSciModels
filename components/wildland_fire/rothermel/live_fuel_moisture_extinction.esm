@@ -1,0 +1,292 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "LiveFuelMoistureExtinction",
+        "description": "Live fuel moisture of extinction (M_x,live) from dead-fuel moisture, dead-to-live effective load ratio, and dead fuel moisture of extinction. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:367 (`LiveFuelMoistureExtinction` @component). Observed-only: Mx_dead, W_ratio, Mf_dead are inputs (parameters); Mx_live is an algebraic output. Implements Eq. M_x,live, Table 6b in Andrews (2018) RMRS-GTR-371.",
+        "tags": [
+            "wildland_fire",
+            "rothermel",
+            "fuel_moisture",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-7ofb)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. 121 p. — Equation M_x,live, Table 6b."
+            }
+        ]
+    },
+    "models": {
+        "LiveFuelMoistureExtinction": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:367\nUpstream `LiveFuelMoistureExtinction` is an MTK `@component` whose three inputs (Mx_dead, W_ratio, Mf_dead) are `@parameters` and whose single output (Mx_live) is a time-indexed `@variable` defined by a single algebraic equation (the standalone component is observed-only with no D(x) terms). The four upstream `@constants` (c_Mx_1=2.9, c_Mx_2=0.226, one=1.0, Mx_dead_floor=1.0e-10) are preserved here as zero-default parameters with the upstream defaults — this matches the pattern used elsewhere in the rig (see components/aerosol/aq_eq/water.esm) where `@constants` and `@parameters` are unified into ESM `parameter` declarations.\n\nThe equation is the Andrews (2018) Table 6b form:\n  Mx_live = max(Mx_dead, c_Mx_1 * W_ratio * (1 - Mf_dead/max(Mx_dead, Mx_dead_floor)) - c_Mx_2)\n— with `Mx_dead_floor=1e-10` as the upstream guard against division by zero when Mx_dead=0 (a degenerate input that arises only if no dead fuel is present in the bed).\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a chain of multiply, divide, subtract, and max operations on hardware-supported intrinsics — so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless fuel-moisture quantities."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "Mx_dead": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.25,
+                    "description": "Dead fuel moisture of extinction (dimensionless mass fraction)"
+                },
+                "W_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dead-to-live effective fuel load ratio (dimensionless)"
+                },
+                "Mf_dead": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.05,
+                    "description": "Fine dead fuel moisture content (dimensionless mass fraction)"
+                },
+                "c_Mx_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2.9,
+                    "description": "Live Mx coefficient 1 (dimensionless), Andrews (2018) Table 6b"
+                },
+                "c_Mx_2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.226,
+                    "description": "Live Mx coefficient 2 (dimensionless), Andrews (2018) Table 6b"
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Unity dimensionless constant (preserved from upstream MTK @constants for unit-balancing)"
+                },
+                "Mx_dead_floor": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0e-10,
+                    "description": "Floor on Mx_dead to avoid division by zero when no dead fuel is present"
+                },
+                "Mx_live": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Live fuel moisture of extinction (dimensionless mass fraction)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "Mx_live",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "Mx_dead",
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "c_Mx_1",
+                                            "W_ratio",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "one",
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "Mf_dead",
+                                                                    {
+                                                                        "op": "max",
+                                                                        "args": ["Mx_dead", "Mx_dead_floor"]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [-1, "c_Mx_2"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "floor_active_no_dead_fuel",
+                    "description": "W_ratio = 0 (no dead fuel relative to live). Inner expression = 2.9·0·(...) − 0.226 = −0.226, so the max(Mx_dead, ...) lower bound is active and Mx_live = Mx_dead = 0.25.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.25,
+                        "W_ratio": 0.0,
+                        "Mf_dead": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 0.25 }
+                    ]
+                },
+                {
+                    "id": "floor_active_wet_dead_fuel",
+                    "description": "Dead fuel saturated at Mf_dead = Mx_dead (= 0.30). The (1 − Mf_dead/Mx_dead) factor is 0, so the inner expression = −0.226 and the floor activates: Mx_live = Mx_dead = 0.30.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.30,
+                        "W_ratio": 1.0,
+                        "Mf_dead": 0.30
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 0.30 }
+                    ]
+                },
+                {
+                    "id": "non_floor_dry_dead_fuel",
+                    "description": "Mf_dead = 0 with W_ratio = 1.0, Mx_dead = 0.25. Inner = 2.9·1·(1 − 0) − 0.226 = 2.674; max(0.25, 2.674) = 2.674. Exercises the non-floor branch.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.25,
+                        "W_ratio": 1.0,
+                        "Mf_dead": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 2.674 }
+                    ]
+                },
+                {
+                    "id": "non_floor_high_dead_load",
+                    "description": "High dead-to-live load ratio (W_ratio = 2.0) with moderately wet dead fuel (Mf_dead = 0.05, Mx_dead = 0.25). Inner = 2.9·2·(1 − 0.05/0.25) − 0.226 = 5.8·0.8 − 0.226 = 4.414; floor inactive.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.25,
+                        "W_ratio": 2.0,
+                        "Mf_dead": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 4.414 }
+                    ]
+                },
+                {
+                    "id": "andrews_grass_scenario",
+                    "description": "Representative grass-fuel scenario: Mx_dead = 0.12 (12% dead extinction), Mf_dead = 0.05 (5% dead moisture), W_ratio = 0.5. Inner = 2.9·0.5·(1 − 0.05/0.12) − 0.226 = 1.45·(7/12) − 0.226 = 0.6198333…; max(0.12, 0.6198…) = 0.6198… (floor inactive).",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.12,
+                        "W_ratio": 0.5,
+                        "Mf_dead": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 0.6198333333333333 }
+                    ]
+                },
+                {
+                    "id": "mx_dead_floor_protects_division",
+                    "description": "Degenerate Mx_dead = 0 (no dead-fuel extinction available). Without the Mx_dead_floor guard, the inner expression would divide by zero. With Mx_dead_floor = 1e-10, the inner expression evaluates to 2.9·1·(1 − 0.05/1e-10) − 0.226 ≈ −1.45e9, which is far below 0; max(0, −1.45e9) = 0 — i.e., Mx_live degenerates to Mx_dead = 0 in this physically degenerate corner.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.0,
+                        "W_ratio": 1.0,
+                        "Mf_dead": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "boundary_inner_equals_floor",
+                    "description": "Edge case where the inner expression and Mx_dead are both small and nonzero. Mx_dead = 0.20, W_ratio = 0.1, Mf_dead = 0.10. Inner = 2.9·0.1·(1 − 0.10/0.20) − 0.226 = 0.29·0.5 − 0.226 = 0.145 − 0.226 = −0.081; floor active → 0.20.",
+                    "parameter_overrides": {
+                        "Mx_dead": 0.20,
+                        "W_ratio": 0.1,
+                        "Mf_dead": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Mx_live", "time": 0.0, "expected": 0.20 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "mx_live_vs_mf_dead_sweep",
+                    "description": "Sweep Mf_dead from 0 to Mx_dead at fixed Mx_dead = 0.25 and W_ratio = 1.0. Surfaces the linear ramp of the inner expression with Mf_dead and the kink where the max(Mx_dead, …) floor activates as the inner term drops below Mx_dead.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "Mx_dead": 0.25,
+                        "W_ratio": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mf_dead",
+                                "range": { "start": 0.0, "stop": 0.25, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "mx_live_vs_mf_dead",
+                            "type": "line",
+                            "description": "Live Mx vs dead-fuel moisture content — descends linearly from the dry-dead-fuel maximum, then clamps at Mx_dead once the inner term crosses below it.",
+                            "x": { "variable": "Mf_dead", "label": "Mf_dead (mass fraction)" },
+                            "y": { "variable": "Mx_live", "label": "Mx_live (mass fraction)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "mx_live_heatmap_w_ratio_mf_dead",
+                    "description": "Two-dimensional sweep over (W_ratio, Mf_dead) at fixed Mx_dead = 0.25. Reveals the joint dependence: high W_ratio with dry dead fuel produces large live Mx; low W_ratio or wet dead fuel collapses to the Mx_dead floor.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "Mx_dead": 0.25
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "W_ratio",
+                                "range": { "start": 0.0, "stop": 3.0, "count": 21, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "Mf_dead",
+                                "range": { "start": 0.0, "stop": 0.25, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "mx_live_surface",
+                            "type": "heatmap",
+                            "description": "Mx_live(W_ratio, Mf_dead) — joint dependence of live fuel moisture of extinction on dead-load ratio and dead-fuel moisture.",
+                            "x": { "variable": "W_ratio", "label": "W_ratio (dead/live effective load ratio)" },
+                            "y": { "variable": "Mf_dead", "label": "Mf_dead (mass fraction)" },
+                            "value": { "variable": "Mx_live", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
