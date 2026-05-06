@@ -1,0 +1,288 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "WindLimit",
+        "description": "Maximum effective wind speed (U_limit) above which the wind factor in the Rothermel surface fire spread model saturates. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:465 (`WindLimit` @component). Observed-only: IR is the input parameter; U_limit is the algebraic output. Both upstream branches are preserved here as a single `ifelse` on the dimensionless `use_corrected` indicator parameter — corrected (Andrews et al. 2013) when use_corrected > 0.5 (the upstream default), original when use_corrected ≤ 0.5. Implements Eq. Ulimit, Table 7 in Andrews (2018) RMRS-GTR-371.",
+        "tags": [
+            "wildland_fire",
+            "rothermel",
+            "wind_limit",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-2p2g)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. 121 p. — Equation Ulimit, Table 7."
+            },
+            {
+                "citation": "Andrews, P. L., Cruz, M. G., & Rothermel, R. C. (2013). Examination of the wind speed limit function in the Rothermel surface fire spread model. International Journal of Wildland Fire, 22(7), 959-969. https://doi.org/10.1071/WF12122 — corrected (cube-root) form of the wind speed limit."
+            }
+        ]
+    },
+    "models": {
+        "WindLimit": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:465\nUpstream `WindLimit` is an MTK `@component` whose single input (IR, reaction intensity) is a `@parameter` and whose single output (U_limit) is a time-indexed `@variable` with one algebraic equation. The upstream component takes a Julia keyword argument `use_corrected::Bool = true` that selects between the corrected cube-root form (Andrews et al. 2013) and the original linear form at component-construction time:\n  if use_corrected: U_limit = c_Ulim_corr * (IR / IR_ref)^(1/3)   # m/s; c_Ulim_corr = 0.0857 m/s\n  else:             U_limit = c_Ulim_orig * IR                   # m/s; c_Ulim_orig = 2.42e-5 m/s·m^2/W\nFor faithful one-component .esm migration, both branches are inlined here as a single algebraic equation gated by an `ifelse` on a runtime indicator parameter `use_corrected` (0/1 dimensionless, threshold > 0.5). Default `use_corrected = 1.0` matches the upstream Julia default (use_corrected=true).\n\nUpstream `@constants` (c_Ulim_corr=0.0857 m/s, c_Ulim_orig=2.42e-5 m/s·m^2/W, IR_ref=1.0 W/m^2) are preserved as parameters with their upstream defaults — this matches the pattern used in components/wildland_fire/rothermel/live_fuel_moisture_extinction.esm, where MTK `@constants` and `@parameters` are unified into ESM `parameter` declarations. IR_ref is the unit-balancing constant that non-dimensionalizes IR before the cube-root in the corrected branch (so the cube-root operates on a dimensionless argument).\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a single multiply or a multiply-then-cube-root in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on m/s wind-speed quantities. Tests using non-cube-friendly inputs (e.g. IR=189270, the SI conversion of 1000 Btu/ft²/min) explicitly relax to rel=1e-12 too — the cube-root only contributes a few additional ULPs on top of the multiply."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "IR": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 1000.0,
+                    "description": "Reaction intensity (heat release rate per unit area)"
+                },
+                "use_corrected": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Flag selecting equation variant (dimensionless): > 0.5 selects the corrected cube-root form (Andrews et al. 2013), ≤ 0.5 selects the original linear form. Default 1.0 matches the upstream Julia keyword default `use_corrected=true`."
+                },
+                "c_Ulim_corr": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0857,
+                    "description": "Corrected wind-limit coefficient, SI form of Andrews et al. (2013) Eq. Ulimit (Table 7, Andrews 2018). Derived as 0.00508·96.8·189.27^(-1/3) m/s."
+                },
+                "c_Ulim_orig": {
+                    "type": "parameter",
+                    "units": "m/s*m^2/W",
+                    "default": 2.42e-5,
+                    "description": "Original wind-limit coefficient, SI form of the linear Ulimit equation (Table 7, Andrews 2018). Derived as 0.00508·0.9/189.27 m/s per (W/m^2)."
+                },
+                "IR_ref": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 1.0,
+                    "description": "Reference reaction intensity (MTK unit-balancing constant preserved from upstream `@constants`). Non-dimensionalizes IR before the cube-root in the corrected branch."
+                },
+                "U_limit": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Maximum effective wind speed; saturates the wind factor φW above this value."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "U_limit",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["use_corrected", 0.5] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "c_Ulim_corr",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            { "op": "/", "args": ["IR", "IR_ref"] },
+                                            { "op": "/", "args": [1.0, 3.0] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": ["c_Ulim_orig", "IR"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "corrected_zero_intensity",
+                    "description": "Corrected branch (use_corrected = 1.0, default): IR = 0 ⇒ U_limit = 0.0857·0^(1/3) = 0. Boundary case at the lower physical limit.",
+                    "parameter_overrides": {
+                        "use_corrected": 1.0,
+                        "IR": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "corrected_unit_intensity",
+                    "description": "Corrected branch at IR = IR_ref = 1 W/m²: (IR/IR_ref)^(1/3) = 1, so U_limit = c_Ulim_corr = 0.0857 m/s. Exercises the non-dimensionalization step of the cube-root.",
+                    "parameter_overrides": {
+                        "use_corrected": 1.0,
+                        "IR": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.0857 }
+                    ]
+                },
+                {
+                    "id": "corrected_perfect_cube_8",
+                    "description": "Corrected branch at IR = 8 W/m²: (8)^(1/3) = 2 exactly, so U_limit = 0.0857·2 = 0.1714 m/s. Round-number cube-root case that exercises the multiply-after-cube-root path with no float roundoff in the cube-root itself.",
+                    "parameter_overrides": {
+                        "use_corrected": 1.0,
+                        "IR": 8.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.1714 }
+                    ]
+                },
+                {
+                    "id": "corrected_perfect_cube_27000",
+                    "description": "Corrected branch at IR = 27000 W/m² (high-intensity fire): (27000)^(1/3) = 30 exactly, so U_limit = 0.0857·30 = 2.571 m/s. Round-number cube-root case at a physically plausible high-intensity scale.",
+                    "parameter_overrides": {
+                        "use_corrected": 1.0,
+                        "IR": 27000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 2.571 }
+                    ]
+                },
+                {
+                    "id": "corrected_andrews_si_reference",
+                    "description": "Corrected branch at the upstream test_rothermel.jl `WindLimit Equations` test point: IR = 189270 W/m² (= 1000 Btu/ft²/min ⨯ Btuft2min_to_Wm2 = 189.27). U_limit = 0.0857·189270^(1/3) ≈ 4.920486930885683 m/s. Direct cross-check against the upstream test reference value.",
+                    "parameter_overrides": {
+                        "use_corrected": 1.0,
+                        "IR": 189270.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 4.920486930885683 }
+                    ]
+                },
+                {
+                    "id": "original_zero_intensity",
+                    "description": "Original branch (use_corrected = 0.0): IR = 0 ⇒ U_limit = 2.42e-5·0 = 0. Boundary case at the lower physical limit.",
+                    "parameter_overrides": {
+                        "use_corrected": 0.0,
+                        "IR": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "original_unit_intensity",
+                    "description": "Original branch at IR = 1 W/m²: U_limit = 2.42e-5·1 = 2.42e-5 m/s. Exercises the linear form at the unit-intensity reference.",
+                    "parameter_overrides": {
+                        "use_corrected": 0.0,
+                        "IR": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 2.42e-5 }
+                    ]
+                },
+                {
+                    "id": "original_andrews_si_reference",
+                    "description": "Original branch at the upstream test_rothermel.jl `WindLimit Equations` test point: IR = 189270 W/m². U_limit = 2.42e-5·189270 = 4.580334 m/s. Direct cross-check against the upstream test reference value.",
+                    "parameter_overrides": {
+                        "use_corrected": 0.0,
+                        "IR": 189270.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 4.580334 }
+                    ]
+                },
+                {
+                    "id": "dispatch_above_threshold",
+                    "description": "use_corrected = 0.6 (above 0.5 threshold) selects the corrected branch even though the value is not exactly 1.0. At IR = 8 W/m² ⇒ U_limit = 0.0857·2 = 0.1714 m/s (matches corrected_perfect_cube_8). Exercises the strict > 0.5 dispatch comparator.",
+                    "parameter_overrides": {
+                        "use_corrected": 0.6,
+                        "IR": 8.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.1714 }
+                    ]
+                },
+                {
+                    "id": "dispatch_at_threshold_selects_original",
+                    "description": "use_corrected = 0.5 (exactly at threshold) selects the original branch — the dispatch comparator is strict `>`, not `>=`. At IR = 1000 W/m² ⇒ U_limit = 2.42e-5·1000 = 0.0242 m/s (original branch).",
+                    "parameter_overrides": {
+                        "use_corrected": 0.5,
+                        "IR": 1000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U_limit", "time": 0.0, "expected": 0.0242 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "u_limit_vs_ir_corrected",
+                    "description": "Sweep IR from 0 to 200000 W/m² in the corrected branch. Surfaces the cube-root growth: U_limit climbs rapidly from 0 to ~5 m/s at the top of physically plausible high-intensity fires (~190000 W/m²), with diminishing returns characteristic of the (·)^(1/3) shape.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "use_corrected": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "IR",
+                                "range": { "start": 0.0, "stop": 200000.0, "count": 41, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_limit_corrected_vs_ir",
+                            "type": "line",
+                            "description": "U_limit vs IR (corrected, cube-root form). Cube-root growth — diminishing-returns shape on the wind-saturation cap.",
+                            "x": { "variable": "IR", "label": "IR (W/m^2)" },
+                            "y": { "variable": "U_limit", "label": "U_limit (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "u_limit_branch_comparison",
+                    "description": "Two-dimensional sweep over (IR, use_corrected) showing how the corrected (cube-root) and original (linear) branches diverge with intensity. At low IR the linear branch under-predicts; at very high IR (>~189000 W/m²) the linear branch overtakes the cube-root branch — exactly the misbehavior the Andrews et al. (2013) correction was published to fix.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "IR",
+                                "range": { "start": 0.0, "stop": 250000.0, "count": 26, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "use_corrected",
+                                "range": { "start": 0.0, "stop": 1.0, "count": 2, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_limit_branch_heatmap",
+                            "type": "heatmap",
+                            "description": "U_limit(IR, use_corrected) — visualizes the divergence between the original linear form and the corrected cube-root form across the IR range.",
+                            "x": { "variable": "IR", "label": "IR (W/m^2)" },
+                            "y": { "variable": "use_corrected", "label": "use_corrected (0=original, 1=corrected)" },
+                            "value": { "variable": "U_limit", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
