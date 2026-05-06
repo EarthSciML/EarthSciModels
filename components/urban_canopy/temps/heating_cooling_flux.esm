@@ -1,0 +1,366 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HeatingCoolingFlux",
+        "description": "Heating/cooling fluxes through the building floor for the urban canopy thermal column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:638 (`HeatingCoolingFlux` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.51 and 4.52: the building uses HVAC to clamp the internal building temperature T_iB to the prescribed comfort window [T_iB_min, T_iB_max]. The combined floor flux F_combined is the Crank-Nicholson average of F_bottom_n (time n) and F_bottom_np1 (time n+1) per Eq. 4.53/4.54; if T_iB falls below T_iB_min the absolute value of F_combined is reported as the heating flux F_heat (Eq. 4.51); if T_iB rises above T_iB_max the absolute value is reported as the cooling flux F_cool (Eq. 4.52); inside the comfort window both F_heat and F_cool are zero (no HVAC demand). Parameterized as observed-only with three algebraic equations: F_combined, F_heat, F_cool are state variables; T_iB, T_iB_min, T_iB_max, F_bottom_n, F_bottom_np1 are inputs (parameters in standalone form).",
+        "tags": [
+            "urban_canopy",
+            "temperatures",
+            "hvac",
+            "building",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-0hjk)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.5 (Urban building energy balance — HVAC clamping of internal building temperature), Eqs. 4.51-4.54, p. 100."
+            }
+        ]
+    },
+    "models": {
+        "HeatingCoolingFlux": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:638\nUpstream `HeatingCoolingFlux` is an MTK `@component` with five `@parameters` (T_iB, T_iB_min, T_iB_max, F_bottom_n, F_bottom_np1), three time-indexed `@variables` (F_combined, F_heat, F_cool), and three algebraic equations (no derivatives). Identical equation structure preserved here. Upstream structural test (test/roof_wall_road_snow_temperatures_test.jl:590) asserts `length(equations(sys)) == 3` and `length(unknowns(sys)) == 3` — matched here.\n\nThe upstream component declares two `@constants`, both encoded here as parameters with the upstream default values: α_CN = 0.5 (Crank-Nicholson weight, dimensionless) and zero_flux = 0.0 W/m^2 (zero-flux reference used as the inactive-HVAC branch). Greek `α_CN` is renamed `alpha_CN` for ASCII parameter names per the rig convention (matches snow_density.esm rho_* convention).\n\nThe HVAC threshold conditions use strict `<` and `>` per the upstream `ifelse` semantics: at T_iB = T_iB_min, the heating condition `T_iB < T_iB_min` is FALSE (strict less-than), so F_heat = 0; at T_iB = T_iB_max, the cooling condition `T_iB > T_iB_max` is FALSE (strict greater-than), so F_cool = 0. Equality at either threshold goes to the no-HVAC branch.\n\nInactive-branch encoding: the upstream component uses `zero_flux` (a `@constants` with unit W/m^2) rather than the bare numeric literal `0.0` in the inactive `ifelse` branch. This is unit-balancing in MTK's symbolic algebra — the active branch `abs(F_combined)` carries unit W/m^2, so the inactive branch must too, otherwise MTK rejects the equation as unit-inconsistent. Preserving `zero_flux` as a parameter with default 0.0 W/m^2 here keeps that contract explicit at the .esm level for any future unit-checking ESS reader.\n\nObservability classification: this component is functionally observed-only — the three output variables are each given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (snow_density.esm, snow_capping_runoff.esm, total_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations involve only multiplication, addition, `ifelse`, and `abs` — all at IEEE-754 ULP precision (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (total_phase_change_energy.esm uses 1e-9 for the analogous additive-identity equations). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (the inactive HVAC branches) so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "alpha_CN": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Crank-Nicholson weight (dimensionless) — upstream `@constants` α_CN; alpha=0.5 gives the symmetric Crank-Nicholson average of F_bottom_n and F_bottom_np1"
+                },
+                "zero_flux": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Zero flux reference (W/m^2) — upstream `@constants` zero_flux; used as the inactive-branch value of F_heat and F_cool to keep unit algebra consistent with the active `abs(F_combined)` branch"
+                },
+                "T_iB": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 295.0,
+                    "description": "Internal building temperature (Oleson Eq. 4.37) — input from a building-energy-balance subsystem; HVAC engages when T_iB exits the comfort window [T_iB_min, T_iB_max]"
+                },
+                "T_iB_min": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 290.0,
+                    "description": "Minimum prescribed building temperature (lower edge of HVAC comfort window) — heating engages when T_iB < T_iB_min"
+                },
+                "T_iB_max": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Maximum prescribed building temperature (upper edge of HVAC comfort window) — cooling engages when T_iB > T_iB_max"
+                },
+                "F_bottom_n": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Bottom heat flux at time n (Oleson Eq. 4.53) — heat flux from the building floor into the building interior at the start of the time step"
+                },
+                "F_bottom_np1": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Bottom heat flux at time n+1 (Oleson Eq. 4.54) — heat flux from the building floor at the end of the time step"
+                },
+                "F_combined": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Combined bottom flux (Crank-Nicholson average): alpha_CN*F_bottom_n + (1-alpha_CN)*F_bottom_np1"
+                },
+                "F_heat": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Heating flux (Oleson Eq. 4.51): |F_combined| if T_iB < T_iB_min, else 0 — the HVAC heating demand needed to clamp T_iB at the lower comfort threshold"
+                },
+                "F_cool": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Cooling flux (Oleson Eq. 4.52): |F_combined| if T_iB > T_iB_max, else 0 — the HVAC cooling demand needed to clamp T_iB at the upper comfort threshold"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_combined",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["alpha_CN", "F_bottom_n"]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "-", "args": [1.0, "alpha_CN"] },
+                                    "F_bottom_np1"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_heat",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": ["T_iB", "T_iB_min"]
+                            },
+                            {
+                                "op": "abs",
+                                "args": ["F_combined"]
+                            },
+                            "zero_flux"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_cool",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": ["T_iB", "T_iB_max"]
+                            },
+                            {
+                                "op": "abs",
+                                "args": ["F_combined"]
+                            },
+                            "zero_flux"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "heating_active",
+                    "description": "Reproduces upstream `HeatingCoolingFlux - Heating Active` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:600). T_iB = 285 K is below T_iB_min = 290 K, so the heating branch engages. Floor fluxes F_bottom_n = -20, F_bottom_np1 = -25 W/m^2 (negative = outflow from building) give F_combined = 0.5*(-20) + 0.5*(-25) = -22.5 W/m^2, so F_heat = |-22.5| = 22.5 W/m^2 and F_cool = 0. Anchors fidelity to the upstream Julia component at this canonical fixture point.",
+                    "parameter_overrides": {
+                        "T_iB": 285.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": -20.0,
+                        "F_bottom_np1": -25.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": -22.5 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 22.5 },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "cooling_active",
+                    "description": "Reproduces upstream `HeatingCoolingFlux - Cooling Active` test (test/roof_wall_road_snow_temperatures_test.jl:627). T_iB = 305 K is above T_iB_max = 300 K, so the cooling branch engages. Floor fluxes F_bottom_n = 30, F_bottom_np1 = 35 W/m^2 (positive = inflow into building) give F_combined = 0.5*30 + 0.5*35 = 32.5 W/m^2, so F_cool = |32.5| = 32.5 W/m^2 and F_heat = 0.",
+                    "parameter_overrides": {
+                        "T_iB": 305.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 30.0,
+                        "F_bottom_np1": 35.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 32.5 },
+                        { "variable": "F_cool", "time": 0.0, "expected": 32.5 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "no_hvac_needed",
+                    "description": "Reproduces upstream `HeatingCoolingFlux - No HVAC Needed` test (test/roof_wall_road_snow_temperatures_test.jl:648). T_iB = 295 K sits inside the comfort window [290, 300] K, so neither HVAC branch engages. F_combined = 0.5*10 + 0.5*12 = 11.0 W/m^2 (still computed, because it is not gated by the temperature window), but F_heat and F_cool are both zero by construction.",
+                    "parameter_overrides": {
+                        "T_iB": 295.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 10.0,
+                        "F_bottom_np1": 12.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 11.0 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "heating_at_lower_threshold_strict",
+                    "description": "Boundary case: T_iB = T_iB_min = 290 K exactly. Upstream `ifelse` uses strict `<`, so the heating condition `T_iB < T_iB_min` is FALSE at equality and F_heat = 0. Verifies that equality at the lower threshold goes to the no-heating branch, not the heating branch — the comfort window is closed on the lower boundary.",
+                    "parameter_overrides": {
+                        "T_iB": 290.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": -20.0,
+                        "F_bottom_np1": -25.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": -22.5 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "cooling_at_upper_threshold_strict",
+                    "description": "Boundary case: T_iB = T_iB_max = 300 K exactly. Upstream `ifelse` uses strict `>`, so the cooling condition `T_iB > T_iB_max` is FALSE at equality and F_cool = 0. Verifies that equality at the upper threshold goes to the no-cooling branch — the comfort window is closed on the upper boundary as well.",
+                    "parameter_overrides": {
+                        "T_iB": 300.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 30.0,
+                        "F_bottom_np1": 35.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 32.5 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "heating_with_positive_flux",
+                    "description": "Heating branch with positive floor fluxes: T_iB = 285 K below comfort window, but F_bottom_n = 15, F_bottom_np1 = 25 W/m^2 are both positive (heat flowing into the building). F_combined = 20.0, and F_heat = |20.0| = 20.0 (the absolute value is taken regardless of sign — the building still demands heating because T_iB is below the comfort threshold). Verifies the abs() does not depend on the sign of F_combined and that the heating demand is reported as a positive magnitude.",
+                    "parameter_overrides": {
+                        "T_iB": 285.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 15.0,
+                        "F_bottom_np1": 25.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 20.0 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 20.0 },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "zero_floor_flux_outside_window",
+                    "description": "Edge case: building temperature is below T_iB_min but the floor flux happens to be exactly zero (F_bottom_n = F_bottom_np1 = 0). F_combined = 0, F_heat = |0| = 0, F_cool = 0. The HVAC condition fires (T_iB < T_iB_min is TRUE) but the magnitude is zero — exercises the active-branch arithmetic with a zero argument and confirms abs(0) = 0.",
+                    "parameter_overrides": {
+                        "T_iB": 285.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 0.0,
+                        "F_bottom_np1": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "asymmetric_crank_nicholson_average",
+                    "description": "Stress-tests the Crank-Nicholson averaging arithmetic with very different magnitudes at time n vs n+1: F_bottom_n = 100, F_bottom_np1 = -50 (sign flip during the step, e.g. solar heating dropping at sunset). F_combined = 0.5*100 + 0.5*(-50) = 25.0. T_iB = 295 K is inside the comfort window so F_heat = F_cool = 0 — verifies that the Crank-Nicholson combiner is computed independently of the HVAC branches.",
+                    "parameter_overrides": {
+                        "T_iB": 295.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": 100.0,
+                        "F_bottom_np1": -50.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_combined", "time": 0.0, "expected": 25.0 },
+                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "hvac_demand_vs_internal_temperature",
+                    "description": "Sweep T_iB across a range spanning both the heating and cooling comfort thresholds with fixed floor fluxes (F_bottom_n = F_bottom_np1 = -40 W/m^2 so F_combined = -40). F_heat = 40 for T_iB below 290 K, drops to 0 in the comfort window, and stays 0 above 300 K; F_cool = 0 for T_iB below 300 K, jumps to 40 above. Surfaces the dual-threshold HVAC dead band of Eqs. 4.51-4.52 directly.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0,
+                        "F_bottom_n": -40.0,
+                        "F_bottom_np1": -40.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_iB",
+                                "range": { "start": 280.0, "stop": 310.0, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_heat_curve",
+                            "type": "line",
+                            "description": "F_heat vs T_iB: nonzero (= |F_combined| = 40) below T_iB_min = 290 K, zero in the comfort window and above — the heating dead band.",
+                            "x": { "variable": "T_iB", "label": "T_iB (K)" },
+                            "y": { "variable": "F_heat", "label": "F_heat (W/m^2)" }
+                        },
+                        {
+                            "id": "F_cool_curve",
+                            "type": "line",
+                            "description": "F_cool vs T_iB: zero below T_iB_max = 300 K, nonzero (= |F_combined| = 40) above — the cooling dead band.",
+                            "x": { "variable": "T_iB", "label": "T_iB (K)" },
+                            "y": { "variable": "F_cool", "label": "F_cool (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "crank_nicholson_combined_flux_surface",
+                    "description": "Joint sweep over F_bottom_n and F_bottom_np1 to surface the Crank-Nicholson combiner F_combined = 0.5*(F_bottom_n + F_bottom_np1). T_iB held in the comfort window so the HVAC branches are inactive — isolates the combiner. Iso-flux contours are 45-degree lines, slope -1 (constant F_combined for trade-offs between time-n and time-(n+1) flux).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T_iB": 295.0,
+                        "T_iB_min": 290.0,
+                        "T_iB_max": 300.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "F_bottom_n",
+                                "range": { "start": -100.0, "stop": 100.0, "count": 11, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "F_bottom_np1",
+                                "range": { "start": -100.0, "stop": 100.0, "count": 11, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_combined_heatmap",
+                            "type": "heatmap",
+                            "description": "F_combined as a function of F_bottom_n and F_bottom_np1: planar Crank-Nicholson surface with slope 0.5 in each dimension per Eq. 4.53/4.54.",
+                            "x": { "variable": "F_bottom_n",   "label": "F_bottom_n (W/m^2)" },
+                            "y": { "variable": "F_bottom_np1", "label": "F_bottom_np1 (W/m^2)" },
+                            "value": { "variable": "F_combined", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
