@@ -1,0 +1,612 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "NH3Equilibria",
+        "description": "Ammonia gas-aqueous dissolution and dissociation equilibria with van't Hoff temperature dependence. Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:345 (`NH3Equilibria` @component). Implements Seinfeld & Pandis Ch 7 §7.3.4 (Eq 7.46–7.51) and Table 7.4. Parameterized as observed-only: T, H_plus, and p_NH3 are inputs; H_NH3, K_a1, K_w, OH_minus, NH3_aq, NH4_plus, NH3_total, H_NH3_eff are algebraic outputs.",
+        "tags": [
+            "aerosol",
+            "aqueous_equilibria",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (mdl-1lu)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Section 7.3.4 (NH3 dissolution/dissociation, Eq 7.46–7.51) and Table 7.4 (equilibrium-constant temperature dependence). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "NH3Equilibria": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:345\nUpstream `NH3Equilibria` is an MTK `@component` where T, H_plus, and p_NH3 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), T, H_plus, and p_NH3 are declared as parameters here — matching the bead's `(S, observed-only)` classification. The eight algebraic equations are unchanged from upstream.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/multiplications of the van't Hoff K(T) and Henry/dissociation closed-form expressions across the atmospheric T range (273–318 K) and 9-decade [H+] sweep."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Temperature"
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Hydrogen ion concentration (1e-4 mol/m³ = pH 7 in pure water at 298 K)"
+                },
+                "p_NH3": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 1.0,
+                    "description": "Partial pressure of NH3"
+                },
+                "R_gas": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Gas constant"
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Reference temperature"
+                },
+                "H_NH3_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 0.611892425363928,
+                    "description": "Henry's law constant for NH3 at 298 K (62.0 M/atm converted to mol/m³/Pa: 62.0 / 101325.0 * 1000.0)"
+                },
+                "dH_H_NH3": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -34183.28,
+                    "description": "Heat of dissolution for NH3 (-8.17 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "K_a1_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.017,
+                    "description": "NH3.H2O dissociation constant at 298 K (1.7e-5 M converted to mol/m³)"
+                },
+                "dH_Ka1": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": 36191.6,
+                    "description": "Enthalpy for K_a1 (8.65 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "K_w_298": {
+                    "type": "parameter",
+                    "units": "mol^2/m^6",
+                    "default": 1.0e-8,
+                    "description": "K_w at 298 K (1.0e-14 M² converted to mol²/m⁶)"
+                },
+                "dH_Kw": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": 55856.4,
+                    "description": "Enthalpy for K_w (13.35 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "H_NH3": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Henry's law constant for NH3 at temperature T"
+                },
+                "K_a1": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "NH3.H2O dissociation constant at temperature T"
+                },
+                "K_w": {
+                    "type": "state",
+                    "units": "mol^2/m^6",
+                    "description": "Water dissociation constant at temperature T"
+                },
+                "OH_minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Hydroxide ion concentration"
+                },
+                "NH3_aq": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Aqueous NH3 concentration [NH3.H2O]"
+                },
+                "NH4_plus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Ammonium ion concentration"
+                },
+                "NH3_total": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Total dissolved ammonia [NH3.H2O] + [NH4+]"
+                },
+                "H_NH3_eff": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Effective Henry's law constant for NH3 (accounts for dissociation)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_NH3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_NH3_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "/", "args": ["dH_H_NH3", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T_ref"] },
+                                                    { "op": "/", "args": [-1, "T"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_a1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_a1_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Ka1", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_w",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_w_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Kw", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "OH_minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["K_w", "H_plus"]
+                    }
+                },
+                {
+                    "lhs": "NH3_aq",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["H_NH3", "p_NH3"]
+                    }
+                },
+                {
+                    "lhs": "NH4_plus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_a1", "NH3_aq"] },
+                            "OH_minus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "NH3_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["NH3_aq", "NH4_plus"]
+                    }
+                },
+                {
+                    "lhs": "H_NH3_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_NH3",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            { "op": "*", "args": ["K_a1", "H_plus"] },
+                                            "K_w"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "baseline_298K_pH7",
+                    "description": "Reference state at 298 K (T_ref) with neutral water (pH 7) and 1 Pa NH3. At T=T_ref the van't Hoff factors are exp(0)=1, so H_NH3, K_a1, K_w take their 298 K values directly. NH4+ dominates over NH3.H2O at pH 7 because K_a1/[OH-] = 0.017/1e-4 = 170.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 0.611892425363928 },
+                        { "variable": "K_a1",      "time": 0.0, "expected": 0.017 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 1.0e-8 },
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 9.999999999999999e-5 },
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 0.611892425363928 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 104.02171231186777 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 104.6336047372317 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 104.63360473723169 }
+                    ]
+                },
+                {
+                    "id": "cold_273K_pH7",
+                    "description": "Cold cloud-water reference (273.15 K) at pH 7. NH3 solubility increases sharply at low T (negative ΔH_dissolution), so H_NH3 grows ~3.5×; K_w decreases (positive ΔH_dissociation) so [OH-] drops; NH4+ partition increases dramatically.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 2.1468472319851686 },
+                        { "variable": "K_a1",      "time": 0.0, "expected": 0.0045008637550133 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 1.2860247646167109e-9 },
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 1.2860247646167108e-5 },
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 2.1468472319851686 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 751.3593174757062 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 753.5061647076914 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 753.5061647076913 }
+                    ]
+                },
+                {
+                    "id": "cold_280K_pH7",
+                    "description": "Intermediate cold-water reference (280 K).",
+                    "parameter_overrides": {
+                        "T": 280.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 1.485508143572881 },
+                        { "variable": "K_a1",      "time": 0.0, "expected": 0.006646880554687791 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 2.3473232097928894e-9 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 420.64915270940264 }
+                    ]
+                },
+                {
+                    "id": "warm_310K_pH7",
+                    "description": "Warm-cloud / body-temperature reference (310 K). NH3 solubility falls (negative ΔH_dissolution), but K_w rises so [OH-] increases and NH4+ partition decreases.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 0.3586961490688435 },
+                        { "variable": "K_a1",      "time": 0.0, "expected": 0.029924341719995504 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 2.3933701536339305e-8 },
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 0.00023933701536339304 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 44.847831506903056 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 45.206527655971904 }
+                    ]
+                },
+                {
+                    "id": "hot_318K_pH7",
+                    "description": "Upper-range reference (318 K, 45 °C) for warm aqueous-phase chemistry.",
+                    "parameter_overrides": {
+                        "T": 318.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 0.25693293054745164 },
+                        { "variable": "K_a1",      "time": 0.0, "expected": 0.042603477905336945 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 4.128494581583288e-8 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 26.5138689501051 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH4_298K",
+                    "description": "Acidic cloud water (pH 4, typical polluted rain) at 298 K. Low [OH-] drives NH4+ to dominate by 5 orders of magnitude over NH3.H2O — equivalently H*_NH3 grows by K_a1*[H+]/K_w = 0.017*0.1/1e-8 ≈ 1.7e5.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 0.1,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 1.0e-7 },
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 0.611892425363928 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 104021.71231186777 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 104022.32420429312 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH2_298K",
+                    "description": "Strongly acidic regime (pH 2, [H+] = 10 mol/m³) at 298 K. Stress-tests the [H+]/K_w ratio in H_NH3_eff at the far-acidic tail where dissociation overwhelmingly favors NH4+.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 10.0,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 1.0e-9 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 10402171.231186775 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 10402171.8430792 }
+                    ]
+                },
+                {
+                    "id": "basic_pH9_298K",
+                    "description": "Mildly basic regime (pH 9) at 298 K. Higher [OH-] suppresses NH4+ partition; NH3.H2O contribution to total becomes non-negligible (~37 %).",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-6,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 0.01 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 1.0402171231186776 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 1.6521095484826056 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 1.6521095484826056 }
+                    ]
+                },
+                {
+                    "id": "basic_pH10_298K",
+                    "description": "Basic regime (pH 10) at 298 K. NH3.H2O begins to dominate over NH4+ (NH3_aq/NH4+ = OH-/K_a1 ≈ 0.1/0.017 ≈ 5.9).",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-7,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 0.1 },
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 0.611892425363928 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 0.10402171231186776 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 0.7159141376757957 }
+                    ]
+                },
+                {
+                    "id": "high_pNH3",
+                    "description": "Henry's-law linearity check: 10× p_NH3 at fixed T, H_plus scales NH3_aq, NH4+, NH3_total by 10× while leaving H_NH3, K_a1, K_w, OH-, H_NH3_eff unchanged.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 6.11892425363928 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 1040.2171231186778 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 1046.3360473723171 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 104.63360473723169 }
+                    ]
+                },
+                {
+                    "id": "low_pNH3",
+                    "description": "Henry's-law linearity check at low partial pressure: p_NH3 = 0.01 Pa scales NH3_aq, NH4+, NH3_total by 0.01× from baseline. H_NH3_eff is independent of p_NH3.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 0.01
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 0.00611892425363928 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 1.0402171231186779 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 104.63360473723169 }
+                    ]
+                },
+                {
+                    "id": "coupled_cold_acidic",
+                    "description": "Cross-check: cold (273.15 K) AND acidic (pH 4). Combines the van't Hoff temperature shift with the acidic [H+] sweep to exercise both coefficient paths at once.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 0.1,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 2.1468472319851686 },
+                        { "variable": "K_w",       "time": 0.0, "expected": 1.2860247646167109e-9 },
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 1.2860247646167107e-8 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 751359.3174757062 },
+                        { "variable": "H_NH3_eff", "time": 0.0, "expected": 751361.4643229382 }
+                    ]
+                },
+                {
+                    "id": "coupled_warm_basic",
+                    "description": "Cross-check: warm (310 K) AND basic (pH 9). Higher T and higher pH together push the system toward NH3.H2O-dominated speciation.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-6,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_NH3",     "time": 0.0, "expected": 0.3586961490688435 },
+                        { "variable": "OH_minus",  "time": 0.0, "expected": 0.023933701536339308 },
+                        { "variable": "NH3_aq",    "time": 0.0, "expected": 0.3586961490688435 },
+                        { "variable": "NH4_plus",  "time": 0.0, "expected": 0.4484783150690305 },
+                        { "variable": "NH3_total", "time": 0.0, "expected": 0.807174464137874 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "H_NH3_eff_vs_pH",
+                    "description": "Effective Henry's law constant H*_NH3 = H_NH3 * (1 + K_a1*[H+]/K_w) as a function of [H+] over the atmospheric pH range at 298 K. Demonstrates the steep enhancement at low pH (NH4+ partition) and the asymptotic approach to H_NH3 at high pH (NH3.H2O partition) — Seinfeld & Pandis Eq 7.51 / 7.52.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T": 298.0,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 1.0e-7, "stop": 10.0, "count": 25, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Hstar_curve",
+                            "type": "line",
+                            "description": "H*_NH3 vs [H+] at 298 K — log-log slope ≈ -1 in the acidic regime (K_a1*[H+]/K_w >> 1).",
+                            "x": { "variable": "H_plus",    "label": "[H⁺] (mol/m³, log scale)" },
+                            "y": { "variable": "H_NH3_eff", "label": "H*_NH3 (mol/m³/Pa, log scale)" }
+                        },
+                        {
+                            "id": "NH4_curve",
+                            "type": "line",
+                            "description": "[NH4+] vs [H+] at fixed p_NH3 = 1 Pa.",
+                            "x": { "variable": "H_plus",   "label": "[H⁺] (mol/m³, log scale)" },
+                            "y": { "variable": "NH4_plus", "label": "[NH4⁺] (mol/m³, log scale)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "H_NH3_vs_temperature",
+                    "description": "NH3 Henry's law constant vs temperature (van't Hoff with negative ΔH_dissolution). Reproduces the canonical NH3 solubility curve (Seinfeld & Pandis Table 7.4 row for NH3): H_NH3 climbs from ~0.36 mol/m³/Pa at 310 K to ~2.1 mol/m³/Pa at 273 K — a ~6× range over the atmospheric temperature range.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_plus": 1.0e-4,
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 20, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "HNH3_curve",
+                            "type": "line",
+                            "description": "H_NH3(T) — van't Hoff curve.",
+                            "x": { "variable": "T",     "label": "Temperature (K)" },
+                            "y": { "variable": "H_NH3", "label": "H_NH3 (mol/m³/Pa, log scale)" }
+                        },
+                        {
+                            "id": "Ka1_curve",
+                            "type": "line",
+                            "description": "K_a1(T) — dissociation constant climbs with T.",
+                            "x": { "variable": "T",    "label": "Temperature (K)" },
+                            "y": { "variable": "K_a1", "label": "K_a1 (mol/m³, log scale)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "coupled_T_pH_sweep",
+                    "description": "Two-dimensional sweep over T (freezing-to-warm cloud range) and [H+] (acidic-to-basic). Surfaces the joint dependence of [NH4+] and H*_NH3 on temperature and acidity that controls atmospheric NH3 partitioning.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "p_NH3": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 10, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 1.0e-7, "stop": 1.0, "count": 15, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Hstar_heatmap",
+                            "type": "heatmap",
+                            "description": "H*_NH3 as a function of T and [H+].",
+                            "x": { "variable": "T",      "label": "Temperature (K)" },
+                            "y": { "variable": "H_plus", "label": "[H⁺] (mol/m³, log scale)" },
+                            "value": { "variable": "H_NH3_eff", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
