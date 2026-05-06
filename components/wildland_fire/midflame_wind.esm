@@ -1,0 +1,384 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MidflameWind",
+        "description": "Midflame-height wind component — converts horizontal 10m wind components (u_wind, v_wind) to Rothermel's midflame-height wind speed U and wind direction omega relative to the upslope direction. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:249 (`MidflameWind` @component). Observed-only: u_wind, v_wind, slope_aspect, wind_reduction are inputs (parameters); U, omega, u_mf_x, u_mf_y are algebraic outputs. The wind reduction factor (default 0.4 for timber fuels) converts 10m wind speed to midflame height (~6.1 m).",
+        "tags": [
+            "wildland_fire",
+            "wind",
+            "observed-only",
+            "rothermel-coupling"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-017v)"
+        ],
+        "references": [
+            {
+                "citation": "Baughman, R. G.; Albini, F. A. (1980). Estimating midflame windspeeds. In: Proceedings, Sixth Conference on Fire and Forest Meteorology, Society of American Foresters, pp. 88-92. — Source for the 0.4 wind-reduction factor for timber fuels."
+            },
+            {
+                "citation": "Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115. — Defines U as the midflame-height wind speed used in the wind coefficient phi_w."
+            }
+        ]
+    },
+    "models": {
+        "MidflameWind": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:249\nUpstream `MidflameWind` is an MTK `@component` whose four inputs (u_wind, v_wind, slope_aspect, wind_reduction) are `@parameters` and whose four outputs (U, omega, u_mf_x, u_mf_y) are time-indexed `@variables` defined by four algebraic equations (the standalone component is observed-only with no D(x) terms). The two upstream `@constants` (zero_ms = 0.0 m/s, zero_rad = 0.0 rad) are MTK unit-balancing zero literals — they are preserved here as zero-valued parameters with the upstream units, matching the same pattern used in components/wildland_fire/terrain_slope.esm where `zero_1` and `zero_rad` were unified into ESM `parameter` declarations.\n\nUnicode -> ASCII transliteration of identifiers follows the rig convention (see components/wildland_fire/terrain_slope.esm where `tanϕ` is rendered as `tan_phi`): the upstream `ω` is rendered as `omega`.\n\nThe four equations are:\n  U      = wind_reduction * sqrt(u_wind^2 + v_wind^2) + zero_ms\n  omega  = (atan2(v_wind, u_wind) - slope_aspect) + zero_rad\n  u_mf_x = wind_reduction * u_wind + zero_ms\n  u_mf_y = wind_reduction * v_wind + zero_ms\n\nThe two-argument atan(v_wind, u_wind) is represented as op `atan2` in the ESS expression vocabulary (see components/wildland_fire/terrain_slope.esm for the same operator and its quadrant semantics: returns radians in (-pi, pi], measured counter-clockwise from the +x (east) axis). Subtracting `slope_aspect` makes `omega` the wind direction RELATIVE to upslope: omega = 0 when wind blows directly upslope, omega = pi when wind blows directly downslope.\n\nDefault wind_reduction = 0.4 is the Baughman & Albini (1980) value typical for timber fuels; grass/brush fuel models use higher values (commonly 0.5-0.6). The factor is exposed as a parameter (not a constant) so it can be set per-fuel-type by upstream fuel-model lookups.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are sqrt-of-sum-of-squares, atan2, and scalar multiplications on hardware-supported intrinsics, so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on midflame wind speeds (mm/s precision on a m/s quantity)."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "u_wind": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Eastward (zonal) wind component at 10 m reference height"
+                },
+                "v_wind": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Northward (meridional) wind component at 10 m reference height"
+                },
+                "slope_aspect": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.0,
+                    "description": "Upslope direction (radians from +x east axis, in (-pi, pi]); supplied by an upstream TerrainSlope component when coupled."
+                },
+                "wind_reduction": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "Wind reduction factor applied to convert 10 m wind to midflame height (~6.1 m). Default 0.4 is the Baughman & Albini (1980) value for timber fuels."
+                },
+                "zero_ms": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Zero-valued wind-speed constant (MTK unit-balancing literal preserved from upstream)"
+                },
+                "zero_rad": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.0,
+                    "description": "Zero-valued angle constant (MTK unit-balancing literal preserved from upstream)"
+                },
+                "U": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Wind speed at midflame height (Rothermel U)"
+                },
+                "omega": {
+                    "type": "state",
+                    "units": "rad",
+                    "description": "Wind direction relative to upslope (rad). Zero means wind blows directly upslope; +pi/-pi means directly downslope."
+                },
+                "u_mf_x": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Midflame-height x (eastward) wind component"
+                },
+                "u_mf_y": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Midflame-height y (northward) wind component"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "U",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "wind_reduction",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "^", "args": ["u_wind", 2] },
+                                                    { "op": "^", "args": ["v_wind", 2] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "zero_ms"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "omega",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    { "op": "atan2", "args": ["v_wind", "u_wind"] },
+                                    "slope_aspect"
+                                ]
+                            },
+                            "zero_rad"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "u_mf_x",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": ["wind_reduction", "u_wind"] },
+                            "zero_ms"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "u_mf_y",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": ["wind_reduction", "v_wind"] },
+                            "zero_ms"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "calm_wind",
+                    "description": "Calm conditions (u_wind = v_wind = 0). All outputs zero; omega = atan2(0, 0) - 0 = 0 by IEEE-754 atan2 convention. wind_reduction held at default 0.4.",
+                    "parameter_overrides": {
+                        "u_wind": 0.0,
+                        "v_wind": 0.0,
+                        "slope_aspect": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "omega",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "pure_east_wind_flat",
+                    "description": "Pure 10 m/s eastward wind on a flat surface (slope_aspect=0). U = 0.4*sqrt(100) = 4.0 m/s; omega = atan2(0,10) - 0 = 0; u_mf_x = 4.0; u_mf_y = 0.",
+                    "parameter_overrides": {
+                        "u_wind": 10.0,
+                        "v_wind": 0.0,
+                        "slope_aspect": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 4.0 },
+                        { "variable": "omega",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 4.0 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "pure_north_wind_flat",
+                    "description": "Pure 10 m/s northward wind on a flat surface. U = 4.0 m/s; omega = atan2(10, 0) - 0 = +pi/2 (wind blows north, perpendicular to the +x reference axis); u_mf_x = 0; u_mf_y = 4.0.",
+                    "parameter_overrides": {
+                        "u_wind": 0.0,
+                        "v_wind": 10.0,
+                        "slope_aspect": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 4.0 },
+                        { "variable": "omega",  "time": 0.0, "expected": 1.5707963267948966 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 4.0 }
+                    ]
+                },
+                {
+                    "id": "northeast_3_4_5_wind",
+                    "description": "Classical 3-4-5 right-triangle wind components (u_wind=3, v_wind=4) — gives an exact wind-speed magnitude of 5 m/s with no float roundoff. U = 0.4*5 = 2.0 m/s; omega = atan2(4, 3) = 0.9272952180016122 rad; u_mf_x = 1.2; u_mf_y = 1.6.",
+                    "parameter_overrides": {
+                        "u_wind": 3.0,
+                        "v_wind": 4.0,
+                        "slope_aspect": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 2.0 },
+                        { "variable": "omega",  "time": 0.0, "expected": 0.9272952180016122 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 1.2 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 1.6 }
+                    ]
+                },
+                {
+                    "id": "wind_aligned_with_upslope",
+                    "description": "Wind blowing directly up a NE-facing slope: u_wind = v_wind = 1.0, slope_aspect = pi/4. atan2(1, 1) = pi/4, so omega = pi/4 - pi/4 = 0 (wind direction relative to upslope is exactly zero — the canonical Rothermel head-fire alignment). U = 0.4*sqrt(2) ≈ 0.5656854249492381 m/s.",
+                    "parameter_overrides": {
+                        "u_wind": 1.0,
+                        "v_wind": 1.0,
+                        "slope_aspect": 0.7853981633974483
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 0.5656854249492381 },
+                        { "variable": "omega",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 0.4 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 0.4 }
+                    ]
+                },
+                {
+                    "id": "wind_opposite_upslope",
+                    "description": "Wind blowing directly down a west-facing slope: 10 m/s east wind, slope_aspect = pi (upslope is west). omega = atan2(0, 10) - pi = -pi (head-fire orientation backed off by 180 degrees). U = 4.0 m/s.",
+                    "parameter_overrides": {
+                        "u_wind": 10.0,
+                        "v_wind": 0.0,
+                        "slope_aspect": 3.141592653589793
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 4.0 },
+                        { "variable": "omega",  "time": 0.0, "expected": -3.141592653589793 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 4.0 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "no_reduction_factor",
+                    "description": "Wind reduction factor of 1.0 (a hypothetical no-reduction case used to isolate the magnitude/direction calculation from the timber-fuel reduction). u_wind = 10, v_wind = 0; U = 10 m/s; u_mf_x = 10; u_mf_y = 0.",
+                    "parameter_overrides": {
+                        "u_wind": 10.0,
+                        "v_wind": 0.0,
+                        "slope_aspect": 0.0,
+                        "wind_reduction": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 10.0 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 10.0 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "grass_reduction_factor",
+                    "description": "Grass-fuel-type wind reduction factor of 0.5 (typical of grass/brush models that have less foliage to attenuate the 10 m wind). u_wind = 10, v_wind = 10. U = 0.5*sqrt(200) ≈ 7.0710678118654755 m/s; omega = atan2(10, 10) = pi/4; u_mf_x = u_mf_y = 5.0.",
+                    "parameter_overrides": {
+                        "u_wind": 10.0,
+                        "v_wind": 10.0,
+                        "slope_aspect": 0.0,
+                        "wind_reduction": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 7.0710678118654755 },
+                        { "variable": "omega",  "time": 0.0, "expected": 0.7853981633974483 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": 5.0 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 5.0 }
+                    ]
+                },
+                {
+                    "id": "second_quadrant_wind",
+                    "description": "Northwest wind components (u_wind = -3, v_wind = 4) on a flat surface — exercises the second-quadrant branch of atan2 that single-arg atan would not reach. U = 0.4*5 = 2.0 m/s; omega = atan2(4, -3) = pi - atan(4/3) ≈ 2.214297435588181 rad; u_mf_x = -1.2; u_mf_y = 1.6.",
+                    "parameter_overrides": {
+                        "u_wind": -3.0,
+                        "v_wind": 4.0,
+                        "slope_aspect": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "U",      "time": 0.0, "expected": 2.0 },
+                        { "variable": "omega",  "time": 0.0, "expected": 2.214297435588181 },
+                        { "variable": "u_mf_x", "time": 0.0, "expected": -1.2 },
+                        { "variable": "u_mf_y", "time": 0.0, "expected": 1.6 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "midflame_speed_vs_wind_magnitude",
+                    "description": "Sweep eastward wind component u_wind from 0 to 30 m/s at fixed v_wind=0 and slope_aspect=0 with the default 0.4 timber-fuel reduction factor — surfaces the linear-in-wind-speed response of midflame U.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "v_wind": 0.0,
+                        "slope_aspect": 0.0,
+                        "wind_reduction": 0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_wind",
+                                "range": { "start": 0.0, "stop": 30.0, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_vs_u_wind",
+                            "type": "line",
+                            "description": "Midflame wind speed U as a function of 10 m eastward wind u_wind (timber-fuel reduction 0.4).",
+                            "x": { "variable": "u_wind", "label": "u_wind (m/s)" },
+                            "y": { "variable": "U",      "label": "U (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "omega_heatmap_uv",
+                    "description": "Two-dimensional sweep over (u_wind, v_wind) at fixed slope_aspect=0 — surfaces the atan2 angle field omega(u, v) over the wind-component plane (with the -pi/+pi branch cut along the -x axis).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "slope_aspect": 0.0,
+                        "wind_reduction": 0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_wind",
+                                "range": { "start": -10.0, "stop": 10.0, "count": 21, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "v_wind",
+                                "range": { "start": -10.0, "stop": 10.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "omega_surface",
+                            "type": "heatmap",
+                            "description": "omega(u_wind, v_wind) — wind-direction-relative-to-upslope angle over the wind-component plane.",
+                            "x": { "variable": "u_wind", "label": "u_wind (m/s)" },
+                            "y": { "variable": "v_wind", "label": "v_wind (m/s)" },
+                            "value": { "variable": "omega", "reduce": "final" }
+                        },
+                        {
+                            "id": "u_surface",
+                            "type": "heatmap",
+                            "description": "U(u_wind, v_wind) — radial midflame wind-speed magnitude (timber-fuel reduction 0.4).",
+                            "x": { "variable": "u_wind", "label": "u_wind (m/s)" },
+                            "y": { "variable": "v_wind", "label": "v_wind (m/s)" },
+                            "value": { "variable": "U", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
