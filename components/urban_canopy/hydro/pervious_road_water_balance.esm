@@ -1,0 +1,385 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PerviousRoadWaterBalance",
+        "description": "Net water-input rate for the pervious-road column (Oleson et al. 2010, CLM Tech Note Ch. 5, Eq. 5.1, p. 110). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:900 (`PerviousRoadWaterBalance` @component). Algebraic single-equation balance: water_input = (precipitation gains) − (evaporation + surface runoff + sub-surface drainage + groundwater liquid runoff + snow-capping solid runoff).",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "water-balance",
+            "pervious-road",
+            "clmu",
+            "oleson-2010"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-c9nr)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., Bonan, G. B., Feddema, J., Vertenstein, M., & Grimmond, C. S. B. (2010). Technical Description of an Urban Parameterization for the Community Land Model (CLMU). NCAR Technical Note NCAR/TN-480+STR. Chapter 5, Section 5.1, Equation 5.1, p. 110."
+            }
+        ]
+    },
+    "models": {
+        "PerviousRoadWaterBalance": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:900\nUpstream `PerviousRoadWaterBalance` is an MTK `@component` whose seven inputs (q_rain, q_sno, E_prvrd, q_over, q_drai, q_rgwl, q_snwcp_ice) are `@parameters` in kg/(m^2*s) and whose single output (water_input) is a time-indexed `@variable` defined by one algebraic equation (no derivative). Identical structure preserved here.\n\nThe upstream component declares no parameter defaults — each `@parameters` line is bare. ESM requires concrete defaults for the canonical Python runner to instantiate the system, so defaults are seeded from the values used in the upstream `PerviousRoadWaterBalance - Equation Verification` testitem (UrbanCanopy.jl test/hydrology_test.jl:765-783): q_rain=0.01, q_sno=0.005, E_prvrd=0.002, q_over=0.003, q_drai=0.001, q_rgwl=0.0005, q_snwcp_ice=0.0001 kg/(m^2*s). These are representative CLMU pervious-road flux magnitudes during a precipitation/runoff event.\n\nEquation 5.1 in Oleson 2010 expresses ΔW_sno + Σ(Δw_liq,i + Δw_ice,i) + ΔW_a = (q_rain + q_sno − E_prvrd − q_over − q_drai − q_rgwl − q_snwcp_ice)Δt; this component encodes the right-hand-side rate (water_input). The AST is grouped as (q_rain + q_sno) − (E_prvrd + q_over + q_drai + q_rgwl + q_snwcp_ice) — algebraically identical to the upstream left-to-right chain, but exposes the gains-vs-losses partition that motivates the equation.\n\nObservability classification: this component is functionally observed-only — water_input is given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_content_calc.esm, snow_layer_combination.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation is six additions and one subtraction — seven IEEE-754 float64 operations on quantities of magnitude ≤ 1e-2 — so roundoff is ~1e-17. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on a kg/(m^2*s) flux (typical CLMU water-balance fluxes are O(1e-4–1e-2) and known to ~1e-6 in coupled runs). Tests that target an algebraic-zero result (gains exactly cancel losses) override with `abs: 1e-15` to bypass the relative-tolerance singularity at zero."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "q_rain": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.01,
+                    "description": "Liquid precipitation rate"
+                },
+                "q_sno": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.005,
+                    "description": "Solid precipitation rate"
+                },
+                "E_prvrd": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.002,
+                    "description": "Total evaporation (pervious road)"
+                },
+                "q_over": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.003,
+                    "description": "Surface runoff"
+                },
+                "q_drai": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.001,
+                    "description": "Sub-surface drainage"
+                },
+                "q_rgwl": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0005,
+                    "description": "Liquid runoff from groundwater"
+                },
+                "q_snwcp_ice": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0001,
+                    "description": "Solid runoff from snow capping"
+                },
+                "water_input": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Net water input rate (Oleson Eq. 5.1): (q_rain + q_sno) − (E_prvrd + q_over + q_drai + q_rgwl + q_snwcp_ice)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "water_input",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": ["q_rain", "q_sno"]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": ["E_prvrd", "q_over"]
+                                                    },
+                                                    "q_drai"
+                                                ]
+                                            },
+                                            "q_rgwl"
+                                        ]
+                                    },
+                                    "q_snwcp_ice"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_test_reference",
+                    "description": "Reproduces the parameter point used by the upstream Julia `PerviousRoadWaterBalance - Equation Verification` testitem (UrbanCanopy.jl test/hydrology_test.jl:765). Net flux = 0.01 + 0.005 − 0.002 − 0.003 − 0.001 − 0.0005 − 0.0001 = 0.0084 kg/(m^2*s). Anchors the migration directly to the upstream verification reference.",
+                    "parameter_overrides": {
+                        "q_rain": 0.01,
+                        "q_sno": 0.005,
+                        "E_prvrd": 0.002,
+                        "q_over": 0.003,
+                        "q_drai": 0.001,
+                        "q_rgwl": 0.0005,
+                        "q_snwcp_ice": 0.0001
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.0084 }
+                    ]
+                },
+                {
+                    "id": "all_zero",
+                    "description": "Quiescent state: every flux term is zero. The right-hand side of Eq. 5.1 must be exactly zero — exercises the additive-identity limit (no precipitation, no evaporation, no runoff, no drainage).",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "pure_rain_input",
+                    "description": "Pure liquid-precipitation regime: only q_rain is non-zero. water_input = q_rain = 0.02 kg/(m^2*s). Verifies the gain-only branch of Eq. 5.1.",
+                    "parameter_overrides": {
+                        "q_rain": 0.02,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.02 }
+                    ]
+                },
+                {
+                    "id": "pure_snow_input",
+                    "description": "Pure solid-precipitation regime: only q_sno is non-zero. water_input = q_sno = 0.015 kg/(m^2*s). Confirms that q_sno enters the balance with the same +1 sign as q_rain (rain and snow both contribute to the gain side of Eq. 5.1).",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.015,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.015 }
+                    ]
+                },
+                {
+                    "id": "pure_evaporation_loss",
+                    "description": "Drying regime: only E_prvrd is non-zero (e.g. dry sunny day, no precipitation, no runoff). water_input = −E_prvrd = −0.004 kg/(m^2*s). Verifies the negative sign on the evaporation term and the loss-only branch of Eq. 5.1.",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.004,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": -0.004 }
+                    ]
+                },
+                {
+                    "id": "drainage_dominant_dry",
+                    "description": "Dry-column drainage regime: no precipitation, but the column is shedding water through surface runoff (q_over=0.005), sub-surface drainage (q_drai=0.003), and groundwater liquid runoff (q_rgwl=0.001). water_input = −(0.005 + 0.003 + 0.001) = −0.009 kg/(m^2*s). Exercises the three liquid-loss terms simultaneously.",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.005,
+                        "q_drai": 0.003,
+                        "q_rgwl": 0.001,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": -0.009 }
+                    ]
+                },
+                {
+                    "id": "snow_capping_loss_only",
+                    "description": "Snow-saturation regime: the snow column has reached its capping limit and sheds the excess as q_snwcp_ice (solid runoff). water_input = −q_snwcp_ice = −0.0008 kg/(m^2*s). Isolates the q_snwcp_ice term, which is the only solid-phase loss in Eq. 5.1.",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0008
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": -0.0008 }
+                    ]
+                },
+                {
+                    "id": "gains_balance_losses",
+                    "description": "Steady-state balance: gains (q_rain + q_sno = 0.010) exactly cancel losses (E_prvrd + q_over + q_drai + q_rgwl + q_snwcp_ice = 0.002 + 0.002 + 0.002 + 0.002 + 0.002 = 0.010). water_input = 0 kg/(m^2*s). Stress-tests the cancellation of all seven terms.",
+                    "parameter_overrides": {
+                        "q_rain": 0.005,
+                        "q_sno": 0.005,
+                        "E_prvrd": 0.002,
+                        "q_over": 0.002,
+                        "q_drai": 0.002,
+                        "q_rgwl": 0.002,
+                        "q_snwcp_ice": 0.002
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "heavy_storm_no_losses",
+                    "description": "Wet-up event in a dry column: heavy mixed precipitation (q_rain=0.05, q_sno=0.02 kg/(m^2*s)) with no losses yet (E_prvrd=q_over=q_drai=q_rgwl=q_snwcp_ice=0). water_input = 0.07 kg/(m^2*s) — full precipitation flux is captured by the column. Represents the leading edge of a CLMU storm event.",
+                    "parameter_overrides": {
+                        "q_rain": 0.05,
+                        "q_sno": 0.02,
+                        "E_prvrd": 0.0,
+                        "q_over": 0.0,
+                        "q_drai": 0.0,
+                        "q_rgwl": 0.0,
+                        "q_snwcp_ice": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.07 }
+                    ]
+                },
+                {
+                    "id": "all_loss_channels_active",
+                    "description": "Heavy-loss regime with all five sink terms simultaneously active and no precipitation: E_prvrd=0.001, q_over=0.004, q_drai=0.002, q_rgwl=0.0008, q_snwcp_ice=0.0002. water_input = −(0.001 + 0.004 + 0.002 + 0.0008 + 0.0002) = −0.008 kg/(m^2*s). Verifies that all five loss terms enter with the correct (negative) sign and aggregate by simple addition.",
+                    "parameter_overrides": {
+                        "q_rain": 0.0,
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.001,
+                        "q_over": 0.004,
+                        "q_drai": 0.002,
+                        "q_rgwl": 0.0008,
+                        "q_snwcp_ice": 0.0002
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": -0.008 }
+                    ]
+                },
+                {
+                    "id": "mixed_storm_with_losses",
+                    "description": "Realistic mid-storm column state: moderate rain (0.008), light snow (0.002), evaporation suppressed by humidity (0.0005), surface runoff active as ponding develops (0.003), sub-surface drainage spinning up (0.0015), groundwater outflow modest (0.0003), snow-capping loss negligible (0.00005). water_input = (0.008 + 0.002) − (0.0005 + 0.003 + 0.0015 + 0.0003 + 0.00005) = 0.010 − 0.00535 = 0.00465 kg/(m^2*s). All seven terms contribute; net is positive (column is gaining water).",
+                    "parameter_overrides": {
+                        "q_rain": 0.008,
+                        "q_sno": 0.002,
+                        "E_prvrd": 0.0005,
+                        "q_over": 0.003,
+                        "q_drai": 0.0015,
+                        "q_rgwl": 0.0003,
+                        "q_snwcp_ice": 0.00005
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "water_input", "time": 0.0, "expected": 0.00465 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "water_input_vs_rain_rate",
+                    "description": "Sweep q_rain across the typical CLMU precipitation range (0 to 0.05 kg/(m^2*s) ≈ 0–180 mm/h liquid-equivalent) at fixed loss terms (E_prvrd=0.001, q_over=0.003, q_drai=0.001, q_rgwl=0.0005, q_snwcp_ice=0.0001) and zero solid precipitation. The straight line water_input = q_rain − 0.0056 has slope 1 and y-intercept −0.0056 — visualizes that each unit of additional rain adds one unit to water_input until the precipitation overcomes the fixed loss budget.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "q_sno": 0.0,
+                        "E_prvrd": 0.001,
+                        "q_over": 0.003,
+                        "q_drai": 0.001,
+                        "q_rgwl": 0.0005,
+                        "q_snwcp_ice": 0.0001
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "q_rain",
+                                "range": { "start": 0.0, "stop": 0.05, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "water_input_vs_qrain",
+                            "type": "line",
+                            "description": "water_input as a function of q_rain at fixed loss budget — shows the linear gain-vs-precipitation response of Eq. 5.1.",
+                            "x": { "variable": "q_rain", "label": "Liquid precipitation rate q_rain (kg/(m^2*s))" },
+                            "y": { "variable": "water_input", "label": "Net water input (kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "water_input_qrain_qover_heatmap",
+                    "description": "Two-dimensional sweep over (q_rain, q_over) — the dominant gain and loss terms during a storm — at fixed remaining fluxes (q_sno=0.002, E_prvrd=0.001, q_drai=0.001, q_rgwl=0.0005, q_snwcp_ice=0.0001). The iso-water_input contours of Eq. 5.1 are straight lines with slope dq_rain/dq_over = 1, surfacing the simple linear structure of the column water balance.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "q_sno": 0.002,
+                        "E_prvrd": 0.001,
+                        "q_drai": 0.001,
+                        "q_rgwl": 0.0005,
+                        "q_snwcp_ice": 0.0001
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "q_rain",
+                                "range": { "start": 0.0, "stop": 0.05, "count": 11, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "q_over",
+                                "range": { "start": 0.0, "stop": 0.02, "count": 11, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "water_input_heatmap",
+                            "type": "heatmap",
+                            "description": "Net water input as a function of liquid precipitation and surface runoff — linear-affine surface with iso-contours at slope 1.",
+                            "x": { "variable": "q_rain", "label": "q_rain (kg/(m^2*s))" },
+                            "y": { "variable": "q_over", "label": "q_over (kg/(m^2*s))" },
+                            "value": { "variable": "water_input", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
