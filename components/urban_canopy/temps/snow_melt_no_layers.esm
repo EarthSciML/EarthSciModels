@@ -1,0 +1,484 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SnowMeltNoLayers",
+        "description": "Surface snow melt for the no-layer (single-layer-flag) snow model: discrete-time update of snow mass and depth from excess top-soil-layer energy, with residual energy and phase-change diagnostics. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:773 (`SnowMeltNoLayers` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.66-4.71. Parameterized as observed-only: H_1, W_sno_n, z_sno_n, Δt are inputs (parameters); W_sno_np1, z_sno_np1, H_residual, M_1S, E_p1S are algebraic outputs.",
+        "tags": [
+            "urban_canopy",
+            "snow",
+            "temperatures",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-qrrp)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.6 (Snow Hydrology — single-layer melt), Eqs. 4.66-4.71, p. 105."
+            }
+        ]
+    },
+    "models": {
+        "SnowMeltNoLayers": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:773\nUpstream `SnowMeltNoLayers` is an MTK `@component` whose four inputs (H_1, W_sno_n, z_sno_n, Δt) are `@parameters` and whose five outputs (W_sno_np1, z_sno_np1, H_residual, M_1S, E_p1S) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares three `@constants`: L_f (latent heat of fusion, 3.337e5 J/kg), zero_kgm2 (0 kg/m^2 unit-balancing literal), and zero_m (0 m unit-balancing literal). They are encoded here as zero-default parameters with the upstream values; zero_kgm2 and zero_m are kept in the equations to maintain 1:1 fidelity with the upstream MTK unit-checking pattern (the same convention used by components/wildland_fire/terrain_slope.esm for its `zero_rad`/`zero_1` literals).\n\nUnicode `Δt` (time step) is preserved from upstream — other ESM components in this rig already use unicode delta in identifiers and the schema's identifier pattern allows it. The upstream comments map each equation to its CLM Tech Note Eq number (4.66-4.71); the same mapping is preserved in the equation list as `notes` on each entry would be redundant with the description.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files (e.g. components/aerosol/aq_eq/water.esm).\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); the equations are simple ratios, products, and `max`/`ifelse` branches — the only non-trivial round-off path is the chained `H_1*Δt/L_f`, `(W_sno_n - W_sno_np1)/Δt`, and `L_f*M_1S` operations. For the test parameters, this gives drifts at the 1e-12-1e-13 level (e.g. `H_residual` should be 0 in the partial-melt and freezing branches but evaluates to ~1e-13 due to the order in which `H_1 - L_f*(W_n - W_{n+1})/Δt` cancels). 1e-6 is comfortably above that. A tighter `abs: 1e-9` is asserted on the energy/mass outputs in branches where they are exactly zero by construction (no melt, no snow) so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "H_1": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Excess energy in top soil layer (CLM Eq. 4.66 forcing)"
+                },
+                "W_sno_n": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Snow mass at time n (kg of water-equivalent per m^2)"
+                },
+                "z_sno_n": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Snow depth at time n"
+                },
+                "Δt": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 1.0,
+                    "description": "Time step"
+                },
+                "L_f": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 3.337e5,
+                    "description": "Latent heat of fusion of water (Oleson et al. 2010 Table 1.4 — 3.337e5 J/kg)"
+                },
+                "zero_kgm2": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Zero-mass unit-balancing literal preserved from upstream MTK component"
+                },
+                "zero_m": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Zero-depth unit-balancing literal preserved from upstream MTK component"
+                },
+                "W_sno_np1": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Snow mass at time n+1 (Oleson Eq. 4.66): max(W_sno_n - H_1*Δt/L_f, 0)"
+                },
+                "z_sno_np1": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Snow depth at time n+1 (Oleson Eq. 4.67): (W_sno_np1 / W_sno_n) * z_sno_n if W_sno_n > 0 else 0"
+                },
+                "H_residual": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Residual energy after snow melt (Oleson Eq. 4.68): H_1 - L_f*(W_sno_n - W_sno_np1)/Δt"
+                },
+                "M_1S": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Snow melt rate (Oleson Eq. 4.70): max((W_sno_n - W_sno_np1)/Δt, 0)"
+                },
+                "E_p1S": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Phase change energy (Oleson Eq. 4.71): L_f * M_1S"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "W_sno_np1",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    "W_sno_n",
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            { "op": "*", "args": ["H_1", "Δt"] },
+                                            "L_f"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "zero_kgm2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_sno_np1",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["W_sno_n", "zero_kgm2"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "/", "args": ["W_sno_np1", "W_sno_n"] },
+                                    "z_sno_n"
+                                ]
+                            },
+                            "zero_m"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "H_residual",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            "H_1",
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "L_f",
+                                            { "op": "-", "args": ["W_sno_n", "W_sno_np1"] }
+                                        ]
+                                    },
+                                    "Δt"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "M_1S",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    { "op": "-", "args": ["W_sno_n", "W_sno_np1"] },
+                                    "Δt"
+                                ]
+                            },
+                            { "op": "/", "args": ["zero_kgm2", "Δt"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "E_p1S",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["L_f", "M_1S"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "no_snow_no_forcing",
+                    "description": "No snow on the ground (W_sno_n = 0), modest forcing (H_1 = 100 W/m^2), Δt = 60 s. The `max(..., 0)` floor in Eq. 4.66 keeps W_sno_np1 = 0; the `ifelse(W_sno_n > 0, ...)` guard in Eq. 4.67 short-circuits z_sno_np1 to 0. H_residual cancels exactly because W_sno_n = W_sno_np1 = 0. M_1S and E_p1S are zero by construction (no mass to melt).",
+                    "parameter_overrides": {
+                        "H_1": 100.0,
+                        "W_sno_n": 0.0,
+                        "z_sno_n": 0.0,
+                        "Δt": 60.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 0.0,   "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.0,   "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "H_residual", "time": 0.0, "expected": 100.0 },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.0,   "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 0.0,   "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "zero_H_with_snow",
+                    "description": "Snowpack is present (W_sno_n = 5 kg/m^2, z_sno_n = 0.025 m) but the top-layer excess energy is zero. The melt rate must be zero, snow mass and depth must pass through unchanged, residual energy must be zero, and phase-change energy zero.",
+                    "parameter_overrides": {
+                        "H_1": 0.0,
+                        "W_sno_n": 5.0,
+                        "z_sno_n": 0.025,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 5.0 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.025 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "partial_melt_60s",
+                    "description": "Short-Δt partial-melt scenario (W_sno_n = 10 kg/m^2, H_1 = 1000 W/m^2, Δt = 60 s). Mass loss is H_1*Δt/L_f = 1000*60/3.337e5 ≈ 0.180 kg/m^2, well below W_sno_n, so the `max` floor is not engaged. Depth shrinks proportionally: z_sno_np1 = (W_sno_np1/W_sno_n)*z_sno_n. H_residual ≈ 0 by construction (all forcing energy went into melting). M_1S = (W_sno_n - W_sno_np1)/Δt and E_p1S = L_f * M_1S = H_1 (energy balance).",
+                    "parameter_overrides": {
+                        "H_1": 1000.0,
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 60.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 9.820197782439317 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.04910098891219659 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0,  "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.00299670362601138 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 1000.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "partial_melt_1h",
+                    "description": "Hourly partial-melt scenario (W_sno_n = 10, H_1 = 300 W/m^2, Δt = 3600 s). Mass loss = 300*3600/3.337e5 ≈ 3.236 kg/m^2 (still partial, snow does not vanish). Verifies the standard hourly-step regime that the no-layer snow model is most often called with in offline CLMU runs.",
+                    "parameter_overrides": {
+                        "H_1": 300.0,
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 6.763560083907702 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.03381780041953852 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.000899011087803416 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 300.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "complete_melt",
+                    "description": "Forcing exceeds the energy needed to melt all snow (H_1 = 2000 W/m^2 over 1 h would melt ≈ 21.58 kg/m^2; W_sno_n = 10). The `max` floor in Eq. 4.66 clamps W_sno_np1 = 0; z_sno_np1 = 0 follows. The leftover energy after melting all the snow (H_residual = H_1 - L_f*W_sno_n/Δt) is positive and represents heat that must go into raising the underlying soil temperature (Oleson §4.6 — the diagnostic the no-layer snow model must report so the next step's surface energy budget is conservative). M_1S = W_sno_n/Δt; E_p1S = L_f*W_sno_n/Δt.",
+                    "parameter_overrides": {
+                        "H_1": 2000.0,
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "H_residual", "time": 0.0, "expected": 1073.0555555555557 },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.002777777777777778 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 926.9444444444445 }
+                    ]
+                },
+                {
+                    "id": "exact_full_melt",
+                    "description": "Forcing exactly equal to the energy needed to melt all snow: H_1 = L_f * W_sno_n / Δt = 3.337e5 * 10 / 3600 ≈ 926.944 W/m^2. The `max` floor is engaged at exactly 0 (no negative undershoot); H_residual = 0 (all forcing energy was consumed). Exercises the boundary case where the floor activates without leaving residual heat — the inflection point between the partial-melt and complete-melt branches.",
+                    "parameter_overrides": {
+                        "H_1": 926.9444444444445,
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.002777777777777778 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 926.9444444444445 }
+                    ]
+                },
+                {
+                    "id": "freezing_branch",
+                    "description": "Negative H_1 — top-layer energy deficit, snow accretes rather than melting. W_sno_np1 > W_sno_n; z_sno_np1 grows in the same proportion. The melt-rate `max(..., 0)` floor in Eq. 4.70 clamps M_1S to 0 (no negative-melt leakage), and E_p1S = L_f * 0 = 0. Verifies that the floor in Eq. 4.70 is correctly applied to the freezing-branch sign of (W_n - W_{n+1}).",
+                    "parameter_overrides": {
+                        "H_1": -100.0,
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 11.0788133053641 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.05539406652682051 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "deep_snow_high_H",
+                    "description": "Thick snowpack (W_sno_n = 100 kg/m^2, z_sno_n = 0.5 m) with a high-melting forcing H_1 = 800 W/m^2 over Δt = 3600 s. Mass loss ≈ 8.63 kg/m^2 — small fraction of total mass. Verifies the high-snow regime against the small-snow tests (`partial_melt_*`) so the proportionality of z_sno_np1 to W_sno_np1/W_sno_n is exercised away from the trivial-mass limit.",
+                    "parameter_overrides": {
+                        "H_1": 800.0,
+                        "W_sno_n": 100.0,
+                        "z_sno_n": 0.5,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 91.3694935570872 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.456847467785436 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.0023973629008091123 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 800.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                },
+                {
+                    "id": "thin_snow_short_dt",
+                    "description": "Thin snow film (W_sno_n = 0.1 kg/m^2, z_sno_n = 5e-4 m) with a 10 s sub-stepping time step and modest forcing (H_1 = 50 W/m^2). The fractional melt is ~1.5% per step — exercises the small-mass / short-Δt regime that arises when the no-layer snow model is called from a sub-cycling outer loop.",
+                    "parameter_overrides": {
+                        "H_1": 50.0,
+                        "W_sno_n": 0.1,
+                        "z_sno_n": 5.0e-4,
+                        "Δt": 10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "W_sno_np1",  "time": 0.0, "expected": 0.0985016481869943 },
+                        { "variable": "z_sno_np1",  "time": 0.0, "expected": 0.0004925082409349715 },
+                        { "variable": "H_residual", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "M_1S",       "time": 0.0, "expected": 0.00014983518130056995 },
+                        { "variable": "E_p1S",      "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-9 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "melt_curve_vs_H_1",
+                    "description": "Sweep H_1 across the full melt-regime range — from negative (freezing) through partial-melt to complete-melt and into the H_residual > 0 regime. Reproduces the canonical CLM Fig. 4.6-equivalent curves: W_sno_np1 falls linearly with H_1 until clamped at 0, M_1S rises linearly, E_p1S tracks M_1S, and H_residual is identically 0 below the threshold and rises linearly above it.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "W_sno_n": 10.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_1",
+                                "range": { "start": -200.0, "stop": 2000.0, "count": 23, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "W_sno_np1_curve",
+                            "type": "line",
+                            "description": "W_sno_np1 vs H_1: linear decrease to zero, then floored.",
+                            "x": { "variable": "H_1",       "label": "H_1 (W/m^2)" },
+                            "y": { "variable": "W_sno_np1", "label": "W_sno_{n+1} (kg/m^2)" }
+                        },
+                        {
+                            "id": "M_1S_curve",
+                            "type": "line",
+                            "description": "Snow melt rate vs H_1: zero in the freezing branch, linear rise in the melting branch, plateau at W_sno_n/Δt once snow is exhausted.",
+                            "x": { "variable": "H_1",  "label": "H_1 (W/m^2)" },
+                            "y": { "variable": "M_1S", "label": "M_{1S} (kg/(m^2*s))" }
+                        },
+                        {
+                            "id": "H_residual_curve",
+                            "type": "line",
+                            "description": "Residual energy vs H_1: identically zero in the partial-melt and freezing branches, linear rise above the complete-melt threshold.",
+                            "x": { "variable": "H_1",        "label": "H_1 (W/m^2)" },
+                            "y": { "variable": "H_residual", "label": "H_residual (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "melt_response_vs_W_sno_n",
+                    "description": "Sweep snow mass W_sno_n at fixed forcing H_1 = 800 W/m^2 (Δt = 3600 s). For W_sno_n below the melt-energy threshold the melt is `complete` (H_residual > 0); above it the melt is `partial` (H_residual = 0). Surfaces the threshold W_sno_n = H_1*Δt/L_f ≈ 8.63 kg/m^2 above which the model transitions out of the `complete-melt` branch.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_1": 800.0,
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "W_sno_n",
+                                "range": { "start": 0.0, "stop": 25.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "W_sno_np1_vs_W_sno_n",
+                            "type": "line",
+                            "description": "W_sno_np1 vs W_sno_n: 0 below threshold; W_sno_n - H_1*Δt/L_f above.",
+                            "x": { "variable": "W_sno_n",   "label": "W_sno_n (kg/m^2)" },
+                            "y": { "variable": "W_sno_np1", "label": "W_sno_{n+1} (kg/m^2)" }
+                        },
+                        {
+                            "id": "H_residual_vs_W_sno_n",
+                            "type": "line",
+                            "description": "H_residual vs W_sno_n: linear decrease until W_sno_n hits threshold, then identically 0.",
+                            "x": { "variable": "W_sno_n",    "label": "W_sno_n (kg/m^2)" },
+                            "y": { "variable": "H_residual", "label": "H_residual (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "two_d_sweep_H_W",
+                    "description": "Joint sweep over H_1 and W_sno_n at Δt = 3600 s. Surfaces the partial-melt / complete-melt phase boundary (H_1 = L_f*W_sno_n/Δt) as the kink in the M_1S and H_residual surfaces. Useful as a regression baseline for the no-layer snow model's response surface.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z_sno_n": 0.05,
+                        "Δt": 3600.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_1",
+                                "range": { "start": -100.0, "stop": 2000.0, "count": 22, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "W_sno_n",
+                                "range": { "start": 0.0, "stop": 25.0, "count": 16, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "M_1S_surface",
+                            "type": "heatmap",
+                            "description": "Snow melt rate as a function of forcing and snow mass. The phase boundary H_1 = L_f*W_sno_n/Δt appears as a ridge along which M_1S = W_sno_n/Δt.",
+                            "x": { "variable": "H_1",     "label": "H_1 (W/m^2)" },
+                            "y": { "variable": "W_sno_n", "label": "W_sno_n (kg/m^2)" },
+                            "value": { "variable": "M_1S", "reduce": "final" }
+                        },
+                        {
+                            "id": "H_residual_surface",
+                            "type": "heatmap",
+                            "description": "Residual energy as a function of forcing and snow mass — zero across the partial-melt region, linearly rising in the complete-melt region.",
+                            "x": { "variable": "H_1",     "label": "H_1 (W/m^2)" },
+                            "y": { "variable": "W_sno_n", "label": "W_sno_n (kg/m^2)" },
+                            "value": { "variable": "H_residual", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
