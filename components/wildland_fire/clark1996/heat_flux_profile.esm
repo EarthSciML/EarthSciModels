@@ -1,0 +1,330 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "Clark1996HeatFluxProfile",
+        "description": "Vertical profile of fire-induced sensible (F_s) and latent (F_l) heat fluxes via the simple e-folding extinction-depth formulation of Clark et al. (1996), Eq. 10. F_s(z) = F_s_sfc * exp(-z/alpha_ext); F_l(z) = F_l_sfc * exp(-z/alpha_ext) with alpha_ext = 50 m. Migrated from WildlandFire.jl@126976f2 src/clark1996.jl:206 (`Clark1996HeatFluxProfile` @component). Observed-only: z, F_s_sfc, F_l_sfc are inputs (parameters); F_s, F_l are algebraic outputs.",
+        "tags": [
+            "wildland_fire",
+            "clark1996",
+            "heat_flux_profile",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-y7ew)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T.L., Jenkins, M.A., Coen, J.L., and Packham, D.R. (1996). A Coupled Atmosphere-Fire Model: Role of the Convective Froude Number and Dynamic Fingering at the Fireline. International Journal of Wildland Fire, 6(4), 177-190. Eq. 10."
+            }
+        ]
+    },
+    "models": {
+        "Clark1996HeatFluxProfile": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/clark1996.jl:206\nUpstream `Clark1996HeatFluxProfile` is an MTK `@component` whose three inputs (z, F_s_sfc, F_l_sfc) are `@parameters` and whose two outputs (F_s, F_l) are time-indexed `@variables` with one algebraic equation each. Two upstream `@constants` are declared: `alpha_ext` (the e-folding extinction depth, 50 m) and `one_m` (a unit-balancing literal, 1 m). Following the wind_profile.esm pattern (components/wildland_fire/clark1996/wind_profile.esm), upstream `@constants` are preserved as parameters with their upstream default values to maintain 1:1 fidelity with the upstream component — even when, as with `one_m` here, they are declared but unused in the equation (upstream keeps it for symmetry with sibling Clark1996 components).\n\nF_s_sfc and F_l_sfc have no defaults upstream (they are driven by a parent surface-flux component); ESM requires concrete defaults for standalone simulation, so we declare them as 0.0 W/m^2 (the trivial null-fire case, matching the convention used for similarly-driven inputs in other observed-only migrations).\n\nTolerance rationale (model-level rel=1e-12): observed-only single-equation algebraic system per output (no ODE integration); each equation is exp + a single multiply on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above ULP and far below any plausible physical-discrimination scale on W/m^2 heat-flux magnitudes."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Height above ground level"
+                },
+                "F_s_sfc": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Sensible heat flux at the surface (z = 0). Upstream has no default; 0 W/m^2 is the trivial null-fire case for standalone simulation."
+                },
+                "F_l_sfc": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Latent heat flux at the surface (z = 0). Upstream has no default; 0 W/m^2 is the trivial null-fire case for standalone simulation."
+                },
+                "alpha_ext": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 50.0,
+                    "description": "Heat flux e-folding extinction depth (upstream @constant; Clark et al. 1996 Eq. 10 default = 50 m)"
+                },
+                "one_m": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Reference length (upstream @constant; declared but unused — preserved for 1:1 structural fidelity with the upstream component)"
+                },
+                "F_s": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Sensible heat flux at height z"
+                },
+                "F_l": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Latent heat flux at height z"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_s",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "F_s_sfc",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": ["z"]
+                                            },
+                                            "alpha_ext"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_l",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "F_l_sfc",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": ["z"]
+                                            },
+                                            "alpha_ext"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "surface",
+                    "description": "At ground level (z = 0), F_s = F_s_sfc and F_l = F_l_sfc — the boundary condition where the profile equals the supplied surface flux. exp(-0/50) = 1.",
+                    "parameter_overrides": {
+                        "z": 0.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 100000.0 },
+                        { "variable": "F_l", "time": 0.0, "expected": 50000.0 }
+                    ]
+                },
+                {
+                    "id": "shallow_z25",
+                    "description": "Below one extinction depth (z = 25 m, half of alpha_ext). exp(-0.5) ≈ 0.6065 → fluxes retain ~60% of their surface value.",
+                    "parameter_overrides": {
+                        "z": 25.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 60653.06597126334 },
+                        { "variable": "F_l", "time": 0.0, "expected": 30326.53298563167 }
+                    ]
+                },
+                {
+                    "id": "one_efold",
+                    "description": "At one extinction depth (z = alpha_ext = 50 m), exp(-1) ≈ 0.3679 — the defining e-folding height.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 36787.94411714423 },
+                        { "variable": "F_l", "time": 0.0, "expected": 18393.972058572115 }
+                    ]
+                },
+                {
+                    "id": "two_efold",
+                    "description": "At two extinction depths (z = 100 m), exp(-2) ≈ 0.1353 — verifies exponential decay of the profile.",
+                    "parameter_overrides": {
+                        "z": 100.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 13533.52832366127 },
+                        { "variable": "F_l", "time": 0.0, "expected": 6766.764161830635 }
+                    ]
+                },
+                {
+                    "id": "three_efold",
+                    "description": "At three extinction depths (z = 150 m), exp(-3) ≈ 0.0498 — fluxes have decayed to ~5% of surface values.",
+                    "parameter_overrides": {
+                        "z": 150.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 4978.706836786395 },
+                        { "variable": "F_l", "time": 0.0, "expected": 2489.3534183931974 }
+                    ]
+                },
+                {
+                    "id": "five_efold_aloft",
+                    "description": "Far aloft (z = 250 m = 5 * alpha_ext), exp(-5) ≈ 0.0067 — confirms the profile is effectively extinguished at this altitude.",
+                    "parameter_overrides": {
+                        "z": 250.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 673.7946999085467 },
+                        { "variable": "F_l", "time": 0.0, "expected": 336.89734995427335 }
+                    ]
+                },
+                {
+                    "id": "alpha_override",
+                    "description": "Override the @constant alpha_ext to verify it is wired correctly. With alpha_ext = 100 m and z = 30 m, exp(-0.3) ≈ 0.7408 — a deeper extinction depth than the upstream default.",
+                    "parameter_overrides": {
+                        "z": 30.0,
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0,
+                        "alpha_ext": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 74081.8220681718 },
+                        { "variable": "F_l", "time": 0.0, "expected": 37040.9110340859 }
+                    ]
+                },
+                {
+                    "id": "asymmetric_surface_fluxes",
+                    "description": "Independent F_s_sfc (200 kW/m^2) and F_l_sfc (80 kW/m^2) at z = 75 m (1.5 e-folds): verifies F_s and F_l are independently scaled by their respective surface inputs.",
+                    "parameter_overrides": {
+                        "z": 75.0,
+                        "F_s_sfc": 200000.0,
+                        "F_l_sfc": 80000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 44626.032029685965 },
+                        { "variable": "F_l", "time": 0.0, "expected": 17850.412811874387 }
+                    ]
+                },
+                {
+                    "id": "zero_surface_flux",
+                    "description": "Zero surface flux (no fire). F_s and F_l vanish identically at any z, regardless of altitude — sanity check the multiplicative coupling.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "F_s_sfc": 0.0,
+                        "F_l_sfc": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_s", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "F_l", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "heat_flux_profile_curve",
+                    "description": "Sensible and latent heat flux profiles vs. height — reproduces the canonical Clark et al. (1996) Eq. 10 e-folding decay from the surface (F_s = 100 kW/m^2, F_l = 50 kW/m^2) through 250 m (~5 extinction depths) where the profile is effectively extinguished. Surface fluxes representative of a moderately intense forest fire (Walker, 1981; p. 180 of Clark et al., 1996).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": { "start": 0.0, "stop": 250.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_s_vs_z",
+                            "type": "line",
+                            "description": "Sensible heat flux F_s (W/m^2) vs. height z (m) — Clark et al. (1996) Eq. 10.",
+                            "x": { "variable": "z",   "label": "Height z (m)" },
+                            "y": { "variable": "F_s", "label": "Sensible heat flux F_s (W/m^2)" }
+                        },
+                        {
+                            "id": "F_l_vs_z",
+                            "type": "line",
+                            "description": "Latent heat flux F_l (W/m^2) vs. height z (m) — Clark et al. (1996) Eq. 10.",
+                            "x": { "variable": "z",   "label": "Height z (m)" },
+                            "y": { "variable": "F_l", "label": "Latent heat flux F_l (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "extinction_depth_sensitivity",
+                    "description": "Sensitivity of the heat flux profile to alpha_ext — shorter e-folding depths concentrate the heat flux near the surface, while longer depths transport heat further aloft. Reveals how the extinction depth controls vertical coupling between fire and atmosphere.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "F_s_sfc": 100000.0,
+                        "F_l_sfc": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": { "start": 0.0, "stop": 250.0, "count": 21, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "alpha_ext",
+                                "range": { "start": 25.0, "stop": 100.0, "count": 4, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_s_heatmap",
+                            "type": "heatmap",
+                            "description": "Sensible heat flux F_s over the (z, alpha_ext) plane — surfaces how the extinction depth controls the vertical reach of fire-induced heating.",
+                            "x": { "variable": "z",         "label": "Height z (m)" },
+                            "y": { "variable": "alpha_ext", "label": "Extinction depth alpha_ext (m)" },
+                            "value": { "variable": "F_s", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
