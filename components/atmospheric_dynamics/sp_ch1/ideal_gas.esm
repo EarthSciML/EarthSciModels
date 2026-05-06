@@ -1,0 +1,287 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "IdealGasLaw",
+        "description": "Ideal gas law for atmospheric air density: rho = M_air * p / (R * T). Migrated from AtmosphericDynamics.jl@816cc391 src/seinfeld_pandis_ch1.jl:68 (`IdealGasLaw` @component). Implements Seinfeld & Pandis Ch 1 Eq 1.2. Parameterized as observed-only: T and p are inputs (parameters in standalone form), rho is the algebraic output. Upstream the Julia @component declares T and p as @variables for composition into a parent system; for standalone serialization (3 unknowns vs 1 equation otherwise), they are declared as parameters here, mirroring the WaterEquilibrium serialization pattern.",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "observed-only",
+            "thermodynamics"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (mdl-0af)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 1, Equation 1.2 (ideal gas law for air density). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "IdealGasLaw": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/seinfeld_pandis_ch1.jl:68\nUpstream `IdealGasLaw` is an MTK `@component` where T and p are `@variables` driven by a parent system. For standalone serialization (and to make the component well-posed in isolation), T and p are declared as parameters here — matching the (S, observed-only) classification in docs/migration-tracker.md. Constant values R = 8.314 J/(mol*K) and M_air = 0.02897 kg/mol come from the upstream module's `R_GAS` and `M_AIR` (Seinfeld & Pandis Appendix A).\n\nTolerance rationale (model-level rel=1e-6): observed-only single-equation algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the M_air * p / (R * T) closed-form expression across the atmospheric T range (216–313 K) and p range (22.6–110 kPa)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature"
+                },
+                "p": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Atmospheric pressure"
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Universal gas constant (Seinfeld & Pandis Appendix A)"
+                },
+                "M_air": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.02897,
+                    "description": "Molecular weight of dry air (Seinfeld & Pandis Appendix A; 28.97 g/mol)"
+                },
+                "rho": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Air density"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "rho",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["M_air", "p"]
+                            },
+                            {
+                                "op": "*",
+                                "args": ["R", "T"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "std_sea_level",
+                    "description": "U.S. Standard Atmosphere sea-level reference: T=288.15 K, p=101325 Pa. Canonical air density rho ≈ 1.225 kg/m^3 (Seinfeld & Pandis Ch 1).",
+                    "parameter_overrides": {
+                        "T": 288.15,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.2252831566631774 }
+                    ]
+                },
+                {
+                    "id": "zero_celsius",
+                    "description": "Standard pressure at the freezing point of water: T=273.15 K, p=101325 Pa. Cold-surface reference.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.2925694365458342 }
+                    ]
+                },
+                {
+                    "id": "std_25C",
+                    "description": "Standard laboratory conditions: T=298.15 K (25°C), p=101325 Pa.",
+                    "parameter_overrides": {
+                        "T": 298.15,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.1841869582173221 }
+                    ]
+                },
+                {
+                    "id": "tropopause_11km",
+                    "description": "U.S. Standard Atmosphere tropopause (~11 km): T=216.65 K, p=22632 Pa. Exercises the cold/low-pressure regime.",
+                    "parameter_overrides": {
+                        "T": 216.65,
+                        "p": 22632.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 0.3640011167935921 }
+                    ]
+                },
+                {
+                    "id": "hot_surface",
+                    "description": "Hot summertime surface: T=313.15 K (40°C), p=101325 Pa.",
+                    "parameter_overrides": {
+                        "T": 313.15,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.1274639680424545 }
+                    ]
+                },
+                {
+                    "id": "cold_surface",
+                    "description": "Wintertime polar surface: T=253.15 K (-20°C), p=101325 Pa.",
+                    "parameter_overrides": {
+                        "T": 253.15,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.394688293867251 }
+                    ]
+                },
+                {
+                    "id": "mid_troposphere",
+                    "description": "Approximate mid-troposphere (~5 km): T=255.65 K, p=54020 Pa. Joint cold-and-low-pressure case.",
+                    "parameter_overrides": {
+                        "T": 255.65,
+                        "p": 54020.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 0.7362872123447658 }
+                    ]
+                },
+                {
+                    "id": "low_pressure",
+                    "description": "Half-pressure case at sea-level temperature: T=288.15 K, p=50000 Pa. Verifies linear scaling of rho with p at fixed T.",
+                    "parameter_overrides": {
+                        "T": 288.15,
+                        "p": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 0.6046302278130656 }
+                    ]
+                },
+                {
+                    "id": "high_pressure",
+                    "description": "Above-standard pressure case at sea-level temperature: T=288.15 K, p=110000 Pa.",
+                    "parameter_overrides": {
+                        "T": 288.15,
+                        "p": 110000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho", "time": 0.0, "expected": 1.3301865011887444 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rho_vs_temperature_at_sea_level_pressure",
+                    "description": "Air density as a function of temperature at sea-level pressure (p = 101325 Pa). Reproduces the canonical inverse-temperature curve of Seinfeld & Pandis Eq 1.2 across the atmospheric range (216–313 K).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 216.65, "stop": 313.15, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rho_vs_T",
+                            "type": "line",
+                            "description": "Air density rho as a function of temperature at p = 101325 Pa.",
+                            "x": { "variable": "T",   "label": "Temperature (K)" },
+                            "y": { "variable": "rho", "label": "Air density (kg/m^3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "rho_vs_pressure_at_standard_T",
+                    "description": "Air density as a function of pressure at standard sea-level temperature (T = 288.15 K). Verifies linear scaling rho ∝ p across the tropospheric pressure range (22.6–110 kPa).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T": 288.15
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p",
+                                "range": { "start": 22632.0, "stop": 110000.0, "count": 20, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rho_vs_p",
+                            "type": "line",
+                            "description": "Air density rho as a function of pressure at T = 288.15 K.",
+                            "x": { "variable": "p",   "label": "Pressure (Pa)" },
+                            "y": { "variable": "rho", "label": "Air density (kg/m^3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "coupled_T_and_p_sweep",
+                    "description": "Two-dimensional sweep over T (cold tropopause to hot surface) and p (tropopause to above-sea-level). Surfaces the joint dependence of rho on temperature and pressure.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 216.65, "stop": 313.15, "count": 12, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "p",
+                                "range": { "start": 22632.0, "stop": 110000.0, "count": 12, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rho_heatmap",
+                            "type": "heatmap",
+                            "description": "Air density rho as a function of T and p.",
+                            "x": { "variable": "T", "label": "Temperature (K)" },
+                            "y": { "variable": "p", "label": "Pressure (Pa)" },
+                            "value": { "variable": "rho", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
