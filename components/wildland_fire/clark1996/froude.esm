@@ -1,0 +1,278 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "Clark1996ConvectiveFroudeNumber",
+        "description": "Square of the convective Froude number (Eq. 1, Clark et al., 1996), a diagnostic of fire-atmosphere coupling strength: F_c^2 = (U - S_f)^2 / (g * (Δθ/θ̄) * W_f). Large F_c^2 indicates wind-dominated (weak coupling); small F_c^2 indicates buoyancy-dominated (strong coupling). Migrated from WildlandFire.jl@126976f2 src/clark1996.jl:253 (`Clark1996ConvectiveFroudeNumber` @component). Observed-only: U, S_f, delta_theta_over_theta, W_f are inputs (parameters); F_c_sq is an algebraic output.",
+        "tags": [
+            "wildland_fire",
+            "clark1996",
+            "froude_number",
+            "diagnostic",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-m8v3)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T.L., Jenkins, M.A., Coen, J.L., and Packham, D.R. (1996). A Coupled Atmosphere-Fire Model: Role of the Convective Froude Number and Dynamic Fingering at the Fireline. International Journal of Wildland Fire, 6(4), 177-190. Eq. 1."
+            }
+        ]
+    },
+    "models": {
+        "Clark1996ConvectiveFroudeNumber": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/clark1996.jl:253\nUpstream `Clark1996ConvectiveFroudeNumber` is an MTK `@component` whose four inputs (U, S_f, delta_theta_over_theta, W_f) are `@parameters` and whose single output F_c_sq is a time-indexed `@variable` with one algebraic equation. Identical structure preserved here; the upstream `g` `@constant` (= 9.81 m/s^2) and `one_dimless` `@constant` (= 1.0) are exposed as parameters with their upstream default values, mirroring the wind_profile.esm pattern (components/wildland_fire/clark1996/wind_profile.esm) where upstream `@constants` are preserved as literal-valued parameters to maintain 1:1 fidelity with the upstream component.\n\nThe `one_dimless` parameter is declared upstream but never referenced in the equation (an MTK boilerplate carry-over from sibling Clark1996 components). It is preserved here as a parameter for 1:1 structural fidelity with the upstream `@constants` block; it does not appear in any equation, mirroring its upstream usage.\n\nTolerance rationale (model-level rel=1e-12): observed-only single-equation algebraic system (no ODE integration); the equation is one subtraction, one square, three multiplications, and one division on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above ULP and far below any plausible physical-discrimination scale on a dimensionless Froude-number diagnostic."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "U": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Ambient wind speed"
+                },
+                "S_f": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Fire spread rate"
+                },
+                "delta_theta_over_theta": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.01,
+                    "description": "Convective buoyancy Δθ/θ̄ (dimensionless potential-temperature anomaly relative to mean)"
+                },
+                "W_f": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Fire width"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration (upstream @constant; default 9.81 m/s^2)"
+                },
+                "one_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dimensionless one (upstream @constant declared but unused in the equation; preserved as a parameter for 1:1 structural fidelity with the upstream @constants block)"
+                },
+                "F_c_sq": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Square of convective Froude number (dimensionless). Large = wind-dominated (weak coupling); small = buoyancy-dominated (strong coupling)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_c_sq",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": ["U", "S_f"]
+                                    },
+                                    2
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": ["g", "delta_theta_over_theta"]
+                                    },
+                                    "W_f"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "wind_dominates_weak_coupling",
+                    "description": "Large excess wind over fire spread (U=10 m/s, S_f=0.18 m/s, Δθ/θ̄=0.01, W_f=100 m). F_c_sq = (10-0.18)^2 / (9.81*0.01*100) = 96.4324/9.81 ≈ 9.83 — well above unity, the wind-dominated weak-coupling regime where ambient flow ventilates the fire faster than buoyancy can drive convergent inflow.",
+                    "parameter_overrides": {
+                        "U": 10.0,
+                        "S_f": 0.18,
+                        "delta_theta_over_theta": 0.01,
+                        "W_f": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 9.830010193679918 }
+                    ]
+                },
+                {
+                    "id": "strong_coupling_low_wind",
+                    "description": "Small excess wind with large buoyancy and wide fireline (U=2 m/s, S_f=1.5 m/s, Δθ/θ̄=0.05, W_f=200 m). F_c_sq = 0.25 / 98.1 ≈ 2.55e-3 — well below unity, the buoyancy-dominated strong-coupling regime where fire-induced convection drives the dynamics.",
+                    "parameter_overrides": {
+                        "U": 2.0,
+                        "S_f": 1.5,
+                        "delta_theta_over_theta": 0.05,
+                        "W_f": 200.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 0.00254841997961264 }
+                    ]
+                },
+                {
+                    "id": "zero_excess_wind",
+                    "description": "Wind matches fire spread rate exactly (U = S_f = 5 m/s). Numerator (U-S_f)^2 = 0 → F_c_sq = 0 — the limiting case where buoyancy completely dominates because there is no relative-flow ventilation.",
+                    "parameter_overrides": {
+                        "U": 5.0,
+                        "S_f": 5.0,
+                        "delta_theta_over_theta": 0.02,
+                        "W_f": 150.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "thin_buoyant_plume_high_wind",
+                    "description": "High wind, narrow fireline, weak buoyancy (U=15 m/s, S_f=2 m/s, Δθ/θ̄=0.005, W_f=50 m). F_c_sq = 169 / 2.4525 ≈ 68.9 — strongly wind-dominated; exercises the regime where the diagnostic grows as the squared excess wind divided by the small-W_f, small-Δθ denominator.",
+                    "parameter_overrides": {
+                        "U": 15.0,
+                        "S_f": 2.0,
+                        "delta_theta_over_theta": 0.005,
+                        "W_f": 50.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 68.90927624872579 }
+                    ]
+                },
+                {
+                    "id": "downstream_wind_negative_U",
+                    "description": "Negative ambient wind component (U = -5 m/s, S_f = 2 m/s). Excess (U - S_f) = -7 squares to +49; F_c_sq = 49/9.81 ≈ 4.99 — verifies the (·)^2 in the numerator collapses both upstream- and downstream-relative flow into the same diagnostic magnitude.",
+                    "parameter_overrides": {
+                        "U": -5.0,
+                        "S_f": 2.0,
+                        "delta_theta_over_theta": 0.01,
+                        "W_f": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 4.994903160040774 }
+                    ]
+                },
+                {
+                    "id": "override_g_lunar",
+                    "description": "Override the upstream @constant g via parameter override (g = 1.62 m/s^2, lunar gravity) while holding other inputs fixed (U=5, S_f=0.5, Δθ/θ̄=0.03, W_f=300). F_c_sq = 20.25 / (1.62*0.03*300) = 20.25/14.58 ≈ 1.389 — verifies g is wired as an overridable parameter rather than a hard-coded literal.",
+                    "parameter_overrides": {
+                        "U": 5.0,
+                        "S_f": 0.5,
+                        "delta_theta_over_theta": 0.03,
+                        "W_f": 300.0,
+                        "g": 1.62
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 1.3888888888888886 }
+                    ]
+                },
+                {
+                    "id": "indicative_fireline_regime",
+                    "description": "Indicative fireline regime (U=8 m/s, S_f=0.7 m/s, Δθ/θ̄=0.02, W_f=80 m) representative of the experiments in Clark et al. (1996). F_c_sq = 53.29 / 15.696 ≈ 3.40 — order-unity-or-larger Froude squared, consistent with the transitional regime where neither wind nor buoyancy completely dominates.",
+                    "parameter_overrides": {
+                        "U": 8.0,
+                        "S_f": 0.7,
+                        "delta_theta_over_theta": 0.02,
+                        "W_f": 80.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_c_sq", "time": 0.0, "expected": 3.3951325178389395 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "froude_vs_wind",
+                    "description": "F_c^2 as a function of ambient wind speed U at fixed fire properties (S_f=1 m/s, Δθ/θ̄=0.02, W_f=100 m) — sweeps U from 0 to 20 m/s, showing the parabolic growth in (U - S_f)^2 that drives the transition from buoyancy-dominated (F_c^2 < 1, near U = S_f) to wind-dominated (F_c^2 >> 1) regimes.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "S_f": 1.0,
+                        "delta_theta_over_theta": 0.02,
+                        "W_f": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "U",
+                                "range": { "start": 0.0, "stop": 20.0, "count": 41, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_c_sq_vs_U",
+                            "type": "line",
+                            "description": "Convective Froude number squared as a function of ambient wind speed at fixed fire spread rate, buoyancy, and fire width.",
+                            "x": { "variable": "U",      "label": "Ambient wind speed U (m/s)" },
+                            "y": { "variable": "F_c_sq", "label": "F_c^2 (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "froude_regime_map",
+                    "description": "Two-dimensional regime map of F_c^2 over (U, W_f) at fixed S_f=1 m/s and Δθ/θ̄=0.02 — surfaces the (U - S_f)^2 / W_f scaling that separates strong-coupling (small F_c^2; narrow fireline, low excess wind) from weak-coupling (large F_c^2; wide fireline does not change much, but high excess wind dominates) regimes.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "S_f": 1.0,
+                        "delta_theta_over_theta": 0.02
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "U",
+                                "range": { "start": 1.0, "stop": 20.0, "count": 20, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "W_f",
+                                "range": { "start": 25.0, "stop": 500.0, "count": 20, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_c_sq_heatmap",
+                            "type": "heatmap",
+                            "description": "F_c^2 over the (U, W_f) plane — the regime-separation surface for fire-atmosphere coupling.",
+                            "x": { "variable": "U",   "label": "Ambient wind speed U (m/s)" },
+                            "y": { "variable": "W_f", "label": "Fire width W_f (m)" },
+                            "value": { "variable": "F_c_sq", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
