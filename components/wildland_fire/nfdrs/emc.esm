@@ -1,0 +1,245 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EquilibriumMoistureContent",
+        "description": "Equilibrium moisture content (EMC) of dead fuels as a function of temperature and relative humidity per the NFDRS (Cohen & Deeming 1985), page 1, Eqs. 1a/1b/1c. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:79 (`EquilibriumMoistureContent` @component). Observed-only: TEMP and RH are inputs (parameters); EMC is the algebraic output.",
+        "tags": [
+            "wildland_fire",
+            "nfdrs",
+            "fuel_moisture",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-n8wo)"
+        ],
+        "references": [
+            {
+                "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 1, Eqs. 1a/1b/1c (Equilibrium Moisture Content)."
+            },
+            {
+                "citation": "Simard, A. J. (1968). The moisture content of forest fuels — I: A review of the basic concepts. Forest Fire Research Institute Information Report FF-X-14. Ottawa, Canada. (Underlying regression of EMC against °F and RH%.)"
+            }
+        ]
+    },
+    "models": {
+        "EquilibriumMoistureContent": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:79\nUpstream `EquilibriumMoistureContent` is an MTK `@component` whose inputs (TEMP, RH) are `@parameters` and whose single output (EMC) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` selecting between Eqs. 1a (RH < 0.1), 1b (0.1 ≤ RH < 0.5), and 1c (RH ≥ 0.5) of Cohen & Deeming (1985). The intermediate bindings TEMP_F = (TEMP/K_ref)*9/5 - K_to_F_offset (Kelvin → °F via the standard 9/5 scaling and 459.67 offset) and RH_pct = RH*100 are inlined into the equation tree exactly as MTK inlines them at System construction time.\n\nThe upstream `@constants` (K_ref = 1 K, K_to_F_offset = 459.67 dimensionless) are MTK unit-balancing literals that non-dimensionalize TEMP (K → dimensionless) before applying the empirical regression coefficients which are calibrated for °F. They are preserved here as parameters with their upstream values to maintain 1:1 fidelity with the source component (same convention as components/wildland_fire/nfdrs/moisture_10h.esm and components/wildland_fire/terrain_slope.esm).\n\nDispatch threshold note: the upstream uses strict `<` comparisons against 0.1 and 0.5 on RH. RH = 0.1 (exactly) selects Eq. 1b; RH = 0.5 (exactly) selects Eq. 1c. The expected values in the inline tests at these boundary points exercise the chosen branch.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a nested `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "TEMP": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 294.2611111111111,
+                    "description": "Dry bulb temperature. Default 294.2611... K = 70°F, a typical mid-range NFDRS reference temperature."
+                },
+                "RH": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.3,
+                    "description": "Relative humidity (dimensionless fraction, 0-1). Default 0.30 = 30%, mid-range value lying in Eq. 1b regime."
+                },
+                "K_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 1.0,
+                    "description": "Reference temperature for non-dimensionalizing TEMP (K → dimensionless) prior to °F conversion. MTK unit-balancing constant preserved from upstream `@constants`."
+                },
+                "K_to_F_offset": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 459.67,
+                    "description": "Kelvin-to-Fahrenheit offset (dimensionless after TEMP/K_ref non-dimensionalization). Standard °F = K * 9/5 - 459.67 conversion. Preserved from upstream `@constants`."
+                },
+                "EMC": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Equilibrium moisture content (dimensionless fraction). Algebraic output of the nested-ifelse regression."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "EMC",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": "<", "args": ["RH", 0.1] },
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            0.03229,
+                                            { "op": "*", "args": [0.281073, { "op": "*", "args": ["RH", 100.0] }] },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -0.000578,
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            { "op": "*", "args": [{ "op": "/", "args": ["TEMP", "K_ref"] }, 1.8] },
+                                                            "K_to_F_offset"
+                                                        ]
+                                                    },
+                                                    { "op": "*", "args": ["RH", 100.0] }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    100.0
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    { "op": "<", "args": ["RH", 0.5] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    2.22749,
+                                                    { "op": "*", "args": [0.160107, { "op": "*", "args": ["RH", 100.0] }] },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -0.014784,
+                                                            {
+                                                                "op": "-",
+                                                                "args": [
+                                                                    { "op": "*", "args": [{ "op": "/", "args": ["TEMP", "K_ref"] }, 1.8] },
+                                                                    "K_to_F_offset"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            100.0
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    21.0606,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            0.005565,
+                                                            { "op": "^", "args": [{ "op": "*", "args": ["RH", 100.0] }, 2] }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -0.00035,
+                                                            { "op": "*", "args": ["RH", 100.0] },
+                                                            {
+                                                                "op": "-",
+                                                                "args": [
+                                                                    { "op": "*", "args": [{ "op": "/", "args": ["TEMP", "K_ref"] }, 1.8] },
+                                                                    "K_to_F_offset"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    { "op": "*", "args": [-0.483199, { "op": "*", "args": ["RH", 100.0] }] }
+                                                ]
+                                            },
+                                            100.0
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "eq1a_low_rh_dry",
+                    "description": "RH = 0.05 (< 0.1) selects Eq. 1a; TEMP = 273.15 K ⇒ TEMP_F = 32 (exact). EMC = (0.03229 + 0.281073*5 - 0.000578*32*5)/100 = (0.03229 + 1.405365 - 0.09248)/100 = 0.01345175.",
+                    "parameter_overrides": {
+                        "TEMP": 273.15,
+                        "RH": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.01345175 }
+                    ]
+                },
+                {
+                    "id": "eq1b_mid_rh_freezing",
+                    "description": "RH = 0.30 (in [0.1, 0.5)) selects Eq. 1b; TEMP = 273.15 K ⇒ TEMP_F = 32. EMC = (2.22749 + 0.160107*30 - 0.014784*32)/100 = (2.22749 + 4.80321 - 0.473088)/100 = 0.06557612.",
+                    "parameter_overrides": {
+                        "TEMP": 273.15,
+                        "RH": 0.30
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.06557612 }
+                    ]
+                },
+                {
+                    "id": "eq1c_high_rh_freezing",
+                    "description": "RH = 0.80 (≥ 0.5) selects Eq. 1c; TEMP = 273.15 K ⇒ TEMP_F = 32. EMC = (21.0606 + 0.005565*6400 - 0.00035*80*32 - 0.483199*80)/100 = (21.0606 + 35.616 - 0.896 - 38.65592)/100 = 0.1712468.",
+                    "parameter_overrides": {
+                        "TEMP": 273.15,
+                        "RH": 0.80
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.1712468 }
+                    ]
+                },
+                {
+                    "id": "boundary_rh_0p1_selects_eq1b",
+                    "description": "RH = 0.10 exactly: strict `<` against 0.1 is false, so Eq. 1a is skipped; strict `<` against 0.5 is true, so Eq. 1b is selected. TEMP = 273.15 K ⇒ TEMP_F = 32. EMC = (2.22749 + 0.160107*10 - 0.014784*32)/100 = (2.22749 + 1.60107 - 0.473088)/100 = 0.03355472.",
+                    "parameter_overrides": {
+                        "TEMP": 273.15,
+                        "RH": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.03355472 }
+                    ]
+                },
+                {
+                    "id": "boundary_rh_0p5_selects_eq1c",
+                    "description": "RH = 0.50 exactly: strict `<` against 0.5 is false, so Eq. 1c is selected. TEMP = 273.15 K ⇒ TEMP_F = 32. EMC = (21.0606 + 0.005565*2500 - 0.00035*50*32 - 0.483199*50)/100 = (21.0606 + 13.9125 - 0.56 - 24.15995)/100 = 0.1025315.",
+                    "parameter_overrides": {
+                        "TEMP": 273.15,
+                        "RH": 0.50
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.1025315 }
+                    ]
+                },
+                {
+                    "id": "eq1b_warm_temp_50F",
+                    "description": "Exercises non-trivial TEMP_F path: TEMP = 283.15 K ⇒ TEMP_F = 50 (exact: 283.15*1.8 - 459.67 = 509.67 - 459.67 = 50). RH = 0.30 selects Eq. 1b. EMC = (2.22749 + 0.160107*30 - 0.014784*50)/100 = (2.22749 + 4.80321 - 0.7392)/100 = 0.062915.",
+                    "parameter_overrides": {
+                        "TEMP": 283.15,
+                        "RH": 0.30
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "EMC", "time": 0.0, "expected": 0.062915 }
+                    ]
+                }
+            ]
+        }
+    }
+}
