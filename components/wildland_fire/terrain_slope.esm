@@ -1,0 +1,373 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TerrainSlope",
+        "description": "Terrain slope magnitude and aspect from elevation gradients. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:205 (`TerrainSlope` @component). Observed-only: dzdx and dzdy are inputs (parameters); tan_phi, slope_aspect, dzdx_out, dzdy_out are algebraic outputs.",
+        "tags": [
+            "wildland_fire",
+            "terrain",
+            "observed-only",
+            "rothermel-coupling"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-kh9)"
+        ],
+        "references": [
+            {
+                "citation": "Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115. Section on slope coefficient (φ_s) requires tan(slope) supplied from terrain elevation gradients."
+            }
+        ]
+    },
+    "models": {
+        "TerrainSlope": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:205\nUpstream `TerrainSlope` is an MTK `@component` whose two inputs (dzdx, dzdy) are `@parameters` and whose four outputs (tanϕ, slope_aspect, dzdx_out, dzdy_out) are time-indexed `@variables` with algebraic-only equations. Identical structure preserved here; the unicode `tanϕ` symbol is rendered as ASCII `tan_phi` (other ESM components in this rig use ASCII identifiers — see e.g. components/aerosol/aq_eq/water.esm). The upstream `zero_rad` and `zero_1` `@constants` are MTK unit-balancing zero literals (added to the RHS to keep MTK's unit checker happy); they are preserved here as zero-valued parameters and kept in the equations to maintain 1:1 fidelity with the upstream component used by the Rothermel coupling.\n\nNote on slope_aspect: upstream uses `atan(dzdy, dzdx)` which is two-argument atan — represented as op `atan2` in the ESS expression vocabulary (see esm-schema.json operator enum). Returned in radians, in (-π, π], measured counter-clockwise from the +x (east) axis.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are sqrt-of-sum-of-squares and atan2 — both single floating-point operations on hardware-supported intrinsics — so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on rise/run gradients."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "dzdx": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Elevation gradient in x (east) direction (dimensionless rise/run)"
+                },
+                "dzdy": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Elevation gradient in y (north) direction (dimensionless rise/run)"
+                },
+                "zero_rad": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.0,
+                    "description": "Zero-valued angle constant (MTK unit-balancing literal preserved from upstream)"
+                },
+                "zero_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Zero-valued dimensionless constant (MTK unit-balancing literal preserved from upstream)"
+                },
+                "tan_phi": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Slope steepness (rise/run, dimensionless) = sqrt(dzdx^2 + dzdy^2)"
+                },
+                "slope_aspect": {
+                    "type": "state",
+                    "units": "rad",
+                    "description": "Aspect angle of the upslope direction, measured from +x (east) axis, in (-pi, pi]"
+                },
+                "dzdx_out": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Pass-through of dzdx (output port for downstream couplings)"
+                },
+                "dzdy_out": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Pass-through of dzdy (output port for downstream couplings)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "tan_phi",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            { "op": "^", "args": ["dzdx", 2] },
+                                            { "op": "^", "args": ["dzdy", 2] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "zero_1"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "slope_aspect",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "atan2", "args": ["dzdy", "dzdx"] },
+                            "zero_rad"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dzdx_out",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["dzdx", "zero_1"]
+                    }
+                },
+                {
+                    "lhs": "dzdy_out",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["dzdy", "zero_1"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "flat_terrain",
+                    "description": "Flat terrain (dzdx = dzdy = 0). tan_phi = 0; slope_aspect = atan2(0, 0) = 0 by IEEE-754 convention (and matches both the numpy and Julia atan2 contracts).",
+                    "parameter_overrides": {
+                        "dzdx": 0.0,
+                        "dzdy": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "east_facing_10pct",
+                    "description": "Pure east-facing 10%-grade slope: dzdx = 0.1, dzdy = 0. tan_phi = 0.1; slope_aspect = atan2(0, 0.1) = 0 rad (upslope points east).",
+                    "parameter_overrides": {
+                        "dzdx": 0.1,
+                        "dzdy": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.1 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "north_facing_10pct",
+                    "description": "Pure north-facing 10%-grade slope: dzdx = 0, dzdy = 0.1. slope_aspect = atan2(0.1, 0) = +π/2 (upslope points north).",
+                    "parameter_overrides": {
+                        "dzdx": 0.0,
+                        "dzdy": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 1.5707963267948966 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.1 }
+                    ]
+                },
+                {
+                    "id": "south_facing_10pct",
+                    "description": "Pure south-facing 10%-grade slope: dzdx = 0, dzdy = -0.1. slope_aspect = atan2(-0.1, 0) = -π/2 (upslope points south, i.e. -y).",
+                    "parameter_overrides": {
+                        "dzdx": 0.0,
+                        "dzdy": -0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": -1.5707963267948966 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.1 }
+                    ]
+                },
+                {
+                    "id": "west_facing_10pct",
+                    "description": "Pure west-facing 10%-grade slope: dzdx = -0.1, dzdy = 0. slope_aspect = atan2(0, -0.1) = +π (upslope points west; numpy/Julia atan2 returns +π for the (+0, -x) branch).",
+                    "parameter_overrides": {
+                        "dzdx": -0.1,
+                        "dzdy": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 3.141592653589793 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.1 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "northeast_45deg_aspect",
+                    "description": "Equal-magnitude eastward and northward gradients (dzdx = dzdy = 0.1) — upslope direction lies on the NE bisector. slope_aspect = atan2(0.1, 0.1) = π/4; tan_phi = sqrt(0.02).",
+                    "parameter_overrides": {
+                        "dzdx": 0.1,
+                        "dzdy": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.14142135623730953 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.7853981633974483 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.1 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.1 }
+                    ]
+                },
+                {
+                    "id": "northeast_3_4_5_triangle",
+                    "description": "Classical 3-4-5 right-triangle gradient pair (dzdx = 0.3, dzdy = 0.4) — gives an exact tan_phi = 0.5 with no float roundoff. slope_aspect = atan2(0.4, 0.3) ≈ 0.9272952180016122 rad.",
+                    "parameter_overrides": {
+                        "dzdx": 0.3,
+                        "dzdy": 0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.9272952180016122 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.3 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.4 }
+                    ]
+                },
+                {
+                    "id": "northwest_quadrant_3_4_5",
+                    "description": "Northwest-quadrant 3-4-5 gradient (dzdx = -0.3, dzdy = 0.4). tan_phi = 0.5; slope_aspect = atan2(0.4, -0.3) = π - atan(0.4/0.3) ≈ 2.214297435588181 rad — exercises the second-quadrant branch of atan2 that single-arg atan would not reach.",
+                    "parameter_overrides": {
+                        "dzdx": -0.3,
+                        "dzdy": 0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 2.214297435588181 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.3 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.4 }
+                    ]
+                },
+                {
+                    "id": "southwest_quadrant_3_4_5",
+                    "description": "Southwest-quadrant 3-4-5 gradient (dzdx = -0.3, dzdy = -0.4). tan_phi = 0.5; slope_aspect = atan2(-0.4, -0.3) = -(π - atan(0.4/0.3)) ≈ -2.214297435588181 rad — exercises the third-quadrant branch.",
+                    "parameter_overrides": {
+                        "dzdx": -0.3,
+                        "dzdy": -0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": -2.214297435588181 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.3 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.4 }
+                    ]
+                },
+                {
+                    "id": "southeast_quadrant_3_4_5",
+                    "description": "Southeast-quadrant 3-4-5 gradient (dzdx = 0.3, dzdy = -0.4). tan_phi = 0.5; slope_aspect = atan2(-0.4, 0.3) = -atan(0.4/0.3) ≈ -0.9272952180016122 rad — exercises the fourth-quadrant branch.",
+                    "parameter_overrides": {
+                        "dzdx": 0.3,
+                        "dzdy": -0.4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": -0.9272952180016122 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.3 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.4 }
+                    ]
+                },
+                {
+                    "id": "steep_slope_45deg_grade",
+                    "description": "Steep slope: dzdx = dzdy = 0.5 (≈35° pitch). tan_phi = sqrt(0.5) ≈ 0.7071067811865476; slope_aspect = π/4 — exercises a regime where tan_phi is no longer << 1, relevant to Rothermel φ_s where slope coefficient grows quadratically with tan_phi.",
+                    "parameter_overrides": {
+                        "dzdx": 0.5,
+                        "dzdy": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.7071067811865476 },
+                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.7853981633974483 },
+                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.5 },
+                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.5 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "aspect_vs_dzdy_at_fixed_dzdx",
+                    "description": "Sweep dzdy from -0.5 to +0.5 at fixed dzdx = 0.1 — produces the canonical S-shape of slope_aspect vs cross-slope gradient (transitions through zero at dzdy = 0, asymptotes toward ±π/2 as |dzdy|/dzdx grows).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "dzdx": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dzdy",
+                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "aspect_curve",
+                            "type": "line",
+                            "description": "slope_aspect (rad) as a function of north-gradient at fixed east-gradient.",
+                            "x": { "variable": "dzdy",         "label": "dzdy (rise/run)" },
+                            "y": { "variable": "slope_aspect", "label": "slope_aspect (rad)" }
+                        },
+                        {
+                            "id": "tan_phi_curve",
+                            "type": "line",
+                            "description": "Slope steepness as a function of north-gradient at fixed east-gradient — V-shape with minimum tan_phi = |dzdx| at dzdy = 0.",
+                            "x": { "variable": "dzdy",    "label": "dzdy (rise/run)" },
+                            "y": { "variable": "tan_phi", "label": "tan_phi (rise/run)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "tan_phi_heatmap",
+                    "description": "Two-dimensional sweep over (dzdx, dzdy) covering ±50% gradients — surfaces the radial sqrt-of-sum-of-squares dependence of tan_phi (concentric circles) that drives Rothermel's slope coefficient φ_s.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dzdx",
+                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "dzdy",
+                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tan_phi_surface",
+                            "type": "heatmap",
+                            "description": "tan_phi(dzdx, dzdy) — the radial slope-magnitude field over the elevation-gradient plane.",
+                            "x": { "variable": "dzdx", "label": "dzdx (rise/run)" },
+                            "y": { "variable": "dzdy", "label": "dzdy (rise/run)" },
+                            "value": { "variable": "tan_phi", "reduce": "final" }
+                        },
+                        {
+                            "id": "aspect_surface",
+                            "type": "heatmap",
+                            "description": "slope_aspect(dzdx, dzdy) — the upslope-direction angle field, with the −π↔+π branch cut along the −x axis.",
+                            "x": { "variable": "dzdx", "label": "dzdx (rise/run)" },
+                            "y": { "variable": "dzdy", "label": "dzdy (rise/run)" },
+                            "value": { "variable": "slope_aspect", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
