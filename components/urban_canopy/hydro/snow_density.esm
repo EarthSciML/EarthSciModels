@@ -1,0 +1,292 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SnowDensity",
+        "description": "Bulk density of newly fallen snow as a piecewise function of atmospheric temperature, following Anderson (1976) as parameterized in Eq. 5.10 of Oleson et al. (2010, CLM Tech Note Ch. 5). Three regimes: (1) warm snow (T_atm > T_f + 2 K) → rho_sno = 50 + 1.7*17^1.5 (saturated warm-side value); (2) intermediate (T_f - 15 K < T_atm <= T_f + 2 K) → rho_sno = 50 + 1.7*((T_atm - T_f + 15)/1K)^1.5; (3) cold (T_atm <= T_f - 15 K) → rho_sno = 50 (saturated cold-side floor). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:25 (`SnowDensity` @component). Parameterized as observed-only: T_atm is the input parameter; rho_sno is an algebraic output.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "snow",
+            "density",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-7htw)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5, Eq. 5.10, p. 115."
+            },
+            {
+                "citation": "Anderson, E. A. (1976). A point energy and mass balance model of a snow cover. NOAA Technical Report NWS 19."
+            }
+        ]
+    },
+    "models": {
+        "SnowDensity": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:25\nUpstream `SnowDensity` is an MTK `@component` whose single input T_atm is a `@parameters` and whose single output rho_sno is a time-indexed `@variables` with one algebraic equation (no derivative). Identical equation structure preserved here.\n\nThe upstream component declares eight `@constants`, all encoded here as parameters with the upstream default values: T_f = 273.15 K (freezing temperature, Oleson 2010 Table 1.4), one_K = 1.0 K (unit-balancing literal — the upstream MTK component divides (T_atm - T_f + T_offset) by `one_K` so the dimensional algebra of `(...)^1.5` works out without introducing a fractional exponent on a unit-bearing quantity), rho_base = 50.0 kg/m^3 (cold-side saturated density floor and the additive base of the intermediate-regime formula), rho_coeff = 1.7 kg/m^3 (Anderson coefficient for the intermediate regime), rho_warm = 169.15775258035036 kg/m^3 (precomputed warm-side saturated value: 50.0 + 1.7 * 17.0^1.5 — upstream stores this as a symbolic constant evaluated to a numeric default at component construction), T_offset = 15.0 K (Anderson temperature offset inside the (...)^1.5 term), T_thresh_high = 2.0 K (upper threshold above the freezing point — 2 K above freezing the warm-side saturation engages), T_thresh_low = -15.0 K (lower threshold below the freezing point — at 15 K below freezing the cold-side floor engages). Greek `ρ` is renamed `rho` for ASCII parameter names per the rig convention (matches snow_compaction.esm).\n\nThe two thresholds are compared with strict `>` per the upstream `ifelse` semantics: at the upper boundary T_atm = T_f + 2 = 275.15 K, the first condition `T_atm > T_f + T_thresh_high` is FALSE (strict greater-than), so the second (intermediate) branch is taken; at the lower boundary T_atm = T_f - 15 = 258.15 K, the second condition `T_atm > T_f + T_thresh_low` is FALSE, so the cold-side floor branch is taken. This matches the upstream test fixture (`SnowDensity - Equation Verification`, hydrology_test.jl:351) which asserts both boundary cases.\n\nObservability classification: this component is functionally observed-only — the single output is given by one algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig (snow_capping_runoff.esm, impervious_runoff.esm, etc.).\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); the equation involves a fractional exponent (^1.5) and an `ifelse`, both of which are at IEEE-754 ULP precision. 1e-6 matches the rtol used by the upstream Julia test (hydrology_test.jl:361) and leaves comfortable headroom above ULP roundoff. Tighter `abs: 1e-12` is asserted on the cold-side branch outputs that are exactly rho_base = 50.0 by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T_atm": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Atmospheric temperature (CLM Eq. 5.10 input)"
+                },
+                "T_f": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Freezing temperature of water (Oleson 2010 Table 1.4)"
+                },
+                "one_K": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 1.0,
+                    "description": "Unit temperature for nondimensionalization preserved from upstream MTK component (lets the (T_atm - T_f + T_offset)^1.5 term stay dimensionally consistent)"
+                },
+                "rho_base": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 50.0,
+                    "description": "Base snow density: cold-side saturated floor and additive base of the intermediate-regime formula"
+                },
+                "rho_coeff": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.7,
+                    "description": "Anderson (1976) snow density coefficient for the intermediate regime"
+                },
+                "rho_warm": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 169.15775258035036,
+                    "description": "Warm-side saturated snow density (= 50.0 + 1.7 * 17.0^1.5): the value the intermediate-regime formula attains at T_atm = T_f + 2 K"
+                },
+                "T_offset": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 15.0,
+                    "description": "Temperature offset inside the (...)^1.5 term of the intermediate-regime formula"
+                },
+                "T_thresh_high": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 2.0,
+                    "description": "Upper temperature threshold (above T_f): warm-side saturation engages when T_atm > T_f + T_thresh_high"
+                },
+                "T_thresh_low": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -15.0,
+                    "description": "Lower temperature threshold (below T_f): cold-side floor engages when T_atm <= T_f + T_thresh_low"
+                },
+                "rho_sno": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Bulk density of newly fallen snow (Oleson Eq. 5.10): rho_warm if T_atm > T_f+2; rho_base + rho_coeff*((T_atm - T_f + T_offset)/one_K)^1.5 if T_f-15 < T_atm <= T_f+2; rho_base otherwise"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "rho_sno",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "T_atm",
+                                    { "op": "+", "args": ["T_f", "T_thresh_high"] }
+                                ]
+                            },
+                            "rho_warm",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": ">",
+                                        "args": [
+                                            "T_atm",
+                                            { "op": "+", "args": ["T_f", "T_thresh_low"] }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "rho_base",
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "rho_coeff",
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            { "op": "-", "args": ["T_atm", "T_f"] },
+                                                                            "T_offset"
+                                                                        ]
+                                                                    },
+                                                                    "one_K"
+                                                                ]
+                                                            },
+                                                            1.5
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "rho_base"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "warm_branch_at_upper_threshold",
+                    "description": "Reproduces upstream `SnowDensity - Equation Verification` test case 1 (hydrology_test.jl:359-361). T_atm = T_f + 2 = 275.15 K is on the upper boundary: strict `>` makes the first condition FALSE, so the intermediate branch is taken with (T_atm - T_f + 15)/1 = 17, giving rho_sno = 50 + 1.7*17^1.5 = 169.15775258035036 kg/m^3. Anchors fidelity to the upstream Julia component at this canonical fixture point.",
+                    "parameter_overrides": {
+                        "T_atm": 275.15
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                    ]
+                },
+                {
+                    "id": "cold_branch_well_below_threshold",
+                    "description": "Reproduces upstream test case 2 (hydrology_test.jl:364-366). T_atm = 250.0 K is well below T_f - 15 = 258.15 K, so the cold-side floor engages: rho_sno = rho_base = 50.0 kg/m^3. Exercises the lowest of the three regimes.",
+                    "parameter_overrides": {
+                        "T_atm": 250.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "intermediate_branch_mid_range",
+                    "description": "Reproduces upstream test case 3 (hydrology_test.jl:369-372). T_atm = 268.15 K = T_f - 5 is in the intermediate regime: (T_atm - T_f + 15)/1 = 10, giving rho_sno = 50 + 1.7*10^1.5 = 103.75872022286241 kg/m^3. Exercises the middle of the (...)^1.5 curve, away from both saturation thresholds.",
+                    "parameter_overrides": {
+                        "T_atm": 268.15
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 103.75872022286241 }
+                    ]
+                },
+                {
+                    "id": "cold_branch_at_lower_threshold",
+                    "description": "Reproduces upstream test case 4 (hydrology_test.jl:377-379). T_atm = T_f - 15 = 258.15 K is exactly on the lower boundary: strict `>` makes the second condition (`T_atm > T_f + T_thresh_low`) FALSE, so the cold-side floor branch is taken (rho_sno = 50.0 kg/m^3). Verifies the equality boundary of the lower threshold — equality goes to the cold floor branch, not the intermediate one.",
+                    "parameter_overrides": {
+                        "T_atm": 258.15
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "warm_branch_just_above_threshold",
+                    "description": "Reproduces upstream test case 5 (hydrology_test.jl:382-384). T_atm = 276.0 K is above T_f + 2 = 275.15 K, so the first condition is TRUE and the warm-side saturation engages: rho_sno = rho_warm = 169.15775258035036 kg/m^3. Exercises the warm-side regime where rho_sno is independent of T_atm — verifies the saturation plateau.",
+                    "parameter_overrides": {
+                        "T_atm": 276.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                    ]
+                },
+                {
+                    "id": "intermediate_branch_at_freezing",
+                    "description": "T_atm = T_f = 273.15 K (exactly at freezing) is in the intermediate regime: (T_atm - T_f + 15)/1 = 15, giving rho_sno = 50 + 1.7*15^1.5 = 148.76107532828913 kg/m^3. Exercises the formula at the natural anchor point T_atm = T_f where the (...)^1.5 term simplifies to T_offset^1.5.",
+                    "parameter_overrides": {
+                        "T_atm": 273.15
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 148.76107532828913 }
+                    ]
+                },
+                {
+                    "id": "intermediate_branch_just_above_lower_threshold",
+                    "description": "T_atm = 258.16 K is just barely above T_f - 15 = 258.15 K, so the intermediate branch engages with (T_atm - T_f + 15)/1 = 0.01, giving rho_sno = 50 + 1.7*0.01^1.5 = 50 + 1.7*0.001 = 50.0017 kg/m^3. Stress-tests the lower-end of the intermediate branch where the (...)^1.5 term is near zero — verifies continuity with the cold-side floor (rho_sno -> rho_base as T_atm -> T_f + T_thresh_low+).",
+                    "parameter_overrides": {
+                        "T_atm": 258.16
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0017 }
+                    ]
+                },
+                {
+                    "id": "warm_branch_extreme_high",
+                    "description": "T_atm = 310.0 K (extreme summer-like atmospheric temperature, far above freezing). The warm-side saturation engages and rho_sno = rho_warm regardless of how high T_atm goes — confirms the warm plateau caps the density and there is no monotone runaway. Useful as a guardrail for downstream code that might pass realistic (>>T_f) air temperatures during snowmelt or warm-rain events.",
+                    "parameter_overrides": {
+                        "T_atm": 310.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                    ]
+                },
+                {
+                    "id": "cold_branch_extreme_low",
+                    "description": "T_atm = 200.0 K (extreme polar/stratospheric temperature, deep below the cold threshold). The cold-side floor holds at rho_sno = rho_base = 50.0 kg/m^3 — confirms the cold plateau caps the density from below and there is no negative or sub-50 runaway. Complements warm_branch_extreme_high.",
+                    "parameter_overrides": {
+                        "T_atm": 200.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rho_sno_vs_T_atm_full_curve",
+                    "description": "Sweep T_atm across the full piecewise-defined regime (240-280 K, 41 points, 1 K spacing). Surfaces the three-regime structure of CLM Eq. 5.10: a cold-side floor at rho_base = 50 kg/m^3 for T_atm <= T_f - 15 = 258.15 K, the (...)^1.5 ramp from rho_base up to rho_warm in the intermediate band, and the warm-side plateau at rho_warm = 169.158 kg/m^3 for T_atm > T_f + 2 = 275.15 K. The two saturation plateaus and the connecting Anderson-1976 ramp are the canonical visualization of new-snow density.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_atm",
+                                "range": { "start": 240.0, "stop": 280.0, "count": 41, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rho_sno_curve",
+                            "type": "line",
+                            "description": "rho_sno vs T_atm: cold-side plateau at 50 kg/m^3, Anderson-1976 (...)^1.5 ramp from T_f - 15 to T_f + 2, warm-side plateau at 169.158 kg/m^3.",
+                            "x": { "variable": "T_atm",   "label": "T_atm (K)" },
+                            "y": { "variable": "rho_sno", "label": "rho_sno (kg/m^3)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
