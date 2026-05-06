@@ -1,0 +1,709 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SO2Equilibria",
+        "description": "SO2 gas-aqueous dissolution and dissociation equilibria with van't Hoff temperature dependence. Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:240 (`SO2Equilibria` @component). Implements Seinfeld & Pandis Ch 7 §7.3.3 (Eq 7.33-7.35, 7.39, 7.41, 7.43-7.45) and Table 7.4. Parameterized as observed-only: T, H_plus, and p_SO2 are inputs; H_SO2, K_s1, K_s2, SO2_aq, HSO3_minus, SO3_2minus, S_IV_total, H_SO2_eff, alpha_0, alpha_1, alpha_2 are algebraic outputs.",
+        "tags": [
+            "aerosol",
+            "aqueous_equilibria",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (mdl-4fc)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Section 7.3.3 (SO2 dissolution/dissociation, Eq 7.33-7.35, 7.39, 7.41, 7.43-7.45) and Table 7.4 (equilibrium-constant temperature dependence). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "SO2Equilibria": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:240\nUpstream `SO2Equilibria` is an MTK `@component` where T, H_plus, and p_SO2 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), T, H_plus, and p_SO2 are declared as parameters here — matching the bead's `(S, observed-only)` classification. The eleven algebraic equations are unchanged from upstream.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/multiplications of the van't Hoff K(T) and Henry/dissociation closed-form expressions across the atmospheric T range (273-318 K) and 9-decade [H+] sweep."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Temperature"
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Hydrogen ion concentration (1e-4 mol/m³ = pH 7 in pure water at 298 K)"
+                },
+                "p_SO2": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 1.0,
+                    "description": "Partial pressure of SO2"
+                },
+                "R_gas": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Gas constant"
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Reference temperature"
+                },
+                "H_SO2_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 0.012139156180606956,
+                    "description": "Henry's law constant for SO2 at 298 K (1.23 M/atm converted to mol/m³/Pa: 1.23 / 101325.0 * 1000.0)"
+                },
+                "dH_H_SO2": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -26150.0,
+                    "description": "Heat of dissolution for SO2 (-6.25 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "K_s1_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 13.0,
+                    "description": "First dissociation constant at 298 K (1.3e-2 M converted to mol/m³)"
+                },
+                "K_s2_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 6.6e-5,
+                    "description": "Second dissociation constant at 298 K (6.6e-8 M converted to mol/m³)"
+                },
+                "dH_Ks1": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -17405.44,
+                    "description": "Enthalpy for K_s1 (-4.16 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "dH_Ks2": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -9330.32,
+                    "description": "Enthalpy for K_s2 (-2.23 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "H_SO2": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Henry's law constant for SO2 at temperature T"
+                },
+                "K_s1": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "First dissociation constant at temperature T"
+                },
+                "K_s2": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Second dissociation constant at temperature T"
+                },
+                "SO2_aq": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Aqueous SO2 concentration [SO2.H2O]"
+                },
+                "HSO3_minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Bisulfite ion concentration [HSO3-]"
+                },
+                "SO3_2minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Sulfite ion concentration [SO3^2-]"
+                },
+                "S_IV_total": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Total S(IV) concentration: [SO2.H2O] + [HSO3-] + [SO3^2-]"
+                },
+                "H_SO2_eff": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Effective Henry's law constant for SO2 (accounts for dissociation)"
+                },
+                "alpha_0": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Mole fraction of SO2.H2O in S(IV) (dimensionless)"
+                },
+                "alpha_1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Mole fraction of HSO3- in S(IV) (dimensionless)"
+                },
+                "alpha_2": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Mole fraction of SO3^2- in S(IV) (dimensionless)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_SO2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_SO2_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "/", "args": ["dH_H_SO2", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T_ref"] },
+                                                    { "op": "/", "args": [-1, "T"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_s1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_s1_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Ks1", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_s2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "K_s2_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            { "op": "/", "args": ["dH_Ks2", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T"] },
+                                                    { "op": "/", "args": [-1, "T_ref"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "SO2_aq",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["H_SO2", "p_SO2"]
+                    }
+                },
+                {
+                    "lhs": "HSO3_minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_s1", "SO2_aq"] },
+                            "H_plus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "SO3_2minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_s2", "HSO3_minus"] },
+                            "H_plus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_IV_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["SO2_aq", "HSO3_minus", "SO3_2minus"]
+                    }
+                },
+                {
+                    "lhs": "H_SO2_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_SO2",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    { "op": "/", "args": ["K_s1", "H_plus"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            { "op": "*", "args": ["K_s1", "K_s2"] },
+                                            { "op": "^", "args": ["H_plus", 2] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "alpha_0",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "^", "args": ["H_plus", 2] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "^", "args": ["H_plus", 2] },
+                                    { "op": "*", "args": ["K_s1", "H_plus"] },
+                                    { "op": "*", "args": ["K_s1", "K_s2"] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "alpha_1",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_s1", "H_plus"] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "^", "args": ["H_plus", 2] },
+                                    { "op": "*", "args": ["K_s1", "H_plus"] },
+                                    { "op": "*", "args": ["K_s1", "K_s2"] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "alpha_2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_s1", "K_s2"] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "^", "args": ["H_plus", 2] },
+                                    { "op": "*", "args": ["K_s1", "H_plus"] },
+                                    { "op": "*", "args": ["K_s1", "K_s2"] }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "baseline_298K_pH7",
+                    "description": "Reference state at 298 K (T_ref) with neutral water (pH 7) and 1 Pa SO2. At T=T_ref the van't Hoff factors are exp(0)=1, so H_SO2, K_s1, K_s2 take their 298 K values directly. HSO3- dominates the speciation at pH 7 (alpha_1 ≈ 0.60) with significant SO3^2- contribution (alpha_2 ≈ 0.40) due to the high K_s1.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.012139156180606956 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 13.0 },
+                        { "variable": "K_s2",        "time": 0.0, "expected": 6.599999999999999e-05 },
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.012139156180606956 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 1578.0903034789042 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 1041.5396002960765 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 2619.642042931161 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 2619.642042931162 },
+                        { "variable": "alpha_0",     "time": 0.0, "expected": 4.633898823453088e-06 },
+                        { "variable": "alpha_1",     "time": 0.0, "expected": 0.6024068470489016 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.39758851905227494 }
+                    ]
+                },
+                {
+                    "id": "cold_273K_pH7",
+                    "description": "Cold cloud-water reference (273.15 K) at pH 7. SO2 solubility increases at low T (negative ΔH_dissolution) so H_SO2 grows ~2.6×; K_s1 nearly doubles (negative ΔH_Ks1, sign-flipped via -dH); SO3^2- partition increases.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.031710756452134795 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 24.63261969180649 },
+                        { "variable": "K_s2",        "time": 0.0, "expected": 9.296853657124221e-05 },
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.031710756452134795 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 7811.190038249352 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 7261.949067359078 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 15073.170816364884 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 15073.17081636488 }
+                    ]
+                },
+                {
+                    "id": "cold_280K_pH7",
+                    "description": "Intermediate cold-water reference (280 K).",
+                    "parameter_overrides": {
+                        "T": 280.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.023925670142206007 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 20.42111446187285 },
+                        { "variable": "K_s2",        "time": 0.0, "expected": 8.407835263235874e-05 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 4885.888485510025 }
+                    ]
+                },
+                {
+                    "id": "warm_310K_pH7",
+                    "description": "Warm-cloud / body-temperature reference (310 K). SO2 solubility falls (negative ΔH_dissolution) and K_s1, K_s2 also decrease. HSO3- partition increases at the expense of SO3^2-.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.008067694063551265 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 9.904667524254098 },
+                        { "variable": "K_s2",        "time": 0.0, "expected": 5.7047113213191966e-05 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 799.0782738687379 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 455.85108755591904 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 1254.9374291187205 }
+                    ]
+                },
+                {
+                    "id": "hot_318K_pH7",
+                    "description": "Upper-range reference (318 K, 45 °C) for warm aqueous-phase chemistry.",
+                    "parameter_overrides": {
+                        "T": 318.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.006250237148170521 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 8.357111469404561 },
+                        { "variable": "K_s2",        "time": 0.0, "expected": 5.2081243957394926e-05 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 522.3392855747431 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH4_298K",
+                    "description": "Acidic cloud water (pH 4, typical polluted rain) at 298 K. Lower [H+] denominator suppresses HSO3- and SO3^2- by 100× and 10000× respectively; alpha_1 dominates (~0.99) since K_s1/[H+] = 130 still drives nearly full dissociation but K_s1*K_s2/[H+]^2 = 8.58e-3.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 0.1,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.012139156180606956 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 1.5780903034789042 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 0.0010415396002960767 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 1.5912709992598073 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 1.5912709992598075 },
+                        { "variable": "alpha_0",     "time": 0.0, "expected": 0.007628591350092841 },
+                        { "variable": "alpha_1",     "time": 0.0, "expected": 0.9917168755120692 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.0006545331378379655 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH2_298K",
+                    "description": "Strongly acidic regime (pH 2, [H+] = 10 mol/m³) at 298 K. SO2.H2O and HSO3- partition become comparable (K_s1/[H+] = 1.3); SO3^2- vanishes. Stress-tests the [H+]^2 term in alpha_0 and H_SO2_eff at the far-acidic tail.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 10.0,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.012139156180606956 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 0.015780903034789042 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 1.0415396002960767e-07 },
+                        { "variable": "alpha_0",     "time": 0.0, "expected": 0.4347809867735363 },
+                        { "variable": "alpha_1",     "time": 0.0, "expected": 0.5652152828055972 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 3.7304208665169412e-06 }
+                    ]
+                },
+                {
+                    "id": "basic_pH9_298K",
+                    "description": "Mildly basic regime (pH 9) at 298 K. Lower [H+] drives both dissociations; SO3^2- dominates speciation (alpha_2 ≈ 0.985). H_SO2_eff explodes because K_s1*K_s2/[H+]^2 ≈ 8.58e8.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-6,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 157809.03034789042 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 10415396.002960768 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 10573205.045447815 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.985074625734702 }
+                    ]
+                },
+                {
+                    "id": "basic_pH10_298K",
+                    "description": "Basic regime (pH 10) at 298 K. SO3^2- almost completely dominates speciation (alpha_2 ≈ 0.9985).",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-7,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 1041539600.2960768 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 1043117690.6116949 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.9984871406842954 }
+                    ]
+                },
+                {
+                    "id": "high_pSO2",
+                    "description": "Henry's-law linearity check: 10× p_SO2 at fixed T, H_plus scales SO2_aq, HSO3-, SO3^2-, S_IV_total by 10× while leaving H_SO2, K_s1, K_s2, H_SO2_eff, and the alpha mole fractions unchanged.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.12139156180606957 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 15780.903034789044 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 10415.396002960768 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 26196.42042931162 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 2619.642042931162 },
+                        { "variable": "alpha_1",     "time": 0.0, "expected": 0.6024068470489016 }
+                    ]
+                },
+                {
+                    "id": "low_pSO2",
+                    "description": "Henry's-law linearity check at low partial pressure: p_SO2 = 0.01 Pa scales SO2_aq, HSO3-, SO3^2- by 0.01× from baseline. H_SO2_eff is independent of p_SO2.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 0.01
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "SO2_aq",      "time": 0.0, "expected": 0.00012139156180606956 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 15.780903034789043 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 26.196420429311615 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 2619.642042931162 }
+                    ]
+                },
+                {
+                    "id": "coupled_cold_acidic",
+                    "description": "Cross-check: cold (273.15 K) AND acidic (pH 4). Combines the van't Hoff temperature shift with the acidic [H+] sweep to exercise both coefficient paths at once.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 0.1,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.031710756452134795 },
+                        { "variable": "K_s1",        "time": 0.0, "expected": 24.63261969180649 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 7.811190038249352 },
+                        { "variable": "S_IV_total",  "time": 0.0, "expected": 7.850162743768846 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 7.850162743768846 }
+                    ]
+                },
+                {
+                    "id": "coupled_warm_basic",
+                    "description": "Cross-check: warm (310 K) AND basic (pH 9). Higher T pushes K(T) down but lower [H+] drives both dissociations; SO3^2- dominates.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-6,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_SO2",       "time": 0.0, "expected": 0.008067694063551265 },
+                        { "variable": "HSO3_minus",  "time": 0.0, "expected": 79907.8273868738 },
+                        { "variable": "SO3_2minus",  "time": 0.0, "expected": 4558510.875559191 },
+                        { "variable": "H_SO2_eff",   "time": 0.0, "expected": 4638418.711013759 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.9827726127301035 }
+                    ]
+                },
+                {
+                    "id": "alpha_sum_to_one",
+                    "description": "Conservation check: alpha_0 + alpha_1 + alpha_2 = 1 by construction (shared denominator). Verified at the baseline state.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "alpha_0",     "time": 0.0, "expected": 4.633898823453088e-06 },
+                        { "variable": "alpha_1",     "time": 0.0, "expected": 0.6024068470489016 },
+                        { "variable": "alpha_2",     "time": 0.0, "expected": 0.39758851905227494 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "H_SO2_eff_vs_pH",
+                    "description": "Effective Henry's law constant H*_SO2 = H_SO2 * (1 + K_s1/[H+] + K_s1*K_s2/[H+]^2) as a function of [H+] over the atmospheric pH range at 298 K. Demonstrates the steep two-stage enhancement at low [H+] (HSO3- partition adds ~100×, then SO3^2- partition adds ~1e6×) and the asymptotic approach to H_SO2 at very high [H+] (SO2.H2O partition) — Seinfeld & Pandis Eq 7.41.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T": 298.0,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 1.0e-7, "stop": 10.0, "count": 25, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Hstar_curve",
+                            "type": "line",
+                            "description": "H*_SO2 vs [H+] at 298 K — log-log slope ≈ -2 in the basic regime (K_s1*K_s2/[H+]^2 dominates), -1 in the mid regime (K_s1/[H+] dominates), 0 in the acidic limit.",
+                            "x": { "variable": "H_plus",    "label": "[H⁺] (mol/m³, log scale)" },
+                            "y": { "variable": "H_SO2_eff", "label": "H*_SO2 (mol/m³/Pa, log scale)" }
+                        },
+                        {
+                            "id": "alpha_curves",
+                            "type": "line",
+                            "description": "Mole fractions alpha_0 (SO2.H2O), alpha_1 (HSO3-), alpha_2 (SO3^2-) vs [H+] — the canonical S(IV) speciation diagram crossing at pK_s1 and pK_s2.",
+                            "x": { "variable": "H_plus",  "label": "[H⁺] (mol/m³, log scale)" },
+                            "y": { "variable": "alpha_1", "label": "α₁ = HSO3⁻ mole fraction" }
+                        }
+                    ]
+                },
+                {
+                    "id": "H_SO2_vs_temperature",
+                    "description": "SO2 Henry's law constant vs temperature (van't Hoff with negative ΔH_dissolution). Reproduces the canonical SO2 solubility curve (Seinfeld & Pandis Table 7.4 row for SO2): H_SO2 climbs from ~0.006 mol/m³/Pa at 318 K to ~0.032 mol/m³/Pa at 273 K — a ~5× range over the atmospheric temperature range.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_plus": 1.0e-4,
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 20, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "HSO2_curve",
+                            "type": "line",
+                            "description": "H_SO2(T) — van't Hoff curve.",
+                            "x": { "variable": "T",     "label": "Temperature (K)" },
+                            "y": { "variable": "H_SO2", "label": "H_SO2 (mol/m³/Pa, log scale)" }
+                        },
+                        {
+                            "id": "Ks1_curve",
+                            "type": "line",
+                            "description": "K_s1(T) — first dissociation constant climbs slightly with T (sign-flipped via -dH; ΔH_Ks1 < 0 means K_s1 actually decreases with increasing T given the upstream sign convention).",
+                            "x": { "variable": "T",    "label": "Temperature (K)" },
+                            "y": { "variable": "K_s1", "label": "K_s1 (mol/m³)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "coupled_T_pH_sweep",
+                    "description": "Two-dimensional sweep over T (freezing-to-warm cloud range) and [H+] (acidic-to-basic). Surfaces the joint dependence of H*_SO2 on temperature and acidity that controls atmospheric SO2 partitioning into cloud and aerosol water.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "p_SO2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 10, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 1.0e-7, "stop": 1.0, "count": 15, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Hstar_heatmap",
+                            "type": "heatmap",
+                            "description": "H*_SO2 as a function of T and [H+].",
+                            "x": { "variable": "T",      "label": "Temperature (K)" },
+                            "y": { "variable": "H_plus", "label": "[H⁺] (mol/m³, log scale)" },
+                            "value": { "variable": "H_SO2_eff", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
