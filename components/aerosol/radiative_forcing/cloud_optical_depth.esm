@@ -1,0 +1,276 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CloudOpticalDepth",
+        "description": "Cloud optical depth from liquid water content and droplet number concentration — Seinfeld & Pandis (2006) Ch. 24 §24.8.1, Eq. 24.36.",
+        "tags": [
+            "aerosol",
+            "radiative_forcing"
+        ]
+    },
+    "models": {
+        "CloudOpticalDepth": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 24, Section 24.8.1, Equation 24.36.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aerosol_radiative_forcing.jl:154\nCloud optical depth in terms of cloud thickness h, liquid water content L, and cloud droplet number concentration N. Closed-form algebraic relation τ_c = h · (9π·L²·N / (2·ρ_w²))^(1/3). The upstream Julia component declares ρ_w as an MTK `@constants` value; here it is exposed as a parameter (default 1000.0 kg/m³) so it remains overridable from the canonical Python runner — it is not a tunable physical knob, it is the density of liquid water. After MTK structural_simplify the system has zero ODE states and τ_c is an observed binding, so the inline-test runner samples τ_c at its algebraic value at any requested time.\n\nTolerance rationale (model-level rel=1e-8 / abs=1e-12): closed-form algebraic τ_c = h·(9π·L²·N / (2·ρ_w²))^(1/3) reduces to zero ODE states after MTK structural_simplify, so 1e-8 captures only float64 roundoff in the cube-root + multiply chain. abs=1e-12 floors near-zero limits (very thin / dilute clouds). Matches the tolerance choice on the sister CloudAlbedo component."
+            },
+            "variables": {
+                "h": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 500.0,
+                    "description": "Cloud thickness"
+                },
+                "L": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 0.0003,
+                    "description": "Liquid water content (in-cloud, kg of liquid water per m³ of cloud air)"
+                },
+                "N": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000.0,
+                    "description": "Cloud droplet number concentration"
+                },
+                "ρ_w": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of liquid water (upstream `@constants`; exposed as a parameter for ESM serialization but not a tunable physical knob)"
+                },
+                "τ_c": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Cloud optical depth from Seinfeld & Pandis (2006) Eq. 24.36, τ_c = h·(9π·L²·N / (2·ρ_w²))^(1/3).",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "h",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    9,
+                                                    3.141592653589793,
+                                                    {
+                                                        "op": "^",
+                                                        "args": ["L", 2]
+                                                    },
+                                                    "N"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    2,
+                                                    {
+                                                        "op": "^",
+                                                        "args": ["ρ_w", 2]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [1, 3]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-8,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "figure_24_17_default_params",
+                    "description": "Reproduces the default-parameter τ_c computation from the upstream Aerosol.jl `Cloud Optical Depth - Eq. 24.36` testitem. With h=500 m, L=0.3 g/m³, N=100 cm⁻³ (typical Figure 24.17 caption values), τ_c ≈ 25.15. Upstream asserts τ_c > 0 and τ_c < 100; we pin the analytic value.",
+                    "parameter_overrides": {
+                        "h": 500.0,
+                        "L": 0.0003,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 25.148087898296158 },
+                        { "variable": "τ_c", "time": 1.0, "expected": 25.148087898296158 }
+                    ]
+                },
+                {
+                    "id": "figure_24_17_high_N",
+                    "description": "Twomey-leg sensitivity: doubling cloud droplet number concentration raises τ_c by 2^(1/3) ≈ 1.26. Upstream `Cloud Optical Depth - Eq. 24.36` asserts τ_c(N=200e6) > τ_c(N=100e6); we pin the analytic value.",
+                    "parameter_overrides": {
+                        "h": 500.0,
+                        "L": 0.0003,
+                        "N": 200000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 31.68460530766985 }
+                    ]
+                },
+                {
+                    "id": "figure_24_17_high_L",
+                    "description": "Liquid-water-content sensitivity at fixed h, N. Going from L=0.3 g/m³ to L=0.5 g/m³ raises τ_c by (5/3)^(2/3) ≈ 1.41. Upstream asserts τ_c(L=0.5e-3) > τ_c(L=0.3e-3); we pin the analytic value.",
+                    "parameter_overrides": {
+                        "h": 500.0,
+                        "L": 0.0005,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 35.35119800550433 }
+                    ]
+                },
+                {
+                    "id": "figure_24_17_double_h",
+                    "description": "Linear scaling in cloud thickness: doubling h doubles τ_c exactly. Upstream `Cloud Optical Depth - Eq. 24.36` asserts τ_c(h=1000) ≈ 2·τ_c(h=500) at rtol=0.01; we pin the exact analytic value.",
+                    "parameter_overrides": {
+                        "h": 1000.0,
+                        "L": 0.0003,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 50.296175796592316 }
+                    ]
+                },
+                {
+                    "id": "low_N_branch",
+                    "description": "Low droplet count (N=50 cm⁻³, marine background) at default h, L lowers τ_c by 0.5^(1/3) ≈ 0.794 versus the default. Confirms monotonicity in N below the default.",
+                    "parameter_overrides": {
+                        "h": 500.0,
+                        "L": 0.0003,
+                        "N": 50000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 19.960050592372035 }
+                    ]
+                },
+                {
+                    "id": "low_L_branch",
+                    "description": "Optically thin cloud (L=0.1 g/m³) at default h, N. τ_c shrinks by (1/3)^(2/3) ≈ 0.481 versus the default. Confirms monotonicity in L below the default.",
+                    "parameter_overrides": {
+                        "h": 500.0,
+                        "L": 0.0001,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 12.089939655123525 }
+                    ]
+                },
+                {
+                    "id": "thin_cloud_h200",
+                    "description": "Thin-cloud sweep point (h=200 m). With default L, N this gives τ_c ≈ 10.06, near the canonical CloudAlbedo default τ_c=10. Anchors the h-leg of the Figure 24.17 cube-root×linear scaling.",
+                    "parameter_overrides": {
+                        "h": 200.0,
+                        "L": 0.0003,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "τ_c", "time": 0.0, "expected": 10.059235159318463 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "figure_24_17_tau_c_vs_N",
+                    "description": "Reproduces Figure 24.17 from Seinfeld & Pandis (2006), p. 1082 — cloud optical depth τ_c as a function of droplet number concentration N at the canonical h = 500 m, L = 0.3 g/m³. The cube-root scaling τ_c ∝ N^(1/3) is the underlying mechanism for the first indirect (Twomey) aerosol effect.",
+                    "parameters": {
+                        "h": 500.0,
+                        "L": 0.0003
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N",
+                                "range": { "start": 10000000.0, "stop": 1000000000.0, "count": 40, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_c_vs_N",
+                            "type": "line",
+                            "description": "τ_c plotted against droplet number concentration N (log axis) at h = 500 m, L = 0.3 g/m³.",
+                            "x": { "variable": "N", "label": "Cloud droplet number concentration N (m⁻³)" },
+                            "y": { "variable": "τ_c", "label": "Cloud optical depth τ_c" }
+                        }
+                    ]
+                },
+                {
+                    "id": "tau_c_vs_L",
+                    "description": "Liquid-water-content sweep at fixed h = 500 m, N = 100 cm⁻³. τ_c ∝ L^(2/3); spans the stratocumulus-to-cumulus range (≈0.05 g/m³ to ≈2 g/m³).",
+                    "parameters": {
+                        "h": 500.0,
+                        "N": 100000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "L",
+                                "range": { "start": 0.00005, "stop": 0.002, "count": 30, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_c_vs_L",
+                            "type": "line",
+                            "description": "τ_c as a function of liquid water content L (log axis) at h = 500 m, N = 100 cm⁻³.",
+                            "x": { "variable": "L", "label": "Liquid water content L (kg/m³)" },
+                            "y": { "variable": "τ_c", "label": "Cloud optical depth τ_c" }
+                        }
+                    ]
+                },
+                {
+                    "id": "tau_c_N_L_joint_sweep",
+                    "description": "Joint sensitivity of τ_c to droplet number concentration and liquid water content at fixed h = 500 m. Visualizes the cube-root × two-thirds-power surface τ_c(N, L). Confirms monotonic increase in both directions and quantifies the Twomey-effect leverage of N on τ_c at varying L.",
+                    "parameters": { "h": 500.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N",
+                                "range": { "start": 10000000.0, "stop": 1000000000.0, "count": 25, "scale": "log" }
+                            },
+                            {
+                                "parameter": "L",
+                                "range": { "start": 0.0001, "stop": 0.001, "count": 20, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_c_heatmap",
+                            "type": "heatmap",
+                            "description": "τ_c(N, L) heatmap at h = 500 m.",
+                            "x": { "variable": "N", "label": "Droplet number concentration N (m⁻³)" },
+                            "y": { "variable": "L", "label": "Liquid water content L (kg/m³)" },
+                            "value": { "variable": "τ_c", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
