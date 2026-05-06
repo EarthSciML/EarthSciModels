@@ -1,0 +1,390 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "GroundwaterDrainage",
+        "description": "Sub-surface drainage out of the soil column as an exponential function of water table depth, modulated by an impermeable-fraction reduction in frozen soils, following Oleson et al. (2010, CLM Tech Note Ch. 5) Eqs. 5.140 (drainage) and 5.141 (impermeable fraction). q_drai = (1 - f_imp) * q_drai_max * exp(-f_drai * z_v); f_imp = max((exp(-α(1 - f_ice_weighted)) - exp(-α)) / (1 - exp(-α)), 0). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:698 (`GroundwaterDrainage` @component). Observed-only: both inputs are parameters and both outputs are given by single algebraic equations.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "groundwater",
+            "drainage",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-0sq3)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Soil Water), Section 5.4 (Sub-surface Drainage), Eqs. 5.138-5.141, pp. 141-142."
+            }
+        ]
+    },
+    "models": {
+        "GroundwaterDrainage": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:698\nUpstream `GroundwaterDrainage` is an MTK `@component` whose two inputs (z_v, f_ice_weighted) are `@parameters` and whose two outputs (f_imp, q_drai) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical structure preserved here.\n\nThe upstream component declares three `@constants`: f_drai = 2.5 m^-1 (drainage decay factor, Oleson 2010 p. 142), q_drai_max = 5.5e-3 kg/(m^2*s) (maximum drainage rate at the surface, Oleson 2010 p. 142), and α = 3.0 dimensionless (scale-dependent impermeable-fraction parameter, Oleson 2010 Eq. 5.141). They are encoded here as parameters with the upstream default values, mirroring the convention used by sibling files in this directory (impervious_runoff.esm, surface_layer_update.esm) for `@constants`-to-parameter promotion.\n\nThe `f_ice_weighted` input is a unit-less ice-weighted impermeable fraction in [0, 1]; values outside that range are accepted but produce non-physical results (the upstream MTK component imposes no clamp, and this file follows that convention). The `max(..., 0.0)` floor in Eq. 5.141 protects against underflow when f_ice_weighted ≈ 0 — at exactly f_ice_weighted = 0 the numerator (exp(-α) - exp(-α)) is mathematically zero but can be a tiny negative due to round-off in the upstream MTK lowering; the `max` ensures f_imp is never negative.\n\nObservability classification: this component is functionally observed-only — both output variables are given by single algebraic equations in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (interface_hydraulic_conductivity.esm, soil_water_content_calc.esm, snow_density.esm).\n\nDefault parameter values: z_v = 1.0 m and f_ice_weighted = 0.0 are mid-range starting values that match the upstream `GroundwaterDrainage - Equation Verification` test fixture (UrbanCanopy.jl test/hydrology_test.jl:519). The constants take their upstream Oleson 2010 values verbatim.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations involve O(10) IEEE-754 float64 operations including two `exp()` calls (which carry ≈1 ULP of relative error) — worst-case roundoff is ~10*ULP ≈ 1e-15. 1e-9 leaves comfortable headroom. Tighter `abs: 1e-15` is asserted on q_drai and f_imp in branches where they are exactly zero by construction (fully-frozen shutdown of drainage, fully-unfrozen identity for f_imp) so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "z_v": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Water table depth (Oleson Eq. 5.140 input)"
+                },
+                "f_ice_weighted": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Ice-weighted impermeable fraction in [0, 1] (Oleson Eq. 5.141 input, dimensionless)"
+                },
+                "f_drai": {
+                    "type": "parameter",
+                    "units": "m^-1",
+                    "default": 2.5,
+                    "description": "Drainage decay factor (Oleson 2010 p. 142)"
+                },
+                "q_drai_max": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 5.5e-3,
+                    "description": "Maximum drainage rate at the surface (Oleson 2010 p. 142)"
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.0,
+                    "description": "Scale-dependent impermeable-fraction parameter of Eq. 5.141 (dimensionless)"
+                },
+                "f_imp": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Impermeable fraction for drainage (Oleson Eq. 5.141, dimensionless)"
+                },
+                "q_drai": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Sub-surface drainage (Oleson Eq. 5.140)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "f_imp",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            { "op": "-", "args": [0.0, "α"] },
+                                                            { "op": "-", "args": [1.0, "f_ice_weighted"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    { "op": "-", "args": [0.0, "α"] }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    { "op": "-", "args": [0.0, "α"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            0.0
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_drai",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            { "op": "-", "args": [1.0, "f_imp"] },
+                            "q_drai_max",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "-", "args": [0.0, "f_drai"] },
+                                            "z_v"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "shallow_unfrozen",
+                    "description": "Reproduces upstream Equation Verification fixture (`hydrology_test.jl:519`). Shallow water table, no frozen soil: z_v = 1.0 m, f_ice_weighted = 0. f_imp = max((exp(-3) - exp(-3))/(1-exp(-3)), 0) = 0 (numerator is identically zero). q_drai = (1-0) * 5.5e-3 * exp(-2.5 * 1.0) = 5.5e-3 * exp(-2.5) ≈ 4.5147e-4 kg/(m^2*s). Anchors the no-freeze decay limit of Eq. 5.140.",
+                    "parameter_overrides": {
+                        "z_v": 1.0,
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_drai", "time": 0.0, "expected": 4.514674924314434e-4 }
+                    ]
+                },
+                {
+                    "id": "fully_frozen",
+                    "description": "Reproduces upstream Equation Verification fixture (`hydrology_test.jl:537`). Fully ice-impermeable soil: z_v = 1.0 m, f_ice_weighted = 1.0. f_imp = max((exp(0) - exp(-3))/(1-exp(-3)), 0) = (1 - exp(-3))/(1 - exp(-3)) = 1.0 — drainage is completely shut off. q_drai = (1 - 1) * ... = 0 exactly (asserted at IEEE-754 zero, abs=1e-15). Anchors the frozen-shutdown limit of Eq. 5.141.",
+                    "parameter_overrides": {
+                        "z_v": 1.0,
+                        "f_ice_weighted": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 1.0 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "surface_unfrozen",
+                    "description": "Reproduces upstream Equation Verification fixture (`hydrology_test.jl:546`). Water table at the surface, no frozen soil: z_v = 0, f_ice_weighted = 0. q_drai = 5.5e-3 * exp(0) = 5.5e-3 kg/(m^2*s) — drainage saturates at the maximum rate q_drai_max. Anchors the surface limit of the exponential decay (Eq. 5.140 at z_v = 0).",
+                    "parameter_overrides": {
+                        "z_v": 0.0,
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_drai", "time": 0.0, "expected": 5.5e-3 }
+                    ]
+                },
+                {
+                    "id": "deep_unfrozen",
+                    "description": "Deep water table, no frozen soil: z_v = 5.0 m, f_ice_weighted = 0. q_drai = 5.5e-3 * exp(-12.5) ≈ 2.05e-8 kg/(m^2*s) — five exp-decay constants below the surface, drainage has dropped by ~5 orders of magnitude. Stress-tests the small-output regime of the exponential.",
+                    "parameter_overrides": {
+                        "z_v": 5.0,
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_drai", "time": 0.0, "expected": 2.049659244643269e-8 }
+                    ]
+                },
+                {
+                    "id": "half_frozen",
+                    "description": "Half ice-impermeable soil at moderate depth: z_v = 1.0 m, f_ice_weighted = 0.5. f_imp = (exp(-1.5) - exp(-3))/(1 - exp(-3)) ≈ 0.18243. q_drai = (1 - f_imp) * 5.5e-3 * exp(-2.5) ≈ 3.6911e-4 kg/(m^2*s). Exercises the nonlinear `f_imp` rise from 0 (unfrozen) to 1 (fully frozen) — at f_ice = 0.5 the impermeable fraction is well below 0.5 because the exp-curve is concave-up.",
+                    "parameter_overrides": {
+                        "z_v": 1.0,
+                        "f_ice_weighted": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.18242552380635632 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 3.691082986430951e-4 }
+                    ]
+                },
+                {
+                    "id": "moderate_depth_unfrozen",
+                    "description": "Moderate water table, no frozen soil: z_v = 2.0 m, f_ice_weighted = 0. q_drai = 5.5e-3 * exp(-5.0) ≈ 3.706e-5 kg/(m^2*s). Exercises the typical CLMU mid-column drainage regime — about 2 e-folding lengths below the surface, drainage has dropped by ~2 orders of magnitude.",
+                    "parameter_overrides": {
+                        "z_v": 2.0,
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_drai", "time": 0.0, "expected": 3.7058708494970066e-5 }
+                    ]
+                },
+                {
+                    "id": "quarter_frozen_shallow",
+                    "description": "Quarter-frozen soil with shallow water table: z_v = 0.5 m, f_ice_weighted = 0.25. f_imp = (exp(-2.25) - exp(-3))/(1-exp(-3)) ≈ 0.05853 — at low f_ice the impermeable fraction is much smaller than f_ice (concave-up curve). q_drai ≈ (1 - 0.05853) * 5.5e-3 * exp(-1.25) ≈ 1.4836e-3 kg/(m^2*s). Verifies the early-freeze regime where partial ice has only a small drainage-suppression effect.",
+                    "parameter_overrides": {
+                        "z_v": 0.5,
+                        "f_ice_weighted": 0.25
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.05852599385116555 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 1.4835525038445162e-3 }
+                    ]
+                },
+                {
+                    "id": "three_quarter_frozen",
+                    "description": "Mostly-frozen soil at moderate depth: z_v = 1.0 m, f_ice_weighted = 0.75. f_imp = (exp(-0.75) - exp(-3))/(1-exp(-3)) ≈ 0.4447 — at high f_ice the impermeable fraction grows rapidly toward 1. q_drai ≈ (1 - 0.4447) * 5.5e-3 * exp(-2.5) ≈ 2.507e-4 kg/(m^2*s) — the freezing factor dominates over depth in suppressing drainage. Verifies the late-freeze regime.",
+                    "parameter_overrides": {
+                        "z_v": 1.0,
+                        "f_ice_weighted": 0.75
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.4447208307797978 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 2.5069049412725976e-4 }
+                    ]
+                },
+                {
+                    "id": "shallow_partial_frozen",
+                    "description": "Very shallow water table with a thin frozen surface layer: z_v = 0.2 m, f_ice_weighted = 0.3. f_imp ≈ 0.07648; q_drai ≈ (1 - 0.07648) * 5.5e-3 * exp(-0.5) ≈ 3.0808e-3 kg/(m^2*s). Spring-thaw scenario — high drainage potential modulated by lingering surface freezing.",
+                    "parameter_overrides": {
+                        "z_v": 0.2,
+                        "f_ice_weighted": 0.3
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.07647692160987249 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 3.080797840976933e-3 }
+                    ]
+                },
+                {
+                    "id": "very_deep_unfrozen",
+                    "description": "Very deep water table, no frozen soil: z_v = 10.0 m, f_ice_weighted = 0. q_drai = 5.5e-3 * exp(-25) ≈ 7.64e-14 kg/(m^2*s) — ten e-folding lengths below the surface, drainage is essentially zero. Stress-tests the small-output limit of the exp pathway and confirms no underflow-to-NaN at the deep tail.",
+                    "parameter_overrides": {
+                        "z_v": 10.0,
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_drai", "time": 0.0, "expected": 7.638369125730211e-14 }
+                    ]
+                },
+                {
+                    "id": "typical_clmu_state",
+                    "description": "Realistic CLMU summer state: water table at z_v = 1.5 m with a small residual ice fraction f_ice_weighted = 0.1 (deep frost remnant). f_imp ≈ 0.01833 (linear-regime small impermeable fraction). q_drai ≈ (1 - 0.01833) * 5.5e-3 * exp(-3.75) ≈ 1.270e-4 kg/(m^2*s). Represents the mid-summer drainage regime where drainage is largely depth-limited and freezing is a small correction.",
+                    "parameter_overrides": {
+                        "z_v": 1.5,
+                        "f_ice_weighted": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_imp",  "time": 0.0, "expected": 0.018331095896544965 },
+                        { "variable": "q_drai", "time": 0.0, "expected": 1.2697651890798619e-4 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "q_drai_vs_z_v",
+                    "description": "Sub-surface drainage q_drai vs. water table depth z_v at fixed unfrozen soil (f_ice_weighted = 0). Reproduces the canonical exponential-decay curve of Oleson Eq. 5.140 — the dominant feature of the groundwater-drainage formulation. Sweeps z_v from 0 m (surface) to 5 m (deep), showing the q_drai_max anchor at the surface and the strong exponential roll-off with depth.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "f_ice_weighted": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_v",
+                                "range": { "start": 0.0, "stop": 5.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "q_drai_curve",
+                            "type": "line",
+                            "description": "q_drai vs z_v (unfrozen): exponential decay from q_drai_max at the surface.",
+                            "x": { "variable": "z_v",    "label": "z_v (m)" },
+                            "y": { "variable": "q_drai", "label": "q_drai (kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "f_imp_vs_f_ice",
+                    "description": "Impermeable fraction f_imp vs. ice-weighted impermeable fraction f_ice_weighted. Reproduces the canonical concave-up curve of Oleson Eq. 5.141: f_imp grows slowly at low f_ice and accelerates toward 1 as f_ice → 1. The curve passes through (0, 0) and (1, 1) by construction. Independent of z_v, so this sweep is at the default depth.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z_v": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "f_ice_weighted",
+                                "range": { "start": 0.0, "stop": 1.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_imp_curve",
+                            "type": "line",
+                            "description": "f_imp vs f_ice_weighted: concave-up curve from (0,0) to (1,1) (Eq. 5.141).",
+                            "x": { "variable": "f_ice_weighted", "label": "f_ice_weighted (-)" },
+                            "y": { "variable": "f_imp",          "label": "f_imp (-)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "q_drai_2d",
+                    "description": "Joint sweep over depth z_v and ice-weighted impermeable fraction f_ice_weighted. Surfaces the iso-q_drai contours of Eq. 5.140: the iso-curves run along lines of approximately constant log(q_drai), with the freezing factor (1 - f_imp) acting as a multiplicative damper on top of the depth-driven exp-decay.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_v",
+                                "range": { "start": 0.0, "stop": 5.0, "count": 11, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "f_ice_weighted",
+                                "range": { "start": 0.0, "stop": 1.0, "count": 11, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "q_drai_heatmap",
+                            "type": "heatmap",
+                            "description": "q_drai as a function of water table depth and ice-weighted impermeable fraction.",
+                            "x": { "variable": "z_v",            "label": "z_v (m)" },
+                            "y": { "variable": "f_ice_weighted", "label": "f_ice_weighted (-)" },
+                            "value": { "variable": "q_drai", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
