@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""tools/run_esm_inline_tests.py  (mdl-w1j)
+"""tools/run_esm_inline_tests.py  (mdl-w1j, lib/ extension mdl-14s)
 
 Python inline-test gate for the EarthSciModels rig.
 
-Walks ``components/**/*.esm`` and runs every inline test
-(``Model.tests`` / ``ReactionSystem.tests`` per ESM spec §6.6) through the
-canonical ESS Python runner ``earthsci_toolkit.simulation.simulate``. For
-each ``(time, variable, expected[, tolerance])`` assertion, samples the
-``SimulationResult`` trajectory at the requested time and compares to the
-declared expected value with the spec §6.6.4 tolerance precedence
-(assertion > test > container > default rel=1e-6).
+Walks ``components/**/*.esm`` and ``lib/**/*.esm`` (both default roots) and
+runs every inline test (``Model.tests`` / ``ReactionSystem.tests`` per ESM
+spec §6.6) through the canonical ESS Python runner
+``earthsci_toolkit.simulation.simulate``. For each ``(time, variable,
+expected[, tolerance])`` assertion, samples the ``SimulationResult``
+trajectory at the requested time and compares to the declared expected
+value with the spec §6.6.4 tolerance precedence (assertion > test >
+container > default rel=1e-6).
+
+Minimum-bar gate (mdl-14s): a discovered .esm with no inline tests still
+counts as a checked file — the worker calls ``earthsci_toolkit.load`` on
+it and emits a synthetic ``<load>`` PASS row. A load failure emits an
+ERROR row and fails the gate. This catches structural-validation drift
+on lib/ files (e.g. lib/solar.esm) at PR time, which is the class of bug
+that motivated the extension (see closed beads mdl-pk3, mdl-97r).
 
 Single-pathway rule (CLAUDE.md "Simulation Pathway — ABSOLUTE Rule"):
 this driver invokes ``earthsci_toolkit.simulation.simulate`` as the
@@ -60,7 +68,7 @@ from typing import Dict, List, Optional, Tuple
 # Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_ROOTS = ["components"]
+DEFAULT_ROOTS = ["components", "lib"]
 DEFAULT_REL_TOL = 1e-6
 
 # Per-subprocess hard memory ceiling. 6 GiB leaves headroom on the 16 GiB
@@ -354,6 +362,17 @@ def run_worker(file_path: str) -> int:
                 ))
 
     if not containers:
+        # mdl-14s: minimum-bar gate. With no inline tests, the load() call
+        # above is the only structural check. Emit a synthetic PASS row so
+        # the parent summary shows the file was actually verified, not
+        # silently skipped.
+        rows.append(AssertionRow(
+            file=file_path, container_kind="file", container_name="<load>",
+            test_id="<load>", assertion_idx=0, variable="", time=0.0,
+            expected=0.0, actual=None, status="PASS",
+            message="load() succeeded (no inline tests declared)",
+            duration_s=0.0,
+        ))
         _emit_worker_results(rows)
         return 0
 
@@ -516,7 +535,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument(
         "--root", action="append", default=None,
         help="Root directory to search for .esm files. May be passed "
-             "multiple times. Defaults to ./components.",
+             "multiple times. Defaults to ./components and ./lib "
+             "(mdl-14s: lib/ included so structural-validation drift in "
+             "lib/*.esm is caught at PR time).",
     )
     ap.add_argument(
         "--junit-xml", default=None,
