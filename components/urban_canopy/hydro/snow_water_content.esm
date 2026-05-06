@@ -1,0 +1,278 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SnowWaterContent",
+        "description": "Volumetric ice/liquid contents and outgoing liquid-water flux for a snow layer (Oleson et al. 2010, CLM4 Tech Note Ch. 5, Eqs. 5.18–5.20). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:119 (`SnowWaterContent` @component). Parameterized as observed-only: w_ice, w_liq, dz are inputs (parameters); theta_ice, theta_liq, q_liq_out are algebraic outputs.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "snow",
+            "observed-only",
+            "clm4"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-1mj4)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Snow Hydrology), Section 5.1.2, Eqs. 5.15–5.22, pp. 116–117."
+            }
+        ]
+    },
+    "models": {
+        "SnowWaterContent": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:119\nUpstream `SnowWaterContent` is an MTK `@component` whose three inputs (w_ice, w_liq, Δz) are `@parameters` and whose three outputs (θ_ice, θ_liq, q_liq_out) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical structure preserved here. Unicode `Δz` is rendered as ASCII `dz` and `θ_ice`/`θ_liq` as `theta_ice`/`theta_liq`, matching the ASCII naming convention used by the other migrated UrbanCanopy components in this rig (see e.g. components/urban_canopy/hydro/snow_compaction.esm `eta`/`dz`).\n\nThe upstream `@constants` block (ρ_liq, ρ_ice, S_r, zero_kgpm2s, one_s) is preserved as parameters with the upstream default values. zero_kgpm2s and one_s are kept in the equations to maintain 1:1 fidelity with the upstream MTK unit-checking pattern (the same convention used by impervious_runoff.esm for its `zero_kgpm2s`/`one_s` literals — `one_s` carries the seconds dimension that converts the per-step kg/m^2 expression into the kg/(m^2*s) flux, and `zero_kgpm2s` is the unit-balanced zero-flux comparison value for the `max` floor).\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are simple products, divisions, `min` and `max` clamps — round-off is at the 1e-15 level. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on volumetric snow contents (m^3/m^3, O(1e-2)–1) or layer fluxes (kg/(m^2*s), O(1e-1)–O(1e2)). Tighter `abs: 1e-12` is asserted on q_liq_out outputs in dry branches where the value is exactly zero by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "rho_liq": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of liquid water (Oleson et al. 2010 Table 1.4; ρ_liq in upstream Julia source)"
+                },
+                "rho_ice": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 917.0,
+                    "description": "Density of ice (Oleson et al. 2010 Table 1.4; ρ_ice in upstream Julia source)"
+                },
+                "S_r": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.033,
+                    "description": "Irreducible water saturation (dimensionless; Oleson et al. 2010 Eq. 5.18)"
+                },
+                "zero_kgpm2s": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Zero flux for unit-balanced max comparison (upstream `@constants` literal)"
+                },
+                "one_s": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 1.0,
+                    "description": "Unit time for rate conversion (upstream `@constants` literal — converts per-step kg/m^2 into per-second flux)"
+                },
+                "w_liq": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 2.0,
+                    "description": "Mass of liquid water in snow layer"
+                },
+                "w_ice": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 5.0,
+                    "description": "Mass of ice in snow layer"
+                },
+                "dz": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Snow layer thickness (Δz in upstream Julia source)"
+                },
+                "theta_ice": {
+                    "type": "state",
+                    "units": "m^3/m^3",
+                    "description": "Volumetric ice content in snow layer (Oleson Eq. 5.19; θ_ice in upstream Julia source)"
+                },
+                "theta_liq": {
+                    "type": "state",
+                    "units": "m^3/m^3",
+                    "description": "Volumetric liquid water content in snow layer (Oleson Eq. 5.20; θ_liq in upstream Julia source)"
+                },
+                "q_liq_out": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Water flow out of snow layer (Oleson Eq. 5.18)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "theta_ice",
+                    "rhs": {
+                        "op": "min",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "w_ice",
+                                    { "op": "*", "args": ["dz", "rho_ice"] }
+                                ]
+                            },
+                            1.0
+                        ]
+                    }
+                },
+                {
+                    "lhs": "theta_liq",
+                    "rhs": {
+                        "op": "min",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "w_liq",
+                                    { "op": "*", "args": ["dz", "rho_liq"] }
+                                ]
+                            },
+                            { "op": "-", "args": [1.0, "theta_ice"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_liq_out",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "rho_liq",
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "theta_liq",
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "S_r",
+                                                            { "op": "-", "args": [1.0, "theta_ice"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "dz"
+                                        ]
+                                    },
+                                    "one_s"
+                                ]
+                            },
+                            "zero_kgpm2s"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_dry_layer",
+                    "description": "Default parameter values (w_ice=5, w_liq=2, dz=0.1): a moderately icy layer with little liquid. theta_ice = 5/(0.1*917) = 0.05452562704471101. theta_liq = min(2/(0.1*1000), 1-theta_ice) = 0.02 (well below the saturation cap 0.945). The Eq. 5.18 inner expression (theta_liq - S_r*(1-theta_ice)) = 0.02 - 0.033*0.9454743... = -0.01120... is negative, so the max-floor activates: q_liq_out = 0. Reproduces upstream `hydrology_test.jl:410` first sub-case.",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 5.0,
+                        "w_liq": 2.0,
+                        "dz": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 0.05452562704471101 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.02 },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "wet_layer_outflow",
+                    "description": "Higher water content with little ice (w_ice=1, w_liq=10, dz=0.1) drives nontrivial outflow. theta_ice = 1/91.7 = 0.0109051..., theta_liq = min(0.1, 0.989...) = 0.1. The inner expression (0.1 - 0.033*(1-0.0109051)) = 0.1 - 0.0326401... = 0.0673599... > 0, so q_liq_out = 1000 * 0.0673599 * 0.1 / 1 = 6.735987 kg/(m^2*s). Reproduces upstream `hydrology_test.jl:410` second sub-case (the `prob_wet` remake).",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 1.0,
+                        "w_liq": 10.0,
+                        "dz": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 0.010905125408942203 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.1 },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 6.73598691384951 }
+                    ]
+                },
+                {
+                    "id": "saturated_ice_clamp",
+                    "description": "Excessive ice mass triggers the theta_ice clamp at 1.0 (m^3/m^3 cap). w_ice=200, dz=0.1 → w_ice/(dz*rho_ice) = 2.18 → min(2.18, 1.0) = 1.0. Then theta_liq = min(w_liq/(dz*rho_liq), 1-1) = min(0.02, 0) = 0. q_liq_out: inner = 0 - 0.033*0 = 0 → max(0, 0) = 0. Verifies the upper bound on theta_ice (Eq. 5.19 saturation cap) and that the cap propagates correctly into theta_liq's effective-porosity term (Eq. 5.20).",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 200.0,
+                        "w_liq": 2.0,
+                        "dz": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 1.0 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "saturated_liquid_clamp",
+                    "description": "Excessive liquid water triggers the theta_liq clamp at (1 - theta_ice) (Eq. 5.20 effective-porosity cap). w_ice=5, w_liq=200, dz=0.1: theta_ice = 0.05452562..., min(2.0, 0.94547...) selects the porosity branch → theta_liq = 0.94547437295528898. q_liq_out: inner = (1-S_r) * (1-theta_ice) = 0.967 * 0.94547... = 0.91427..., * 1000 * 0.1 / 1 = 91.4273718647764 kg/(m^2*s). Verifies the porosity cap and confirms (1-S_r)*(1-theta_ice) algebra.",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 5.0,
+                        "w_liq": 200.0,
+                        "dz": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 0.05452562704471101 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.945474372955289 },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 91.42737186477646 }
+                    ]
+                },
+                {
+                    "id": "thicker_layer_no_outflow",
+                    "description": "Thicker layer dilutes ice/liquid contents below the irreducible-water threshold so q_liq_out remains floored at zero. w_ice=20, w_liq=8, dz=0.5: theta_ice = 20/(0.5*917) = 0.0436205..., theta_liq = min(8/500, 1-0.0436205) = 0.016. Inner = 0.016 - 0.033*(1-0.0436205) = 0.016 - 0.031560084... = -0.01556..., max(., 0) = 0. Verifies the dz scaling on theta_ice and the irreducible-water floor at a larger layer thickness.",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 20.0,
+                        "w_liq": 8.0,
+                        "dz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 0.04362050163576881 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.016 },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "thin_layer_strong_outflow",
+                    "description": "Thin layer with high liquid loading drives the largest outflow regime. w_ice=2, w_liq=5, dz=0.05: theta_ice = 2/(0.05*917) = 0.04362050163576881, theta_liq = min(5/50, 1-0.0436...) = 0.1. Inner = 0.1 - 0.033*(1-0.0436205) = 0.1 - 0.031560525... = 0.068439475..., q_liq_out = 1000 * 0.06843947655 * 0.05 / 1 ≈ 3.42197382 kg/(m^2*s). Verifies the dz multiplication in the flux equation (Eq. 5.18) at small dz.",
+                    "parameter_overrides": {
+                        "rho_liq": 1000.0,
+                        "rho_ice": 917.0,
+                        "S_r": 0.033,
+                        "w_ice": 2.0,
+                        "w_liq": 5.0,
+                        "dz": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta_ice", "time": 0.0, "expected": 0.04362050163576881 },
+                        { "variable": "theta_liq", "time": 0.0, "expected": 0.1 },
+                        { "variable": "q_liq_out", "time": 0.0, "expected": 3.4219738276990186 }
+                    ]
+                }
+            ]
+        }
+    }
+}
