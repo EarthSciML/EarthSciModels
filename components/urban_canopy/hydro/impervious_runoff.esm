@@ -1,0 +1,426 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ImperviousRunoff",
+        "description": "Surface runoff and updated surface liquid-water content for roof and impervious-road surfaces, following Oleson et al. (2010, CLM Tech Note Ch. 5) Eqs. 5.47-5.48. With no snow layers (has_snow = 0): runoff is the excess of (w_liq_1/Δt + q_liq_0 - q_seva) above the ponding limit w_pond_max/Δt. With snow layers (has_snow = 1): all liquid water reaching the surface becomes runoff and the surface liquid-water content passes through unchanged. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:991 (`ImperviousRunoff` @component). Parameterized as observed-only: w_liq_1, q_liq_0, q_seva, has_snow are inputs (parameters); q_over_nosnow, q_over, w_liq_1_new are algebraic outputs.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "runoff",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-eggn)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5, Section 5.2 (Surface water — roof and impervious road), Eqs. 5.47-5.48, pp. 124-125."
+            }
+        ]
+    },
+    "models": {
+        "ImperviousRunoff": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:991\nUpstream `ImperviousRunoff` is an MTK `@component` whose four inputs (w_liq_1, q_liq_0, q_seva, has_snow) are `@parameters` and whose three outputs (q_over_nosnow, q_over, w_liq_1_new) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares four `@constants`: w_pond_max = 1.0 kg/m^2 (Oleson 2010 Ch. 5 ponding limit, p. 112), zero_kgpm2s = 0 kg/(m^2*s) (zero-flux unit-balancing literal), zero_kgpm2 = 0 kg/m^2 (zero-mass unit-balancing literal), and one_s = 1.0 s (rate-conversion literal — the upstream MTK component uses this to make the dimensional algebra of `w_liq_1/Δt` work out without introducing a separate Δt parameter, since the equation is written in per-step finite-difference form). They are encoded here as parameters with the upstream default values; zero_kgpm2s and zero_kgpm2 are kept in the equations to maintain 1:1 fidelity with the upstream MTK unit-checking pattern (the same convention used by snow_melt_no_layers.esm for its `zero_kgm2`/`zero_m` literals).\n\nThe `has_snow` input is a flag (1.0 = snow layers present, 0.0 = no snow) and is compared against 0.5 to branch in `ifelse` (preserving the upstream dispatch on snl < 0 vs snl == 0 from the original CLM scheme). The 0.5 threshold is robust to floating-point representation of 0/1 flag values.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); the equations are simple sums, products, `max` floors, and `ifelse` branches — round-off is at the 1e-15 level. 1e-6 is comfortably above that. Tighter `abs: 1e-12` is asserted on the q_over and w_liq_1_new outputs in branches where they are exactly zero or exactly w_pond_max by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "w_liq_1": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Liquid water on impervious surface (CLM Eq. 5.48 input)"
+                },
+                "q_liq_0": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Liquid water reaching surface from rain/snowmelt"
+                },
+                "q_seva": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Surface evaporation of liquid water"
+                },
+                "has_snow": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Whether snow layers are present (1.0 = yes, 0.0 = no); compared against 0.5 in ifelse branches"
+                },
+                "w_pond_max": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 1.0,
+                    "description": "Maximum ponding limit on impervious surfaces (Oleson 2010 Ch. 5 p. 112 — 1.0 kg/m^2)"
+                },
+                "zero_kgpm2s": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Zero-flux unit-balancing literal preserved from upstream MTK component"
+                },
+                "zero_kgpm2": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Zero-mass unit-balancing literal preserved from upstream MTK component"
+                },
+                "one_s": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 1.0,
+                    "description": "Unit time for per-step rate conversion preserved from upstream MTK component"
+                },
+                "q_over_nosnow": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Surface runoff in the no-snow branch (Oleson Eq. 5.47, case 1): max(0, w_liq_1/one_s + q_liq_0 - q_seva - w_pond_max/one_s)"
+                },
+                "q_over": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Surface runoff (Oleson Eq. 5.47): q_liq_0 if snow layers present, else q_over_nosnow"
+                },
+                "w_liq_1_new": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Updated surface liquid water content (Oleson Eq. 5.48): w_liq_1 if snow present; w_pond_max if runoff occurs; max(w_liq_1 + (q_liq_0 - q_seva)*one_s, 0) otherwise"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "q_over_nosnow",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "zero_kgpm2s",
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            { "op": "/", "args": ["w_liq_1", "one_s"] },
+                                                            "q_liq_0"
+                                                        ]
+                                                    },
+                                                    "q_seva"
+                                                ]
+                                            },
+                                            { "op": "/", "args": ["w_pond_max", "one_s"] }
+                                        ]
+                                    },
+                                    "zero_kgpm2s"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_over",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["has_snow", 0.5] },
+                            "q_liq_0",
+                            "q_over_nosnow"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_liq_1_new",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["has_snow", 0.5] },
+                            "w_liq_1",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    { "op": ">", "args": ["q_over_nosnow", "zero_kgpm2s"] },
+                                    "w_pond_max",
+                                    {
+                                        "op": "max",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "w_liq_1",
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            { "op": "-", "args": ["q_liq_0", "q_seva"] },
+                                                            "one_s"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "zero_kgpm2"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "no_snow_runoff",
+                    "description": "Reproduces upstream case 1 (`hydrology_test.jl:1218`). No snow, surface saturated above the ponding limit: w_liq_1 = 2.0, q_liq_0 = 0.5, q_seva = 0.1. q_over_nosnow = max(0, 2.0 + 0.5 - 0.1 - 1.0) = 1.4 kg/(m^2*s). q_over = q_over_nosnow = 1.4. w_liq_1_new is capped at w_pond_max = 1.0 kg/m^2 (runoff branch).",
+                    "parameter_overrides": {
+                        "w_liq_1": 2.0,
+                        "q_liq_0": 0.5,
+                        "q_seva": 0.1,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 1.4 },
+                        { "variable": "q_over",        "time": 0.0, "expected": 1.4 },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "no_snow_no_runoff",
+                    "description": "Reproduces upstream case 2 (`hydrology_test.jl:1233`). No snow, surface below the ponding limit: w_liq_1 = 0.1, q_liq_0 = 0.2, q_seva = 0.1. q_over_nosnow = max(0, 0.1 + 0.2 - 0.1 - 1.0) = 0 (the max-floor activates). q_over = 0. w_liq_1_new accumulates net input: max(0.1 + (0.2 - 0.1)*1, 0) = 0.2 kg/m^2.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.1,
+                        "q_liq_0": 0.2,
+                        "q_seva": 0.1,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_over",        "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 0.2 }
+                    ]
+                },
+                {
+                    "id": "with_snow_all_runoff",
+                    "description": "Reproduces upstream case 3 (`hydrology_test.jl:1247`). Snow layers present: all incoming liquid becomes runoff regardless of the no-snow ponding logic. w_liq_1 = 0.5, q_liq_0 = 0.3, q_seva = 0.1, has_snow = 1.0. q_over = q_liq_0 = 0.3. w_liq_1_new passes through unchanged (= w_liq_1 = 0.5) because the snow-layer module owns the surface mass balance in this branch.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.5,
+                        "q_liq_0": 0.3,
+                        "q_seva": 0.1,
+                        "has_snow": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over",      "time": 0.0, "expected": 0.3 },
+                        { "variable": "w_liq_1_new", "time": 0.0, "expected": 0.5 }
+                    ]
+                },
+                {
+                    "id": "dry_idle_no_snow",
+                    "description": "Bone-dry surface, no precipitation, no evaporation, no snow. All zero-input limit: q_over_nosnow = max(0, -1.0) = 0; q_over = 0; w_liq_1_new = max(0, 0) = 0. Exercises the additive-zero limit and confirms the unit-balancing zero literals do not introduce drift.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.0,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_over",        "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "evaporation_only",
+                    "description": "No precipitation, evaporation drying out the impervious surface (w_liq_1 = 0.5, q_liq_0 = 0, q_seva = 0.2). Below ponding limit, so q_over_nosnow = 0 and q_over = 0. Net input is negative: w_liq_1_new = max(0.5 + (0 - 0.2)*1, 0) = 0.3 kg/m^2 — surface dries at the evaporation rate.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.5,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.2,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new", "time": 0.0, "expected": 0.3 }
+                    ]
+                },
+                {
+                    "id": "evaporation_overshoots",
+                    "description": "Evaporation demand exceeds available water (w_liq_1 = 0.05, q_seva = 0.1, no rain). The `max(..., 0)` floor in Eq. 5.48 case 2 clamps w_liq_1_new at 0 — the surface can't go negative. Exercises the lower-bound floor on the no-runoff branch (the analog of the `max(..., 0)` floor on q_over_nosnow but applied to the mass-update branch).",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.05,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.1,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "at_pond_max_threshold",
+                    "description": "Surface exactly at the ponding limit with no net input: w_liq_1 = 1.0 = w_pond_max, q_liq_0 = q_seva = 0. q_over_nosnow = max(0, 1.0 - 1.0) = 0 (the boundary case where the runoff branch is just barely not engaged). q_over = 0; w_liq_1_new = 1.0 unchanged. Verifies the equality boundary on the `q_over_nosnow > 0` discriminator in Eq. 5.48 — the threshold is strict greater-than, so equality goes to the no-runoff branch.",
+                    "parameter_overrides": {
+                        "w_liq_1": 1.0,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_over",        "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "above_pond_max_threshold",
+                    "description": "Surface just above the ponding limit triggers runoff with no precipitation or evaporation: w_liq_1 = 1.5, q_liq_0 = 0, q_seva = 0. q_over_nosnow = max(0, 1.5 - 1.0) = 0.5 — the storage-driven runoff case where excess pre-existing water sheds. q_over = 0.5. w_liq_1_new is capped at w_pond_max = 1.0 (runoff branch). This is the complement of `at_pond_max_threshold`: just above the boundary the runoff branch engages.",
+                    "parameter_overrides": {
+                        "w_liq_1": 1.5,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 0.5 },
+                        { "variable": "q_over",        "time": 0.0, "expected": 0.5 },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "heavy_rain_no_snow",
+                    "description": "Heavy rain on dry impervious surface (w_liq_1 = 0.5, q_liq_0 = 5.0, q_seva = 0). Far above ponding limit: q_over_nosnow = max(0, 0.5 + 5.0 - 0 - 1.0) = 4.5; q_over = 4.5. w_liq_1_new is capped at w_pond_max = 1.0. Stress-tests the high-rainfall regime — the runoff branch must dominate and the surface storage saturates at the ponding cap regardless of how large the input flux is.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.5,
+                        "q_liq_0": 5.0,
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 4.5 },
+                        { "variable": "q_over",        "time": 0.0, "expected": 4.5 },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "heavy_rain_with_snow",
+                    "description": "Heavy rain on snow-covered impervious surface (w_liq_1 = 0.3, q_liq_0 = 1.5, q_seva = 0, has_snow = 1.0). The snow-present branch routes all incoming liquid to q_over (= q_liq_0 = 1.5) and bypasses the ponding logic entirely; w_liq_1_new = w_liq_1 = 0.3. Verifies that q_over_nosnow is computed but unused in this branch — the snow-layer module owns the mass balance — so its value is observable but does not propagate to q_over or w_liq_1_new.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.3,
+                        "q_liq_0": 1.5,
+                        "q_seva": 0.0,
+                        "has_snow": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over_nosnow", "time": 0.0, "expected": 0.8 },
+                        { "variable": "q_over",        "time": 0.0, "expected": 1.5 },
+                        { "variable": "w_liq_1_new",   "time": 0.0, "expected": 0.3 }
+                    ]
+                },
+                {
+                    "id": "snow_no_input",
+                    "description": "Snow-covered surface with no rain or snowmelt input (q_liq_0 = 0). q_over = 0, w_liq_1_new = w_liq_1 unchanged. Confirms the snow-branch identity for q_liq_0 = 0 — important because when the snow-layer scheme is active the impervious-runoff component must be a pass-through for the underlying liquid storage.",
+                    "parameter_overrides": {
+                        "w_liq_1": 0.7,
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.05,
+                        "has_snow": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "q_over",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "w_liq_1_new", "time": 0.0, "expected": 0.7 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "runoff_vs_q_liq_0_no_snow",
+                    "description": "Sweep precipitation rate q_liq_0 across the no-snow runoff regime (held fixed w_liq_1 = 0.5, q_seva = 0). For q_liq_0 < 0.5 kg/(m^2*s) the no-snow surface is below the ponding limit and q_over = 0; above 0.5 the surface ponds and q_over rises linearly with q_liq_0 (CLM Eq. 5.47 case 1). Reproduces the canonical impervious-surface runoff curve.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "w_liq_1": 0.5,
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "q_liq_0",
+                                "range": { "start": 0.0, "stop": 5.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "q_over_curve",
+                            "type": "line",
+                            "description": "q_over vs q_liq_0 (no snow): floored at 0 below threshold, linear above.",
+                            "x": { "variable": "q_liq_0", "label": "q_liq_0 (kg/(m^2*s))" },
+                            "y": { "variable": "q_over",  "label": "q_over (kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "w_liq_1_new_vs_inputs",
+                    "description": "Joint sweep over surface storage w_liq_1 and precipitation q_liq_0 (no snow, no evaporation). Surfaces the iso-w_liq_1_new contours of Eq. 5.48: a cap at w_pond_max = 1.0 in the runoff region (w_liq_1 + q_liq_0*1 > 1.0), and a linear w_liq_1 + q_liq_0 ramp below threshold. The 2-D heatmap shows the discontinuity along the ponding-limit diagonal.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "q_seva": 0.0,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "w_liq_1",
+                                "range": { "start": 0.0, "stop": 1.5, "count": 11, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "q_liq_0",
+                                "range": { "start": 0.0, "stop": 1.5, "count": 11, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w_liq_1_new_heatmap",
+                            "type": "heatmap",
+                            "description": "w_liq_1_new as a function of pre-existing surface water and precipitation rate (no snow, no evap).",
+                            "x": { "variable": "w_liq_1", "label": "w_liq_1 (kg/m^2)" },
+                            "y": { "variable": "q_liq_0", "label": "q_liq_0 (kg/(m^2*s))" },
+                            "value": { "variable": "w_liq_1_new", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
