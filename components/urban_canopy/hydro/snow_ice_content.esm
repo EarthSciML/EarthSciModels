@@ -1,0 +1,166 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SnowIceContent",
+        "description": "Conservation of ice mass in snow layers and new snowfall accumulation (Oleson et al. 2010, CLM4 Tech Note Ch. 5, Section 5.1.1, Eqs. 5.6-5.14). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:79 (`SnowIceContent` @component). Parameterized as observed-only: q_grnd_ice, q_frost, q_subl, rho_sno are inputs (parameters); dz_sno_dt, q_ice_top are algebraic outputs.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "snow",
+            "observed-only",
+            "clm4"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (mdl-hbhf)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Snow Hydrology), Section 5.1.1, Eqs. 5.6-5.14, pp. 114-115."
+            }
+        ]
+    },
+    "models": {
+        "SnowIceContent": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:79\nUpstream `SnowIceContent` is an MTK `@component` whose four inputs (q_grnd_ice, q_frost, q_subl, ρ_sno) are `@parameters` and whose two outputs (dz_sno_dt, q_ice_top) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical structure preserved here. Unicode `ρ_sno` is rendered as ASCII `rho_sno`, matching the ASCII naming convention used by the other migrated UrbanCanopy components in this rig (see e.g. components/urban_canopy/hydro/snow_water_content.esm `rho_liq`/`rho_ice`).\n\nThe upstream component has no `@constants` block — all four inputs are parameters with no defaults in the Julia source. Defaults here are taken from the upstream `hydrology_test.jl:387` Equation Verification test (q_grnd_ice=0.001, ρ_sno=100, q_frost=0.0002, q_subl=0.0001), which yields the canonical reference outputs dz_sno_dt=1.0e-5 and q_ice_top=0.0011.\n\nObservability classification: this component is functionally observed-only — both output variables are given by single algebraic equations in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are a single division (dz_sno_dt = q_grnd_ice/rho_sno) and a sum-and-difference (q_ice_top = q_grnd_ice + q_frost - q_subl) — round-off is at the 1e-15 level. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on snow accumulation rates (m/s, O(1e-6)) or ice mass fluxes (kg/(m^2*s), O(1e-4))."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "q_grnd_ice": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.001,
+                    "description": "Solid precipitation reaching the surface (Oleson Eq. 5.5)"
+                },
+                "q_frost": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0002,
+                    "description": "Frost rate (Oleson Eq. 5.7)"
+                },
+                "q_subl": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0001,
+                    "description": "Sublimation rate (Oleson Eq. 5.7)"
+                },
+                "rho_sno": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 100.0,
+                    "description": "Bulk density of newly fallen snow (rho_sno in upstream Julia source)"
+                },
+                "dz_sno_dt": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Rate of new snow depth accumulation (derived from Oleson Eq. 5.9: dz_sno/dt = q_grnd_ice / rho_sno)"
+                },
+                "q_ice_top": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Rate of ice accumulation for top snow layer (Oleson Eq. 5.7: q_ice_top = q_grnd_ice + (q_frost - q_subl))"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "dz_sno_dt",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["q_grnd_ice", "rho_sno"]
+                    }
+                },
+                {
+                    "lhs": "q_ice_top",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "q_grnd_ice",
+                            { "op": "-", "args": ["q_frost", "q_subl"] }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_canonical_rates",
+                    "description": "Default parameter values reproduce the upstream `hydrology_test.jl:387` Equation Verification test exactly. q_grnd_ice=0.001 kg/(m^2*s), rho_sno=100 kg/m^3 → dz_sno_dt = 0.001/100 = 1.0e-5 m/s. q_frost=0.0002, q_subl=0.0001 → q_ice_top = 0.001 + (0.0002 - 0.0001) = 0.0011 kg/(m^2*s).",
+                    "parameter_overrides": {
+                        "q_grnd_ice": 0.001,
+                        "q_frost": 0.0002,
+                        "q_subl": 0.0001,
+                        "rho_sno": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dz_sno_dt", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "q_ice_top", "time": 0.0, "expected": 0.0011 }
+                    ]
+                },
+                {
+                    "id": "heavy_snowfall_dense_snow",
+                    "description": "Heavier solid precipitation onto denser snow. q_grnd_ice=0.005 kg/(m^2*s), rho_sno=250 kg/m^3 → dz_sno_dt = 0.005/250 = 2.0e-5 m/s (slower depth accumulation than the lighter snow case despite larger mass flux, because higher density compresses the increment). With q_frost=0.0, q_subl=0.0 → q_ice_top = 0.005 kg/(m^2*s). Verifies the inverse rho_sno scaling on dz_sno_dt and the no-flux branches of the q_ice_top sum.",
+                    "parameter_overrides": {
+                        "q_grnd_ice": 0.005,
+                        "q_frost": 0.0,
+                        "q_subl": 0.0,
+                        "rho_sno": 250.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dz_sno_dt", "time": 0.0, "expected": 2.0e-5 },
+                        { "variable": "q_ice_top", "time": 0.0, "expected": 0.005 }
+                    ]
+                },
+                {
+                    "id": "sublimation_dominates",
+                    "description": "No precipitation, sublimation exceeds frost: q_grnd_ice=0.0, q_frost=0.0001, q_subl=0.0005 → q_ice_top = 0.0 + (0.0001 - 0.0005) = -0.0004 kg/(m^2*s) (net loss). dz_sno_dt = 0.0/100 = 0.0 (no new snow when there is no solid precipitation). Verifies that q_ice_top is signed (the upstream equation is a plain sum, not a max-floored flux) and that dz_sno_dt is zero in the no-precipitation branch.",
+                    "parameter_overrides": {
+                        "q_grnd_ice": 0.0,
+                        "q_frost": 0.0001,
+                        "q_subl": 0.0005,
+                        "rho_sno": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dz_sno_dt", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_ice_top", "time": 0.0, "expected": -0.0004 }
+                    ]
+                },
+                {
+                    "id": "frost_only",
+                    "description": "Frost-only accumulation onto an existing layer (no precipitation, no sublimation). q_grnd_ice=0.0, q_frost=0.0003, q_subl=0.0 → q_ice_top = 0.0003 kg/(m^2*s); dz_sno_dt = 0.0. Isolates the frost contribution to q_ice_top — confirms that frost is added (not subtracted) and that frost without precipitation does not generate new snow depth (consistent with Eq. 5.7/5.9 separation: depth growth is precip-driven, mass growth includes phase-change inputs).",
+                    "parameter_overrides": {
+                        "q_grnd_ice": 0.0,
+                        "q_frost": 0.0003,
+                        "q_subl": 0.0,
+                        "rho_sno": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dz_sno_dt", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "q_ice_top", "time": 0.0, "expected": 0.0003 }
+                    ]
+                },
+                {
+                    "id": "light_snow_low_density",
+                    "description": "Very light, fresh snow (low density) maximizes depth-per-mass accumulation. q_grnd_ice=0.0001 kg/(m^2*s), rho_sno=50 kg/m^3 → dz_sno_dt = 0.0001/50 = 2.0e-6 m/s. With q_frost=0.0, q_subl=0.0 → q_ice_top = 0.0001 kg/(m^2*s). Exercises the dz_sno_dt equation at small numerator/denominator magnitudes to verify no precision loss at the low end of the physical range.",
+                    "parameter_overrides": {
+                        "q_grnd_ice": 0.0001,
+                        "q_frost": 0.0,
+                        "q_subl": 0.0,
+                        "rho_sno": 50.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dz_sno_dt", "time": 0.0, "expected": 2.0e-6 },
+                        { "variable": "q_ice_top", "time": 0.0, "expected": 0.0001 }
+                    ]
+                }
+            ]
+        }
+    }
+}
