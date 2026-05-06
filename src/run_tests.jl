@@ -52,23 +52,59 @@ end
 # Discovery
 # ---------------------------------------------------------------------------
 
+# Resolve exclude patterns: either an explicit kwarg vector, or the
+# ESM_TESTS_EXCLUDE env var (";" or ":" separated). Patterns are matched as
+# substrings against the absolute discovered path AND the path relative to
+# `esm_root()`, so users can write either "components/gaschem/geoschem_fullchem.esm"
+# or just "geoschem_fullchem.esm".
+function _resolve_exclude(exclude::Union{Nothing,AbstractVector{<:AbstractString}})
+    if exclude !== nothing
+        return collect(String, exclude)
+    end
+    raw = get(ENV, "ESM_TESTS_EXCLUDE", "")
+    isempty(raw) && return String[]
+    parts = split(raw, r"[;:]"; keepempty=false)
+    return String[String(strip(p)) for p in parts if !isempty(strip(p))]
+end
+
+function _is_excluded(path::AbstractString, base::AbstractString,
+                     patterns::Vector{String})
+    isempty(patterns) && return false
+    rel = startswith(path, base) ? relpath(path, base) : path
+    for pat in patterns
+        (occursin(pat, path) || occursin(pat, rel)) && return true
+    end
+    return false
+end
+
 """
-    discover_esm_files(roots) -> Vector{String}
+    discover_esm_files(roots; exclude=nothing) -> Vector{String}
 
 Recursively walk each directory in `roots` (relative to `esm_root()` if not
 absolute) and return all `*.esm` paths in deterministic sorted order. Missing
 roots are skipped silently — empty top-level dirs are normal in the migration
 window.
+
+`exclude` (or the `ESM_TESTS_EXCLUDE` env var, ";"- or ":"-separated) is a list
+of substring patterns; any discovered file whose absolute or repo-relative
+path contains a pattern is dropped. This is the supported way to skip the
+OOM-prone full-chemistry inline test on memory-constrained CI runners
+(see bead mdl-lvu).
 """
-function discover_esm_files(roots::AbstractVector{<:AbstractString})
+function discover_esm_files(roots::AbstractVector{<:AbstractString};
+                            exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing)
     base = esm_root()
+    patterns = _resolve_exclude(exclude)
     found = String[]
     for r in roots
         dir = isabspath(r) ? r : joinpath(base, r)
         isdir(dir) || continue
         for (root, _dirs, files) in walkdir(dir)
             for f in files
-                endswith(f, ".esm") && push!(found, joinpath(root, f))
+                endswith(f, ".esm") || continue
+                full = joinpath(root, f)
+                _is_excluded(full, base, patterns) && continue
+                push!(found, full)
             end
         end
     end
@@ -76,7 +112,7 @@ function discover_esm_files(roots::AbstractVector{<:AbstractString})
     return found
 end
 
-discover_esm_files() = discover_esm_files(DEFAULT_ROOTS)
+discover_esm_files(; kwargs...) = discover_esm_files(DEFAULT_ROOTS; kwargs...)
 
 # ---------------------------------------------------------------------------
 # Tolerance resolution (spec §6.6.4)
@@ -346,7 +382,7 @@ end
 
 """
     run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
-                  io::IO=stdout) -> (results, exit_code)
+                  exclude=nothing, io::IO=stdout) -> (results, exit_code)
 
 Walk each directory in `roots` (default: `components/`, which holds all
 per-science-domain subdirs), run every inline test in every `.esm` file,
@@ -355,12 +391,16 @@ and return `(results::Vector{AssertionResult}, exit_code::Int)` where
 
 Prints a per-file summary table to `io` when `verbose=true`. When
 `junit_xml` is a path, emits a junit-compatible XML report there.
+
+`exclude` (or the `ESM_TESTS_EXCLUDE` env var) drops any `.esm` file whose
+path contains one of the listed substrings. See `discover_esm_files`.
 """
 function run_esm_tests(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
                        junit_xml::Union{AbstractString,Nothing}=nothing,
                        verbose::Bool=true,
+                       exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing,
                        io::IO=stdout)
-    files = discover_esm_files(roots)
+    files = discover_esm_files(roots; exclude=exclude)
     results = AssertionResult[]
     if isempty(files)
         verbose && println(io, "No .esm files discovered under: ",

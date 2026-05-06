@@ -45,6 +45,26 @@ end
         @test all(endswith(f, ".esm") for f in found)
     end
 
+    @testset "discover_esm_files honours exclude (mdl-lvu)" begin
+        kw = discover_esm_files([inline_dir]; exclude=["failing_decay"])
+        @test length(kw) == 1
+        @test endswith(kw[1], "passing_decay.esm")
+
+        prev = get(ENV, "ESM_TESTS_EXCLUDE", nothing)
+        try
+            ENV["ESM_TESTS_EXCLUDE"] = "failing_decay.esm"
+            envf = discover_esm_files([inline_dir])
+            @test length(envf) == 1
+            @test endswith(envf[1], "passing_decay.esm")
+        finally
+            if prev === nothing
+                delete!(ENV, "ESM_TESTS_EXCLUDE")
+            else
+                ENV["ESM_TESTS_EXCLUDE"] = prev
+            end
+        end
+    end
+
     @testset "passing fixture → all PASS" begin
         passing = joinpath(inline_dir, "passing_decay.esm")
         results, exit_code = run_esm_tests([dirname(passing)]; verbose=false)

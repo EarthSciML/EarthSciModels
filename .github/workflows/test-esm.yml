@@ -46,10 +46,17 @@ jobs:
       # ESM_TESTS_JUNIT_XML tells runtests.jl to emit a junit artifact in the
       # same pass. We can't run a second `julia --project=.` walker because
       # ModelingToolkit is a test-only dep (see mdl-89o).
+      #
+      # ESM_TESTS_EXCLUDE drops the full-chemistry inline test from the Julia
+      # walk. The 819-reaction Catalyst → MTK build for geoschem_fullchem
+      # peaks ~13 GB on a single MTK process and OOM-kills the 16 GB GHA
+      # runner; it's covered by the python-inline-tests gate below
+      # (per-file subprocess, peak ~196 MB). See bead mdl-lvu.
       - uses: julia-actions/julia-runtest@v1
         if: steps.check_project.outputs.has_project == 'true'
         env:
           ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/esm-tests.xml
+          ESM_TESTS_EXCLUDE: components/gaschem/geoschem_fullchem.esm
       - name: Upload junit XML
         if: always() && steps.check_project.outputs.has_project == 'true'
         uses: actions/upload-artifact@v4
@@ -58,7 +65,7 @@ jobs:
           path: esm-tests.xml
           if-no-files-found: ignore
 
-  # Python inline-test gate (mdl-w1j).
+  # Python inline-test gate (mdl-w1j, promoted to required in mdl-lvu).
   #
   # Walks components/**/*.esm and runs every inline test through the canonical
   # ESS Python runner (earthsci_toolkit.simulation.simulate, cse=False). One
@@ -67,14 +74,13 @@ jobs:
   # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
   # job timeout.
   #
-  # During the ~1-week soak window the job is continue-on-error: true so
-  # surface-level Python runner gaps (filed as follow-up ESS beads) do not
-  # block the workflow while the Julia full-chemistry inline test (above) is
-  # being retired. Flip to required once the soak follow-up bead lands.
+  # This is the gate of record for full-chemistry inline tests — the Julia
+  # job above skips components/gaschem/geoschem_fullchem.esm via
+  # ESM_TESTS_EXCLUDE because the 819-reaction Catalyst → MTK build OOM-kills
+  # the 16 GB GHA runner.
   python-inline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
