@@ -1,0 +1,331 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EffectiveMidflameWindSpeed",
+        "description": "Effective midflame wind speed UE — combines the actual wind factor and slope factor into an equivalent wind speed for fire-behavior calculations. Migrated from WildlandFire.jl@126976f2 src/rothermel.jl:410 (`EffectiveMidflameWindSpeed` @component). Observed-only: C_coeff, B_coeff, E_coeff, beta_ratio, phi_w, phi_s are inputs (parameters); phi_E (combined wind+slope factor) and UE (effective midflame wind speed in m/s) are algebraic outputs. Implements Eq. UE, Table 7, Andrews (2018) RMRS-GTR-371.",
+        "tags": [
+            "wildland_fire",
+            "rothermel",
+            "wind",
+            "observed-only"
+        ],
+        "created": "2026-05-06T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (mdl-eq3p)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. (2018). The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. 121 p. — Equation UE, Table 7."
+            }
+        ]
+    },
+    "models": {
+        "EffectiveMidflameWindSpeed": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/rothermel.jl:410\nUpstream `EffectiveMidflameWindSpeed` is an MTK `@component` whose six inputs (C_coeff, B_coeff, E_coeff, β_ratio, φw, φs) are `@parameters` and whose two outputs (φE, UE) are time-indexed `@variables` defined by two algebraic equations (the standalone component is observed-only with no D(x) terms). The two upstream `@constants` (one=1.0 dimensionless, UE_ref=0.3048/60 m/s) are preserved here as zero-default parameters with their upstream defaults — this matches the pattern used elsewhere in the rig (see components/aerosol/aq_eq/water.esm and components/wildland_fire/rothermel/live_fuel_moisture_extinction.esm) where `@constants` and `@parameters` are unified into ESM `parameter` declarations.\n\nUnicode → ASCII transliteration of identifiers follows the rig convention (see components/wildland_fire/terrain_slope.esm where `tanϕ` is rendered as `tan_phi`): β_ratio → beta_ratio, φw → phi_w, φs → phi_s, φE → phi_E.\n\nThe two equations are the Andrews (2018) Table 7 form:\n  phi_E = phi_w + phi_s\n  UE    = UE_ref * (phi_E * beta_ratio^E_coeff / C_coeff)^(one / B_coeff)\n\nUE_ref = 0.3048/60 m/s = 0.00508 m/s (1 ft/min) is the SI conversion factor applied to the dimensionless wind-speed power-law that is otherwise expressed in ft/min in Andrews (2018). The exponent (one / B_coeff) is left as a parameter ratio so MTK's unit checker accepts the dimensionless exponent literal `1` from the @constants block.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are sums and a power chain on hardware-supported intrinsics, so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on midflame wind speeds (mm/s precision on a m/s quantity)."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "C_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 7.47,
+                    "description": "Wind coefficient C (dimensionless), Andrews (2018) Table 7"
+                },
+                "B_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Wind coefficient B (dimensionless), Andrews (2018) Table 7"
+                },
+                "E_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Wind coefficient E (dimensionless), Andrews (2018) Table 7"
+                },
+                "beta_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Relative packing ratio beta/beta_op (dimensionless)"
+                },
+                "phi_w": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Wind factor phi_w (dimensionless)"
+                },
+                "phi_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Slope factor phi_s (dimensionless)"
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Unity dimensionless constant (preserved from upstream MTK @constants for unit-balancing of the dimensionless exponent)"
+                },
+                "UE_ref": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.00508,
+                    "description": "Reference wind speed (1 ft/min in m/s = 0.3048/60). Must match U_ref in RothermelFireSpread."
+                },
+                "phi_E": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Combined wind and slope factor (dimensionless)"
+                },
+                "UE": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Effective midflame wind speed"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "phi_E",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["phi_w", "phi_s"]
+                    }
+                },
+                {
+                    "lhs": "UE",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "UE_ref",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "phi_E",
+                                                    {
+                                                        "op": "^",
+                                                        "args": ["beta_ratio", "E_coeff"]
+                                                    }
+                                                ]
+                                            },
+                                            "C_coeff"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": ["one", "B_coeff"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "trivial_unit_power",
+                    "description": "Simplest non-zero case: B=E=1, C=1, beta_ratio=1, phi_w=1, phi_s=0. phi_E = 1+0 = 1; the inner term simplifies to 1*1^1/1 = 1; UE = UE_ref * 1^(1/1) = UE_ref = 0.3048/60 m/s = 0.00508 m/s exactly.",
+                    "parameter_overrides": {
+                        "C_coeff": 1.0,
+                        "B_coeff": 1.0,
+                        "E_coeff": 1.0,
+                        "beta_ratio": 1.0,
+                        "phi_w": 1.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 1.0 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.00508 }
+                    ]
+                },
+                {
+                    "id": "slope_only",
+                    "description": "Pure-slope case (phi_w = 0): phi_s = 2.5, B=E=C=beta_ratio=1. phi_E = 0+2.5 = 2.5; UE = UE_ref * 2.5 = 0.0127 m/s exactly.",
+                    "parameter_overrides": {
+                        "C_coeff": 1.0,
+                        "B_coeff": 1.0,
+                        "E_coeff": 1.0,
+                        "beta_ratio": 1.0,
+                        "phi_w": 0.0,
+                        "phi_s": 2.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 2.5 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.0127 }
+                    ]
+                },
+                {
+                    "id": "wind_plus_slope",
+                    "description": "Combined wind and slope factors with C=2: phi_w=4, phi_s=6, B=E=beta_ratio=1. phi_E = 4+6 = 10; UE = UE_ref * (10/2) = 5*UE_ref = 0.0254 m/s exactly.",
+                    "parameter_overrides": {
+                        "C_coeff": 2.0,
+                        "B_coeff": 1.0,
+                        "E_coeff": 1.0,
+                        "beta_ratio": 1.0,
+                        "phi_w": 4.0,
+                        "phi_s": 6.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 10.0 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.0254 }
+                    ]
+                },
+                {
+                    "id": "square_root_branch",
+                    "description": "Exercises the (1/B_coeff) fractional-exponent path with B=2: C=1, B=2, E=2, beta_ratio=4, phi_w=1, phi_s=0. phi_E = 1; UE = UE_ref * (1*16/1)^(1/2) = UE_ref * 4 = 0.02032 m/s exactly.",
+                    "parameter_overrides": {
+                        "C_coeff": 1.0,
+                        "B_coeff": 2.0,
+                        "E_coeff": 2.0,
+                        "beta_ratio": 4.0,
+                        "phi_w": 1.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 1.0 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.02032 }
+                    ]
+                },
+                {
+                    "id": "cube_root_packing_ratio",
+                    "description": "Exercises the beta_ratio^E_coeff branch with non-integer E_coeff: C=1, B=1, E=1/3, beta_ratio=8, phi_w=5, phi_s=0. phi_E = 5; UE = UE_ref * 5 * 8^(1/3) / 1 = UE_ref * 5 * 2 = 0.0508 m/s exactly.",
+                    "parameter_overrides": {
+                        "C_coeff": 1.0,
+                        "B_coeff": 1.0,
+                        "E_coeff": 0.3333333333333333,
+                        "beta_ratio": 8.0,
+                        "phi_w": 5.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 5.0 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.0508 }
+                    ]
+                },
+                {
+                    "id": "andrews_table7_grass_like",
+                    "description": "Andrews (2018) Table 7 grass-like coefficients with mid-range wind: C=7.47, B=1, E=0.5, beta_ratio=4, phi_w=10, phi_s=0. phi_E = 10; UE = UE_ref * (10 * 4^0.5 / 7.47) = 0.00508 * 20.0/7.47 ≈ 0.0136 m/s. Expected value taken from the canonical Python ESS runner under the upstream float64 evaluation order (pow → multiply → divide → multiply by UE_ref).",
+                    "parameter_overrides": {
+                        "C_coeff": 7.47,
+                        "B_coeff": 1.0,
+                        "E_coeff": 0.5,
+                        "beta_ratio": 4.0,
+                        "phi_w": 10.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 10.0 },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.013601070950468542 }
+                    ]
+                },
+                {
+                    "id": "zero_wind_zero_slope",
+                    "description": "Calm-and-flat degenerate case: phi_w = phi_s = 0, B=1 (so the exponent (1/B) = 1 is well-defined for 0). phi_E = 0; UE = UE_ref * 0^1 = 0 m/s exactly. B_coeff is held at 1 to avoid the 0^(non-integer) edge case in the canonical interpreter.",
+                    "parameter_overrides": {
+                        "C_coeff": 1.0,
+                        "B_coeff": 1.0,
+                        "E_coeff": 1.0,
+                        "beta_ratio": 1.0,
+                        "phi_w": 0.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "phi_E", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "UE",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ue_vs_phi_w_at_andrews_grass_like",
+                    "description": "Sweep wind factor phi_w from 0 to 50 at fixed slope (phi_s = 0) with Andrews (2018) Table 7 grass-like coefficients (C=7.47, B=1, E=0.5, beta_ratio=4). Surfaces the linear-in-phi_w response of UE under a unit-power exponent.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_coeff": 7.47,
+                        "B_coeff": 1.0,
+                        "E_coeff": 0.5,
+                        "beta_ratio": 4.0,
+                        "phi_s": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "phi_w",
+                                "range": { "start": 0.0, "stop": 50.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ue_vs_phi_w",
+                            "type": "line",
+                            "description": "Effective midflame wind speed UE as a function of wind factor phi_w (Andrews-Table-7 grass-like coefficients).",
+                            "x": { "variable": "phi_w", "label": "phi_w (wind factor, dimensionless)" },
+                            "y": { "variable": "UE",    "label": "UE (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "ue_heatmap_phi_w_phi_s",
+                    "description": "Two-dimensional sweep over (phi_w, phi_s) at fixed Andrews (2018) Table 7 grass-like coefficients (C=7.47, B=1, E=0.5, beta_ratio=4). Reveals the joint dependence: UE responds linearly to phi_E = phi_w + phi_s when B=1.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_coeff": 7.47,
+                        "B_coeff": 1.0,
+                        "E_coeff": 0.5,
+                        "beta_ratio": 4.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "phi_w",
+                                "range": { "start": 0.0, "stop": 50.0, "count": 16, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "phi_s",
+                                "range": { "start": 0.0, "stop": 10.0, "count": 16, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ue_surface",
+                            "type": "heatmap",
+                            "description": "UE(phi_w, phi_s) — joint dependence of effective midflame wind speed on wind and slope factors.",
+                            "x": { "variable": "phi_w", "label": "phi_w (dimensionless)" },
+                            "y": { "variable": "phi_s", "label": "phi_s (dimensionless)" },
+                            "value": { "variable": "UE", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
