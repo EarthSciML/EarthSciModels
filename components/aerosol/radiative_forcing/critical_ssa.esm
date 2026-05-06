@@ -1,0 +1,421 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CriticalSingleScatteringAlbedo",
+        "description": "Critical single-scattering albedo at which an aerosol layer transitions from cooling to heating — Seinfeld & Pandis (2006) Ch. 24 §24.2, Eq. 24.15.",
+        "tags": [
+            "aerosol",
+            "radiative_forcing"
+        ]
+    },
+    "models": {
+        "CriticalSingleScatteringAlbedo": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 24, Section 24.2, Equation 24.15.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aerosol_radiative_forcing.jl:106\nCritical single-scattering albedo from the Charlson et al. two-stream forcing balance, ω_crit = 2·R_s / (2·R_s + β·(1−R_s)²). When ω > ω_crit the aerosol layer cools (scattering dominates); when ω < ω_crit it heats (absorption dominates). Authored as a closed-form algebraic .esm so that, after MTK structural_simplify, the compiled system has zero ODE states and the inline-test runner exercises ω_crit at its observed algebraic value.\n\nTolerance rationale (model-level rel=1e-8 / abs=1e-12): the closed-form expression is a small rational function of two dimensionless parameters, so 1e-8 captures float64 roundoff in the multi-step evaluation. abs=1e-12 floors the dark-surface limit (R_s=0.01) where ω_crit ≈ 0.066."
+            },
+            "variables": {
+                "R_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.15,
+                    "description": "Surface albedo (dimensionless)"
+                },
+                "β": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.29,
+                    "description": "Upscatter fraction (dimensionless)"
+                },
+                "ω_crit": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Critical single-scattering albedo: ω_crit = 2·R_s / (2·R_s + β·(1−R_s)²).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    "R_s"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            2,
+                                            "R_s"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "β",
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -1,
+                                                                    "R_s"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-8,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "table_24_2_default_Rs015_beta029",
+                    "description": "Reproduces the upstream Aerosol.jl `CriticalSingleScatteringAlbedo - Figure 24.2 Validation` testitem default case. Table 24.2 land-surface values R_s=0.15, β=0.29 give ω_crit ≈ 0.589 (upstream asserts ≈ 0.586 with rtol=0.01; we pin the exact analytic value).",
+                    "parameter_overrides": {
+                        "R_s": 0.15,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.5887836710661891
+                        },
+                        {
+                            "variable": "ω_crit",
+                            "time": 1.0,
+                            "expected": 0.5887836710661891
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_dark_surface_limit",
+                    "description": "Dark-surface limit R_s → 0 implies ω_crit → 0. Upstream asserts `ω_crit(R_s=0.01, β=0.29) < 0.1`; we pin the exact analytic value.",
+                    "parameter_overrides": {
+                        "R_s": 0.01,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.06573995247001437
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_bright_surface_limit",
+                    "description": "Bright-surface limit R_s → 1 implies ω_crit → 1. Upstream asserts `ω_crit(R_s=0.99, β=0.29) > 0.99`; we pin the exact analytic value.",
+                    "parameter_overrides": {
+                        "R_s": 0.99,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9999853537498693
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_monotonic_Rs_p1",
+                    "description": "Monotonic R_s sweep point (upstream uses R_s ∈ {0.1, 0.3, 0.5, 0.7, 0.9} at β=0.29 and asserts `issorted(ω_crit_vals)`). R_s = 0.1.",
+                    "parameter_overrides": {
+                        "R_s": 0.1,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.45987583352494826
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_monotonic_Rs_p3",
+                    "description": "Monotonic R_s sweep point. R_s = 0.3.",
+                    "parameter_overrides": {
+                        "R_s": 0.3,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.8085163724565423
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_monotonic_Rs_p5",
+                    "description": "Monotonic R_s sweep point. R_s = 0.5.",
+                    "parameter_overrides": {
+                        "R_s": 0.5,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9324009324009324
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_monotonic_Rs_p7",
+                    "description": "Monotonic R_s sweep point. R_s = 0.7.",
+                    "parameter_overrides": {
+                        "R_s": 0.7,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9816983381249562
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_monotonic_Rs_p9",
+                    "description": "Monotonic R_s sweep point. R_s = 0.9.",
+                    "parameter_overrides": {
+                        "R_s": 0.9,
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9983914803927006
+                        }
+                    ]
+                },
+                {
+                    "id": "beta_sensitivity_low",
+                    "description": "Sensitivity to upscatter fraction at fixed R_s = 0.5 (upstream asserts `issorted(ω_crit_vs_beta, rev=true)` over β ∈ {0.1, 0.2, 0.3, 0.4}). β = 0.1 — smaller upscatter → higher ω_crit.",
+                    "parameter_overrides": {
+                        "R_s": 0.5,
+                        "β": 0.1
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9756097560975611
+                        }
+                    ]
+                },
+                {
+                    "id": "beta_sensitivity_high",
+                    "description": "Sensitivity to upscatter fraction at fixed R_s = 0.5. β = 0.4 — larger upscatter → lower ω_crit.",
+                    "parameter_overrides": {
+                        "R_s": 0.5,
+                        "β": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ω_crit",
+                            "time": 0.0,
+                            "expected": 0.9090909090909091
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "figure_24_2_omega_crit_vs_Rs",
+                    "description": "Reproduces Figure 24.2 from Seinfeld & Pandis (2006) — critical single-scattering albedo as a function of surface albedo at fixed upscatter fraction β = 0.29 (Table 24.2 land value). The curve rises from ~0 at R_s → 0 toward 1 at R_s → 1, crossing the canonical land value (R_s ≈ 0.15) near ω_crit ≈ 0.59.",
+                    "parameters": {
+                        "β": 0.29
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_s",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.99,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "omega_crit_vs_Rs",
+                            "type": "line",
+                            "description": "Critical single-scattering albedo ω_crit as a function of surface albedo R_s at β = 0.29.",
+                            "x": {
+                                "variable": "R_s",
+                                "label": "Surface albedo R_s"
+                            },
+                            "y": {
+                                "variable": "ω_crit",
+                                "label": "Critical single-scattering albedo ω_crit"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "figure_24_2_curve_family",
+                    "description": "Supplements Figure 24.2 with a sweep over β at fixed R_s — the published figure shows curve families for several β values. Larger β (more backscatter) suppresses ω_crit at every R_s, raising the threshold for net cooling.",
+                    "parameters": {
+                        "R_s": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "β",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.5,
+                                    "count": 40,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "omega_crit_vs_beta",
+                            "type": "line",
+                            "description": "Critical single-scattering albedo ω_crit as a function of upscatter fraction β at R_s = 0.5.",
+                            "x": {
+                                "variable": "β",
+                                "label": "Upscatter fraction β"
+                            },
+                            "y": {
+                                "variable": "ω_crit",
+                                "label": "Critical single-scattering albedo ω_crit"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "Rs_beta_joint_sweep",
+                    "description": "Joint sensitivity of ω_crit to surface albedo and upscatter fraction. Heatmap visualizes the Figure 24.2 curve family as ω_crit(R_s, β). Confirms monotonicity: ω_crit increases with R_s and decreases with β.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_s",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.99,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "β",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.5,
+                                    "count": 20,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "omega_crit_heatmap",
+                            "type": "heatmap",
+                            "description": "ω_crit(R_s, β) heatmap.",
+                            "x": {
+                                "variable": "R_s",
+                                "label": "Surface albedo R_s"
+                            },
+                            "y": {
+                                "variable": "β",
+                                "label": "Upscatter fraction β"
+                            },
+                            "value": {
+                                "variable": "ω_crit",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
