@@ -1,0 +1,128 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "BETAdsorption",
+        "description": "BET (Brunauer-Emmett-Teller) adsorption isotherm for multilayer adsorption. Extends the Langmuir model to include formation of additional molecular layers, assuming each adsorbed molecule can serve as an adsorption site for the next layer. From Seinfeld and Pandis (2006), Chapter 14, Section 14.5.3, Equation 14.45.",
+        "tags": [
+            "aerosol",
+            "organic",
+            "bet-adsorption"
+        ],
+        "created": "2026-05-07T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-1c7)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Eq. 14.45."
+            }
+        ]
+    },
+    "models": {
+        "BETAdsorption": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:279\nUpstream `BETAdsorption` is an MTK `@component` with two parameters (V_m, c_BET), and two variables (S, V). The equation is:\n  \u2022 V ~ V_m * c_BET * S / ((1 - S) * (1 + (c_BET - 1) * S))  (Eq. 14.45 \u2014 BET isotherm)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only \u2014 the single output V is given by an algebraic equation. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves multiplication, division, and addition. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "V_m": {
+                    "type": "parameter",
+                    "units": "m^3",
+                    "default": 1.0,
+                    "description": "Gas volume for monolayer formation"
+                },
+                "c_BET": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 10.0,
+                    "description": "BET constant for the adsorbing surface (dimensionless)"
+                },
+                "S": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Gas-phase saturation ratio p/p_sat (dimensionless)"
+                },
+                "V": {
+                    "type": "state",
+                    "units": "m^3",
+                    "description": "Volume of gas adsorbed"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "V",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["c_BET", "V_m", "S"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "+", "args": [1, { "op": "*", "args": [-1, "S"] }] },
+                                    { "op": "+", "args": [1, { "op": "*", "args": [{ "op": "+", "args": [-1, "c_BET"] }, "S"] }] }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default conditions: V_m = 1.0 m^3, c_BET = 10.0, S = 0.5. V = 1.0*10.0*0.5 / ((1-0.5)*(1+9*0.5)) = 5.0/2.75 = 1.8181818181818181 m^3.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "V", "time": 0.0, "expected": 1.8181818181818181, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "low_saturation",
+                    "description": "Low saturation regime: S = 0.001, V approaches V_m * c_BET * S = 0.01 m^3 (linear approximation).",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "initial_conditions": {
+                        "S": 0.001
+                    },
+                    "assertions": [
+                        { "variable": "V", "time": 0.0, "expected": 0.009921, "tolerance": { "rel": 1.0e-4 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "saturation_sweep",
+                    "description": "Sweep saturation ratio from 0.01 to 0.99 to show the characteristic BET isotherm shape (multilayer adsorption as S approaches 1).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "V_m": 1.0,
+                        "c_BET": 10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "S",
+                                "range": { "start": 0.01, "stop": 0.99, "count": 50 }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "bet_isotherm",
+                            "type": "line",
+                            "description": "BET isotherm: V/V_m vs S \u2014 shows monolayer completion at intermediate S and multilayer adsorption as S \u2192 1.",
+                            "x": { "variable": "S", "label": "S (p/p_sat)" },
+                            "y": { "variable": "V", "label": "V (m^3)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
