@@ -1,0 +1,231 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "WaterProperties",
+    "description": "Temperature-dependent physical properties of water for nucleation calculations following Seinfeld & Pandis (2006), Chapter 11, Tables 11.1 and 11.4. Provides surface tension, molecular volume, molecular mass, and saturation vapor pressure as functions of temperature.",
+    "authors": ["EarthSciML"],
+    "created": "2026-05-07T00:00:00Z",
+    "tags": ["nucleation", "water-properties", "aerosol", "seinfeld-pandis"],
+    "references": [
+      {
+        "citation": "Seinfeld, J.H. and Pandis, S.N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 11, pp. 489-536."
+      }
+    ]
+  },
+  "models": {
+    "WaterProperties": {
+      "coupletype": "WaterProperties",
+      "variables": {
+        "T": {
+          "type": "parameter",
+          "units": "K",
+          "default": 293.0,
+          "description": "Temperature"
+        },
+        "T_unit": {
+          "type": "parameter",
+          "units": "K",
+          "default": 1.0,
+          "description": "Unit temperature for conversion (dimensionless)"
+        },
+        "Pa_unit": {
+          "type": "parameter",
+          "units": "Pa",
+          "default": 1.0,
+          "description": "Unit pressure for conversion (dimensionless)"
+        },
+        "M_H2O": {
+          "type": "constant",
+          "units": "kg/mol",
+          "default": 0.018015,
+          "description": "Molar mass of water"
+        },
+        "N_A": {
+          "type": "constant",
+          "units": "mol^-1",
+          "default": 6.02214076e23,
+          "description": "Avogadro number"
+        },
+        "R": {
+          "type": "constant",
+          "units": "J/(mol*K)",
+          "default": 8.314,
+          "description": "Gas constant"
+        },
+        "sigma_ref": {
+          "type": "constant",
+          "units": "N/m",
+          "default": 0.0756,
+          "description": "Surface tension at 273 K"
+        },
+        "sigma_slope": {
+          "type": "constant",
+          "units": "N/(m*K)",
+          "default": -0.0001454,
+          "description": "Surface tension temperature slope"
+        },
+        "T_ref": {
+          "type": "constant",
+          "units": "K",
+          "default": 273.0,
+          "description": "Reference temperature"
+        },
+        "v_1_const": {
+          "type": "constant",
+          "units": "m^3",
+          "default": 2.99e-29,
+          "description": "Molecular volume of water"
+        },
+        "A_antoine": {
+          "type": "constant",
+          "units": "1",
+          "default": 23.1964,
+          "description": "Antoine A coefficient (dimensionless)"
+        },
+        "B_antoine": {
+          "type": "constant",
+          "units": "1",
+          "default": 3816.44,
+          "description": "Antoine B coefficient (dimensionless)"
+        },
+        "C_antoine": {
+          "type": "constant",
+          "units": "1",
+          "default": -46.13,
+          "description": "Antoine C coefficient (dimensionless)"
+        },
+        "sigma": {
+          "type": "observed",
+          "units": "N/m",
+          "description": "Surface tension (temperature-dependent linear approximation)",
+          "expression": {
+            "op": "+",
+            "args": [
+              "sigma_ref",
+              {
+                "op": "*",
+                "args": [
+                  "sigma_slope",
+                  { "op": "-", "args": ["T", "T_ref"] }
+                ]
+              }
+            ]
+          }
+        },
+        "v_1": {
+          "type": "observed",
+          "units": "m^3",
+          "description": "Molecular volume (approximately constant)",
+          "expression": { "op": "id", "args": ["v_1_const"] }
+        },
+        "m_1": {
+          "type": "observed",
+          "units": "kg",
+          "description": "Molecular mass of water",
+          "expression": {
+            "op": "/",
+            "args": ["M_H2O", "N_A"]
+          }
+        },
+        "p_sat": {
+          "type": "observed",
+          "units": "Pa",
+          "description": "Saturation vapor pressure from Antoine equation: ln(p/Pa) = A - B/(C + T/K)",
+          "expression": {
+            "op": "*",
+            "args": [
+              "Pa_unit",
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "A_antoine",
+                      {
+                        "op": "/",
+                        "args": [
+                          "B_antoine",
+                          {
+                            "op": "+",
+                            "args": [
+                              "C_antoine",
+                              { "op": "/", "args": ["T", "T_unit"] }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "equations": []
+    }
+  },
+  "tests": [
+    {
+      "model": "WaterProperties",
+      "description": "Surface tension at 273K should be approximately 0.0756 N/m",
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0,
+          "expected": 0.0756,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "model": "WaterProperties",
+      "description": "Surface tension at 293K should be approximately 0.0727 N/m",
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0,
+          "expected": 0.072722,
+          "tolerance": 0.001
+        }
+      ]
+    },
+    {
+      "model": "WaterProperties",
+      "description": "Molecular mass of water should be approximately 2.99e-26 kg",
+      "assertions": [
+        {
+          "variable": "m_1",
+          "time": 0,
+          "expected": 2.9915e-26,
+          "tolerance": 1e-28
+        }
+      ]
+    },
+    {
+      "model": "WaterProperties",
+      "description": "Molecular volume should be approximately 2.99e-29 m^3",
+      "assertions": [
+        {
+          "variable": "v_1",
+          "time": 0,
+          "expected": 2.99e-29,
+          "tolerance": 1e-31
+        }
+      ]
+    },
+    {
+      "model": "WaterProperties",
+      "description": "Saturation vapor pressure at 293K should be approximately 2300 Pa",
+      "assertions": [
+        {
+          "variable": "p_sat",
+          "time": 0,
+          "expected": 2300,
+          "tolerance": 100
+        }
+      ]
+    }
+  ]
+}
