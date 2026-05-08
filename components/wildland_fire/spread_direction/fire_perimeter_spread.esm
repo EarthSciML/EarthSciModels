@@ -1,0 +1,680 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "FirePerimeterSpread",
+        "description": "Fire perimeter spread rate and fireline intensity — calculates spread rate normal to the elliptical fire perimeter and Byram's fireline intensity. Migrated from WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fire_spread_direction.jl:264 (`FirePerimeterSpread` @component). Algebraic-only: R_H, f, g, h, γ, H_A are inputs (parameters); cos_θ, sin_θ, θ, R_ψ, ψ, I_B are algebraic outputs.",
+        "tags": [
+            "wildland_fire",
+            "spread_direction",
+            "fire_perimeter",
+            "algebraic"
+        ],
+        "created": "2026-05-07T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (polecat-ea-2l4a4)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. 2018. The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. Table 26, pages 89-91."
+            },
+            {
+                "citation": "Catchpole, E. A.; deMestre, N. J.; Gill, A. M. 1982. Intensity of fire at its perimeter. Australian Forest Research. 12: 47-54."
+            }
+        ]
+    },
+    "models": {
+        "FirePerimeterSpread": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fire_spread_direction.jl:264\nUpstream `FirePerimeterSpread` is an MTK `@component` whose six inputs (R_H, f, g, h, γ, H_A) are `@parameters` and whose six outputs (cos_θ, sin_θ, θ, R_ψ, ψ, I_B) are time-indexed `@variables` defined by six algebraic equations (the standalone component is observed-only with no D(x) terms). Identical equation structure preserved here; unicode identifiers (γ, θ, ψ) are preserved from the upstream `@component` declaration.\n\nThe equations follow Catchpole et al. (1982) and Andrews (2018) Table 26 pages 89-91:\n  cos_θ = (h·cos(γ)·√(h²·cos²γ + (f²−g²)·sin²γ) − f·g·sin²γ) / (h²·cos²γ + f²·sin²γ)\n  sin_θ = √(1 − cos²θ)\n  θ    = acos(cos_θ)\n  R_ψ  = R_H·h·(g·cos_θ + f) / (f·√(h²·cos²θ + f²·sin²θ))\n  ψ    = atan(f·sin_θ / (h·cos_θ))\n  I_B  = H_A·R_ψ\n\nUpstream `@constants` `one` (= 1.0) is an MTK unit-balancing literal preserved here as a zero-default parameter with its upstream value, matching the pattern used in components/wildland_fire/terrain_slope.esm where `zero_1` is similarly preserved.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are chains of arithmetic ops and elementary functions (cos, sin, sqrt, acos, atan) on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on m/s spread rates, radian angles, and W/m fireline intensities (typical Byram intensities range 10²–10⁵ kW/m)."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "R_H": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Rate of spread in direction of maximum spread (head fire)"
+                },
+                "f": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Ellipse semi-major axis"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Distance from focus to center"
+                },
+                "h": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Ellipse semi-minor axis"
+                },
+                "γ": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.0,
+                    "description": "Direction from ignition point relative to max spread direction"
+                },
+                "H_A": {
+                    "type": "parameter",
+                    "units": "J/m^2",
+                    "default": 0.0,
+                    "description": "Heat per unit area"
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dimensionless one (MTK unit-balancing literal preserved from upstream)"
+                },
+                "cos_θ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Cosine of intermediate angle θ (dimensionless)"
+                },
+                "sin_θ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Sine of intermediate angle θ (dimensionless)"
+                },
+                "θ": {
+                    "type": "state",
+                    "units": "rad",
+                    "description": "Intermediate angle from center of ellipse"
+                },
+                "R_ψ": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Rate of spread normal to fire perimeter"
+                },
+                "ψ": {
+                    "type": "state",
+                    "units": "rad",
+                    "description": "Direction normal to perimeter relative to max spread"
+                },
+                "I_B": {
+                    "type": "state",
+                    "units": "W/m",
+                    "description": "Fireline intensity (Byram)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "cos_θ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "sin",
+                                                        "args": ["γ"]
+                                                    },
+                                                    2
+                                                ]
+                                            },
+                                            "g",
+                                            "f"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "h",
+                                            {
+                                                "op": "cos",
+                                                "args": ["γ"]
+                                            },
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": ["h", 2]
+                                                                    },
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "cos",
+                                                                                "args": ["γ"]
+                                                                            },
+                                                                            2
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "sin",
+                                                                                "args": ["γ"]
+                                                                            },
+                                                                            2
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": ["f", 2]
+                                                                            },
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    -1,
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": ["g", 2]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": ["h", 2]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "cos",
+                                                        "args": ["γ"]
+                                                    },
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "sin",
+                                                        "args": ["γ"]
+                                                    },
+                                                    2
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": ["f", 2]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "sin_θ",
+                    "rhs": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    "one",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            {
+                                                "op": "^",
+                                                "args": ["cos_θ", 2]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "θ",
+                    "rhs": {
+                        "op": "acos",
+                        "args": ["cos_θ"]
+                    }
+                },
+                {
+                    "lhs": "R_ψ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "h",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["cos_θ", "g"]
+                                            },
+                                            "f"
+                                        ]
+                                    },
+                                    "R_H"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "^",
+                                                                "args": ["h", 2]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": ["cos_θ", 2]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "^",
+                                                                "args": ["sin_θ", 2]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": ["f", 2]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "f"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ψ",
+                    "rhs": {
+                        "op": "atan",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": ["sin_θ", "f"]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": ["h", "cos_θ"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "I_B",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["R_ψ", "H_A"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "head_fire_direction",
+                    "description": "γ = 0 (head fire direction): cos_θ = 1, sin_θ = 0, θ = 0, R_ψ = R_H·h·(g+f)/(f·h) = R_H·(g+f)/f = 1.0·(50+100)/100 = 1.5 m/s, ψ = 0, I_B = H_A·R_ψ = 1.5e7 W/m.",
+                    "parameter_overrides": {
+                        "R_H": 1.0,
+                        "f": 100.0,
+                        "g": 50.0,
+                        "h": 40.0,
+                        "γ": 0.0,
+                        "H_A": 10000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "cos_θ",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "sin_θ",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "θ",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "R_ψ",
+                            "time": 0.0,
+                            "expected": 1.5
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "I_B",
+                            "time": 0.0,
+                            "expected": 15000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "backing_fire_direction",
+                    "description": "γ = π (backing fire direction): cos_θ = -1, sin_θ = 0, θ = π, R_ψ = R_H·h·(g·(-1)+f)/(f·h) = R_H·(f−g)/f = 1.0·(100−50)/100 = 0.5 m/s, ψ = 0, I_B = 5.0e6 W/m.",
+                    "parameter_overrides": {
+                        "R_H": 1.0,
+                        "f": 100.0,
+                        "g": 50.0,
+                        "h": 40.0,
+                        "γ": 3.141592653589793,
+                        "H_A": 10000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "cos_θ",
+                            "time": 0.0,
+                            "expected": -1.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "sin_θ",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "θ",
+                            "time": 0.0,
+                            "expected": 3.141592653589793,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "R_ψ",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1.0e-15
+                            }
+                        },
+                        {
+                            "variable": "I_B",
+                            "time": 0.0,
+                            "expected": 5000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "flanking_direction",
+                    "description": "γ = π/2 (flanking direction perpendicular to head fire): cos_θ = -g/f = -50/100 = -0.5, sin_θ = √(1−0.25) = √0.75 ≈ 0.8660254038, θ = acos(−0.5) = 2π/3 ≈ 2.0943951024, R_ψ = R_H·h·(g·cos_θ+f)/(f·√(h²·cos²θ+f²·sin²θ)) = 3/√79 ≈ 0.3375313702 m/s, ψ = atan(f·sin_θ/(h·cos_θ)) ≈ −1.3430138191 rad, I_B = H_A·R_ψ ≈ 3.375313702e6 W/m.",
+                    "parameter_overrides": {
+                        "R_H": 1.0,
+                        "f": 100.0,
+                        "g": 50.0,
+                        "h": 40.0,
+                        "γ": 1.5707963267948966,
+                        "H_A": 10000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "cos_θ",
+                            "time": 0.0,
+                            "expected": -0.5
+                        },
+                        {
+                            "variable": "sin_θ",
+                            "time": 0.0,
+                            "expected": 0.8660254037844386
+                        },
+                        {
+                            "variable": "θ",
+                            "time": 0.0,
+                            "expected": 2.0943951023931953
+                        },
+                        {
+                            "variable": "R_ψ",
+                            "time": 0.0,
+                            "expected": 0.3375313701564216
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -1.3430138191322088
+                        },
+                        {
+                            "variable": "I_B",
+                            "time": 0.0,
+                            "expected": 3375313.701564216
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "perimeter_R_psi_sweep_gamma",
+                    "description": "Rate of spread normal to perimeter R_ψ (m/s) as a function of direction γ from head-fire direction (0 to π rad), at fixed ellipse geometry (f=100 m, g=50 m, h=40 m). Surfaces the cos_θ and sin_θ intermediate equations driving the R_ψ and I_B outputs across the full perimeter.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "γ",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 3.141592653589793,
+                                    "count": 33,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "R_psi_vs_gamma",
+                            "type": "line",
+                            "description": "R_ψ (m/s) vs. γ (rad) — spread rate decreases from head-fire value (R_ψ = 1.5 m/s at γ=0) through the flanking minimum (R_ψ ≈ 0.338 m/s at γ=π/2) to the backing-fire value (R_ψ = 0.5 m/s at γ=π).",
+                            "x": {
+                                "variable": "γ",
+                                "label": "γ (rad)"
+                            },
+                            "y": {
+                                "variable": "R_ψ",
+                                "label": "R_ψ (m/s)"
+                            }
+                        },
+                        {
+                            "id": "I_B_vs_gamma",
+                            "type": "line",
+                            "description": "Byram fireline intensity I_B (W/m) vs. γ (rad) — proportional to R_ψ, showing the same head-to-backing asymmetry.",
+                            "x": {
+                                "variable": "γ",
+                                "label": "γ (rad)"
+                            },
+                            "y": {
+                                "variable": "I_B",
+                                "label": "I_B (W/m)"
+                            }
+                        },
+                        {
+                            "id": "psi_vs_gamma",
+                            "type": "line",
+                            "description": "Normal direction ψ (rad) vs. γ (rad) — relationship between the direction from ignition and the normal to the perimeter.",
+                            "x": {
+                                "variable": "γ",
+                                "label": "γ (rad)"
+                            },
+                            "y": {
+                                "variable": "ψ",
+                                "label": "ψ (rad)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "perimeter_sweep_ellipse_aspect",
+                    "description": "Sensitivity of R_ψ to the ellipse aspect ratio (h/f) at fixed f=100 m, g=50 m, across three sample directions γ ∈ {0, π/4, π/2}. Surfaces how the ellipse shape modulates the perimeter spread rate.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "h",
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 100.0,
+                                    "count": 10,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "γ",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1.5707963267948966,
+                                    "count": 3,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "R_psi_surface",
+                            "type": "heatmap",
+                            "description": "R_ψ over the (h, γ) plane — full 2D surface of perimeter spread rate sensitivity to ellipse aspect and direction.",
+                            "x": {
+                                "variable": "h",
+                                "label": "h (m)"
+                            },
+                            "y": {
+                                "variable": "γ",
+                                "label": "γ (rad)"
+                            },
+                            "value": {
+                                "variable": "R_ψ",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
