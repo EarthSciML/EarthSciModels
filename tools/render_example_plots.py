@@ -1328,6 +1328,14 @@ def run(components_root: Path) -> int:
     if not files:
         print(f"warning: no .esm files under {components_root}", file=sys.stderr)
         return 0
+    return run_files(files)
+
+
+def run_files(files: list[Path]) -> int:
+    """Render examples for an explicit list of .esm files. Used by --files."""
+    if not files:
+        print("warning: no .esm files to render", file=sys.stderr)
+        return 0
     stats = _RenderStats()
     t0 = time.time()
     for f in files:
@@ -1350,10 +1358,34 @@ def main(argv: list[str] | None = None) -> int:
         "--components-dir",
         type=Path,
         default=None,
-        help="Components root (default: <repo-root>/components).",
+        help="Components root (default: <repo-root>/components). "
+             "Mutually exclusive with --files.",
+    )
+    parser.add_argument(
+        "--files", nargs="+", default=None,
+        help="Explicit list of .esm files to render examples for (instead "
+             "of walking --components-dir). Useful for pre-merge gates that "
+             "only want to validate files changed in the diff. Mutually "
+             "exclusive with --components-dir.",
     )
     args = parser.parse_args(argv)
+    if args.files and args.components_dir:
+        parser.error("--files and --components-dir are mutually exclusive")
     repo_root = Path(__file__).resolve().parent.parent
+    if args.files:
+        files: list[Path] = []
+        for f in args.files:
+            p = Path(f)
+            if not p.is_absolute():
+                p = repo_root / p
+            if not p.exists():
+                print(f"ERROR: --files: not found: {p}", file=sys.stderr)
+                return 2
+            if p.suffix != ".esm":
+                print(f"ERROR: --files: not a .esm file: {p}", file=sys.stderr)
+                return 2
+            files.append(p.resolve())
+        return run_files(sorted(set(files)))
     components_root = (args.components_dir or (repo_root / "components")).resolve()
     return run(components_root)
 
