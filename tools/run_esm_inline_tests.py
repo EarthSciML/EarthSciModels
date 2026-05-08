@@ -537,7 +537,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Root directory to search for .esm files. May be passed "
              "multiple times. Defaults to ./components and ./lib "
              "(mdl-14s: lib/ included so structural-validation drift in "
-             "lib/*.esm is caught at PR time).",
+             "lib/*.esm is caught at PR time). Mutually exclusive with --files.",
+    )
+    ap.add_argument(
+        "--files", nargs="+", default=None,
+        help="Explicit list of .esm files to test (instead of walking --root "
+             "directories). Useful for pre-merge gates that only want to test "
+             "files changed in the diff. Mutually exclusive with --root.",
     )
     ap.add_argument(
         "--junit-xml", default=None,
@@ -548,14 +554,36 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.worker:
         return run_worker(args.worker)
 
-    roots = args.root or DEFAULT_ROOTS
-    files = discover_esm_files(roots)
-    if not files:
-        print(
-            f"No .esm files discovered under: {', '.join(roots)}",
-            file=sys.stderr,
-        )
-        return 0
+    if args.files and args.root:
+        ap.error("--files and --root are mutually exclusive")
+
+    if args.files:
+        repo_root = Path(__file__).resolve().parent.parent
+        files: List[Path] = []
+        for f in args.files:
+            p = Path(f)
+            if not p.is_absolute():
+                p = repo_root / p
+            if not p.exists():
+                print(f"ERROR: --files: not found: {p}", file=sys.stderr)
+                return 2
+            if p.suffix != ".esm":
+                print(f"ERROR: --files: not a .esm file: {p}", file=sys.stderr)
+                return 2
+            files.append(p.resolve())
+        files = sorted(set(files))
+        if not files:
+            print("No .esm files passed via --files.", file=sys.stderr)
+            return 0
+    else:
+        roots = args.root or DEFAULT_ROOTS
+        files = discover_esm_files(roots)
+        if not files:
+            print(
+                f"No .esm files discovered under: {', '.join(roots)}",
+                file=sys.stderr,
+            )
+            return 0
 
     print(f"Walking {len(files)} .esm file(s) ...")
     all_rows: List[AssertionRow] = []
