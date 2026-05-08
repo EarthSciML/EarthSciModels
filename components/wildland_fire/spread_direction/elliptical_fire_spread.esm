@@ -1,0 +1,449 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EllipticalFireSpread",
+        "description": "Fire spread from a single ignition point assuming an elliptical fire shape — calculates eccentricity, spread rate in arbitrary direction, backing fire spread, fire length and width, flanking distance, and ellipse geometric parameters (semi-major axis, focus offset, semi-minor axis). Migrated from WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fire_spread_direction.jl:174 (`EllipticalFireSpread` @component). Algebraic-only: R_H, Z, γ, elapsed_time are inputs (parameters); e, R_γ, R_B, D_H, D_B, L, W, D_F, f, g, h are algebraic outputs.",
+        "tags": [
+            "wildland_fire",
+            "spread_direction",
+            "elliptical_fire",
+            "algebraic"
+        ],
+        "created": "2026-05-07T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (polecat-ea-qob21)"
+        ],
+        "references": [
+            {
+                "citation": "Andrews, Patricia L. 2018. The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station. Table 26, pages 86-89."
+            },
+            {
+                "citation": "Catchpole, E. A.; deMestre, N. J.; Gill, A. M. 1982. Intensity of fire at its perimeter. Australian Forest Research. 12: 47-54."
+            }
+        ]
+    },
+    "models": {
+        "EllipticalFireSpread": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fire_spread_direction.jl:174\n\nUpstream `EllipticalFireSpread` is an MTK `@component` whose four inputs (R_H, Z, γ, elapsed_time) are `@parameters` and whose eleven outputs (e, R_γ, R_B, D_H, D_B, L, W, D_F, f, g, h) are time-indexed `@variables` defined by algebraic equations. Identical equation structure preserved here.\n\nThe equations follow Andrews (2018) Table 26 and Catchpole et al. (1982):\n  e     = sqrt(Z² − 1) / Z\n  R_γ   = R_H·(1 − e) / (1 − e·cos γ)\n  R_B   = R_H·(1 − e) / (1 + e)\n  D_H   = R_H·elapsed_time\n  D_B   = R_B·elapsed_time\n  L     = D_H + D_B\n  W     = L / Z\n  D_F   = W / 2\n  f     = L / 2\n  g     = D_H − f\n  h     = D_F\n\nUpstream `@constants` `one` (1.0) and `two` (2.0) are MTK unit-balancing literals preserved here as zero-default parameters with their upstream values, matching the pattern used in components/wildland_fire/terrain_slope.esm and components/wildland_fire/spread_direction/fire_perimeter_spread.esm where `zero_1` and `one` are similarly preserved.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are chains of arithmetic ops and elementary functions (sqrt, cos, acos, atan) on hardware-supported intrinsics — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on m/s spread rates, meter distances, and radian angles."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "R_H": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Rate of spread in direction of maximum spread (head fire)"
+                },
+                "Z": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Fire length-to-width ratio (dimensionless)"
+                },
+                "γ": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.0,
+                    "description": "Direction from ignition point relative to max spread direction"
+                },
+                "elapsed_time": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 0.0,
+                    "description": "Elapsed time"
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dimensionless one (MTK unit-balancing literal preserved from upstream)"
+                },
+                "two": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2.0,
+                    "description": "Dimensionless two (MTK unit-balancing literal preserved from upstream)"
+                },
+                "e": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Eccentricity of fire ellipse (dimensionless)"
+                },
+                "R_γ": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Rate of spread from ignition point in direction γ"
+                },
+                "R_B": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Rate of spread of backing fire"
+                },
+                "D_H": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Heading spread distance"
+                },
+                "D_B": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Backing spread distance"
+                },
+                "L": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Fire length"
+                },
+                "W": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Fire width"
+                },
+                "D_F": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Flanking spread distance"
+                },
+                "f": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Ellipse semi-major axis"
+                },
+                "g": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Distance from focus to center"
+                },
+                "h": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Ellipse semi-minor axis"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "e",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "one"
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": ["Z", 2]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "Z"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_γ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "one",
+                                            {
+                                                "op": "*",
+                                                "args": [-1, "e"]
+                                            }
+                                        ]
+                                    },
+                                    "R_H"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "one",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            "e",
+                                            {
+                                                "op": "cos",
+                                                "args": ["γ"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_B",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "one",
+                                            {
+                                                "op": "*",
+                                                "args": [-1, "e"]
+                                            }
+                                        ]
+                                    },
+                                    "R_H"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": ["e", "one"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "D_H",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["elapsed_time", "R_H"]
+                    }
+                },
+                {
+                    "lhs": "D_B",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["R_B", "elapsed_time"]
+                    }
+                },
+                {
+                    "lhs": "L",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["D_B", "D_H"]
+                    }
+                },
+                {
+                    "lhs": "W",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["L", "Z"]
+                    }
+                },
+                {
+                    "lhs": "D_F",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["W", "two"]
+                    }
+                },
+                {
+                    "lhs": "f",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["L", "two"]
+                    }
+                },
+                {
+                    "lhs": "g",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [-1, "f"]
+                            },
+                            "D_H"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "h",
+                    "rhs": "D_F"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "head_fire_direction",
+                    "description": "γ = 0 (head fire direction): R_γ = R_H = 0.1 m/s, e = √(4−1)/2 ≈ 0.8660254, D_H = 360 m, L = 385.85 m, W = 192.92 m, D_F = 96.46 m.",
+                    "parameter_overrides": {
+                        "R_H": 0.1,
+                        "Z": 2.0,
+                        "γ": 0.0,
+                        "elapsed_time": 3600.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "e",
+                            "time": 0.0,
+                            "expected": 0.8660254037844386
+                        },
+                        {
+                            "variable": "R_γ",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "R_B",
+                            "time": 0.0,
+                            "expected": 0.007179676972449085
+                        },
+                        {
+                            "variable": "D_H",
+                            "time": 0.0,
+                            "expected": 360.0
+                        },
+                        {
+                            "variable": "D_B",
+                            "time": 0.0,
+                            "expected": 25.84683710081671
+                        },
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": 385.8468371008167
+                        },
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 192.92341855040834
+                        },
+                        {
+                            "variable": "D_F",
+                            "time": 0.0,
+                            "expected": 96.46170927520417
+                        },
+                        {
+                            "variable": "f",
+                            "time": 0.0,
+                            "expected": 192.92341855040834
+                        },
+                        {
+                            "variable": "g",
+                            "time": 0.0,
+                            "expected": 167.07658144959166
+                        },
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 96.46170927520417
+                        }
+                    ]
+                },
+                {
+                    "id": "back_fire_direction",
+                    "description": "γ = π (back fire direction): R_γ = R_B ≈ 0.00718 m/s, verifying the backing-fire identity for an ellipse with Z = 2.",
+                    "parameter_overrides": {
+                        "R_H": 0.1,
+                        "Z": 2.0,
+                        "γ": 3.141592653589793,
+                        "elapsed_time": 3600.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "e",
+                            "time": 0.0,
+                            "expected": 0.8660254037844386
+                        },
+                        {
+                            "variable": "R_γ",
+                            "time": 0.0,
+                            "expected": 0.007179676972449085
+                        },
+                        {
+                            "variable": "R_B",
+                            "time": 0.0,
+                            "expected": 0.007179676972449085
+                        },
+                        {
+                            "variable": "D_H",
+                            "time": 0.0,
+                            "expected": 360.0
+                        },
+                        {
+                            "variable": "D_B",
+                            "time": 0.0,
+                            "expected": 25.84683710081671
+                        },
+                        {
+                            "variable": "g",
+                            "time": 0.0,
+                            "expected": 167.07658144959166
+                        }
+                    ]
+                },
+                {
+                    "id": "oblique_direction",
+                    "description": "γ = π/4 (45° from head fire direction): R_γ ≈ 0.03456 m/s, intermediate between head-fire (0.1) and backing-fire (0.00718) rates.",
+                    "parameter_overrides": {
+                        "R_H": 0.1,
+                        "Z": 2.0,
+                        "γ": 0.7853981633974483,
+                        "elapsed_time": 3600.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "e",
+                            "time": 0.0,
+                            "expected": 0.8660254037844386
+                        },
+                        {
+                            "variable": "R_γ",
+                            "time": 0.0,
+                            "expected": 0.03456271136343125
+                        },
+                        {
+                            "variable": "R_B",
+                            "time": 0.0,
+                            "expected": 0.007179676972449085
+                        },
+                        {
+                            "variable": "D_H",
+                            "time": 0.0,
+                            "expected": 360.0
+                        },
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": 385.8468371008167
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
