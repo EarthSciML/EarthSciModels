@@ -1,0 +1,187 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "FireLoadIndex",
+        "description": "Fire Load Index (FLI) per the NFDRS (Cohen & Deeming 1985), page 14. FLI combines the Burning Index (BI) with fire occurrence indexes (LOI + MCOI) to provide a comprehensive measure of the expected fire load. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:1605 (`FireLoadIndex` @component). Observed-only: BI, LOI, and MCOI are inputs (parameters); FLI is the algebraic output.",
+        "tags": [
+            "wildland_fire",
+            "nfdrs",
+            "fire_occurrence",
+            "observed-only"
+        ],
+        "created": "2026-05-07T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (esm-t1rk)"
+        ],
+        "references": [
+            {
+                "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 14, FLI equation."
+            },
+            {
+                "citation": "Deeming, J. E., Burgan, R. E., & Cohen, J. D. (1977). The National Fire-Danger Rating System — 1978. Gen. Tech. Rep. INT-39. Ogden, UT: USDA Forest Service, Intermountain Forest and Range Experiment Station. (Original FLI formulation.)"
+            }
+        ]
+    },
+    "models": {
+        "FireLoadIndex": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:1605\nUpstream `FireLoadIndex` is an MTK `@component` whose inputs (BI, LOI, MCOI) are `@parameters` and whose single output (FLI) is a time-indexed `@variable` with one algebraic equation: FLI = 0.71 × sqrt(min(100, BI)^2 + min(100, LOI + MCOI)^2). Both BI and (LOI + MCOI) are individually clamped to 100 before computing the Euclidean norm.\n\nThe equation uses the `min` operator which is defined in the ESM schema but emitted as a TODO_GAP by mtk2esm (v0.0.3). The operator tree has been hand-validated against the upstream MTK System: the `min` nodes clamp each term to 100, matching the source behavior exactly.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a composition of sqrt, min, ^2, and + in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless fire-load outputs."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "BI": {
+                    "type": "parameter",
+                    "units": "1",
+                    "description": "Burning index 0-100 (dimensionless). No default — must be supplied by caller."
+                },
+                "LOI": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Lightning fire occurrence index 0-100 (dimensionless). Default 0.0 (no lightning fire concern)."
+                },
+                "MCOI": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Human-caused fire occurrence index 0-100 (dimensionless). Default 0.0 (no human-caused fire concern)."
+                },
+                "FLI": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Fire load index (dimensionless). Algebraic output; typical range 0-100 but may slightly exceed 100 when both BI and (LOI + MCOI) approach 100 simultaneously."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "FLI",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.71,
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "min",
+                                                        "args": [100.0, "BI"]
+                                                    },
+                                                    2
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "min",
+                                                        "args": [
+                                                            100.0,
+                                                            {
+                                                                "op": "+",
+                                                                "args": ["LOI", "MCOI"]
+                                                            }
+                                                        ]
+                                                    },
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "nominal_bi_only",
+                    "description": "BI=50, LOI=0, MCOI=0: only BI contributes. FLI = 0.71 × sqrt(50^2 + 0^2) = 0.71 × 50 = 35.5. This exercises the BI-only path with LOI+MCOI at zero.",
+                    "parameter_overrides": {
+                        "BI": 50.0,
+                        "LOI": 0.0,
+                        "MCOI": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 35.5 }
+                    ]
+                },
+                {
+                    "id": "combined_indexes",
+                    "description": "BI=60, LOI=25, MCOI=15: both terms contribute without clamping. FLI = 0.71 × sqrt(60^2 + 40^2) = 0.71 × sqrt(3600 + 1600) = 0.71 × sqrt(5200) = 0.71 × 72.111... = 51.19882811158865.",
+                    "parameter_overrides": {
+                        "BI": 60.0,
+                        "LOI": 25.0,
+                        "MCOI": 15.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 51.19882811158865 }
+                    ]
+                },
+                {
+                    "id": "clamped_bi",
+                    "description": "BI=150 (clamped to 100), LOI=10, MCOI=20: BI is clamped to 100, LOI+MCOI=30 not clamped. FLI = 0.71 × sqrt(100^2 + 30^2) = 0.71 × sqrt(10000 + 900) = 0.71 × sqrt(10900) = 0.71 × 104.403... = 74.1261762132649.",
+                    "parameter_overrides": {
+                        "BI": 150.0,
+                        "LOI": 10.0,
+                        "MCOI": 20.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 74.1261762132649 }
+                    ]
+                },
+                {
+                    "id": "clamped_sum",
+                    "description": "BI=25, LOI=70, MCOI=60: LOI+MCOI=130 clamped to 100. FLI = 0.71 × sqrt(25^2 + 100^2) = 0.71 × sqrt(625 + 10000) = 0.71 × sqrt(10625) = 0.71 × 103.078... = 73.18512485471348.",
+                    "parameter_overrides": {
+                        "BI": 25.0,
+                        "LOI": 70.0,
+                        "MCOI": 60.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 73.18512485471348 }
+                    ]
+                },
+                {
+                    "id": "both_clamped",
+                    "description": "BI=200, LOI=80, MCOI=80: both BI and LOI+MCOI are clamped to 100. FLI = 0.71 × sqrt(100^2 + 100^2) = 0.71 × sqrt(20000) = 0.71 × 141.421... = 100.40916292848975. This is the maximum FLI value (slightly exceeds 100).",
+                    "parameter_overrides": {
+                        "BI": 200.0,
+                        "LOI": 80.0,
+                        "MCOI": 80.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 100.40916292848975 }
+                    ]
+                },
+                {
+                    "id": "zero_inputs",
+                    "description": "BI=0, LOI=0, MCOI=0: all inputs zero. FLI = 0.0. Exercises the zero-boundary case.",
+                    "parameter_overrides": {
+                        "BI": 0.0,
+                        "LOI": 0.0,
+                        "MCOI": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "FLI", "time": 0.0, "expected": 0.0 }
+                    ]
+                }
+            ]
+        }
+    }
+}
