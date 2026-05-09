@@ -1,0 +1,405 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HundredHourFuelMoisture",
+        "description": "100-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 5. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:279 (`HundredHourFuelMoisture` @component). State-variable model: MC100, EMCBAR, BNDRYH are time-indexed state variables with daily discrete update equations.",
+        "tags": [
+            "wildland_fire",
+            "nfdrs",
+            "fuel_moisture"
+        ],
+        "created": "2026-05-09T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (esm-hjnq)"
+        ],
+        "references": [
+            {
+                "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 5 (100-hour timelag fuel moisture)."
+            }
+        ]
+    },
+    "models": {
+        "HundredHourFuelMoisture": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:279\nUpstream `HundredHourFuelMoisture` is an MTK `@component` with three state variables (MC100, EMCBAR, BNDRYH) that follow daily discrete update equations. The model computes weighted 24-hour averages of equilibrium moisture content (EMCBAR) and boundary conditions (BNDRYH), then updates the 100-hour fuel moisture (MC100) using a response coefficient. Daylength is computed from latitude and Julian day using solar declination. The response_coef constant is computed as 1.0 - 0.87 * exp(-0.24) ≈ 0.2804."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "s_ref": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 1.0,
+                    "description": "Reference time for non-dimensionalization."
+                },
+                "rad_ref": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 1.0,
+                    "description": "Reference angle for non-dimensionalization."
+                },
+                "hr_to_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3600.0,
+                    "description": "Hours to seconds conversion factor (dimensionless after non-dimensionalization)."
+                },
+                "response_coef": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.280401,
+                    "description": "Moisture response coefficient (dimensionless), computed as 1.0 - 0.87 * exp(-0.24) ≈ 0.2804."
+                },
+                "EMCMIN": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.05,
+                    "description": "EMC at maximum temperature / minimum RH (dimensionless fraction). Default 0.05 = 5%."
+                },
+                "EMCMAX": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.20,
+                    "description": "EMC at minimum temperature / maximum RH (dimensionless fraction). Default 0.20 = 20%."
+                },
+                "PPTDUR": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 0.0,
+                    "description": "Duration of precipitation (seconds)."
+                },
+                "LAT": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.6981,
+                    "description": "Station latitude in radians. Default 0.6981 rad ≈ 40 degrees."
+                },
+                "JDATE": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 180.0,
+                    "description": "Julian day of year (1-366, dimensionless). Default 180 ≈ summer solstice."
+                },
+                "YMC100": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.10,
+                    "description": "Previous day's MC100 value (dimensionless fraction). Default 0.10 = 10%."
+                },
+                "MC100": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "100-hour fuel moisture content (dimensionless fraction)."
+                },
+                "EMCBAR": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Weighted 24-hour average EMC (dimensionless fraction)."
+                },
+                "BNDRYH": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Weighted 24-hour average boundary condition (dimensionless fraction)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "PPTDUR_hr",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": ["PPTDUR", "s_ref"]
+                            },
+                            "hr_to_s"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "LAT_nd",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["LAT", "rad_ref"]
+                    }
+                },
+                {
+                    "lhs": "DECL",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.41008,
+                            {
+                                "op": "sin",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": ["JDATE", 82]
+                                            },
+                                            0.01745
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "tan_product",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "tan",
+                                "args": ["LAT_nd"]
+                            },
+                            {
+                                "op": "tan",
+                                "args": ["DECL"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "tan_product_clamped",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            -0.99,
+                            {
+                                "op": "min",
+                                "args": [
+                                    0.99,
+                                    "tan_product"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "DAYLIT",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            24.0,
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "acos",
+                                                "args": ["tan_product_clamped"]
+                                            },
+                                            3.1416
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "EMCBAR",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "DAYLIT",
+                                            "EMCMIN"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [24.0, "DAYLIT"]
+                                            },
+                                            "EMCMAX"
+                                        ]
+                                    }
+                                ]
+                            },
+                            24.0
+                        ]
+                    }
+                },
+                {
+                    "lhs": "BNDRYH",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [24.0, "PPTDUR_hr"]
+                                            },
+                                            "EMCBAR"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "PPTDUR_hr",
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [0.5, { "op": "*", "args": ["PPTDUR_hr", "PPTDUR_hr"] }]
+                                                            },
+                                                            41.0
+                                                        ]
+                                                    },
+                                                    100.0
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            24.0
+                        ]
+                    }
+                },
+                {
+                    "lhs": "MC100",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "YMC100",
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": ["BNDRYH", "YMC100"]
+                                    },
+                                    "response_coef"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_summer_no_precip",
+                    "description": "Summer conditions (JDATE=180, LAT=40deg), no precipitation (PPTDUR=0). Default EMCMIN=0.05, EMCMAX=0.20, YMC100=0.10. Tests daylength calculation and basic moisture update.",
+                    "parameter_overrides": {
+                        "LAT": 0.6981,
+                        "JDATE": 180.0,
+                        "PPTDUR": 0.0,
+                        "EMCMIN": 0.05,
+                        "EMCMAX": 0.20,
+                        "YMC100": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                    ]
+                },
+                {
+                    "id": "winter_short_day",
+                    "description": "Winter conditions (JDATE=30, LAT=40deg), short daylength. Tests seasonal variation in EMCBAR calculation.",
+                    "parameter_overrides": {
+                        "LAT": 0.6981,
+                        "JDATE": 30.0,
+                        "PPTDUR": 0.0,
+                        "EMCMIN": 0.05,
+                        "EMCMAX": 0.20,
+                        "YMC100": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                    ]
+                },
+                {
+                    "id": "with_precipitation",
+                    "description": "Moderate precipitation (PPTDUR=3600s = 1 hour). Tests precipitation weighting in BNDRYH calculation.",
+                    "parameter_overrides": {
+                        "LAT": 0.6981,
+                        "JDATE": 180.0,
+                        "PPTDUR": 3600.0,
+                        "EMCMIN": 0.05,
+                        "EMCMAX": 0.20,
+                        "YMC100": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                    ]
+                },
+                {
+                    "id": "dry_conditions",
+                    "description": "Dry conditions: low EMCMAX (0.10), previous moisture 0.05. Tests lower bound of moisture range.",
+                    "parameter_overrides": {
+                        "LAT": 0.6981,
+                        "JDATE": 180.0,
+                        "PPTDUR": 0.0,
+                        "EMCMIN": 0.03,
+                        "EMCMAX": 0.10,
+                        "YMC100": 0.05
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.07402 }
+                    ]
+                },
+                {
+                    "id": "humid_conditions",
+                    "description": "Humid conditions: high EMCMAX (0.30), previous moisture 0.20. Tests upper bound of moisture range.",
+                    "parameter_overrides": {
+                        "LAT": 0.6981,
+                        "JDATE": 180.0,
+                        "PPTDUR": 0.0,
+                        "EMCMIN": 0.15,
+                        "EMCMAX": 0.30,
+                        "YMC100": 0.20
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.25608 }
+                    ]
+                },
+                {
+                    "id": "equator_latitude",
+                    "description": "Equatorial location (LAT=0), constant daylength ~12 hours year-round.",
+                    "parameter_overrides": {
+                        "LAT": 0.0,
+                        "JDATE": 180.0,
+                        "PPTDUR": 0.0,
+                        "EMCMIN": 0.05,
+                        "EMCMAX": 0.20,
+                        "YMC100": 0.10
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                    ]
+                }
+            ]
+        }
+    }
+}
