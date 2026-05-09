@@ -1,0 +1,222 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ThousandHourFuelMoisture",
+        "description": "1000-hour fuel moisture content per NFDRS Cohen & Deeming (1985), page 5. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:354 (`ThousandHourFuelMoisture` @component). ODE system with daily update equation for MC1000 based on 7-day running average boundary condition.",
+        "tags": [
+            "wildland_fire",
+            "nfdrs",
+            "fuel_moisture"
+        ],
+        "created": "2026-05-09T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (esm-3e0q)"
+        ],
+        "references": [
+            {
+                "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 5 (1000-hour fuel moisture)."
+            }
+        ]
+    },
+    "models": {
+        "ThousandHourFuelMoisture": {
+            "reference": {
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:354\nUpstream `ThousandHourFuelMoisture` is an MTK `@component` with an ODE system for 1000-hour fuel moisture. The model tracks MC1000 (1000-hour fuel moisture content) and BNDRYT (weighted 24-hour average boundary condition). The daily update equation MC1000 = PM1000 + (BDYBAR - PM1000) * response_coef implements the moisture response with response_coef = 1.0 - 0.82*exp(-0.168) ≈ 0.307 (Cohen & Deeming 1985, page 5).\n\nThe BNDRYT equation computes the weighted 24-hour average boundary condition accounting for precipitation duration: BNDRYT = ((24 - PPTDUR_hr) * EMCBAR + PPTDUR_hr * (2.7*PPTDUR_hr + 76)/100) / 24, where PPTDUR_hr is precipitation duration in hours.\n\nTODO_GAP: gt-p3ep - non-standard op '*' with 3 args likely requires a registered function declaration"
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "EMCBAR": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.1,
+                    "description": "Weighted 24-hour average EMC (equilibrium moisture content) at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture."
+                },
+                "PPTDUR": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 0.0,
+                    "description": "Duration of precipitation (seconds). Default 0.0 = no precipitation."
+                },
+                "BDYBAR": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.15,
+                    "description": "7-day running average boundary condition (dimensionless fraction). Default 0.15 = 15% moisture."
+                },
+                "PM1000": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.10,
+                    "description": "Previous MC1000 value (dimensionless fraction). Used as initial condition for the daily update equation."
+                },
+                "s_ref": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 1.0,
+                    "description": "Reference time for non-dimensionalization (MTK unit-balancing constant)."
+                },
+                "hr_to_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3600.0,
+                    "description": "Hours-to-seconds conversion factor (dimensionless after non-dimensionalization). Preserved from upstream `@constants`."
+                },
+                "response_coef": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.30680985555857987,
+                    "description": "Moisture response coefficient (dimensionless). Computed as 1.0 - 0.82*exp(-0.168) ≈ 0.307 per Cohen & Deeming (1985) page 5."
+                },
+                "MC1000": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "1000-hour fuel moisture content (dimensionless fraction)."
+                },
+                "BNDRYT": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Weighted 24-hour average boundary condition for 1000-hr (dimensionless fraction)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "BNDRYT",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            76.0,
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [2.7, "PPTDUR"]
+                                                                                    },
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": ["hr_to_s", "s_ref"]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    "PPTDUR"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    100.0,
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": ["hr_to_s", "s_ref"]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "EMCBAR",
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    24.0,
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [-1, "PPTDUR"]
+                                                                            },
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": ["hr_to_s", "s_ref"]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            24.0
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "MC1000",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "PM1000",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "response_coef",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "BDYBAR",
+                                            {
+                                                "op": "*",
+                                                "args": [-1, "PM1000"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "variable": "MC1000",
+                    "time": 1.0,
+                    "expected": 0.13068098555857987,
+                    "tolerance": {
+                        "rel": 1.0e-10
+                    },
+                    "description": "Daily update: with BDYBAR=0.15, PM1000=0.10, response_coef≈0.307, MC1000 = 0.10 + (0.15-0.10)*0.307 ≈ 0.1307"
+                },
+                {
+                    "variable": "BNDRYT",
+                    "time": 1.0,
+                    "expected": 0.1,
+                    "tolerance": {
+                        "rel": 1.0e-10
+                    },
+                    "description": "No precipitation (PPTDUR=0): BNDRYT = EMCBAR = 0.1"
+                }
+            ]
+        }
+    }
+}
