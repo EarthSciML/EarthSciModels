@@ -1,0 +1,514 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ClOxCycle",
+        "description": "Stratospheric ClOx catalytic ozone destruction cycle (Seinfeld & Pandis 2006, Ch. 5 §5.5.1). Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:272 (`ClOxCycle` @component). Implements 4 ODEs (Cl, ClO, HCl, ClONO2) coupled to 2 algebraic family sums (ClOx = Cl + ClO, Cly = Cl + ClO + HCl + ClONO2). Rate coefficients are Arrhenius (k = A·exp(C/T)) for the five binary reactions and a (T_ref/T)^3.4 form for the termolecular ClO + NO2 + M → ClONO2 channel. All upstream `@constants` are encoded as parameters with their literal SI defaults; physical-condition `@parameters` (T, M, photolysis rates, fixed-bath species O, O3, NO, NO2, OH, CH4) are also parameters so the cycle can be exercised at different atmospheric conditions.",
+        "tags": [
+            "gaschem",
+            "stratospheric",
+            "ClOx",
+            "ozone-depletion",
+            "catalytic-cycle",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-q2id)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Chapter 5 (Stratospheric Chemistry), §5.5.1 (ClOx catalytic cycle, pp. 162-168), Eqs. 5.29-5.30."
+            }
+        ]
+    },
+    "models": {
+        "ClOxCycle": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:272\n\nUpstream `ClOxCycle` is an MTK `@component` with 12 `@constants` (Arrhenius pre-factors and activation temperatures for five binary channels plus the termolecular ClO + NO2 + M reference), 9 `@parameters` (T, M, j_ClONO2, and the six fixed-bath concentrations CH4, O, O3, NO, NO2, OH), and 6 `@variables` (4 time-indexed states Cl, ClO, HCl, ClONO2 + 2 algebraic family sums ClOx, Cly). All 6 equations preserved verbatim: 4 ODEs (D(Cl), D(ClO), D(HCl), D(ClONO2)) + 2 algebraic (ClOx ~ Cl + ClO, Cly ~ Cl + ClO + HCl + ClONO2). The upstream structural test (test/StratosphericChemistry_test.jl:71-81) asserts `length(equations(sys)) == 6` and that Cl, ClO, ClONO2, ClOx appear as states — both preserved here.\n\nUpstream `@constants` are encoded as parameters with their upstream SI default values, matching the convention used by sibling migrations in this rig (snow_thermal.esm encodes physical constants as parameters with default; diameter_growth.esm encodes R_gas, D_diff similarly). Rate coefficients are written inline in the equations as `A * exp(C / T)` (binary) and `A * (T_ref / T)^3.4` (termolecular ClO + NO2 + M) per Seinfeld & Pandis Table B.1/B.2 (pp. 162-167). CGS→SI conversion factors (cm³/molec/s × 1e-6; cm⁶/molec²/s × 1e-12) are folded into the `_A` defaults: e.g. upstream Cl + O3 pre-factor 2.3e-11 cm³/molec/s → 2.3e-17 m³/s.\n\nCly conservation: the upstream `Cly Conservation (ClOx Cycle)` test (test/StratosphericChemistry_test.jl:266-290) asserts that Cly = Cl + ClO + HCl + ClONO2 is conserved to rtol = 1e-6 over a 1 s integration. This is structurally exact for this component — summing the four ODEs:\n\n    D(Cl)     = -k_Cl_O3·Cl·O3 + k_ClO_O·ClO·O + k_ClO_NO·ClO·NO - k_Cl_CH4·Cl·CH4 + k_OH_HCl·OH·HCl + j_ClONO2·ClONO2\n    D(ClO)    = +k_Cl_O3·Cl·O3 - k_ClO_O·ClO·O - k_ClO_NO·ClO·NO - k_ClO_NO2_M·ClO·NO2·M\n    D(HCl)    = +k_Cl_CH4·Cl·CH4 - k_OH_HCl·OH·HCl\n    D(ClONO2) = +k_ClO_NO2_M·ClO·NO2·M - j_ClONO2·ClONO2\n    Σ         = 0\n\nso D(Cly) ≡ 0 analytically and any observed drift in Cly is integrator roundoff — this is why the upstream test uses rtol = 1e-6 over 1 s while internal solver tolerances run at abstol = 1e-12, reltol = 1e-12. The migration preserves this exact conservation structure.\n\nClOx (= Cl + ClO) is NOT conserved: D(ClOx) = -k_Cl_CH4·Cl·CH4 + k_OH_HCl·OH·HCl + j_ClONO2·ClONO2 - k_ClO_NO2_M·ClO·NO2·M, the four-channel exchange between the active ClOx pair and the reservoir species HCl and ClONO2. The Cl + CH4 / OH + HCl pair shuttles between ClOx and HCl; the ClO + NO2 + M / ClONO2 + hν pair shuttles between ClOx and ClONO2.\n\nTolerance rationale (model-level rel=1e-6): reference trajectories from upstream Julia MTK Tsit5 integration at abstol=1e-10, reltol=1e-10. 1e-6 covers Tsit5↔SciPy LSODA truncation over 3600 s plus float64 roundoff. Cly conservation runs at the same 1e-6 — it matches the upstream test tolerance (test/StratosphericChemistry_test.jl:289). Several anchors test small-fractional deltas near the initial reservoir mass (HCl, ClONO2 changing by 0.1-1% over short windows) — these use looser per-assertion abs floors derived from the variable magnitude (~1e15 m^-3 × 1e-6 = 1e9 abs floor).\n\nDomain validity: this is a stratospheric component. Defaults match the upstream component (T = 227 K and M = 3.1e23 m^-3 are ~30 km conditions; CH4 = 1e19 m^-3, O3 = 3e18 m^-3 are typical stratospheric values). All bath species (O, O3, NO, NO2, OH, CH4) are parameters here because the upstream component treats them as such — this cycle is a sub-model that runs against externally-prescribed environmental conditions, not a self-contained chemistry box. Coupling with the larger StratosphericOzoneSystem (test/StratosphericChemistry_test.jl:94+) is what promotes these to dynamical species; that integration is out of scope for this single-component migration."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 227.0,
+                    "description": "Temperature. Default 227 K matches the upstream component and is the canonical 30 km stratospheric value (Seinfeld & Pandis Table 5.1)."
+                },
+                "j_ClONO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-4,
+                    "description": "ClONO2 photolysis rate (ClONO2 + hν → Cl + NO3)."
+                },
+                "CH4": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e19,
+                    "description": "Methane number density (1e13 molec/cm^3 × 1e6 → 1e19 m^-3). Drives the Cl + CH4 → HCl reservoir-formation channel."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.1e23,
+                    "description": "Air number density at 30 km (3.1e17 molec/cm^3 × 1e6 → 3.1e23 m^-3). Third body for the ClO + NO2 + M → ClONO2 termolecular channel."
+                },
+                "O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "Atomic oxygen number density (1e7 molec/cm^3 × 1e6 → 1e13 m^-3). Drives the ClO + O → Cl + O2 catalytic-cycle closing step."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.0e18,
+                    "description": "Ozone number density (3e12 molec/cm^3 × 1e6 → 3e18 m^-3). Drives the Cl + O3 → ClO + O2 catalytic-cycle initiating step."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "NO number density (1e9 molec/cm^3 × 1e6 → 1e15 m^-3). Drives the ClO + NO → Cl + NO2 alternative recycling channel."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "NO2 number density (1e9 molec/cm^3 × 1e6 → 1e15 m^-3). Reactant in the ClO + NO2 + M → ClONO2 reservoir-formation channel."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "OH number density (1e6 molec/cm^3 × 1e6 → 1e12 m^-3). Drives the OH + HCl → Cl + H2O reservoir-release channel."
+                },
+                "k_Cl_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.3e-17,
+                    "description": "Arrhenius pre-factor for Cl + O3 → ClO + O2 (upstream constant: 2.3e-11 cm^3/molec/s × 1e-6 → 2.3e-17 m^3/s, Seinfeld & Pandis Table B.1, p. 162)."
+                },
+                "C_Cl_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -200.0,
+                    "description": "Activation temperature (C = -E_a/R) for Cl + O3 (upstream constant: -200 K, Seinfeld & Pandis p. 162)."
+                },
+                "k_ClO_O_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3.0e-17,
+                    "description": "Arrhenius pre-factor for ClO + O → Cl + O2 (upstream constant: 3.0e-11 cm^3/molec/s × 1e-6 → 3.0e-17 m^3/s, Seinfeld & Pandis Table B.1, p. 162)."
+                },
+                "C_ClO_O": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 70.0,
+                    "description": "Activation temperature for ClO + O (upstream constant: 70 K, Seinfeld & Pandis p. 162). Positive C means the reaction speeds up at low T (catalytic cycle is more efficient in the cold stratosphere)."
+                },
+                "k_ClO_NO_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.4e-18,
+                    "description": "Arrhenius pre-factor for ClO + NO → Cl + NO2 (upstream constant: 6.4e-12 cm^3/molec/s × 1e-6 → 6.4e-18 m^3/s, Seinfeld & Pandis Table B.1, p. 163)."
+                },
+                "C_ClO_NO": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 290.0,
+                    "description": "Activation temperature for ClO + NO (upstream constant: 290 K)."
+                },
+                "k_Cl_CH4_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 9.6e-18,
+                    "description": "Arrhenius pre-factor for Cl + CH4 → HCl + CH3 (upstream constant: 9.6e-12 cm^3/molec/s × 1e-6 → 9.6e-18 m^3/s, Seinfeld & Pandis Table B.1, p. 168)."
+                },
+                "C_Cl_CH4": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -1360.0,
+                    "description": "Activation temperature for Cl + CH4 (upstream constant: -1360 K — strongly endothermic, slow in the cold stratosphere)."
+                },
+                "k_OH_HCl_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.6e-18,
+                    "description": "Arrhenius pre-factor for OH + HCl → Cl + H2O (upstream constant: 2.6e-12 cm^3/molec/s × 1e-6 → 2.6e-18 m^3/s, Seinfeld & Pandis p. 168)."
+                },
+                "C_OH_HCl": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -350.0,
+                    "description": "Activation temperature for OH + HCl (upstream constant: -350 K)."
+                },
+                "k_ClO_NO2_M_A": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 1.8e-43,
+                    "description": "Pre-factor for the termolecular ClO + NO2 + M → ClONO2 reaction at T_ref = 300 K (upstream constant: 1.8e-31 cm^6/molec^2/s × 1e-12 → 1.8e-43 m^6/s, Seinfeld & Pandis p. 165). Rate is k = A · (T_ref/T)^3.4, not Arrhenius."
+                },
+                "T_ref_ClO": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Reference temperature for the ClO + NO2 + M rate law k = k_A · (T_ref/T)^3.4."
+                },
+                "Cl": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e10,
+                    "description": "Cl atom number density (upstream default initial value 1e4 molec/cm^3 × 1e6 → 1e10 m^-3)."
+                },
+                "ClO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "ClO number density (upstream default initial value 1e7 molec/cm^3 × 1e6 → 1e13 m^-3)."
+                },
+                "HCl": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "HCl reservoir number density (upstream default initial value 1e9 molec/cm^3 × 1e6 → 1e15 m^-3)."
+                },
+                "ClONO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "ClONO2 reservoir number density (upstream default initial value 1e9 molec/cm^3 × 1e6 → 1e15 m^-3)."
+                },
+                "ClOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Active chlorine family ClOx = Cl + ClO (algebraic). Catalytically destroys O3 via the Cl + O3 / ClO + O cycle."
+                },
+                "Cly": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total inorganic chlorine Cly = Cl + ClO + HCl + ClONO2 (algebraic). Conserved by the four ODEs (D(Cly) ≡ 0)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["Cl"]},
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            {"op": "*", "args": ["k_Cl_O3_A", {"op": "exp", "args": [{"op": "/", "args": ["C_Cl_O3", "T"]}]}]},
+                                            "Cl",
+                                            "O3"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {"op": "*", "args": ["k_Cl_CH4_A", {"op": "exp", "args": [{"op": "/", "args": ["C_Cl_CH4", "T"]}]}]},
+                                            "Cl",
+                                            "CH4"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_ClO_O_A", {"op": "exp", "args": [{"op": "/", "args": ["C_ClO_O", "T"]}]}]},
+                                    "ClO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_ClO_NO_A", {"op": "exp", "args": [{"op": "/", "args": ["C_ClO_NO", "T"]}]}]},
+                                    "ClO",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_OH_HCl_A", {"op": "exp", "args": [{"op": "/", "args": ["C_OH_HCl", "T"]}]}]},
+                                    "OH",
+                                    "HCl"
+                                ]
+                            },
+                            {"op": "*", "args": ["j_ClONO2", "ClONO2"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["ClO"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_Cl_O3_A", {"op": "exp", "args": [{"op": "/", "args": ["C_Cl_O3", "T"]}]}]},
+                                    "Cl",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {"op": "*", "args": ["k_ClO_O_A", {"op": "exp", "args": [{"op": "/", "args": ["C_ClO_O", "T"]}]}]},
+                                            "ClO",
+                                            "O"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {"op": "*", "args": ["k_ClO_NO_A", {"op": "exp", "args": [{"op": "/", "args": ["C_ClO_NO", "T"]}]}]},
+                                            "ClO",
+                                            "NO"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {"op": "*", "args": ["k_ClO_NO2_M_A", {"op": "^", "args": [{"op": "/", "args": ["T_ref_ClO", "T"]}, 3.4]}]},
+                                            "ClO",
+                                            "NO2",
+                                            "M"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["HCl"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_Cl_CH4_A", {"op": "exp", "args": [{"op": "/", "args": ["C_Cl_CH4", "T"]}]}]},
+                                    "Cl",
+                                    "CH4"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_OH_HCl_A", {"op": "exp", "args": [{"op": "/", "args": ["C_OH_HCl", "T"]}]}]},
+                                    "OH",
+                                    "HCl"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["ClONO2"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "*", "args": ["k_ClO_NO2_M_A", {"op": "^", "args": [{"op": "/", "args": ["T_ref_ClO", "T"]}, 3.4]}]},
+                                    "ClO",
+                                    "NO2",
+                                    "M"
+                                ]
+                            },
+                            {"op": "*", "args": ["j_ClONO2", "ClONO2"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ClOx",
+                    "rhs": {"op": "+", "args": ["Cl", "ClO"]}
+                },
+                {
+                    "lhs": "Cly",
+                    "rhs": {"op": "+", "args": ["Cl", "ClO", "HCl", "ClONO2"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_30km_short_window",
+                    "description": "Reference trajectory at upstream default conditions (T = 227 K, M = 3.1e23 m^-3 — 30 km, defaults for all bath species, initial Cl = 1e10, ClO = 1e13, HCl = 1e15, ClONO2 = 1e15). Samples Cl, ClO, HCl, ClONO2, and the algebraic family sums ClOx and Cly at t = 0, 1, 60, 600 s. Pinned from upstream Julia MTK Tsit5 integration at abstol=1e-10, reltol=1e-10. Exercises all four ODE channels (Cl + O3, ClO + O, ClO + NO, Cl + CH4, OH + HCl, ClO + NO2 + M, j_ClONO2) and both algebraic family sums simultaneously.",
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "Cl",     "time": 0.0,  "expected": 1.0e10},
+                        {"variable": "ClO",    "time": 0.0,  "expected": 1.0e13},
+                        {"variable": "HCl",    "time": 0.0,  "expected": 1.0e15},
+                        {"variable": "ClONO2", "time": 0.0,  "expected": 1.0e15},
+                        {"variable": "ClOx",   "time": 0.0,  "expected": 1.001e13},
+                        {"variable": "Cly",    "time": 0.0,  "expected": 2.01001e15},
+                        {"variable": "Cl",     "time": 1.0,  "expected": 1.1667854808897636e10},
+                        {"variable": "ClO",    "time": 1.0,  "expected": 1.009465837903493e13},
+                        {"variable": "HCl",    "time": 1.0,  "expected": 1.0000022221414302e15, "tolerance": {"abs": 1.0e9}},
+                        {"variable": "ClONO2", "time": 1.0,  "expected": 9.999014516247262e14,  "tolerance": {"abs": 1.0e9}},
+                        {"variable": "ClOx",   "time": 1.0,  "expected": 1.0106326233843828e13},
+                        {"variable": "Cl",     "time": 60.0, "expected": 1.6190275896757105e10},
+                        {"variable": "ClO",    "time": 60.0, "expected": 1.5698213820352043e13},
+                        {"variable": "ClOx",   "time": 60.0, "expected": 1.57144040962488e13},
+                        {"variable": "Cl",     "time": 600.0, "expected": 5.2499282405076584e10},
+                        {"variable": "ClO",    "time": 600.0, "expected": 6.069977424037587e13},
+                        {"variable": "HCl",    "time": 600.0, "expected": 1.0044129057386172e15},
+                        {"variable": "ClONO2", "time": 600.0, "expected": 9.448448207386024e14},
+                        {"variable": "ClOx",   "time": 600.0, "expected": 6.0752273522780945e13}
+                    ]
+                },
+                {
+                    "id": "default_30km_long_window_one_hour",
+                    "description": "Same upstream-default conditions extended to t = 3600 s (1 hour) — the exact window of the upstream `ClOx Cycle Integration` test (test/StratosphericChemistry_test.jl:182-202). At this point HCl has grown ~8% (~1.08e15) and ClONO2 has dropped ~25% (~7.5e14), as ClO + NO2 + M / ClONO2 + hν has not yet reached steady state and the Cl + CH4 / OH + HCl channel slowly transfers Cl into HCl. Exercises long-window numerical agreement and verifies positivity-preservation (all species ≥ 0) as the upstream test asserts.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "assertions": [
+                        {"variable": "Cl",     "time": 3600.0, "expected": 1.4591756347657654e11},
+                        {"variable": "ClO",    "time": 3600.0, "expected": 1.767694110367072e14},
+                        {"variable": "HCl",    "time": 3600.0, "expected": 1.0824486343246476e15},
+                        {"variable": "ClONO2", "time": 3600.0, "expected": 7.506460370751814e14},
+                        {"variable": "ClOx",   "time": 3600.0, "expected": 1.7691532860018375e14}
+                    ]
+                },
+                {
+                    "id": "cly_conservation_short_window",
+                    "description": "Reproduces the upstream `Cly Conservation (ClOx Cycle)` test (test/StratosphericChemistry_test.jl:266-290): integrating 1 s under defaults, total inorganic chlorine Cly = Cl + ClO + HCl + ClONO2 must remain at its initial value 2.01001e15 m^-3 to rtol = 1e-6. Analytically D(Cly) = D(Cl) + D(ClO) + D(HCl) + D(ClONO2) ≡ 0, so any deviation is integrator roundoff. Samples Cly at three points spanning the integration window.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Cly", "time": 0.0, "expected": 2.01001e15},
+                        {"variable": "Cly", "time": 0.1, "expected": 2.0100100000000005e15},
+                        {"variable": "Cly", "time": 0.5, "expected": 2.0100100000000005e15},
+                        {"variable": "Cly", "time": 1.0, "expected": 2.0100100000000005e15}
+                    ]
+                },
+                {
+                    "id": "warm_temperature_40km",
+                    "description": "Reference trajectory at T = 251 K (40 km conditions, Seinfeld & Pandis Table 5.1) with all other parameters at defaults. Warmer T accelerates the Arrhenius positive-C channels (ClO + O, ClO + NO, OH + HCl) and slows the negative-C channels (Cl + O3, Cl + CH4) — net effect is faster ClOx cycling (ClO at 1 hour ≈ 1.63e14, vs ~1.77e14 at 30 km). Exercises the temperature-dependent rate-law branch at a textbook-relevant altitude. Reference values pinned from upstream Tsit5 integration.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"T": 251.0},
+                    "assertions": [
+                        {"variable": "Cl",     "time": 600.0,  "expected": 4.217260537589072e10},
+                        {"variable": "ClO",    "time": 600.0,  "expected": 5.959277313818142e13},
+                        {"variable": "HCl",    "time": 600.0,  "expected": 1.0064495943347608e15},
+                        {"variable": "ClONO2", "time": 600.0,  "expected": 9.439254599216819e14},
+                        {"variable": "Cl",     "time": 3600.0, "expected": 1.0948492576625302e11},
+                        {"variable": "ClO",    "time": 3600.0, "expected": 1.6303934405270762e14},
+                        {"variable": "HCl",    "time": 3600.0, "expected": 1.1135238564477112e15},
+                        {"variable": "ClONO2", "time": 3600.0, "expected": 7.333373145738068e14}
+                    ]
+                },
+                {
+                    "id": "no_methane_channel",
+                    "description": "Methane-free scenario (CH4 = 0). Eliminates the Cl + CH4 → HCl reservoir-formation channel, so HCl can only decrease (OH + HCl → Cl is the only HCl term). After 1 hour HCl has dropped ~0.2% (vs growing ~8% at default CH4) because the only HCl source is the externally-prescribed OH + HCl reaction. Exercises the parameter-sweep behavior of the CH4 channel; reference values pinned from upstream Tsit5 integration.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"CH4": 0.0},
+                    "assertions": [
+                        {"variable": "Cl",     "time": 60.0,   "expected": 1.6488836255480213e10},
+                        {"variable": "ClO",    "time": 60.0,   "expected": 1.5897307817018953e13},
+                        {"variable": "HCl",    "time": 600.0,  "expected": 9.99666239397679e14,  "tolerance": {"abs": 1.0e10}},
+                        {"variable": "HCl",    "time": 3600.0, "expected": 9.979991065847689e14, "tolerance": {"abs": 1.0e10}},
+                        {"variable": "ClO",    "time": 3600.0, "expected": 2.4757567995764284e14}
+                    ]
+                },
+                {
+                    "id": "no_no2_channel",
+                    "description": "NO2-free scenario (NO2 = 0). Eliminates the ClO + NO2 + M → ClONO2 reservoir-formation channel, so ClONO2 can only decrease (ClONO2 + hν → Cl is the only ClONO2 term). After 1 hour ClONO2 has dropped ~30% (vs ~25% at default NO2) because the photolysis loss is no longer balanced by formation. Exercises the parameter-sweep behavior of the termolecular ClO + NO2 + M channel; reference values pinned from upstream Tsit5 integration.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"NO2": 0.0},
+                    "assertions": [
+                        {"variable": "Cl",     "time": 60.0,   "expected": 1.6279100182742704e10},
+                        {"variable": "ClO",    "time": 60.0,   "expected": 1.5808340135467223e13},
+                        {"variable": "ClONO2", "time": 600.0,  "expected": 9.417645335842521e14},
+                        {"variable": "ClONO2", "time": 3600.0, "expected": 6.976763260710351e14},
+                        {"variable": "ClO",    "time": 3600.0, "expected": 2.17428446195968e14}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "clox_cycle_default_one_hour",
+                    "description": "Default 30 km stratospheric run (T = 227 K, M = 3.1e23 m^-3, upstream initial conditions) over 1 hour. Surfaces the canonical ClOx-cycle behavior: ClO grows by ~18x as Cl + O3 drives the catalytic cycle, while HCl slowly accumulates and ClONO2 partially photolyzes. Reproduces the upstream `ClOx Cycle Integration` reference run (test/StratosphericChemistry_test.jl:182).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "Cl": 1.0e10,
+                            "ClO": 1.0e13,
+                            "HCl": 1.0e15,
+                            "ClONO2": 1.0e15
+                        }
+                    },
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "plots": [
+                        {
+                            "id": "active_clox_vs_time",
+                            "type": "line",
+                            "description": "Active ClOx species (Cl, ClO) vs time at 30 km defaults. Cl tracks ClO via the quasi-steady Cl/ClO ratio set by Eq. 5.30; both grow as Cl + O3 outpaces the reservoir-formation channels in the first hour.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "ClO", "label": "ClO (m^-3)"}
+                        },
+                        {
+                            "id": "reservoir_species_vs_time",
+                            "type": "line",
+                            "description": "Reservoir species (HCl, ClONO2) vs time at 30 km defaults. HCl grows slowly via Cl + CH4, while ClONO2 partially photolyzes — the two reservoirs equilibrate on different timescales because the formation/loss rate constants differ.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "ClONO2", "label": "ClONO2 (m^-3)"}
+                        },
+                        {
+                            "id": "cly_conservation_vs_time",
+                            "type": "line",
+                            "description": "Total inorganic chlorine Cly = Cl + ClO + HCl + ClONO2 vs time at 30 km defaults. Should remain constant at the initial value 2.01001e15 m^-3 — the upstream Cly Conservation test reference plot.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "Cly", "label": "Cly (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "clox_cycle_temperature_sweep",
+                    "description": "Sweep T over the stratospheric range [200, 270] K at otherwise-default conditions. Surfaces the temperature dependence of the ClOx cycle: ClO at t = 3600 s rises with T (the positive-C Arrhenius channels — ClO + O, ClO + NO, OH + HCl — speed up faster than the negative-C channels — Cl + O3, Cl + CH4 — slow down). The termolecular ClO + NO2 + M → ClONO2 also slows at higher T (k ∝ (T_ref/T)^3.4), shifting the partition away from the ClONO2 reservoir.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "Cl": 1.0e10,
+                            "ClO": 1.0e13,
+                            "HCl": 1.0e15,
+                            "ClONO2": 1.0e15
+                        }
+                    },
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 200.0, "stop": 270.0, "count": 8, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ClO_final_vs_T",
+                            "type": "line",
+                            "description": "Final ClO at t = 3600 s vs temperature: shows the temperature-dependent saturation of the ClOx cycle as the relative weight of Arrhenius positive-C / negative-C / termolecular channels shifts.",
+                            "x": {"variable": "T",   "label": "T (K)"},
+                            "y": {"variable": "ClO", "label": "ClO at t=3600 s (m^-3)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
