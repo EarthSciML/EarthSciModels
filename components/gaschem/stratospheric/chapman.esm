@@ -1,0 +1,432 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ChapmanMechanism",
+        "description": "Stratospheric Chapman mechanism for ozone production and destruction (Seinfeld & Pandis 2006 Ch. 5, §5.2, Eqs. 5.1-5.17). Two-state ODE on atomic oxygen O and ozone O3 driven by the four canonical Chapman reactions: O2 photolysis (j_O2), three-body recombination O + O2 + M → O3 + M (k2 with power-law T-dependence (T_ref/T)^2.4), O3 photolysis (j_O3), and the O + O3 → 2 O2 odd-oxygen sink (k4 with Arrhenius temperature dependence). Odd oxygen Ox = O + O3 is *not* exactly conserved — the Chapman cycle has a net Ox source (2·j_O2·O2·M from O2 photolysis) balanced against an Ox sink (2·k4·O·O3 from the O+O3 reaction) — but on short timescales (≲ 10 s under default mid-stratosphere conditions) the net change is small (~4e-5 relative drift) and the upstream test treats it as quasi-conserved at rtol=1e-4. Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:51 (`ChapmanMechanism` @component). Rate coefficients carry SI units throughout, converted from Seinfeld & Pandis CGS values via cm^6/molec^2/s × 1e-12 → m^6/s for the 3-body k2 and cm^3/molec/s × 1e-6 → m^3/s for the bimolecular k4.",
+        "tags": [
+            "gaschem",
+            "stratospheric",
+            "chapman",
+            "ozone",
+            "photochemistry",
+            "seinfeld-pandis",
+            "ode"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-w9h2)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 5 (Chemistry of the Stratosphere), §5.2 (Chapman Mechanism), pp. 138-149, Eqs. 5.1-5.17."
+            },
+            {
+                "citation": "Brasseur, G. P. and Solomon, S. (2005). Aeronomy of the Middle Atmosphere, 3rd revised and enlarged edition, Springer, Dordrecht. §5.2 (Pure Oxygen Stratosphere). Supporting reference for the Chapman cycle's odd-oxygen budget and the timescale separation between fast O ↔ O3 cycling and slow Ox source-sink chemistry."
+            }
+        ]
+    },
+    "models": {
+        "ChapmanMechanism": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:51\n\nUpstream `ChapmanMechanism` is an MTK `@component` declaring four `@constants` (the 3-body Chapman pre-factor `k2_A` = 6.0e-46 m^6/s for O+O2+M→O3+M, the bimolecular `k4_A` = 8.0e-18 m^3/s for O+O3→2O2, the Arrhenius temperature scale `C_k4` = -2060.0 K for k4, and the reference temperature `T_ref` = 300.0 K for the power-law k2), five `@parameters` (`j_O2` = 1e-10 s^-1 O2 photolysis rate, `j_O3` = 1e-3 s^-1 O3 photolysis rate, `T` = 227.0 K mid-stratosphere reference temperature ~30 km altitude, `M` = 3.0e23 m^-3 air number density 3e17 molec/cm^3 × 1e6, `O2_mix` = 0.21 dimensionless O2 mixing ratio in air), three time-indexed `@variables` (`O(t)` = 1.0e13 m^-3 atomic oxygen default 1e7 molec/cm^3 × 1e6 from S&P Page 145, `O3(t)` = 3.0e18 m^-3 ozone default 3e12 molec/cm^3 × 1e6 from S&P Page 145, and `Ox(t)` the algebraic odd-oxygen family sum), and three equations (two ODEs and one algebraic constraint). Identical structure preserved here. Upstream structural test (test/StratosphericChemistry_test.jl 'Chapman Mechanism Structure', lines 38-49) asserts `length(equations(sys)) == 3` and that O(t), O3(t), and Ox(t) appear in `unknowns(sys)` — matched here by the three entries in `equations` and the O/O3/Ox state declarations in `variables`.\n\nThe four upstream `@constants` (k2_A, k4_A, C_k4, T_ref) are encoded here as `type: parameter` with the upstream values as `default`, matching the convention used by the sibling stratospheric migrations in this rig (hox_cycle.esm encodes its eight upstream `@constants` the same way; clox_cycle.esm encodes its many `@constants` the same way; this is the rig-wide convention for `@constants` migration). The five upstream `@parameters` (j_O2, j_O3, T, M, O2_mix) are also `type: parameter` with their upstream defaults — they were already MTK parameters upstream, so the parameter-vs-constant distinction collapses at the `.esm` schema level. A downstream consumer that wants to override the Chapman rate coefficients (e.g. to test sensitivity to the Table B.1/B.2 rate-coefficient updates between S&P 2006 and JPL 2019) reads them from `parameter_overrides` exactly as it would override T, M, or j_O2.\n\nUpstream rate-coefficient helper bindings (`k2 = k2_A * (T_ref / T)^2.4` and `k4 = k4_A * exp(C_k4 / T)`) and the O2 binding (`O2 = O2_mix * M`) are local Julia bindings expanded into the equation right-hand-sides — they are not user-visible MTK state variables (no `@variables k2`, `@variables k4`, `@variables O2`) so the upstream `unknowns(sys)` returns exactly O, O3, Ox after `mtkcompile`. The migrated `.esm` preserves this by inlining the three sub-expressions directly into each reaction-flux term on the right-hand sides — bit-equivalent to writing the equations with the helper bindings, and matches the `length(unknowns(sys)) == 3` invariant the upstream structural test enforces.\n\nOdd-oxygen (Ox) is *not* exactly conserved by construction in the Chapman cycle — sum of the two ODE right-hand-sides gives `D(O) + D(O3) = 2·j_O2·O2·M - 2·k4·O·O3` (the k2 three-body term and the j_O3 photolysis term cancel exactly because they shuttle O ↔ O3 within the family; only the O2 photolysis source and the O+O3 → 2·O2 sink remain). The algebraic equation `Ox ~ O + O3` simply names the family sum for downstream observers — its value drifts at a rate `D(Ox) = 2·j_O2·O2·M - 2·k4·O·O3` set by the small Chapman source-sink imbalance. Under default conditions (j_O2 = 1e-10, O2 = O2_mix·M = 6.3e22, k4·O3 ≈ 2.8e-3 1/s) the radical-equilibrium O ≈ 1.36e14 m^-3 gives a source ≈ 1.26e13 m^-3/s and a sink ≈ 7.5e11 m^-3/s — a net Ox growth of ~1.18e13 m^-3/s, or ~4e-6 relative per second. On the 10-second window of the upstream 'Odd Oxygen Conservation (Chapman)' test (StratosphericChemistry_test.jl:248-264) this gives ~4e-5 absolute drift relative to the initial 3.00001e18 m^-3 Ox value — within the upstream `rtol = 1e-4` tolerance. The migrated `odd_oxygen_quasi_conservation_short` test below pins the actual Ox trajectory (rather than just asserting conservation) so any structural break in the migration shows up as a wrong-magnitude drift, not just a tolerance failure.\n\nFast radical equilibrium: under default conditions the O atom has a very short lifetime (lifetime ≈ 1 / (k2·O2·M + k4·O3) ≈ 1 / (22.1 + 2.8e-3) ≈ 0.045 s, dominated by the k2·O2·M three-body sink with k2 = k2_A·(300/227)^2.4 ≈ 1.17e-45 m^6/s, O2·M = O2_mix·M^2 = 0.21·9e46 = 1.89e46). O reaches quasi-equilibrium with O3 by t ≈ 0.5 s at a steady-state value O_eq ≈ (2·j_O2·O2·M + j_O3·O3) / (k2·O2·M + k4·O3) ≈ (1.26e13 + 3e15) / 22.1 ≈ 1.36e14 m^-3 (the 3e15 j_O3·O3 channel dominates the source). After that fast settling, O follows the much slower Ox evolution adiabatically (O ≈ O3 · j_O3 / (k2·O2·M + k4·O3) ∝ O3 at fixed environment, S&P Eq. 5.7). The 'default_short_term_10s' test pins the early-time transient up to t = 10 s where O has long since reached its radical equilibrium; 'default_long_term_1day' pins the slow Ox drift over 24 hours.\n\nTemperature dependence: k2 has a power-law T-dependence (T_ref/T)^2.4 (Table B.2 of S&P), unique among the stratospheric rate coefficients in this rig — sibling cycles use Arrhenius forms exclusively. The 'cold_temperature_perturbation' (T = 200 K) and 'warm_temperature_perturbation' (T = 270 K) tests exercise the joint k2/k4 temperature response: at 200 K, k2 = 1.6e-45 (2× faster) while k4 = 8e-18·exp(-10.3) = 2.7e-22 (14× slower than at 227 K), so O accumulates less (1.02e14 vs 1.36e14 default at 1 hour) because the dominant k2 sink is faster. At 270 K, k2 = 7.6e-46 (0.65× slower) and k4 = 8e-18·exp(-7.63) = 3.9e-21 (4.3× faster), so O accumulates more (2.06e14) due to slower k2 sink, but Ox depletes faster due to faster k4·O·O3 odd-oxygen loss.\n\nDensity dependence: M scales O+O2+M three-body production as M^2 (the explicit M factor times the implicit O2 = O2_mix·M factor) and the O2 photolysis source as M (via O2 = O2_mix·M). At higher M (denser, lower altitudes), the M^2 sink for O dominates the M source — O is pushed to a very low steady state (1.4e11 at M=1e25, vs 1.36e14 at M=3e23). At lower M (thinner, higher altitudes), the M^2 sink weakens faster than the source — O accumulates to ~8.6e16 at M=1e22, but Ox actually *decreases* over time because the k4·O·O3 sink becomes proportionally stronger relative to the weakened 2·j_O2·O2_mix·M production. The 'dense_M_perturbation' (M = 1e25) and 'thin_M_perturbation' (M = 1e22) tests pin both regimes.\n\nUnit balance (verified): each flux term has units consistent with d[X]/dt for X in m^-3. The k2 three-body term `k2 · O · O2 · M = (m^6/s) · (m^-3) · (m^-3) · (m^-3) = m^-3/s` ✓. The k4 bimolecular term `k4 · O · O3 = (m^3/s) · (m^-3) · (m^-3) = m^-3/s` ✓. The photolysis terms `j_O2 · O2_mix · M = (1/s) · (1) · (m^-3) = m^-3/s` and `j_O3 · O3 = (1/s) · (m^-3) = m^-3/s` ✓. The (T_ref/T)^2.4 factor is dimensionless because both are in K. The exp(C_k4/T) factor is dimensionless because C_k4 is in K and T is in K. The migrated `.esm` preserves the upstream units verbatim — k2_A in m^6/s, k4_A in m^3/s, C_k4 and T_ref in K, j_O2 and j_O3 in 1/s, T in K, M and O and O3 and Ox in m^-3, O2_mix dimensionless. SI throughout; no CGS↔SI conversion at parse or runtime.\n\nObservability classification: this is an active-ODE system (two state derivatives D(O), D(O3) plus one algebraic Ox constraint), like sibling stratospheric components. Test scenarios sample at non-zero times (t = 0.1, 1.0, 5.0, 10.0, 60.0, 600.0, 1800.0, 3600.0, 21600.0, 86400.0 s across the suite) to exercise both the fast O radical-equilibrium transient (t ≲ 1 s) and the slow Ox source/sink drift (t ≳ 1 hour). The fast-vs-slow timescale separation is the headline behavior the suite captures.\n\nTolerance rationale (model-level rel=1e-6): two-state stiff ODE with widely separated timescales (O equilibrium lifetime ~0.045 s under default conditions, Ox drift timescale ~hours-to-days). The expected values pinned below are LSODA references from the canonical ESS Python runner (`earthsci_toolkit.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` — the same settings the inline-test driver uses), so the cross-integrator drift between reference and gate is zero by construction. Model-level rel=1e-6 matches the spec §6.6.4 default and accommodates accumulated round-off across the long 86400 s window of the 'default_long_term_1day' test (~7e-11 ULP × 86400 / 0.045 s steps ≈ 1.3e-4 cumulative, but bounded by the integrator's adaptive step control). On `initial_conditions_t0` the per-test tolerance is tightened to rel=1e-10 / abs=1e-14 because at t=0 there is no integration drift — only parser→Float64 conversion and the first-step identity evaluation of the initial state. On `zero_photolysis_radical_decay` the assertions on O reaching numerical zero use abs=1e-10 to accommodate the floating-point underflow of a negative-exponential decay below the atol=1e-12 integrator floor.\n\nUpstream test reproduction: the upstream structural test ('Chapman Mechanism Structure', `length(equations(sys)) == 3` with O/O3/Ox state names, lines 38-49) is reproduced by the test-level shape of the `variables` and `equations` blocks. The upstream integration test ('Chapman Mechanism Integration', lines 136-150: 1-day default-IC solve with `abstol=1e-8, reltol=1e-8` asserting `sol.retcode == ReturnCode.Success` and positivity on O and O3) is reproduced and extended by 'default_long_term_1day', which pins not just positivity but the actual O, O3, Ox values at four times across the 24-hour window. The upstream conservation test ('Odd Oxygen Conservation (Chapman)', lines 248-264: 10-second default-IC solve with `abstol=1e-12, reltol=1e-12` asserting `isapprox(Ox_initial, Ox_final, rtol=1e-4)`) is reproduced by `odd_oxygen_quasi_conservation_short`, which pins the actual Ox trajectory at five times in [0, 10] s — both the quasi-conservation bound *and* the magnitude of the slow drift. The upstream zero-photolysis test ('Zero Photolysis Rates', lines 502-523: 1-hour solve with `j_O2=0, j_O3=0` asserting `O[end] < O[1]`) is reproduced and tightened by `zero_photolysis_radical_decay`, which pins O collapsing to numerical zero (~3e-23 m^-3 by t=60 s) and O3 holding at the post-collapse value 3.00001e18 m^-3. The upstream positivity-preservation test ('Positivity Preservation', lines 228-242) is implicitly covered by `default_short_term_10s` and `default_long_term_1day` which pin strictly-positive values throughout. Parameter-sweep coverage (T, M, j_O3, initial conditions) goes beyond the upstream test suite — the upstream 'Chapman Steady-State [O]/[O3] Ratio' test (lines 365-401) uses j_O3=4e-4 to anchor Eq. 5.7's order-of-magnitude prediction with rtol=0.1; the migrated `reduced_jO3_perturbation` test exercises the same parameter override at the canonical default M but at the tighter rel=1e-6 quantitative level rather than the upstream's order-of-magnitude check."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "k2_A": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 6.0e-46,
+                    "description": "Pre-factor for the O + O2 + M → O3 + M three-body recombination rate coefficient k2 = k2_A · (T_ref/T)^2.4 (S&P Table B.2; 6e-34 cm^6/molec^2/s × 1e-12 → m^6/s)."
+                },
+                "k4_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8.0e-18,
+                    "description": "Pre-factor for the O + O3 → 2 O2 bimolecular rate coefficient k4 = k4_A · exp(C_k4/T) (S&P Table B.1; 8e-12 cm^3/molec/s × 1e-6 → m^3/s)."
+                },
+                "C_k4": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -2060.0,
+                    "description": "Arrhenius activation temperature for O + O3 → 2 O2 (S&P Table B.1)."
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Reference temperature for the k2 power-law T-dependence (S&P Table B.2). The k2 coefficient is fit as 6e-34 · (T/300)^-2.4 in CGS, equivalent to k2_A · (T_ref/T)^2.4 in SI."
+                },
+                "j_O2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-10,
+                    "description": "O2 photolysis rate constant (S&P Page 142, S-R band photolysis at ~30 km mid-stratosphere)."
+                },
+                "j_O3": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-3,
+                    "description": "O3 photolysis rate constant (S&P Page 142, Hartley band photolysis at ~30 km mid-stratosphere)."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 227.0,
+                    "description": "Local temperature for the k2 and k4 rate-coefficient evaluations (S&P Page 145 mid-stratosphere reference, ~30 km)."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.0e23,
+                    "description": "Air number density (3e17 molec/cm^3 × 1e6 → m^-3; S&P Page 145 mid-stratosphere reference, ~30 km). Acts as the three-body collider in k2·O·O2·M and as the source of background O2 via O2 = O2_mix · M."
+                },
+                "O2_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.21,
+                    "description": "O2 mixing ratio in air (dimensionless). Combined with M to give O2 number density: O2 = O2_mix · M. Background O2 is assumed at the standard atmospheric mixing ratio throughout the stratosphere (S&P Page 142)."
+                },
+                "O": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "Atomic oxygen O(3P) number density (1e7 molec/cm^3 × 1e6 → m^-3; S&P Page 145 stratospheric reference). State variable: D(O) = 2·j_O2·O2_mix·M - k2_A·(T_ref/T)^2.4·O·O2_mix·M^2 + j_O3·O3 - k4_A·exp(C_k4/T)·O·O3. Has a very short lifetime (~0.045 s under default conditions) and rapidly reaches a quasi-equilibrium with O3 governed by S&P Eq. 5.7."
+                },
+                "O3": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 3.0e18,
+                    "description": "Ozone number density (3e12 molec/cm^3 × 1e6 → m^-3; S&P Page 145 stratospheric reference). State variable: D(O3) = k2_A·(T_ref/T)^2.4·O·O2_mix·M^2 - j_O3·O3 - k4_A·exp(C_k4/T)·O·O3. The O3 timescale is set by the slow Chapman source/sink imbalance (D(Ox) ≈ 2·j_O2·O2·M - 2·k4·O·O3) — much slower than the fast O ↔ O3 cycling within the family."
+                },
+                "Ox": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Odd-oxygen family: algebraic sum Ox ~ O + O3 (S&P §5.2). Not exactly conserved — Chapman has a net Ox source (2·j_O2·O2·M, O2 photolysis adds two O atoms per O2) balanced against an Ox sink (2·k4·O·O3, the O+O3 → 2 O2 reaction removes one O and one O3 per encounter). On short timescales (≲ 10 s under default conditions) the relative drift is ~4e-5; on long timescales (hours-to-days) Ox approaches a steady state set by the j_O2/k4 ratio."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["O"]},
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2.0,
+                                    "j_O2",
+                                    "O2_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k2_A",
+                                    {"op": "^", "args": [{"op": "/", "args": ["T_ref", "T"]}, 2.4]},
+                                    "O",
+                                    "O2_mix",
+                                    "M",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_O3",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k4_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_k4", "T"]}]},
+                                    "O",
+                                    "O3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["O3"]},
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k2_A",
+                                    {"op": "^", "args": [{"op": "/", "args": ["T_ref", "T"]}, 2.4]},
+                                    "O",
+                                    "O2_mix",
+                                    "M",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_O3",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k4_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_k4", "T"]}]},
+                                    "O",
+                                    "O3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Ox",
+                    "rhs": {"op": "+", "args": ["O", "O3"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "initial_conditions_t0",
+                    "description": "At t=0 the solver must return the declared species defaults exactly. Pins O at 1e13 m^-3 (1e6 molec/cm^3, S&P Page 145 reference), O3 at 3e18 m^-3 (3e12 molec/cm^3, same reference), and Ox at the algebraic sum 3.00001e18 m^-3 (= 1e13 + 3e18). Tolerance tightened to rel=1e-10 / abs=1e-14 because at t=0 there is no integration drift — only parser→Float64 conversion and the first-step identity evaluation of the initial state.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "tolerance": {"rel": 1.0e-10, "abs": 1.0e-14},
+                    "assertions": [
+                        {"variable": "O",  "time": 0.0, "expected": 1.0e13},
+                        {"variable": "O3", "time": 0.0, "expected": 3.0e18},
+                        {"variable": "Ox", "time": 0.0, "expected": 3.00001e18}
+                    ]
+                },
+                {
+                    "id": "default_short_term_10s",
+                    "description": "Captures the fast O radical-equilibrium transient: from the initial O = 1e13 m^-3, atomic oxygen accumulates on a ~0.045 s timescale (lifetime = 1/(k2·O2_mix·M^2 + k4·O3) ≈ 0.045 s) toward the j_O3·O3-dominated quasi-equilibrium O_eq ≈ (2·j_O2·O2_mix·M + j_O3·O3) / (k2·O2_mix·M^2 + k4·O3) ≈ 1.36e14 m^-3 (the j_O3·O3 source channel dominates the production over 2·j_O2·O2·M by ~240×). O is essentially at its equilibrium value by t ≈ 0.5 s and holds it through t = 10 s. O3 is approximately constant on this timescale (Ox drift ~4e-5 over 10 s, see `odd_oxygen_quasi_conservation_short`).",
+                    "time_span": {"start": 0.0, "end": 10.0},
+                    "assertions": [
+                        {"variable": "O",  "time": 0.0,  "expected": 1.0e13},
+                        {"variable": "O3", "time": 0.0,  "expected": 3.0e18},
+                        {"variable": "O",  "time": 0.1,  "expected": 1.222672944581606e14},
+                        {"variable": "O",  "time": 1.0,  "expected": 1.360282269114367e14},
+                        {"variable": "O",  "time": 5.0,  "expected": 1.360303673435825e14},
+                        {"variable": "O",  "time": 10.0, "expected": 1.360330428384102e14},
+                        {"variable": "O3", "time": 1.0,  "expected": 2.999885855433412e18},
+                        {"variable": "O3", "time": 10.0, "expected": 2.999992521729438e18}
+                    ]
+                },
+                {
+                    "id": "default_long_term_1day",
+                    "description": "Headline 24-hour integration under S&P Page 145 mid-stratosphere defaults (O=1e13, O3=3e18 m^-3; T=227 K, M=3e23 m^-3, O2_mix=0.21, j_O2=1e-10 s^-1, j_O3=1e-3 s^-1). Reproduces and tightens the upstream 'Chapman Mechanism Integration' test (StratosphericChemistry_test.jl:136-150) — that test asserts only positivity at retcode=Success over 1 day, this one pins the actual trajectory at four times across the window. The Ox value drifts slowly upward as the j_O2 source (2·j_O2·O2·M = 1.26e13 m^-3/s) modestly exceeds the k4·O·O3 sink at the radical-equilibrium O ≈ 1.36-1.81e14 m^-3 → net Ox growth ~1e13 m^-3/s, giving Ox at t=86400 s ≈ 4.0e18 m^-3 (a ~33% increase over the initial 3.00001e18 m^-3).",
+                    "time_span": {"start": 0.0, "end": 86400.0},
+                    "assertions": [
+                        {"variable": "O",  "time": 0.0,     "expected": 1.0e13},
+                        {"variable": "O3", "time": 0.0,     "expected": 3.0e18},
+                        {"variable": "O",  "time": 3600.0,  "expected": 1.379523226867756e14},
+                        {"variable": "O3", "time": 3600.0,  "expected": 3.042502323795783e18},
+                        {"variable": "O",  "time": 21600.0, "expected": 1.475221637023426e14},
+                        {"variable": "O3", "time": 21600.0, "expected": 3.254465331388063e18},
+                        {"variable": "O",  "time": 86400.0, "expected": 1.811716642589568e14},
+                        {"variable": "O3", "time": 86400.0, "expected": 3.999799734606761e18},
+                        {"variable": "Ox", "time": 86400.0, "expected": 3.999980906271021e18}
+                    ]
+                },
+                {
+                    "id": "odd_oxygen_quasi_conservation_short",
+                    "description": "Short-window (10-second) integration pinning Ox at five times spanning the fast O radical-equilibrium transient (0 < t < 1 s) and the early Ox source-sink slow drift (1 s < t < 10 s). Reproduces and tightens the upstream 'Odd Oxygen Conservation (Chapman)' test (StratosphericChemistry_test.jl:248-264) — that test asserts `isapprox(Ox_initial, Ox_final, rtol=1e-4)` over 10 s, this one pins the actual Ox trajectory so the magnitude of the drift (~4e-5 relative over 10 s, from 3.00001e18 to 3.0001286e18) is itself a regression target, not just the upper-bound rtol. Captures both endpoints of the well-known Chapman timescale separation: fast O equilibration (~0.045 s) followed by slow Ox drift (~1.18e13 m^-3/s under default conditions).",
+                    "time_span": {"start": 0.0, "end": 10.0},
+                    "assertions": [
+                        {"variable": "Ox", "time": 0.0,  "expected": 3.00001e18},
+                        {"variable": "Ox", "time": 0.1,  "expected": 3.000011213098563e18},
+                        {"variable": "Ox", "time": 1.0,  "expected": 3.000021883660323e18},
+                        {"variable": "Ox", "time": 5.0,  "expected": 3.000069293122439e18},
+                        {"variable": "Ox", "time": 10.0, "expected": 3.000128554772277e18}
+                    ]
+                },
+                {
+                    "id": "zero_photolysis_radical_decay",
+                    "description": "Zero-photolysis case: with j_O2 = 0 and j_O3 = 0 the only remaining O dynamics are the two sink reactions (O + O2 + M → O3 + M and O + O3 → 2 O2) — both consume O without replenishment. Starting from O = 1e13 m^-3, atomic oxygen collapses to numerical zero on the ~0.045 s timescale set by k2·O2_mix·M^2 + k4·O3. By t = 60 s the integrator has driven O below the abstol=1e-12 floor (sample value ~3e-23 m^-3, effectively zero). O3 has absorbed the initial 1e13 m^-3 of O atoms (one O atom becomes one O3 via the dominant 3-body channel) and holds at 3.000009997518167e18 m^-3 thereafter. Reproduces and tightens the upstream 'Zero Photolysis Rates' test (StratosphericChemistry_test.jl:502-523) — that test asserts only `O[end] < O[1]` over 1 hour, this one pins the numerical collapse of O and the post-collapse steady state of O3 and Ox.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"j_O2": 0.0, "j_O3": 0.0},
+                    "tolerance": {"rel": 1.0e-6, "abs": 1.0e-10},
+                    "assertions": [
+                        {"variable": "O",  "time": 0.0,    "expected": 1.0e13},
+                        {"variable": "O",  "time": 60.0,   "expected": 0.0, "tolerance": {"abs": 1.0e-10}},
+                        {"variable": "O",  "time": 600.0,  "expected": 0.0, "tolerance": {"abs": 1.0e-10}},
+                        {"variable": "O",  "time": 3600.0, "expected": 0.0, "tolerance": {"abs": 1.0e-10}},
+                        {"variable": "O3", "time": 60.0,   "expected": 3.000009997518167e18},
+                        {"variable": "O3", "time": 600.0,  "expected": 3.000009997518167e18},
+                        {"variable": "O3", "time": 3600.0, "expected": 3.000009997518167e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 3.000009997518167e18}
+                    ]
+                },
+                {
+                    "id": "cold_temperature_perturbation",
+                    "description": "Cold-stratosphere case: drop T from 227 K to 200 K. The two T-dependent rate coefficients change in opposite directions: k2 ∝ (T_ref/T)^2.4 grows from 1.17e-45 to 1.60e-45 m^6/s (1.4× faster), accelerating the O+O2+M sink; k4 ∝ exp(C_k4/T) = exp(-2060/T) drops from 9.2e-22 to 2.65e-22 m^3/s (3.5× slower), decelerating the O+O3 odd-oxygen sink. Net effect on O at radical equilibrium: O_eq ≈ (2·j_O2·O2_mix·M + j_O3·O3) / (k2·O2_mix·M^2 + k4·O3) drops to ~1.02e14 m^-3 (faster sink wins). Ox drift slows (smaller k4·O·O3 sink loses to the unchanged j_O2 source) — Ox at 3600 s rises to 3.0448e18, more than the warm-case value because the source-sink balance shifts slightly toward source.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"T": 200.0},
+                    "assertions": [
+                        {"variable": "O",  "time": 60.0,   "expected": 1.004135195913270e14},
+                        {"variable": "O",  "time": 600.0,  "expected": 1.006373178516833e14},
+                        {"variable": "O",  "time": 3600.0, "expected": 1.018804024083936e14},
+                        {"variable": "O3", "time": 3600.0, "expected": 3.044675971321667e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 3.044777851724076e18}
+                    ]
+                },
+                {
+                    "id": "warm_temperature_perturbation",
+                    "description": "Warm-stratosphere case: raise T from 227 K to 270 K. k2 ∝ (T_ref/T)^2.4 drops from 1.17e-45 to 7.6e-46 m^6/s (0.65× slower, weaker O+O2+M sink). k4 ∝ exp(-2060/T) grows from 9.2e-22 to 3.9e-21 m^3/s (4.3× faster, stronger O+O3 odd-oxygen sink). O accumulates higher (~2.06e14 m^-3) at radical equilibrium because the dominant k2 sink is weaker, but Ox drifts upward less than the cold case because the k4 sink eats more of the j_O2 source. Together with `cold_temperature_perturbation`, brackets the dynamic range across the stratospheric temperature range.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"T": 270.0},
+                    "assertions": [
+                        {"variable": "O",  "time": 60.0,   "expected": 2.061592636089013e14},
+                        {"variable": "O",  "time": 600.0,  "expected": 2.064466749053785e14},
+                        {"variable": "O",  "time": 3600.0, "expected": 2.080343574124492e14},
+                        {"variable": "O3", "time": 3600.0, "expected": 3.027697042944536e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 3.027905077301948e18}
+                    ]
+                },
+                {
+                    "id": "dense_M_perturbation",
+                    "description": "Lower-altitude (denser) case: raise M from 3e23 to 1e25 m^-3 (~factor 33×, mimicking ~10 km altitude vs ~30 km default). The k2·O·O2_mix·M^2 three-body sink scales as M^2 (3×33² ≈ 3300× stronger), the 2·j_O2·O2_mix·M source scales as M (33× stronger), and the j_O3·O3 source is unchanged — the M^2 sink wins by a factor of ~100, pushing O radical equilibrium to ~1.4e11 m^-3 (factor 970 lower than the default 1.36e14). O3 grows substantially over 1 hour (3e18 → 4.5e18) because the k4·O·O3 sink is essentially shut off (O collapsed) and the j_O2 → k2 → O3 production channel still operates. Ox at 3600 s ≈ 4.5e18 m^-3 (50% increase, much faster Ox growth than the default M case).",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"M": 1.0e25},
+                    "assertions": [
+                        {"variable": "O",  "time": 60.0,   "expected": 1.400283996483846e11},
+                        {"variable": "O",  "time": 600.0,  "expected": 1.492465240434067e11},
+                        {"variable": "O",  "time": 3600.0, "expected": 2.004582720442080e11},
+                        {"variable": "O3", "time": 3600.0, "expected": 4.512005543330380e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 4.512005743788653e18}
+                    ]
+                },
+                {
+                    "id": "thin_M_perturbation",
+                    "description": "Higher-altitude (thinner) case: drop M from 3e23 to 1e22 m^-3 (~factor 30× thinner, mimicking ~60 km altitude vs ~30 km default). The k2·O·O2_mix·M^2 sink weakens by ~900×, the 2·j_O2·O2_mix·M source weakens by 30×, so the source/sink ratio favors O accumulation — O climbs to ~8.6e16 m^-3 within a minute, then *declines* over time because the k4·O·O3 odd-oxygen sink (still bimolecular, not weakened by M) is now the dominant Ox loss channel and outpaces the weakened M-dependent production. Ox at 3600 s drops to 1.78e18 m^-3 (a 41% decrease from initial) — the opposite regime from the dense_M case. Demonstrates the model handles wide regime shifts cleanly and produces qualitatively correct altitude-dependent behavior.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"M": 1.0e22},
+                    "assertions": [
+                        {"variable": "O",  "time": 60.0,   "expected": 8.639600122257584e16},
+                        {"variable": "O",  "time": 600.0,  "expected": 9.736078453152483e16},
+                        {"variable": "O",  "time": 3600.0, "expected": 6.575602054228018e16},
+                        {"variable": "O3", "time": 60.0,   "expected": 2.895970473007935e18},
+                        {"variable": "O3", "time": 3600.0, "expected": 1.713430216697002e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 1.779186237239282e18}
+                    ]
+                },
+                {
+                    "id": "reduced_jO3_perturbation",
+                    "description": "Reduced O3 photolysis case: drop j_O3 from 1e-3 to 4e-4 s^-1 (the value used by the upstream 'Chapman Steady-State [O]/[O3] Ratio' test, StratosphericChemistry_test.jl:365-401). The j_O3·O3 source for O drops by 2.5× (from 3e15 to 1.2e15 m^-3/s) — the dominant O source channel, so O radical equilibrium drops correspondingly to ~5.5e13 m^-3 (about 0.4× the default 1.36e14). O3 drift is slightly faster because more O3 is preserved per unit time (less photolysis loss). This test reproduces the upstream parameter setup at a tighter quantitative level: where the upstream test asserts the steady-state O/O3 ratio to ~10% (its Eq. 5.7 order-of-magnitude check), this one pins both O and O3 at rel=1e-6 across the trajectory.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"j_O3": 4.0e-4},
+                    "assertions": [
+                        {"variable": "O",  "time": 60.0,   "expected": 5.476724089724273e13},
+                        {"variable": "O",  "time": 600.0,  "expected": 5.488717392624235e13},
+                        {"variable": "O",  "time": 3600.0, "expected": 5.555323066804884e13},
+                        {"variable": "O3", "time": 3600.0, "expected": 3.044215105276009e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 3.044270658506678e18}
+                    ]
+                },
+                {
+                    "id": "equal_O_O3_initial",
+                    "description": "Initial-condition sensitivity check: start the system with O = O3 = 1e18 m^-3 (so Ox = 2e18 m^-3, different from the default 3.00001e18). The system relaxes the excess O via the fast k2·O·O2_mix·M^2 three-body sink (O collapses from 1e18 to ~9.1e13 m^-3 within ~60 s, depositing the excess O atoms as O3) — by t = 60 s the system is at a quasi-equilibrium with O ≈ 9.1e13 m^-3 and O3 ≈ 2e18 m^-3. The reduced O3 (vs default 3e18) means the O/O3 ratio is different from the default trajectory, but the radical equilibrium structure is the same. Ox at 3600 s ≈ 2.044e18 m^-3 — close to the initial Ox plus the j_O2-driven drift over 1 hour. Verifies the initial-condition machinery works correctly across the full O domain (1e13 to 1e18 m^-3 spans 5 orders of magnitude).",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "initial_conditions": {"O": 1.0e18, "O3": 1.0e18},
+                    "assertions": [
+                        {"variable": "O",  "time": 0.0,    "expected": 1.0e18},
+                        {"variable": "O3", "time": 0.0,    "expected": 1.0e18},
+                        {"variable": "O",  "time": 60.0,   "expected": 9.090584756405858e13},
+                        {"variable": "O",  "time": 600.0,  "expected": 9.120490382013364e13},
+                        {"variable": "O",  "time": 3600.0, "expected": 9.286534037592266e13},
+                        {"variable": "O3", "time": 60.0,   "expected": 2.000521044470805e18},
+                        {"variable": "O3", "time": 3600.0, "expected": 2.043917930090608e18},
+                        {"variable": "Ox", "time": 3600.0, "expected": 2.044010795430983e18}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "default_run_1day",
+                    "description": "One-day integration under S&P Page 145 mid-stratosphere defaults (O=1e13, O3=3e18 m^-3, T=227 K, M=3e23 m^-3, O2_mix=0.21, j_O2=1e-10 s^-1, j_O3=1e-3 s^-1). Shows the fast O radical-equilibrium transient (O rises from 1e13 to 1.36e14 m^-3 within ~1 s) and the slow Ox drift over 24 hours (O3 grows from 3e18 to ~4e18 m^-3 as the j_O2 source modestly outpaces the k4·O·O3 sink at the quasi-equilibrium O).",
+                    "time_span": {"start": 0.0, "end": 86400.0},
+                    "plots": [
+                        {
+                            "id": "O_vs_time",
+                            "type": "line",
+                            "description": "Atomic oxygen O concentration over one day of ChapmanMechanism integration.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "O", "label": "O (m^-3)"}
+                        },
+                        {
+                            "id": "O3_vs_time",
+                            "type": "line",
+                            "description": "Ozone O3 concentration over one day of ChapmanMechanism integration.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "O3", "label": "O3 (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_sensitivity_sweep",
+                    "description": "Stratospheric temperature sweep over 200 K - 280 K (cold polar vortex to warm sub-tropical mid-stratosphere). At each T the system is integrated for one hour to its quasi-equilibrium plus slow-drift state. The k2 ∝ (T_ref/T)^2.4 and k4 ∝ exp(C_k4/T) rate coefficients change in opposite directions with T (k2 faster at low T, k4 slower at low T) — the net effect on O at radical equilibrium is monotonic: cold T favors lower O via the dominant k2 sink. Mirrors the sibling HOx cycle's temperature_sensitivity_sweep example shape.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "values": [200.0, 210.0, 220.0, 230.0, 240.0, 250.0, 260.0, 270.0, 280.0]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "O_eq_vs_T",
+                            "type": "line",
+                            "description": "Quasi-equilibrium O concentration vs. temperature.",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "O", "label": "O (m^-3)"}
+                        },
+                        {
+                            "id": "O3_eq_vs_T",
+                            "type": "line",
+                            "description": "O3 concentration at t=3600s vs. temperature.",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "O3", "label": "O3 (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "altitude_density_sweep",
+                    "description": "Air density sweep across the stratospheric range, mimicking altitude effects: M from 1e22 m^-3 (~60 km) to 3e24 m^-3 (~20 km), covering ~2.5 orders of magnitude. At lower altitudes (denser, higher M), the M^2-dependent three-body sink dominates and pushes O to very low quasi-equilibrium (~1e11 m^-3 at M=1e25). At higher altitudes (thinner, lower M), the sink weakens faster than the source and O accumulates to ~1e17 m^-3 at M=1e22. This illustrates the canonical Chapman 'O > O3 above ~60 km / O < O3 below ~60 km' regime crossover that motivates the family-sum Ox variable.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "M",
+                                "values": [1.0e22, 3.0e22, 1.0e23, 3.0e23, 1.0e24, 3.0e24]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "O_eq_vs_M",
+                            "type": "line",
+                            "description": "Quasi-equilibrium O concentration vs. air number density M.",
+                            "x": {"variable": "M", "label": "M (m^-3)"},
+                            "y": {"variable": "O", "label": "O (m^-3)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
