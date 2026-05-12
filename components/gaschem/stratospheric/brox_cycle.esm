@@ -1,0 +1,384 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "BrOxCycle",
+        "description": "Stratospheric bromine catalytic ozone-destruction cycle (BrOx). Three ODEs (Br, BrO, HOBr) and two algebraic family identities (BrOx = Br + BrO; Bry = Br + BrO + HOBr). Reactions: Br + O3 → BrO + O2 (Arrhenius); BrO + O → Br + O2; BrO + ClO → Br + Cl + O2 (constant rate); BrO + HO2 → HOBr + O2; HOBr + hν → OH + Br (photolysis). Unlike chlorine, bromine has no stable HBr reservoir because Br + CH4 is endothermic (Seinfeld & Pandis Page 169). Bromine is approximately 50× more effective than chlorine in destroying ozone on an atom-for-atom basis. Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:390 (`BrOxCycle` @component). Rate coefficients converted CGS → SI: cm³/molec/s × 1e-6 → m³/s.",
+        "tags": [
+            "gaschem",
+            "stratospheric",
+            "ozone-destruction",
+            "bromine",
+            "halogen-chemistry",
+            "catalytic-cycle",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-22bs)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 5, §5.5.2 (Stratospheric Bromine Chemistry — Page 166); reservoir-species note Page 169; rate-coefficient Tables B.1 and B.2."
+            }
+        ]
+    },
+    "models": {
+        "BrOxCycle": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:390\nUpstream `BrOxCycle` is an MTK `@component` with 5 equations: 3 differential ODEs for Br, BrO, HOBr and 2 algebraic family identities for BrOx and Bry.\n\nThe three ODE balances encode (Seinfeld & Pandis §5.5.2, Page 166):\n  d[Br]/dt   = -k_Br_O3[Br][O3] + k_BrO_O[BrO][O] + k_BrO_ClO[BrO][ClO] + j_HOBr[HOBr]\n  d[BrO]/dt  = +k_Br_O3[Br][O3] - k_BrO_O[BrO][O] - k_BrO_ClO[BrO][ClO] - k_BrO_HO2[BrO][HO2]\n  d[HOBr]/dt = +k_BrO_HO2[BrO][HO2] - j_HOBr[HOBr]\n\nThe family identities:\n  BrOx ≡ Br + BrO\n  Bry  ≡ Br + BrO + HOBr   (total inorganic bromine — conserved)\n\nRate coefficients (all are temperature-only or constant; CGS → SI by × 1e-6):\n  k_Br_O3   = 1.7e-17 × exp(-800/T)  m³/s   (Arrhenius)\n  k_BrO_O   = 5.0e-17                m³/s   (constant)\n  k_BrO_ClO = 2.0e-18                m³/s   (constant)\n  k_BrO_HO2 = 4.0e-17                m³/s   (constant)\n\nObservability classification: the 3 ODE states (Br, BrO, HOBr) are integrated; the 2 algebraic states (BrOx, Bry) are observed identities the runner can recover from the integrated state.\n\nConservation: Bry is exactly conserved by construction — the production and loss terms cancel pairwise. Bry conservation is a hard physical invariant of the cycle and is one of the test cases.\n\nTolerance rationale (model-level rel=1.0e-6): the upstream Bry conservation test at GasChem.jl test/StratosphericChemistry_test.jl:312 asserts rtol=1e-6 over t=0..1 s. Tightening below that would over-promise relative to the upstream contract; loosening above would weaken the conservation gate. Per-assertion overrides use abs floors for low-magnitude Br values (post-depletion Br falls to ~1e9 m⁻³, where Tsit5 ↔ Rosenbrock23 step-adaptation noise on a stiff state crosses the relative-tolerance threshold)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 227.0,
+                    "description": "Temperature (default: ~227 K stratospheric mid-latitude)"
+                },
+                "j_HOBr": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-3,
+                    "description": "HOBr photolysis rate"
+                },
+                "O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "Atomic oxygen number density (1e7 molec/cm³ × 1e6)"
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.0e18,
+                    "description": "Ozone number density (3e12 molec/cm³ × 1e6)"
+                },
+                "ClO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "ClO number density (1e7 molec/cm³ × 1e6)"
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "HO2 number density (1e7 molec/cm³ × 1e6)"
+                },
+                "k_Br_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.7e-17,
+                    "description": "Pre-factor for Br + O3 → BrO + O2 (1.7e-11 cm³/molec/s × 1e-6; Table B.1)"
+                },
+                "C_Br_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -800.0,
+                    "description": "Activation temperature for Br + O3 (k = A·exp(C/T))"
+                },
+                "k_BrO_O_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5.0e-17,
+                    "description": "BrO + O → Br + O2 rate (5e-11 cm³/molec/s × 1e-6)"
+                },
+                "k_BrO_ClO_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.0e-18,
+                    "description": "BrO + ClO → Br + Cl + O2 rate (2e-12 cm³/molec/s × 1e-6)"
+                },
+                "k_BrO_HO2_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 4.0e-17,
+                    "description": "BrO + HO2 → HOBr + O2 rate (4e-11 cm³/molec/s × 1e-6)"
+                },
+                "Br": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e11,
+                    "description": "Br atom number density (1e5 molec/cm³ × 1e6)"
+                },
+                "BrO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "BrO number density (1e6 molec/cm³ × 1e6)"
+                },
+                "HOBr": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "HOBr number density (1e6 molec/cm³ × 1e6)"
+                },
+                "BrOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "BrOx family ≡ Br + BrO"
+                },
+                "Bry": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Bry family ≡ Br + BrO + HOBr (total inorganic bromine — conserved)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": { "op": "D", "wrt": "t", "args": ["Br"] },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": ["BrO", "ClO", "k_BrO_ClO_c"] },
+                            { "op": "*", "args": ["BrO", "O", "k_BrO_O_c"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    "k_Br_O3_A",
+                                    "Br",
+                                    "O3",
+                                    { "op": "exp", "args": [ { "op": "/", "args": ["C_Br_O3", "T"] } ] }
+                                ]
+                            },
+                            { "op": "*", "args": ["j_HOBr", "HOBr"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": { "op": "D", "wrt": "t", "args": ["BrO"] },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": [-1, "BrO", "ClO", "k_BrO_ClO_c"] },
+                            { "op": "*", "args": [-1, "BrO", "HO2", "k_BrO_HO2_c"] },
+                            { "op": "*", "args": [-1, "BrO", "O", "k_BrO_O_c"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_Br_O3_A",
+                                    "Br",
+                                    "O3",
+                                    { "op": "exp", "args": [ { "op": "/", "args": ["C_Br_O3", "T"] } ] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": { "op": "D", "wrt": "t", "args": ["HOBr"] },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": ["BrO", "HO2", "k_BrO_HO2_c"] },
+                            { "op": "*", "args": [-1, "j_HOBr", "HOBr"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "BrOx",
+                    "rhs": { "op": "+", "args": ["BrO", "Br"] }
+                },
+                {
+                    "lhs": "Bry",
+                    "rhs": { "op": "+", "args": ["BrO", "Br", "HOBr"] }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "defaults_initial_state",
+                    "description": "At t=0 with canonical stratospheric defaults (T=227 K, O3=3e18, HO2=1e13, ClO=1e13, O=1e13, j_HOBr=1e-3 s⁻¹), the three integrated states (Br, BrO, HOBr) take their declared defaults and the two algebraic identities (BrOx, Bry) evaluate consistently. Pins the documented initial condition of upstream BrOxCycle (GasChem.jl test/StratosphericChemistry_test.jl:209-211).",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Br",   "time": 0.0, "expected": 1.0e11 },
+                        { "variable": "BrO",  "time": 0.0, "expected": 1.0e12 },
+                        { "variable": "HOBr", "time": 0.0, "expected": 1.0e12 },
+                        { "variable": "BrOx", "time": 0.0, "expected": 1.1e12 },
+                        { "variable": "Bry",  "time": 0.0, "expected": 2.1e12 }
+                    ]
+                },
+                {
+                    "id": "defaults_integration_3600s",
+                    "description": "Integrate from canonical defaults to 1 hour. Pins reference trajectory values for Br, BrO, HOBr, BrOx, Bry at five sample times spanning the fast Br depletion (sub-second), BrO build-up (10 s), HOBr photolysis (1000 s), and 1-hour endpoint. This is the primary numerical-agreement test mirroring the upstream `BrOx Cycle Integration` test (GasChem.jl test/StratosphericChemistry_test.jl:204-222) — upstream asserts positivity + retcode; we strengthen that here by pinning the actual trajectory.",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "Br",   "time": 1.0,    "expected": 2.30430742e10, "tolerance": { "rel": 1.0e-5 } },
+                        { "variable": "BrO",  "time": 1.0,    "expected": 1.07753741e12 },
+                        { "variable": "HOBr", "time": 1.0,    "expected": 9.99419521e11 },
+                        { "variable": "Br",   "time": 10.0,   "expected": 1.04376883e9,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 10.0,   "expected": 1.10454734e12 },
+                        { "variable": "HOBr", "time": 10.0,   "expected": 9.94408888e11 },
+                        { "variable": "Br",   "time": 100.0,  "expected": 1.02881006e9,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 100.0,  "expected": 1.15128950e12 },
+                        { "variable": "HOBr", "time": 100.0,  "expected": 9.47681690e11 },
+                        { "variable": "Br",   "time": 1000.0, "expected": 9.49170206e8,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 1000.0, "expected": 1.40062868e12 },
+                        { "variable": "HOBr", "time": 1000.0, "expected": 6.98422146e11 },
+                        { "variable": "Br",   "time": 3600.0, "expected": 9.18467464e8,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 3600.0, "expected": 1.49675388e12 },
+                        { "variable": "HOBr", "time": 3600.0, "expected": 6.02327651e11 },
+                        { "variable": "BrOx", "time": 3600.0, "expected": 1.49767235e12 },
+                        { "variable": "Bry",  "time": 3600.0, "expected": 2.1e12,        "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "bry_conservation_short_horizon",
+                    "description": "Bry ≡ Br + BrO + HOBr is exactly conserved by construction (the production/loss terms in the three ODEs cancel pairwise). With initial Bry = 1e11 + 1e12 + 1e12 = 2.1e12 m⁻³, the algebraic Bry variable must stay at 2.1e12 across the full short-horizon integration. Mirrors upstream `Bry Conservation (BrOx Cycle)` test (GasChem.jl test/StratosphericChemistry_test.jl:292-315) at the same 1-second horizon and rtol=1e-6 tolerance.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "tolerance": { "rel": 1.0e-6 },
+                    "assertions": [
+                        { "variable": "Bry", "time": 0.0,  "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 0.1,  "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 0.5,  "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 1.0,  "expected": 2.1e12 }
+                    ]
+                },
+                {
+                    "id": "bry_conservation_long_horizon",
+                    "description": "Bry conservation extends across the full 1-hour integration horizon, not just the upstream's 1-second window. Pins Bry = 2.1e12 m⁻³ at times spanning the radical chemistry's fast (t≤10 s), medium (t=100..1000 s), and long (t=3600 s) scales — confirming the conservation invariant is not just an early-time artifact and is preserved under stiff Br depletion.",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "tolerance": { "rel": 1.0e-6 },
+                    "assertions": [
+                        { "variable": "Bry", "time": 10.0,   "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 100.0,  "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 1000.0, "expected": 2.1e12 },
+                        { "variable": "Bry", "time": 3600.0, "expected": 2.1e12 }
+                    ]
+                },
+                {
+                    "id": "warm_temperature_T250",
+                    "description": "At T=250 K (~+23 K above stratospheric default), the Arrhenius rate k_Br_O3 = 1.7e-17·exp(-800/T) accelerates from 5.0e-19 → 7.4e-19 m³/s (~1.5×). Br depletion runs ~1.4× faster, dropping Br to 7.55e8 m⁻³ at t=10 s vs 1.04e9 at T=227 K. BrO and HOBr trajectories are nearly identical because they are governed by O, ClO, HO2, j_HOBr (all T-independent here) and the steady-state Br budget is set by the same rate balance. Probes temperature sensitivity of the rate-limited Br + O3 step.",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "parameter_overrides": { "T": 250.0 },
+                    "assertions": [
+                        { "variable": "Br",   "time": 10.0,   "expected": 7.54762812e8,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 10.0,   "expected": 1.10482806e12 },
+                        { "variable": "HOBr", "time": 10.0,   "expected": 9.94417179e11 },
+                        { "variable": "Br",   "time": 3600.0, "expected": 6.64209844e8,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 3600.0, "expected": 1.49693565e12 },
+                        { "variable": "HOBr", "time": 3600.0, "expected": 6.02400138e11 },
+                        { "variable": "Bry",  "time": 3600.0, "expected": 2.1e12,        "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "no_HO2_blocks_HOBr_formation",
+                    "description": "With HO2 → 0, the BrO + HO2 → HOBr channel shuts off. HOBr can only photolyze (j_HOBr·HOBr loss) — its trajectory decays toward zero with no production source. BrO accumulates faster than at default HO2 (1.19e12 at t=100 s vs 1.15e12 at default) because the BrO loss channel is removed. Pins the HO2-absent kinetic regime: HOBr decay is pure exponential, dHOBr/dt = -j_HOBr·HOBr.",
+                    "time_span": { "start": 0.0, "end": 100.0 },
+                    "parameter_overrides": { "HO2": 0.0 },
+                    "assertions": [
+                        { "variable": "HOBr", "time": 1.0,   "expected": 9.99000500e11 },
+                        { "variable": "HOBr", "time": 10.0,  "expected": 9.90049834e11 },
+                        { "variable": "HOBr", "time": 100.0, "expected": 9.04837418e11 },
+                        { "variable": "BrO",  "time": 100.0, "expected": 1.19414736e12 },
+                        { "variable": "Br",   "time": 100.0, "expected": 1.01522251e9,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "Bry",  "time": 100.0, "expected": 2.1e12,        "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "no_O3_Br_accumulates",
+                    "description": "With O3 → 0, the only Br loss channel (Br + O3 → BrO + O2) is removed. Br is now only sourced (from BrO + O, BrO + ClO, HOBr photolysis) — no depletion — and Br accumulates over time. At t=100 s, Br has grown 2.5× from its 1e11 initial value to 2.47e11 m⁻³. Mirror-image of the default scenario where Br depletes by 100× in 10 s. Confirms the rate-balance is correctly captured by the encoded equations.",
+                    "time_span": { "start": 0.0, "end": 100.0 },
+                    "parameter_overrides": { "O3": 0.0 },
+                    "assertions": [
+                        { "variable": "Br",   "time": 10.0,  "expected": 1.15146192e11 },
+                        { "variable": "Br",   "time": 100.0, "expected": 2.46718775e11 },
+                        { "variable": "BrO",  "time": 100.0, "expected": 9.12105150e11 },
+                        { "variable": "HOBr", "time": 100.0, "expected": 9.41176076e11 },
+                        { "variable": "Bry",  "time": 100.0, "expected": 2.1e12,        "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "high_photolysis_drives_BrO_buildup",
+                    "description": "With j_HOBr = 1.0 s⁻¹ (1000× the default), HOBr photolyzes near-instantly. The HOBr reservoir empties into Br + BrO, driving BrOx ≡ Br + BrO from 1.1e12 to ~2.1e12 m⁻³ (the entire Bry inventory). Pins the limit where Bry → BrOx as photolysis dominates the HOBr loss channel. BrO at steady state grows to 2.10e12 (essentially the full Bry budget less the tiny residual Br pool).",
+                    "time_span": { "start": 0.0, "end": 100.0 },
+                    "parameter_overrides": { "j_HOBr": 1.0 },
+                    "assertions": [
+                        { "variable": "HOBr", "time": 10.0,  "expected": 8.84040582e8,  "tolerance": { "rel": 1.0e-4, "abs": 1.0e6 } },
+                        { "variable": "BrO",  "time": 10.0,  "expected": 2.09774328e12 },
+                        { "variable": "BrOx", "time": 10.0,  "expected": 2.09911596e12 },
+                        { "variable": "BrO",  "time": 100.0, "expected": 2.09787689e12 },
+                        { "variable": "BrOx", "time": 100.0, "expected": 2.09916085e12 },
+                        { "variable": "Bry",  "time": 100.0, "expected": 2.1e12,        "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "default_brox_trajectory",
+                    "description": "Default 1-hour BrOx-cycle trajectory at canonical stratospheric mid-latitude conditions (T=227 K, O3=3e18 m⁻³, HO2=ClO=O=1e13 m⁻³, j_HOBr=1e-3 s⁻¹). Reproduces the canonical run shape of the upstream `BrOx Cycle Integration` test (GasChem.jl test/StratosphericChemistry_test.jl:204-222): Br depletes by ~2 orders of magnitude in ~10 s as it converts to BrO; BrO grows monotonically to ~1.5e12 m⁻³ by 1 h; HOBr decays slowly via photolysis from 1e12 to 6e11 m⁻³.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "plots": [
+                        {
+                            "id": "brox_species_vs_time",
+                            "type": "line",
+                            "description": "BrO concentration vs time — the dominant BrOx-family member at steady state.",
+                            "x": { "variable": "t",   "label": "time (s)" },
+                            "y": { "variable": "BrO", "label": "BrO (m⁻³)" }
+                        },
+                        {
+                            "id": "hobr_decay_vs_time",
+                            "type": "line",
+                            "description": "HOBr photolytic decay over 1 hour with j_HOBr = 1e-3 s⁻¹ — characteristic e-folding time ≈ 1000 s.",
+                            "x": { "variable": "t",    "label": "time (s)" },
+                            "y": { "variable": "HOBr", "label": "HOBr (m⁻³)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_sensitivity_sweep",
+                    "description": "Sweep stratospheric temperature from 200 K (polar lower stratosphere) to 260 K (tropical lower stratosphere) at default O3/HO2/ClO/O/j_HOBr. The only T-dependent rate is k_Br_O3 = 1.7e-17·exp(-800/T) (Arrhenius). Faster Br + O3 at warmer T tips the BrO-vs-Br steady-state ratio toward BrO and accelerates the initial Br depletion. Useful for inspecting the dominant rate's temperature sensitivity without setting up a full latitudinal sweep.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            { "parameter": "T", "range": { "start": 200.0, "stop": 260.0, "count": 13 } }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "br_steady_vs_T",
+                            "type": "line",
+                            "description": "Steady-state Br after 1 hour vs temperature — declines with warmer T as k_Br_O3 increases.",
+                            "x": { "variable": "T",  "label": "T (K)" },
+                            "y": { "variable": "Br", "label": "Br at t=3600 s (m⁻³)" }
+                        },
+                        {
+                            "id": "bro_steady_vs_T",
+                            "type": "line",
+                            "description": "Steady-state BrO after 1 hour vs temperature — grows with warmer T (Br converts more readily to BrO).",
+                            "x": { "variable": "T",   "label": "T (K)" },
+                            "y": { "variable": "BrO", "label": "BrO at t=3600 s (m⁻³)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "ho2_sensitivity_sweep",
+                    "description": "Sweep HO2 from clean-air levels (1e11 m⁻³, ~4 ppt) to polluted/perturbed levels (1e14 m⁻³, ~4 ppb) at default conditions. Higher HO2 drains BrO into HOBr faster (k_BrO_HO2·BrO·HO2 channel), partitioning more of the Bry budget into the HOBr reservoir. The plot shows the HOBr-to-BrO partitioning curve — useful for assessing how stratospheric HO2 variability influences the bromine reservoir.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            { "parameter": "HO2", "range": { "start": 1.0e11, "stop": 1.0e14, "count": 16 } }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "hobr_vs_ho2",
+                            "type": "line",
+                            "description": "HOBr at t=3600 s vs HO2 abundance — direct measure of the HOBr reservoir's HO2 sensitivity.",
+                            "x": { "variable": "HO2",  "label": "HO2 (m⁻³)" },
+                            "y": { "variable": "HOBr", "label": "HOBr at t=3600 s (m⁻³)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
