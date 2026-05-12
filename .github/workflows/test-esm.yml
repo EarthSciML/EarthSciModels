@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
 
+# Coalesce concurrent runs on the same ref. On PR branches the latest push
+# supersedes earlier in-flight runs (the usual GHA pattern). On main we let
+# runs queue but each runs to completion — `cancel-in-progress: false` —
+# because every main commit is a merge that should be independently verified
+# (esm-g97l).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   julia-test:
     runs-on: ubuntu-latest
@@ -41,22 +50,35 @@ jobs:
         if: steps.check_project.outputs.has_project == 'true'
       # Pkg.test runs test/runtests.jl, which exercises:
       #   - the Julia shim's unit tests (mdl-8y7), and
-      #   - run_esm_tests over components/ — every inline test in every
-      #     committed .esm file (mdl-08t).
-      # ESM_TESTS_JUNIT_XML tells runtests.jl to emit a junit artifact in the
-      # same pass. We can't run a second `julia --project=.` walker because
-      # ModelingToolkit is a test-only dep (see mdl-89o).
+      #   - run_esm_tests over fixtures — the inline-test runner mechanism
+      #     itself, including discover/exclude semantics and junit emission
+      #     (mdl-08t, mdl-lvu).
       #
-      # ESM_TESTS_EXCLUDE drops the full-chemistry inline test from the Julia
-      # walk. The 819-reaction Catalyst → MTK build for geoschem_fullchem
-      # peaks ~13 GB on a single MTK process and OOM-kills the 16 GB GHA
-      # runner; it's covered by the python-inline-tests gate below
-      # (per-file subprocess, peak ~196 MB). See bead mdl-lvu.
+      # ESM_TESTS_SKIP_LIVE_REPO defers the components/ walk to the
+      # python-inline-tests job below (the gate of record per mdl-lvu).
+      # The in-process MTK walk scales linearly with component count
+      # (~85 s/file under the active migration burst) and was blowing the
+      # 30-minute job budget once the repo crossed ~25 .esm files; the
+      # python gate covers the same files via per-file subprocess in ~9 min
+      # (esm-g97l). Local devs running `pkg test` still get the full walk.
+      #
+      # ESM_TESTS_JUNIT_XML stays set so any future Julia walk emits a
+      # junit artifact in the same pass — a second `julia --project=.`
+      # walker isn't viable because ModelingToolkit is a test-only dep
+      # (see mdl-89o).
+      #
+      # ESM_TESTS_EXCLUDE still drops the full-chemistry inline test from
+      # any Julia walk that does happen. The 819-reaction Catalyst → MTK
+      # build for geoschem_fullchem peaks ~13 GB on a single MTK process
+      # and OOM-kills the 16 GB GHA runner; it's covered by the
+      # python-inline-tests gate below (per-file subprocess, peak ~196 MB).
+      # See bead mdl-lvu.
       - uses: julia-actions/julia-runtest@v1
         if: steps.check_project.outputs.has_project == 'true'
         env:
           ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/esm-tests.xml
           ESM_TESTS_EXCLUDE: components/gaschem/geoschem_fullchem.esm
+          ESM_TESTS_SKIP_LIVE_REPO: '1'
       - name: Upload junit XML
         if: always() && steps.check_project.outputs.has_project == 'true'
         uses: actions/upload-artifact@v4
@@ -65,7 +87,8 @@ jobs:
           path: esm-tests.xml
           if-no-files-found: ignore
 
-  # Python inline-test gate (mdl-w1j, promoted to required in mdl-lvu).
+  # Python inline-test gate (mdl-w1j, promoted to required in mdl-lvu,
+  # extended to all live-repo coverage in esm-g97l).
   #
   # Walks components/**/*.esm and lib/**/*.esm (mdl-14s) and runs every inline
   # test through the canonical ESS Python runner
@@ -77,10 +100,12 @@ jobs:
   # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
   # job timeout.
   #
-  # This is the gate of record for full-chemistry inline tests — the Julia
-  # job above skips components/gaschem/geoschem_fullchem.esm via
-  # ESM_TESTS_EXCLUDE because the 819-reaction Catalyst → MTK build OOM-kills
-  # the 16 GB GHA runner.
+  # This is the **gate of record** for live-repo inline tests. The Julia job
+  # above (a) excludes geoschem_fullchem via ESM_TESTS_EXCLUDE because the
+  # 819-reaction Catalyst → MTK build OOM-kills the 16 GB GHA runner, and
+  # (b) skips the full components/ walk entirely via ESM_TESTS_SKIP_LIVE_REPO
+  # because the in-process MTK build does not scale to the live migration
+  # burst (esm-g97l). Local devs still get full Julia coverage via `pkg test`.
   python-inline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25

@@ -13,10 +13,13 @@ can `load_esm(...)` a single file and get a ready-to-simulate
 `ModelingToolkit.System`.
 
 **How this repo is validated:** every push and PR runs each `.esm` file's
-inline `tests` block (ESM spec §6.6) through `EarthSciModels.run_esm_tests` —
-each scalar `(variable, time, expected)` assertion is checked by simulating
+inline `tests` block (ESM spec §6.6) through `tools/run_esm_inline_tests.py`
+(the Python gate of record, driving `earthsci_toolkit.simulation.simulate`).
+Each scalar `(variable, time, expected)` assertion is checked by simulating
 the model and sampling its solution interpolant. One failed assertion turns
-the build red. See [`src/run_tests.jl`](src/run_tests.jl) and
+the build red. The Julia equivalent `EarthSciModels.run_esm_tests` runs the
+same contract via MTK and is the canonical local walker (see
+[`src/run_tests.jl`](src/run_tests.jl)). Workflow definition:
 [`.github/workflows/test-esm.yml`](.github/workflows/test-esm.yml).
 
 ## Quick links

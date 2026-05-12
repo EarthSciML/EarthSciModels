@@ -103,17 +103,30 @@ end
         # CI sets ESM_TESTS_JUNIT_XML to collect a junit artifact in the same
         # pass — avoids a second `julia --project=.` invocation which can't
         # see MTK (it's a test-only dep).
-        junit_xml = get(ENV, "ESM_TESTS_JUNIT_XML", nothing)
-        results, exit_code = run_esm_tests(; junit_xml=junit_xml)
-        if !isempty(results)
-            failures = filter(r -> r.status != EarthSciModels.PASS, results)
-            for f in failures
-                println(stderr, "FAIL ", f.file, " :: ", f.container_name,
-                        "/", f.test_id, " — ", f.message)
-            end
-            @test exit_code == 0
+        #
+        # ESM_TESTS_SKIP_LIVE_REPO=1 short-circuits this walk. CI sets it on
+        # the julia-test job because the python-inline-tests gate (mdl-w1j,
+        # promoted to gate of record in mdl-lvu) covers the same .esm files
+        # via per-file subprocess in ~9 min, while the in-process MTK walk
+        # here scales linearly with component count (~85 s/file) and blew
+        # past the 30-minute job budget once the migration burst pushed the
+        # repo past ~25 components. The walk remains the default locally —
+        # only the workflow opts out (esm-g97l).
+        if get(ENV, "ESM_TESTS_SKIP_LIVE_REPO", "") in ("1", "true", "yes")
+            @info "ESM_TESTS_SKIP_LIVE_REPO set — deferring live-repo walk to python-inline-tests gate."
         else
-            @info "No committed .esm files yet — runner exercised only against fixtures."
+            junit_xml = get(ENV, "ESM_TESTS_JUNIT_XML", nothing)
+            results, exit_code = run_esm_tests(; junit_xml=junit_xml)
+            if !isempty(results)
+                failures = filter(r -> r.status != EarthSciModels.PASS, results)
+                for f in failures
+                    println(stderr, "FAIL ", f.file, " :: ", f.container_name,
+                            "/", f.test_id, " — ", f.message)
+                end
+                @test exit_code == 0
+            else
+                @info "No committed .esm files yet — runner exercised only against fixtures."
+            end
         end
     end
 end

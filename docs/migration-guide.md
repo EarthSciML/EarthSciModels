@@ -309,9 +309,7 @@ checklist is to catch failures at the polecat, not at the refinery.
 
 ### 7.1 Run the walker locally — exact invocation
 
-CI invokes the walker via `julia-actions/julia-runtest@v1`, which is
-equivalent to `Pkg.test()`. Run the **same** command locally before
-`gt done`:
+Run the **same** walker CI runs, locally before `gt done`:
 
 ```bash
 scripts/setup_polecat_env.sh                       # idempotent; once per worktree
@@ -319,9 +317,21 @@ julia --project=. -e 'using Pkg; Pkg.test()'       # this IS the walker
 ```
 
 This loads `test/runtests.jl`, which calls
-`run_esm_tests()` over `components/` — the same call CI makes. Do not
-substitute `julia --project=. test/runtests.jl` (it bypasses `Pkg.test`'s
-test environment), and do not paraphrase the command — copy it.
+`run_esm_tests()` over `components/`. Do not substitute `julia
+--project=. test/runtests.jl` (it bypasses `Pkg.test`'s test
+environment), and do not paraphrase the command — copy it.
+
+> **CI runs the same inline-test contract via the Python gate of
+> record** (`tools/run_esm_inline_tests.py`, driving
+> `earthsci_toolkit.simulation.simulate(cse=False)` per AGENTS.md §1).
+> The Julia walker is the local equivalent — it covers the same
+> `(variable, time, expected)` assertions and is the one to debug
+> against locally because the failure messages cite Julia/MTK
+> internals. The Python gate is what blocks the merge; the Julia
+> walker is what you run to find and fix the failure. CI sets
+> `ESM_TESTS_SKIP_LIVE_REPO=1` on the Julia job so that walk stays
+> a local-only step — running it on every push blew the 30-minute
+> CI budget once the repo crossed ~25 components (esm-g97l).
 
 ### 7.2 Report the assertion count
 

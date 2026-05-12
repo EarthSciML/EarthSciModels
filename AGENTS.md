@@ -46,9 +46,23 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
 2. Provide a **thin** loader shim per language (today: the Julia shim in
    `src/EarthSciModels.jl`) that calls the canonical ESS parser and returns the
    appropriate runtime object (`ModelingToolkit.System`, etc.).
-3. Run each `.esm` file's inline `tests` block (ESS spec §6.6) through the
-   canonical runner — `EarthSciModels.run_esm_tests` in CI — to verify the
-   model's `(variable, time, expected)` assertions.
+3. Run each `.esm` file's inline `tests` block (ESS spec §6.6) through a
+   canonical runner to verify the model's `(variable, time, expected)`
+   assertions. Two canonical runners cover this:
+
+   - **CI gate of record (Python):** `tools/run_esm_inline_tests.py`,
+     which drives `earthsci_toolkit.simulation.simulate(cse=False)` per
+     §1 (mdl-w1j → mdl-lvu). Per-file subprocess for OOM isolation;
+     walks both `components/**/*.esm` and `lib/**/*.esm`. This is the
+     blocking gate on every PR and push.
+   - **Julia runner (`EarthSciModels.run_esm_tests`):** the canonical
+     Julia walker; runs by default under `pkg test` for local
+     development and exercises the same `.esm` files via MTK directly.
+     CI skips this walk (`ESM_TESTS_SKIP_LIVE_REPO=1`) because its
+     ~85 s/file in-process MTK build does not scale to the migration
+     burst — the Python gate provides the same coverage with OOM
+     isolation in ~9 min (esm-g97l). Julia shim unit tests and the
+     fixture-based exercise of `run_esm_tests` still run in CI.
 
 What does **not** belong in this rig:
 
