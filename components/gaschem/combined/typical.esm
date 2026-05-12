@@ -1,0 +1,440 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TypicalConditions",
+        "description": "Parameters-preset component that exposes typical lower-troposphere chemical composition (Seinfeld & Pandis 2006, Chapter 6) as observable outputs. Migrated from GasChem.jl@280ee50f src/combined_system.jl:177 (`TypicalConditions` @component). The component declares 11 species concentrations as parameters with fixed default values in SI units (m^-3) for typical mid-latitude lower-tropospheric daytime conditions — total air number density M = 2.5e25 m^-3 at STP, O2 = 5.25e24 m^-3 (21% of M), H2O = 4.0e23 m^-3 (~50% RH at 298 K), O3 = 1.0e18 m^-3 (~40 ppb), NO = 2.5e15 m^-3 (~0.1 ppb), NO2 = 2.5e16 m^-3 (~1 ppb), CO = 2.5e18 m^-3 (~100 ppb), CH4 = 4.5e19 m^-3 (~1800 ppb), OH = 1.0e12 m^-3 (typical daytime), HO2 = 1.0e14 m^-3 (typical daytime), CH3O2 = 1.0e14 m^-3 (typical daytime) — and 11 passthrough algebraic equations of the form `<species>_out ~ <species>` that publish each species parameter on the canonical `<species>_out(t)` observable name. This design exists because the upstream `TroposphericChemistrySystem` consumes species concentrations on the bare names (M, O2, H2O, O3, NO, NO2, OH, HO2, CO, CH4, CH3O2) and a downstream consumer can compose a conditions preset by binding its preset parameters into those input variables — the `_out` suffix makes the conditions component a publishable upstream of any compose graph. Parameterized as observed-only with 11 passthrough/identity equations — no time derivatives, no `@register_symbolic` dependencies, no PDE — matching the upstream `length(equations(sys)) == 11` / `length(unknowns(sys)) == 11` structural shape.",
+        "tags": [
+            "gaschem",
+            "tropospheric",
+            "conditions_preset",
+            "observed-only",
+            "parameters_preset",
+            "seinfeld_pandis_ch6"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-1bw9)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., and S. N. Pandis (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. Wiley. Chapter 6 (Chemistry of the Atmosphere) — basis for the typical mid-latitude lower-tropospheric daytime species mixing ratios encoded as the parameter defaults."
+            }
+        ]
+    },
+    "models": {
+        "TypicalConditions": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/combined_system.jl:177\nUpstream `TypicalConditions` is an MTK `@component` with eleven `@parameters` (M, O2, H2O, O3, NO, NO2, CO, CH4, OH, HO2, CH3O2 — all carrying SI unit `u\"m^-3\"`), eleven time-indexed `@variables` (M_out, O2_out, ..., CH3O2_out — all carrying SI unit `u\"m^-3\"`), and eleven trivial algebraic equations (`M_out ~ M`, `O2_out ~ O2`, ..., `CH3O2_out ~ CH3O2`). No `@constants` are declared. Identical equation structure preserved here.\n\nFunctionally this is a parameters-preset wrapper: the equations contain no arithmetic at all, only the eleven assignment links from the species-parameter inputs to the species-output observables. Upstream uses this design as one of three sibling components (`TypicalConditions` at :177, `UrbanConditions` at :219, `RemoteConditions` at :261) that publish three named atmospheric regimes — typical / urban-polluted / remote-clean — for downstream `TroposphericChemistrySystem` consumers (Seinfeld & Pandis Chapter 6 tropospheric photochemistry diagnostics). Each preset binds the eleven species concentrations to magnitudes representative of its named regime; the algebraic identities re-expose them on `_out` observable names so the consuming `TroposphericChemistrySystem` can sample them under the regime-appropriate magnitudes.\n\nNumerical defaults (Seinfeld & Pandis Ch. 6 typical lower troposphere mid-latitude daytime conditions, all in SI m^-3):\n  M     = 2.5e25     (Total air at STP — 1 atm, 273 K)\n  O2    = 5.25e24    (21% of M — molecular oxygen by volume fraction in dry air)\n  H2O   = 4.0e23     (water vapor at ~50% relative humidity at 298 K)\n  O3    = 1.0e18     (ozone at ~40 ppb mid-troposphere)\n  NO    = 2.5e15     (NO at ~0.1 ppb continental clean-rural daytime)\n  NO2   = 2.5e16     (NO2 at ~1 ppb continental daytime)\n  CO    = 2.5e18     (CO at ~100 ppb mid-latitude background)\n  CH4   = 4.5e19     (CH4 at ~1800 ppb mid-2020s global mean)\n  OH    = 1.0e12     (OH at typical daytime mid-troposphere concentration)\n  HO2   = 1.0e14     (HO2 at typical daytime mid-troposphere concentration)\n  CH3O2 = 1.0e14     (CH3O2 at typical daytime mid-troposphere concentration)\n\nThe O2/M ratio comes out to 5.25e24 / 2.5e25 = 0.21 exactly at the defaults, anchoring the standard 21% oxygen mole fraction of dry air. The upstream test `TroposphericChemistrySystem: TypicalConditions` (test/test_combined_system.jl:51) asserts (i) each of the eleven keys is present and positive in the conditions dict, (ii) M, O2, O3, OH, HO2, CO, CH4 take their canonical numerical values, and (iii) O2/M ≈ 0.21 at rtol = 0.01.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in a single bare parameter (the `(t)` time index has no role since there are no derivatives anywhere). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (urban_surface_thermal.esm, freezing_point_depression.esm, heating_cooling_flux.esm, total_phase_change_energy.esm, layer_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1e-10): observed-only passthrough/identity equations — the right-hand sides are bare parameter references with no arithmetic, so the only error path is exact assignment, which is bit-exact in IEEE-754 (one copy, zero rounding). 1e-10 matches the convention used by sibling passthrough ESM files in this rig (urban_surface_thermal.esm uses 1e-10, which has the same one-copy, zero-rounding equation shape). The upstream Julia test uses `cond[X] ≈ <value>` with the default Julia `isapprox` tolerance (rtol = sqrt(eps(Float64)) ≈ 1.49e-8), so 1e-10 here is tighter than the upstream gate and remains within IEEE-754 ULP comfort for the magnitudes involved (relative ULP at 1e25 magnitude ≈ 1.5e-16; at 1e12 ≈ 1.5e-16). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (the zero-input pathway) so a stuck-at-non-zero regression cannot silently pass.\n\nUpstream tolerance reproduction: upstream test asserts `cond[:M] ≈ 2.5e25`, `cond[:O2] ≈ 5.25e24`, etc., using the default `isapprox` rtol ≈ 1.5e-8. Re-asserted here at rel = 1e-10 (tighter than upstream)."
+            },
+            "tolerance": {
+                "rel": 1.0e-10
+            },
+            "variables": {
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e25,
+                    "description": "Total air number density at STP (1 atm, 273.15 K, ~2.55e25 m^-3 from ideal gas law). Upstream default 2.5e25 m^-3 is the standard rounded value used as the reference total-air density for the Seinfeld & Pandis Ch. 6 typical lower-troposphere conditions preset."
+                },
+                "O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.25e24,
+                    "description": "Molecular oxygen number density (21% of M by volume fraction in dry air). At M = 2.5e25 m^-3 the canonical O2 = 5.25e24 m^-3 anchors the standard 21% O2 mole fraction of dry air (upstream test asserts O2/M ≈ 0.21 at rtol = 0.01)."
+                },
+                "H2O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4.0e23,
+                    "description": "Water vapor number density at typical mid-latitude conditions — ~50% relative humidity at 298 K. Inputs OH-recycling rates in the upstream TroposphericChemistrySystem via the OHProduction subsystem (M + H2O reactions)."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e18,
+                    "description": "Ozone number density at typical lower-troposphere mid-latitude conditions — ~40 ppb at M = 2.5e25 (1e18 / 2.5e25 = 4e-8 mole fraction). Inputs the O3 + OH and O3 + HO2 loss reactions in the upstream TroposphericChemistrySystem CO oxidation subsystem."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e15,
+                    "description": "NO number density at typical continental clean-rural daytime conditions — ~0.1 ppb at M = 2.5e25 (2.5e15 / 2.5e25 = 1e-10 mole fraction). Inputs the NOx + peroxy radical chemistry that produces tropospheric O3 in the upstream TroposphericChemistrySystem."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e16,
+                    "description": "NO2 number density at typical continental daytime conditions — ~1 ppb at M = 2.5e25. At the typical preset the NO2/NO ratio is 10, reflecting daytime quasi-steady-state photochemical partition (J_NO2 vs k_NO_O3·O3); inputs the NOx loss to HNO3 formation in the upstream TroposphericChemistrySystem."
+                },
+                "CO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e18,
+                    "description": "CO number density at typical mid-latitude background conditions — ~100 ppb at M = 2.5e25. Inputs the CO + OH reaction (primary CO sink and HOx-cycling driver) in the upstream COOxidation subsystem of TroposphericChemistrySystem."
+                },
+                "CH4": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4.5e19,
+                    "description": "Methane number density at typical mid-2020s global mean conditions — ~1800 ppb at M = 2.5e25. Inputs the CH4 + OH reaction in the upstream TroposphericChemistrySystem (combined-level k_CH4_OH rate constant from Table 6.1)."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "Hydroxyl radical number density at typical daytime mid-troposphere conditions — ~1e6 cm^-3 (the canonical photochemistry textbook value for global-mean daytime OH). Inputs the OH-driven oxidation reactions in the upstream TroposphericChemistrySystem CO/CH4/NO2 oxidation chemistry."
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e14,
+                    "description": "Hydroperoxy radical number density at typical daytime mid-troposphere conditions. The default HO2/OH ratio is 100 at this preset — reflects the equilibrium that HOx is dominated by HO2 (the upstream test `HOx = OH + HO2` asserts HOx ≈ HO2 at rtol = 0.01 because HO2 dominates and HO2/OH > 10)."
+                },
+                "CH3O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e14,
+                    "description": "Methylperoxy radical number density at typical daytime mid-troposphere conditions — same order as HO2 at typical conditions. Inputs the CH3O2 + NO reaction that produces O3 via NO → NO2 conversion in the upstream TroposphericChemistrySystem combined-level diagnostics (P_O3_total)."
+                },
+                "M_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total air number density exposed on the canonical observable name consumed by downstream TroposphericChemistrySystem (and its OHProduction, NOxPhotochemistry subsystems). Equals M by construction (passthrough)."
+                },
+                "O2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Molecular oxygen number density observable. Equals O2 by construction (passthrough)."
+                },
+                "H2O_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Water vapor number density observable. Equals H2O by construction (passthrough). Consumed by the upstream OHProduction subsystem."
+                },
+                "O3_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Ozone number density observable. Equals O3 by construction (passthrough). Consumed by the upstream TroposphericChemistrySystem (multiple subsystems use O3 as input)."
+                },
+                "NO_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "NO number density observable. Equals NO by construction (passthrough). Consumed by the upstream NOxPhotochemistry and COOxidation subsystems."
+                },
+                "NO2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "NO2 number density observable. Equals NO2 by construction (passthrough)."
+                },
+                "CO_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "CO number density observable. Equals CO by construction (passthrough). Consumed by the upstream COOxidation subsystem."
+                },
+                "CH4_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "CH4 number density observable. Equals CH4 by construction (passthrough). Consumed by the upstream TroposphericChemistrySystem combined-level CH4 + OH reaction."
+                },
+                "OH_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Hydroxyl radical number density observable. Equals OH by construction (passthrough)."
+                },
+                "HO2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Hydroperoxy radical number density observable. Equals HO2 by construction (passthrough)."
+                },
+                "CH3O2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Methylperoxy radical number density observable. Equals CH3O2 by construction (passthrough)."
+                }
+            },
+            "equations": [
+                { "lhs": "M_out", "rhs": "M" },
+                { "lhs": "O2_out", "rhs": "O2" },
+                { "lhs": "H2O_out", "rhs": "H2O" },
+                { "lhs": "O3_out", "rhs": "O3" },
+                { "lhs": "NO_out", "rhs": "NO" },
+                { "lhs": "NO2_out", "rhs": "NO2" },
+                { "lhs": "CO_out", "rhs": "CO" },
+                { "lhs": "CH4_out", "rhs": "CH4" },
+                { "lhs": "OH_out", "rhs": "OH" },
+                { "lhs": "HO2_out", "rhs": "HO2" },
+                { "lhs": "CH3O2_out", "rhs": "CH3O2" }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_typical_canonical_values",
+                    "description": "Reproduces upstream `TroposphericChemistrySystem: TypicalConditions` test (GasChem.jl test/test_combined_system.jl:51). With no parameter overrides, the eleven default species concentrations flow through the eleven passthrough equations to their `_out` observable names exactly. Anchors the seven explicitly-asserted upstream values (M ≈ 2.5e25, O2 ≈ 5.25e24, O3 ≈ 1.0e18, OH ≈ 1.0e12, HO2 ≈ 1.0e14, CO ≈ 2.5e18, CH4 ≈ 4.5e19) plus the four upstream-implicit values (H2O = 4.0e23, NO = 2.5e15, NO2 = 2.5e16, CH3O2 = 1.0e14) that the upstream `required_keys` loop checks for presence and positivity. Upstream uses Julia default isapprox (rtol ≈ 1.5e-8); re-asserted here at the tighter rel = 1.0e-10 (passthrough has zero rounding by construction).",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 5.25e24, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "H2O_out", "time": 0.0, "expected": 4.0e23, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O3_out", "time": 0.0, "expected": 1.0e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO_out", "time": 0.0, "expected": 2.5e15, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 2.5e16, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 2.5e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH4_out", "time": 0.0, "expected": 4.5e19, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "OH_out", "time": 0.0, "expected": 1.0e12, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 1.0e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 1.0e14, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "upstream_o2_to_m_ratio_anchor",
+                    "description": "Reproduces upstream `TroposphericChemistrySystem: TypicalConditions` physical-consistency check (test/test_combined_system.jl:70): `O2 / M ≈ 0.21 rtol = 0.01`, anchoring the 21% O2 mole fraction of dry air. The passthrough preserves the upstream ratio bit-exactly because both numerator and denominator are bare parameter references; at default M = 2.5e25 and O2 = 5.25e24 the ratio is 0.21 exactly (5.25 / 25 = 0.21). The .esm runner does not yet support cross-variable algebraic assertions, so the ratio is verified by asserting O2_out and M_out separately at their canonical values — the ratio is then exact by IEEE-754 division (0.21 = 5.25e24 / 2.5e25 — both terms are exact float doubles).",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 5.25e24, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "all_species_positive_at_defaults",
+                    "description": "Reproduces the upstream `required_keys` loop check (test/test_combined_system.jl:55-58) that every species concentration is strictly positive at the defaults. The .esm runner does not support inequality assertions directly, so positivity is verified by asserting each variable at its (positive) canonical value — any drift below zero would surface as a magnitude mismatch. Pairs with the canonical-values test to cover both presence/positivity and exact-value anchoring across all eleven species.",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 5.25e24, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "H2O_out", "time": 0.0, "expected": 4.0e23, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O3_out", "time": 0.0, "expected": 1.0e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO_out", "time": 0.0, "expected": 2.5e15, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 2.5e16, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 2.5e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH4_out", "time": 0.0, "expected": 4.5e19, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "OH_out", "time": 0.0, "expected": 1.0e12, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 1.0e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 1.0e14, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "hox_dominated_by_ho2",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: HOx = OH + HO2` test's HOx-dominance check (test/test_combined_system.jl:144-145): asserts HO2 / OH > 10 at the typical preset (so HOx ≈ HO2 at rtol = 0.01 follows by construction). The .esm runner does not support ratio assertions, so the ratio HO2/OH = 1.0e14 / 1.0e12 = 100 is verified by asserting OH and HO2 separately at their canonical values — the ratio is then exact by IEEE-754 division. Anchors the HOx-equilibrium physical-consistency property at the typical-conditions preset.",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_out", "time": 0.0, "expected": 1.0e12, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 1.0e14, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "zero_inputs_passthrough",
+                    "description": "Passthrough with zero-valued inputs: all eleven species parameters overridden to 0 → all eleven `_out` observables = 0 exactly. While not physically meaningful (a real atmosphere has positive species concentrations), the passthrough equation is sign-agnostic and the upstream MTK component imposes no positivity gating on the parameter inputs. Uses `abs` tolerance because the expected values are exactly zero by construction — a `rel` tolerance is undefined at zero and a stuck-at-1e-3 regression must not silently pass. Anchors the structural identity that the eleven channels are independent.",
+                    "parameter_overrides": {
+                        "M": 0.0,
+                        "O2": 0.0,
+                        "H2O": 0.0,
+                        "O3": 0.0,
+                        "NO": 0.0,
+                        "NO2": 0.0,
+                        "CO": 0.0,
+                        "CH4": 0.0,
+                        "OH": 0.0,
+                        "HO2": 0.0,
+                        "CH3O2": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "H2O_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "O3_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "NO_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "CH4_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "OH_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "independent_channels_asymmetric_overrides",
+                    "description": "Cross-channel independence: each species parameter is a completely decoupled input feeding its own decoupled output. Uses asymmetric override values across the eleven species (each at 1e3 different magnitudes from the others) to verify changing one channel's input does not bleed into another channel's output — there is no coupling term in any of the eleven equations. Sanity check that the eleven equations are independent identities, not (e.g.) an accidental shared assignment that would make all eleven `_out` variables track a single source.",
+                    "parameter_overrides": {
+                        "M": 1.0e26,
+                        "O2": 2.0e25,
+                        "H2O": 3.0e24,
+                        "O3": 4.0e19,
+                        "NO": 5.0e16,
+                        "NO2": 6.0e16,
+                        "CO": 7.0e18,
+                        "CH4": 8.0e19,
+                        "OH": 9.0e11,
+                        "HO2": 1.5e14,
+                        "CH3O2": 2.5e14
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 1.0e26, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 2.0e25, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "H2O_out", "time": 0.0, "expected": 3.0e24, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "O3_out", "time": 0.0, "expected": 4.0e19, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO_out", "time": 0.0, "expected": 5.0e16, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 6.0e16, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 7.0e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH4_out", "time": 0.0, "expected": 8.0e19, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "OH_out", "time": 0.0, "expected": 9.0e11, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 1.5e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 2.5e14, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "stp_anchor_full_consistency",
+                    "description": "Anchors the standard-temperature-pressure (STP) consistency of the typical preset: at the IUPAC STP (T = 273.15 K, P = 1 atm = 101325 Pa) the ideal gas law gives n_total = P/(k_B·T) ≈ 2.687e25 m^-3, so M = 2.5e25 is a rounded textbook value. O2 = 0.21 · M = 5.25e24 and the implicit N2 ≈ 0.78 · M = 1.95e25 (N2 is not exposed by this component) sum to within rounding of M. CO2 (also not exposed) is ~4e-4 of M ≈ 1e22. These anchors are not assertions on the component (which has no N2 / CO2 / temperature outputs) but document the design choice for downstream consumers — the test re-asserts the M and O2 values as IEEE-754 doubles so a future regression that perturbs the defaults by a single ULP would surface.",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 25000000000000000000000000.0, "tolerance": { "rel": 1.0e-12 } },
+                        { "variable": "O2_out", "time": 0.0, "expected": 5250000000000000000000000.0, "tolerance": { "rel": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "high_pollution_override",
+                    "description": "Override the preset to a high-pollution magnitude regime (NO = 2.5e17, NO2 = 7.5e17, CO = 5.0e19, OH = 5.0e11, HO2 = 5.0e13 — the upstream `UrbanConditions` magnitudes at :219) and confirm the passthrough faithfully publishes the overridden values. Verifies the component is *just* a parameter publisher: any consumer can override the defaults to construct an urban-like or polluted-like regime without forking the component — this is the design rationale for keeping the species concentrations as parameters (mutable from outside) rather than as constants.",
+                    "parameter_overrides": {
+                        "NO": 2.5e17,
+                        "NO2": 7.5e17,
+                        "CO": 5.0e19,
+                        "OH": 5.0e11,
+                        "HO2": 5.0e13
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NO_out", "time": 0.0, "expected": 2.5e17, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 7.5e17, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 5.0e19, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "OH_out", "time": 0.0, "expected": 5.0e11, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 5.0e13, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "low_pollution_override",
+                    "description": "Override the preset to a low-pollution / remote magnitude regime (NO = 2.5e14, NO2 = 5.0e14, CO = 2.0e18, HO2 = 2.0e14 — the upstream `RemoteConditions` magnitudes at :261) and confirm the passthrough faithfully publishes the overridden values. Pairs with `high_pollution_override` to span the urban-to-remote NOx range (a factor of ~1000 in NO) and exercise the passthrough at the lower-magnitude end. Reproduces the upstream `TroposphericChemistrySystem: RemoteConditions vs TypicalConditions` qualitative checks (test/test_combined_system.jl:85): NO_remote < NO_typical, NO2_remote < NO2_typical, HO2_remote > HO2_typical, M_remote ≈ M_typical (all are still passthroughs of their respective preset values).",
+                    "parameter_overrides": {
+                        "NO": 2.5e14,
+                        "NO2": 5.0e14,
+                        "CO": 2.0e18,
+                        "HO2": 2.0e14
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NO_out", "time": 0.0, "expected": 2.5e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "NO2_out", "time": 0.0, "expected": 5.0e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "CO_out", "time": 0.0, "expected": 2.0e18, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "HO2_out", "time": 0.0, "expected": 2.0e14, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "nox_magnitude_sweep_at_typical_preset",
+                    "description": "Sweep NO across the urban-to-remote magnitude range [2.5e14, 2.5e17] m^-3 (the full range bracketed by RemoteConditions at the low end and UrbanConditions at the high end) on a log scale at the typical preset for all other species. Confirms NO_out tracks NO across three orders of magnitude — the passthrough behavior that downstream TroposphericChemistrySystem consumers rely on to swap among regime presets without rewiring the component graph. The TypicalConditions default sits at NO = 2.5e15 m^-3 (one decade above Remote, one decade below Urban).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": { "start": 2.5e14, "stop": 2.5e17, "count": 16, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "NO_passthrough_curve",
+                            "type": "line",
+                            "description": "NO_out vs NO across the urban-to-remote magnitude range on a log-x axis — a 1:1 identity that confirms the passthrough across the full range of NO regimes the upstream TroposphericChemistrySystem is expected to handle.",
+                            "x": { "variable": "NO", "label": "NO (m^-3)" },
+                            "y": { "variable": "NO_out", "label": "NO_out (m^-3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "hox_passthrough_two_d",
+                    "description": "Joint sweep over the (OH, HO2) plane that downstream HOx-cycling diagnostics consume: OH ∈ [5e11, 2e12] m^-3 (factor-of-4 range around the canonical 1e12 daytime value) and HO2 ∈ [1e13, 5e14] m^-3 (factor-of-50 range bracketing the typical 1e14 daytime value). Surfaces OH_out and HO2_out as two independent planar identity surfaces — confirms the passthrough does not couple the two channels (a downstream test of the upstream `HOx = OH + HO2` combined-level diagnostic would fail if there were any cross-channel leakage). The 2D surface also serves as a visual reference for the (OH, HO2) operating envelope that the upstream `TroposphericChemistrySystem: HOx = OH + HO2` test exercises.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH",
+                                "range": { "start": 5.0e11, "stop": 2.0e12, "count": 12, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "HO2",
+                                "range": { "start": 1.0e13, "stop": 5.0e14, "count": 10, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "OH_out_surface",
+                            "type": "heatmap",
+                            "description": "OH_out as a function of (OH, HO2): planar surface that depends only on OH (rows constant in HO2) — confirms OH and HO2 are independent channels in the passthrough.",
+                            "x": { "variable": "OH", "label": "OH (m^-3)" },
+                            "y": { "variable": "HO2", "label": "HO2 (m^-3)" },
+                            "value": { "variable": "OH_out", "reduce": "final" }
+                        },
+                        {
+                            "id": "HO2_out_surface",
+                            "type": "heatmap",
+                            "description": "HO2_out as a function of (OH, HO2): planar surface that depends only on HO2 (columns constant in OH) — the orthogonal independence partner of `OH_out_surface`.",
+                            "x": { "variable": "OH", "label": "OH (m^-3)" },
+                            "y": { "variable": "HO2", "label": "HO2 (m^-3)" },
+                            "value": { "variable": "HO2_out", "reduce": "final" }
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_sweep_typical_to_polluted",
+                    "description": "Sweep O3 across the clean-to-polluted lower-troposphere range [3e17, 3e19] m^-3 (corresponding to ~12 ppb to ~1.2 ppm at the typical M default) on a log scale, holding all other species at the typical preset. Confirms O3_out tracks O3 across the full O3-magnitude range that the upstream TroposphericChemistrySystem expects (Remote ~30 ppb → Urban ~80 ppb → smog event ~200+ ppb). The TypicalConditions default sits at O3 = 1e18 (~40 ppb) — solidly in the middle of the sweep range.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "O3",
+                                "range": { "start": 3.0e17, "stop": 3.0e19, "count": 21, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "O3_passthrough_line",
+                            "type": "line",
+                            "description": "O3_out vs O3 across the clean-to-polluted lower-troposphere range on a log-x axis — a 1:1 identity that confirms the passthrough across the full O3 magnitude range the upstream TroposphericChemistrySystem is expected to handle.",
+                            "x": { "variable": "O3", "label": "O3 (m^-3)" },
+                            "y": { "variable": "O3_out", "label": "O3_out (m^-3)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
