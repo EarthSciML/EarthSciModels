@@ -88,6 +88,36 @@
                     "default": 0.10,
                     "description": "Previous day's MC100 value (dimensionless fraction). Default 0.10 = 10%."
                 },
+                "PPTDUR_hr": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Precipitation duration in hours (algebraic intermediate)."
+                },
+                "LAT_nd": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Non-dimensionalized latitude (algebraic intermediate)."
+                },
+                "DECL": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Solar declination (radians, algebraic intermediate)."
+                },
+                "tan_product": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Product tan(LAT)*tan(DECL) used in daylength calc (algebraic intermediate)."
+                },
+                "tan_product_clamped": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "tan_product clamped to [-0.99, 0.99] before acos (algebraic intermediate)."
+                },
+                "DAYLIT": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Daylength in hours derived from latitude and Julian date (algebraic intermediate)."
+                },
                 "MC100": {
                     "type": "state",
                     "units": "1",
@@ -190,6 +220,7 @@
                             {
                                 "op": "-",
                                 "args": [
+                                    1.0,
                                     {
                                         "op": "/",
                                         "args": [
@@ -305,7 +336,7 @@
             "tests": [
                 {
                     "id": "default_summer_no_precip",
-                    "description": "Summer conditions (JDATE=180, LAT=40deg), no precipitation (PPTDUR=0). Default EMCMIN=0.05, EMCMAX=0.20, YMC100=0.10. Tests daylength calculation and basic moisture update.",
+                    "description": "Summer conditions (JDATE=180, LAT≈40deg), no precipitation. EMCMIN=0.05, EMCMAX=0.20, YMC100=0.10. DAYLIT ≈ 14.82 h ⇒ EMCBAR=BNDRYH ≈ 0.10737 ⇒ MC100 = 0.10 + (0.10737-0.10)*0.280401 ≈ 0.10207.",
                     "parameter_overrides": {
                         "LAT": 0.6981,
                         "JDATE": 180.0,
@@ -316,12 +347,12 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.1020680892, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 },
                 {
                     "id": "winter_short_day",
-                    "description": "Winter conditions (JDATE=30, LAT=40deg), short daylength. Tests seasonal variation in EMCBAR calculation.",
+                    "description": "Winter conditions (JDATE=30, LAT≈40deg), short daylength. DAYLIT ≈ 9.82 h ⇒ EMCBAR=BNDRYH ≈ 0.13860 ⇒ MC100 ≈ 0.11082.",
                     "parameter_overrides": {
                         "LAT": 0.6981,
                         "JDATE": 30.0,
@@ -332,12 +363,12 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.1108226212, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 },
                 {
                     "id": "with_precipitation",
-                    "description": "Moderate precipitation (PPTDUR=3600s = 1 hour). Tests precipitation weighting in BNDRYH calculation.",
+                    "description": "Moderate precipitation (PPTDUR=3600s = 1 hour). Saturated-fuel formula contributes 1 hour of 0.415 vs 23 h of EMCBAR=0.10737 in BNDRYH average ⇒ BNDRYH ≈ 0.12019 ⇒ MC100 ≈ 0.10566.",
                     "parameter_overrides": {
                         "LAT": 0.6981,
                         "JDATE": 180.0,
@@ -348,12 +379,12 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.1056621819, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 },
                 {
                     "id": "dry_conditions",
-                    "description": "Dry conditions: low EMCMAX (0.10), previous moisture 0.05. Tests lower bound of moisture range.",
+                    "description": "Dry conditions: EMCMIN=0.03, EMCMAX=0.10, YMC100=0.05. DAYLIT ≈ 14.82 h ⇒ EMCBAR=BNDRYH ≈ 0.05678 ⇒ MC100 ≈ 0.05190.",
                     "parameter_overrides": {
                         "LAT": 0.6981,
                         "JDATE": 180.0,
@@ -364,12 +395,12 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.07402 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.0518997783, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 },
                 {
                     "id": "humid_conditions",
-                    "description": "Humid conditions: high EMCMAX (0.30), previous moisture 0.20. Tests upper bound of moisture range.",
+                    "description": "Humid conditions: EMCMIN=0.15, EMCMAX=0.30, YMC100=0.20. DAYLIT ≈ 14.82 h ⇒ EMCBAR=BNDRYH ≈ 0.20737 ⇒ MC100 ≈ 0.20207.",
                     "parameter_overrides": {
                         "LAT": 0.6981,
                         "JDATE": 180.0,
@@ -380,12 +411,12 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.25608 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.2020680892, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 },
                 {
                     "id": "equator_latitude",
-                    "description": "Equatorial location (LAT=0), constant daylength ~12 hours year-round.",
+                    "description": "Equatorial location (LAT=0): tan(0)=0 ⇒ acos(0)=π/2 ⇒ DAYLIT = 12 h exactly. EMCBAR=BNDRYH = (12*0.05 + 12*0.20)/24 = 0.125 ⇒ MC100 = 0.10 + 0.025*0.280401 ≈ 0.10701.",
                     "parameter_overrides": {
                         "LAT": 0.0,
                         "JDATE": 180.0,
@@ -396,7 +427,7 @@
                     },
                     "time_span": { "start": 0.0, "end": 1.0 },
                     "assertions": [
-                        { "variable": "MC100", "time": 0.0, "expected": 0.12804 }
+                        { "variable": "MC100", "time": 0.0, "expected": 0.1070099758, "tolerance": { "rel": 1.0e-8 } }
                     ]
                 }
             ]
