@@ -1,0 +1,704 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SurfaceRunoffInfiltration",
+        "description": "Surface runoff and infiltration for the pervious-road urban surface, following Oleson et al. (2010, CLM Tech Note Ch. 5) §5.2, Eqs. 5.49-5.57. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:384 (`SurfaceRunoffInfiltration` @component). Implements the SIMTOP-based (Niu et al., 2005) runoff partition with frozen-soil-modulated saturated fraction (Eqs. 5.50-5.51), a maximum infiltration capacity built from top-layer matric-potential and saturation (Eqs. 5.52-5.55), and snow-aware surface infiltration (Eqs. 5.56-5.57). Observed-only: all 14 inputs are parameters and the seven outputs (f_frz_1, f_sat, s, v, q_infl_max, q_over, q_infl) are given by algebraic equations.",
+        "tags": [
+            "urban_canopy",
+            "hydrology",
+            "surface-runoff",
+            "infiltration",
+            "simtop",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-ds0b)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Hydrology), Section 5.2 (Surface Runoff and Infiltration), Eqs. 5.47-5.58, pp. 124-128."
+            },
+            {
+                "citation": "Niu, G.-Y., Yang, Z.-L., Dickinson, R. E., & Gulden, L. E. (2005). A simple TOPMODEL-based runoff parameterization (SIMTOP) for use in global climate models. Journal of Geophysical Research, 110, D21106."
+            }
+        ]
+    },
+    "models": {
+        "SurfaceRunoffInfiltration": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:384\nUpstream `SurfaceRunoffInfiltration` is an MTK `@component` whose 14 inputs (q_liq_0, q_seva, f_max, z_v, k_sat_1, B_1, ψ_sat_1, θ_liq_1, θ_sat_1, θ_ice_1, w_ice_1, w_liq_1, Δz_1, has_snow) are `@parameters` (driven by a parent column/atmosphere/soil-hydraulics coupler) and whose seven outputs (f_frz_1, f_sat, s, v, q_infl_max, q_over, q_infl) are time-indexed `@variables` with seven algebraic equations and no derivatives. Identical structure preserved here.\n\nThe upstream component declares six `@constants` (α=3.0 [dimensionless], f_over=0.5 [m^-1], θ_imp=0.05 [m^3/m^3], ρ_liq=1000.0 [kg/m^3], one_kgpm2=1.0 [kg/m^2], zero_kgpm2s=0.0 [kg/(m^2*s)]). Per the convention of sibling files in this directory (snow_compaction.esm, groundwater_drainage.esm), `@constants` are promoted to parameters here with the upstream default values so the seven equations reference them by name without re-injecting magic numbers. The two `_kgpm2` / `_kgpm2s` constants exist upstream purely to make the unit-bearing `max()` floors well-typed under DynamicQuantities; they preserve unit-consistency of the equation AST and are kept here for round-trip fidelity.\n\nThe upstream component declares no defaults on the 14 input `@parameters`. The canonical Python runner (`earthsci_toolkit.simulation.simulate`) requires concrete numeric defaults to instantiate the system in isolation, so defaults are seeded from a mid-range CLMU pervious-road state representative of Oleson 2010 Tables 5.1-5.2: sandy-loam top layer (k_sat_1=1e-5 m/s, B_1=5.0, ψ_sat_1=-0.05 m, θ_sat_1=0.4 m^3/m^3, Δz_1=0.02 m), moderate water table (z_v=2.0 m), f_max=0.4 (mid-range maximum saturated fraction), zero precipitation/evaporation, and no snow. Each test below overrides the inputs that exercise its specific branch.\n\nObservability classification: this component is functionally observed-only — all seven outputs are given by single algebraic equations in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (aquifer_water_balance.esm, impervious_water_balance.esm, snow_compaction.esm).\n\nEquation-ordering note (vs upstream comment ordering): the upstream Julia source orders the equations as (5.51, 5.50, 5.53, 5.54, 5.52, 5.49, 5.56-5.57). The same numerical order is preserved here verbatim because the AST is dependency-driven (each equation references only earlier outputs and the 14 inputs) and the canonical Python runner topologically sorts before solving — so ordering is informational, not load-bearing.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the longest equation chain is O(10) IEEE-754 float64 operations including two `exp()` calls in f_frz_1 (each carrying ≈1 ULP of relative error) — worst-case roundoff is ~10*ULP ≈ 1e-15. 1e-9 leaves seven orders of magnitude of headroom above ULP roundoff and is well below any plausible physical-discrimination scale on the surface-water flux densities (typical CLMU q_liq_0 / q_over / q_infl values fall in the 1e-6 to 1e-2 kg/(m^2*s) range). Tests that yield exact algebraic zeros use `abs: 1e-15` to bypass the relative-tolerance singularity at zero."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "q_liq_0": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Liquid water reaching surface from rain or snowmelt"
+                },
+                "q_seva": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Surface evaporation of liquid water"
+                },
+                "f_max": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "Maximum saturated fraction (Eq. 5.50, dimensionless)"
+                },
+                "z_v": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 2.0,
+                    "description": "Water table depth (Eq. 5.50)"
+                },
+                "k_sat_1": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0e-5,
+                    "description": "Saturated hydraulic conductivity of top soil layer"
+                },
+                "B_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 5.0,
+                    "description": "Clapp-Hornberger exponent for top soil layer (dimensionless)"
+                },
+                "ψ_sat_1": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -0.05,
+                    "description": "Saturated matric potential for top soil layer (typically negative)"
+                },
+                "θ_liq_1": {
+                    "type": "parameter",
+                    "units": "m^3/m^3",
+                    "default": 0.2,
+                    "description": "Volumetric liquid water content of top soil layer"
+                },
+                "θ_sat_1": {
+                    "type": "parameter",
+                    "units": "m^3/m^3",
+                    "default": 0.4,
+                    "description": "Porosity of top soil layer"
+                },
+                "θ_ice_1": {
+                    "type": "parameter",
+                    "units": "m^3/m^3",
+                    "default": 0.0,
+                    "description": "Volumetric ice content of top soil layer"
+                },
+                "w_ice_1": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Ice content of top soil layer"
+                },
+                "w_liq_1": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 50.0,
+                    "description": "Liquid water content of top soil layer"
+                },
+                "Δz_1": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.02,
+                    "description": "Thickness of top soil layer"
+                },
+                "has_snow": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Whether snow layers are present (1=yes, 0=no, dimensionless)"
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.0,
+                    "description": "Scale-dependent parameter for frozen fraction (Eq. 5.51, dimensionless)"
+                },
+                "f_over": {
+                    "type": "parameter",
+                    "units": "m^-1",
+                    "default": 0.5,
+                    "description": "Decay factor for saturated fraction (Oleson 2010 p. 126)"
+                },
+                "θ_imp": {
+                    "type": "parameter",
+                    "units": "m^3/m^3",
+                    "default": 0.05,
+                    "description": "Minimum effective porosity floor for relative-saturation denominator (Oleson 2010 p. 127)"
+                },
+                "ρ_liq": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of liquid water (Oleson 2010 Table 1.4)"
+                },
+                "one_kgpm2": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 1.0,
+                    "description": "Unit mass per area, used to unit-balance the 1e-10 floor in the f_frz_1 max() guard"
+                },
+                "zero_kgpm2s": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Zero flux sentinel, used to unit-balance the max() floors in q_over and q_infl"
+                },
+                "f_frz_1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Impermeable fraction from frozen soil (Oleson Eq. 5.51, dimensionless)"
+                },
+                "f_sat": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Fractional saturated area (Oleson Eq. 5.50, dimensionless)"
+                },
+                "s": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Relative saturation of top soil layer (Oleson Eq. 5.53, dimensionless)"
+                },
+                "v": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Infiltration variable v (Oleson Eq. 5.54, dimensionless)"
+                },
+                "q_infl_max": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Maximum infiltration capacity (Oleson Eq. 5.52)"
+                },
+                "q_over": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Surface runoff (Oleson Eq. 5.49, SIMTOP)"
+                },
+                "q_infl": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Infiltration rate (Oleson Eqs. 5.56-5.57; snow-aware)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "f_frz_1",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    { "op": "-", "args": [0.0, "α"] },
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1.0,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "w_ice_1",
+                                                                    {
+                                                                        "op": "max",
+                                                                        "args": [
+                                                                            { "op": "+", "args": ["w_ice_1", "w_liq_1"] },
+                                                                            { "op": "*", "args": [1.0e-10, "one_kgpm2"] }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            { "op": "-", "args": [0.0, "α"] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "-",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            { "op": "-", "args": [0.0, "α"] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "f_sat",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "-", "args": [1.0, "f_frz_1"] },
+                                    "f_max",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [-0.5, "f_over", "z_v"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "f_frz_1"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "s",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "θ_liq_1",
+                                                    {
+                                                        "op": "max",
+                                                        "args": [
+                                                            "θ_imp",
+                                                            { "op": "-", "args": ["θ_sat_1", "θ_ice_1"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "f_sat"
+                                        ]
+                                    },
+                                    {
+                                        "op": "max",
+                                        "args": [
+                                            { "op": "-", "args": [1.0, "f_sat"] },
+                                            0.01
+                                        ]
+                                    }
+                                ]
+                            },
+                            0.0
+                        ]
+                    }
+                },
+                {
+                    "lhs": "v",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["B_1", "ψ_sat_1"] },
+                            { "op": "*", "args": [0.5, "Δz_1"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_infl_max",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "ρ_liq",
+                            "k_sat_1",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "v",
+                                            { "op": "-", "args": ["s", 1.0] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_over",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            { "op": "*", "args": ["f_sat", "q_liq_0"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "-", "args": [1.0, "f_sat"] },
+                                    {
+                                        "op": "max",
+                                        "args": [
+                                            "zero_kgpm2s",
+                                            { "op": "-", "args": ["q_liq_0", "q_infl_max"] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_infl",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["has_snow", 0.5] },
+                            { "op": "-", "args": ["q_liq_0", "q_over"] },
+                            {
+                                "op": "max",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            { "op": "-", "args": ["q_liq_0", "q_over"] },
+                                            "q_seva"
+                                        ]
+                                    },
+                                    "zero_kgpm2s"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "all_zero_inputs",
+                    "description": "Null state — every input zero except f_max=0 (drives saturation pathway off) and the mid-range soil defaults that do not zero out the denominators in s. All seven outputs are exactly zero by IEEE-754: f_frz_1=0 because w_ice_1=0 with finite w_liq_1; f_sat=0 because (1-f_frz_1)*0*exp(0)+0=0; s=0 because θ_liq_1=0; v=0 because ψ_sat_1=0; q_infl_max=0 because k_sat_1=0; q_over=0 because q_liq_0=0; q_infl=max(0-0-0, 0)=0. Exercises the additive/multiplicative-zero limits of all seven equations.",
+                    "parameter_overrides": {
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.0,
+                        "f_max": 0.0,
+                        "z_v": 0.0,
+                        "k_sat_1": 0.0,
+                        "B_1": 0.0,
+                        "ψ_sat_1": 0.0,
+                        "θ_liq_1": 0.0,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "s",          "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "v",          "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_over",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "dry_quiescent",
+                    "description": "Dry-soil quiescent state — no precipitation, no evaporation, no ice, moderate liquid storage. With q_liq_0=0 and q_seva=0, q_over and q_infl must both be exactly zero regardless of the saturated-fraction state. f_sat reaches the typical CLMU mid-range value (0.4·exp(-0.5·0.5·2) = 0.2426 at f_max=0.4, z_v=2 m), s settles at 0.34, q_infl_max takes its unsaturated value (0.175 kg/(m^2*s) — the upper-bound infiltration capacity in the absence of forcing).",
+                    "parameter_overrides": {
+                        "q_liq_0": 0.0,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.2426122638850534 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.3398361550389345 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.17504096124026639 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "moderate_rain_unsaturated",
+                    "description": "Typical rainfall event on an unsaturated pervious-road column: q_liq_0=1e-4 kg/(m^2*s) (~0.36 mm/hr) with no evaporation, no ice, no snow. Because q_liq_0 << q_infl_max (1e-4 vs 0.175), the infiltration-excess branch of q_over (the max() second term) is exactly zero; only the saturation-excess term contributes: q_over = f_sat·q_liq_0 = 0.2426·1e-4 = 2.43e-5. q_infl = q_liq_0 - q_over - q_seva = 7.57e-5 — the standard partition into saturation-area runoff and column infiltration.",
+                    "parameter_overrides": {
+                        "q_liq_0": 1.0e-4,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.2426122638850534 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.3398361550389345 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.17504096124026639 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 2.426122638850534e-05 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 7.573877361149466e-05 }
+                    ]
+                },
+                {
+                    "id": "fully_saturated_surface",
+                    "description": "Surface fully saturated (f_max=1, z_v=0 ⇒ f_sat = (1-0)·1·exp(0)+0 = 1). The Eq. 5.49 SIMTOP partition collapses to q_over = q_liq_0 (all rain becomes saturation-area runoff; the infiltration-excess term is multiplied by 1-f_sat=0). q_infl = q_liq_0 - q_over - q_seva = 0 — no water infiltrates through a fully saturated surface. Also exercises the max(1-f_sat, 0.01) floor in s: with 1-f_sat=0, the floor activates at 0.01, and combined with θ_liq_1=θ_sat_1 the s expression reaches exactly 0 (because θ_liq/θ_sat - f_sat = 1 - 1 = 0).",
+                    "parameter_overrides": {
+                        "q_liq_0": 1.0e-3,
+                        "q_seva": 0.0,
+                        "f_max": 1.0,
+                        "z_v": 0.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.4,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 1.0 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.26 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 1.0e-3 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "fully_frozen_top_layer",
+                    "description": "Top soil layer completely frozen (w_ice_1=50, w_liq_1=0, θ_liq_1=0, θ_ice_1=θ_sat_1=0.4): Eq. 5.51 gives f_frz_1=1 (impermeable), which forces f_sat=1 via Eq. 5.50 ((1-1)·... + 1 = 1). All incident liquid becomes saturation-area runoff; no infiltration. Exercises both the w_ice_1/(w_ice_1+w_liq_1) ⇒ 1 limit of Eq. 5.51 and the f_frz_1·1 → f_sat = 1 propagation. Also triggers the θ_imp floor (max(0.05, θ_sat_1-θ_ice_1) = max(0.05, 0) = 0.05) — a divide-by-zero guard for the relative-saturation denominator.",
+                    "parameter_overrides": {
+                        "q_liq_0": 2.0e-4,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.0,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.4,
+                        "w_ice_1": 50.0,
+                        "w_liq_1": 0.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 1.0 },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 1.0 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.26 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 2.0e-4 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "partial_ice_water_mix",
+                    "description": "Partially-frozen top layer (w_ice_1=20, w_liq_1=30 ⇒ ice fraction = 0.4): exercises the intermediate branch of Eq. 5.51 where f_frz_1 ∈ (0, 1). f_frz_1 = (exp(-3·(1-0.4))-exp(-3))/(1-exp(-3)) = 0.1216. f_sat then blends frozen and SIMTOP contributions. With θ_liq_1=0.1 and θ_sat_1-θ_ice_1=0.3, the saturation ratio θ_liq_1/0.3 ≈ 0.333 falls just below f_sat ≈ 0.335 ⇒ the max(..., 0) floor on s activates (the numerator is a tiny negative number; max() clamps it to 0).",
+                    "parameter_overrides": {
+                        "q_liq_0": 2.0e-4,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.1,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.1,
+                        "w_ice_1": 20.0,
+                        "w_liq_1": 30.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.12156414210793089 },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.3346834542689348 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.26 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 6.693669085378696e-05 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 1.3306330914621305e-04 }
+                    ]
+                },
+                {
+                    "id": "snow_present_skip_evap",
+                    "description": "Snow layers present (has_snow=1): Eq. 5.57 branch of the q_infl ifelse selects q_infl = q_liq_0 - q_over (the surface-evaporation term q_seva is NOT subtracted — the snow layer mediates surface evaporation upstream of this component). With q_liq_0=5e-4 and q_seva=1e-4 (active but ignored), q_infl = 5e-4 - q_over = 3.79e-4, identical to the no-evap case at the same q_liq_0. This is the contrast with `evap_exceeds_throughfall` below.",
+                    "parameter_overrides": {
+                        "q_liq_0": 5.0e-4,
+                        "q_seva": 1.0e-4,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.2426122638850534 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.3398361550389345 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.17504096124026639 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 1.213061319425267e-04 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 3.7869386805747333e-04 }
+                    ]
+                },
+                {
+                    "id": "evap_exceeds_throughfall",
+                    "description": "No snow but evaporation exceeds throughfall (q_seva=2e-4 > q_liq_0-q_over): the max(..., zero_kgpm2s) floor in Eq. 5.56 clamps q_infl to exactly 0 — the surface cannot infiltrate water that has already evaporated. Specifically q_liq_0 - q_over - q_seva = 1e-4 - 2.43e-5 - 2e-4 = -1.24e-4 < 0 ⇒ max(...,0) = 0. Contrasts with snow_present_skip_evap above to isolate the q_seva branch.",
+                    "parameter_overrides": {
+                        "q_liq_0": 1.0e-4,
+                        "q_seva": 2.0e-4,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.2426122638850534 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.3398361550389345 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.17504096124026639 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 2.426122638850534e-05 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                    ]
+                },
+                {
+                    "id": "shallow_water_table",
+                    "description": "Shallow water table (z_v=0.1 m vs 2 m default): Eq. 5.50 exp(-0.5·f_over·z_v) → exp(-0.025) ≈ 0.9753, raising f_sat from 0.2426 to 0.3901 — a near-doubling of the saturated fraction in the SIMTOP partition. This is the typical CLMU-urban wet-zone state where a shallow water table elevates surface runoff for a fixed precipitation forcing.",
+                    "parameter_overrides": {
+                        "q_liq_0": 5.0e-4,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 0.1,
+                        "k_sat_1": 1.0e-5,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.39012396481133305 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.1801612604021676 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 0.2149596848994581 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 1.9506198240566654e-04 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 3.049380175943335e-04 }
+                    ]
+                },
+                {
+                    "id": "infiltration_excess_runoff",
+                    "description": "Infiltration-excess (Hortonian) runoff regime: clay-like top layer (k_sat_1=1e-8 m/s) under intense rainfall (q_liq_0=5e-3 kg/(m^2*s) ≈ 18 mm/hr). q_infl_max collapses to 1.75e-4 ≪ q_liq_0, activating the second term of Eq. 5.49: q_over = f_sat·q_liq_0 + (1-f_sat)·(q_liq_0 - q_infl_max) = 0.2426·5e-3 + 0.7574·(5e-3 - 1.75e-4) = 4.87e-3. Nearly all rain becomes runoff; only 1.33e-4 infiltrates (close to q_infl_max). This is the canonical CLMU clay-soil storm scenario complementary to fully_saturated_surface (which exercised the saturation-excess limit).",
+                    "parameter_overrides": {
+                        "q_liq_0": 5.0e-3,
+                        "q_seva": 0.0,
+                        "f_max": 0.4,
+                        "z_v": 2.0,
+                        "k_sat_1": 1.0e-8,
+                        "B_1": 5.0,
+                        "ψ_sat_1": -0.05,
+                        "θ_liq_1": 0.2,
+                        "θ_sat_1": 0.4,
+                        "θ_ice_1": 0.0,
+                        "w_ice_1": 0.0,
+                        "w_liq_1": 50.0,
+                        "Δz_1": 0.02,
+                        "has_snow": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f_frz_1",    "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "f_sat",      "time": 0.0, "expected": 0.2426122638850534 },
+                        { "variable": "s",          "time": 0.0, "expected": 0.3398361550389345 },
+                        { "variable": "v",          "time": 0.0, "expected": -25.0 },
+                        { "variable": "q_infl_max", "time": 0.0, "expected": 1.750409612402664e-04 },
+                        { "variable": "q_over",     "time": 0.0, "expected": 4.867426122638851e-03 },
+                        { "variable": "q_infl",     "time": 0.0, "expected": 1.3257387736114942e-04 }
+                    ]
+                }
+            ]
+        }
+    }
+}
