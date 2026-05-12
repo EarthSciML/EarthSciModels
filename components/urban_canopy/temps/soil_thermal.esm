@@ -1,0 +1,869 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SoilThermalProperties",
+        "description": "Thermal conductivity and volumetric heat capacity for soil layers in the pervious-road column of the urban canopy thermal solver. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:75 (`SoilThermalProperties` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4 §4.3): thermal conductivity follows Farouki (1981) using the Kersten-number method (Eqs. 4.77-4.82); volumetric heat capacity follows de Vries (1963) (Eqs. 4.85-4.86). Parameterized as observed-only: pct_sand, pct_clay, θ_sat, θ_liq, T_i, w_ice, w_liq, Δz are inputs (parameters); λ_s, λ_sat, λ_dry, ρ_d, S_r, K_e, λ_soil, c_s, c_soil are algebraic outputs. The component carries two temperature-conditioned `ifelse` branches: λ_sat and K_e switch between frozen (T_i < T_f) and unfrozen (T_i ≥ T_f) regimes, while λ_soil falls back to λ_dry whenever S_r drops below a small numerical threshold.",
+        "tags": [
+            "urban_canopy",
+            "temperatures",
+            "soil",
+            "thermal_conductivity",
+            "heat_capacity",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-w61l)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.3 (Thermal properties), Eqs. 4.77-4.82 and Eqs. 4.85-4.86, pp. 107-108."
+            },
+            {
+                "citation": "Farouki, O. T. (1981). The thermal properties of soils in cold regions. Cold Regions Science and Technology, 5(1), 67-75."
+            },
+            {
+                "citation": "de Vries, D. A. (1963). Thermal properties of soils. In Physics of Plant Environment (W. R. van Wijk, Ed.), pp. 210-235. North-Holland Publishing Co., Amsterdam."
+            }
+        ]
+    },
+    "models": {
+        "SoilThermalProperties": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:75\nUpstream `SoilThermalProperties` is an MTK `@component` whose eight inputs (pct_sand, pct_clay, θ_sat, θ_liq, T_i, w_ice, w_liq, Δz) are `@parameters` and whose nine outputs (λ_s, λ_sat, λ_dry, ρ_d, S_r, K_e, λ_soil, c_s, c_soil) are time-indexed `@variables` with nine algebraic equations (no derivatives). Identical equation structure preserved here. Upstream structural test (test/roof_wall_road_snow_temperatures_test.jl:46-54) asserts `length(equations(sys)) == 9` and `length(unknowns(sys)) == 9` — matched here.\n\nThe upstream component declares three `@constants` blocks. (i) Physical constants from Oleson Table 1.4: T_f = 273.15 K (freezing temperature), ρ_liq = 1000.0 kg/m^3, ρ_ice = 917.0 kg/m^3, C_liq = 4188.0 J/(kg*K), C_ice = 2117.27 J/(kg*K), λ_liq_const = 0.6 W/(m*K), λ_ice_const = 2.29 W/(m*K). (ii) Unit-balancing references one_Wm⁻¹K⁻¹ = 1.0 W/(m*K), one_kgm⁻³ = 1.0 kg/m^3 used for non-dimensionalization of bases before the fractional-power exponents in Eq. 4.78 and the dimensionless denominator term in Eq. 4.80 (the upstream block also declares one_Jm⁻³K⁻¹ but it is never used in any equation — omitted from this ESM as the migration captures only what enters the algebraic system). (iii) Empirical-formula constants: λ_s_sand_coeff = 8.8 W/(m*K) and λ_s_clay_coeff = 2.92 W/(m*K) (Eq. 4.79); ρ_mineral = 2700.0 kg/m^3 (Section 4.3 bulk density); λ_dry_numerator_coeff = 0.135 W·m^2/(kg·K), λ_dry_numerator_offset = 64.7 W/(m*K), λ_dry_denom_offset = 2700.0 (dimensionless), λ_dry_denom_coeff = 0.947 (dimensionless) (Eq. 4.80); c_s_sand_coeff = 2.128e6 J/(m^3*K) and c_s_clay_coeff = 2.385e6 J/(m^3*K) (Eq. 4.86). All `@constants` are encoded here as parameters carrying the upstream default values, matching the convention used by sibling observed-only ESM files (freezing_point_depression.esm encodes T_f/L_f/g/one_ref the same way; snow_soil_blended_heat_capacity.esm encodes C_ice the same way).\n\nName-mapping: unicode identifiers from upstream (λ_*, ρ_*, θ_*, Δz, S_r, K_e) are preserved here — peer ESM components in this rig (freezing_point_depression.esm uses Δz/θ_sat/ψ_sat/ρ_liq; snow_soil_blended_heat_capacity.esm uses Δz; heat_flux.esm uses λ_interface) already use unicode in identifiers and the schema's identifier strings allow it. Two upstream constant names that carry Unicode superscript characters (`one_Wm⁻¹K⁻¹`, `one_kgm⁻³`) are renamed `one_W_per_mK` and `one_kg_per_m3` for ASCII-safe JSON keys — the superscript combining characters interact poorly with JSON tooling without changing the semantics. The third upstream unit-balancing constant `one_Jm⁻³K⁻¹` is declared but never used in any equation, so it is omitted from the ESM rather than carried as a dead parameter.\n\nObservability classification: this component is functionally observed-only — every output state is given by a single algebraic equation in terms of the parameters and other state outputs (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only files in this rig (freezing_point_depression.esm, heating_cooling_flux.esm, snow_soil_blended_heat_capacity.esm).\n\nEquation semantics — `ifelse` branches: Eq. 4.78 (λ_sat) and Eq. 4.81 (K_e) both branch on `T_i ≥ T_f` (frozen/unfrozen split, encoded as `>=` per the schema's relational operator set). Equality at T_i = T_f goes to the unfrozen branch — this matches the upstream Julia `≥` semantics. Eq. 4.77 (λ_soil) branches on `S_r > 1.0e-7` to avoid evaluating `log(S_r)` at very small or zero S_r in the unfrozen K_e branch — when S_r drops below 1e-7 the component falls back to λ_dry. (The unfrozen Kersten formula itself further guards `log(max(S_r, 1.0e-10))` to keep `log` finite at S_r = 0, and the outer max(·, 0) clamps the resulting K_e to be non-negative.)\n\nSign and unit conventions: pct_sand and pct_clay are percent-by-mass (treated as dimensionless in the algebra — the ratio (sand+clay)/(sand+clay) cancels their units); ψ_sat / matric potential does not appear in this component (it is the FreezingPointDepression model); θ_liq is the unfrozen volumetric water content and is bounded by θ_sat from above (the test scenarios respect this). The expression `(w_liq / (ρ_liq · Δz) + w_ice / (ρ_ice · Δz)) / θ_sat` in Eq. 4.82 maps to the degree of saturation S_r — pore volume is θ_sat·Δz; w/(ρ·Δz) is the volume fraction of each phase; their sum divided by θ_sat is the fraction of the pore space that is occupied.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations chain multiplies, divides, additions, and three fractional-power calls (Eq. 4.78). Roundoff is at the IEEE-754 ULP level (~1e-16) for the multiplicative parts and ~1e-15 for `pow`. 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (heating_cooling_flux.esm, freezing_point_depression.esm). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (S_r = 0 in the dry-soil-limit test, K_e = 0 when the unfrozen log-formula clamps to zero) so the assertion does not silently accept a stuck-at-1e-3 regression. Reference values for `λ_sat` (fractional-power) and `c_s` (large 10^6 magnitudes) are computed in IEEE-754 double precision matching the upstream MTK system's evaluation order.\n\nUpstream tolerance reproduction: the upstream `Equation Verification` test (test/roof_wall_road_snow_temperatures_test.jl:56-98) uses rtol = 1e-6 on λ_s, c_s, ρ_d, λ_dry, S_r; we anchor the same fixture and the additional state outputs (λ_sat, K_e, λ_soil, c_soil) that the upstream test does not check by value (it only checks λ_soil ≥ λ_dry - 1e-10 and c_soil > 0) — the additional anchors here defend against silent regressions in the fractional-power and ifelse paths that the upstream coverage allows through."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "pct_sand": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 60.0,
+                    "description": "Percent sand (dimensionless; treated as a unit-free ratio in Eqs. 4.79 and 4.86 where the sand+clay denominator cancels the percent unit)"
+                },
+                "pct_clay": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 20.0,
+                    "description": "Percent clay (dimensionless)"
+                },
+                "θ_sat": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "Porosity / volumetric water content at saturation (dimensionless; Oleson Table 1.3)"
+                },
+                "θ_liq": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.1,
+                    "description": "Volumetric liquid water content (dimensionless; bounded by θ_sat from above)"
+                },
+                "T_i": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Layer temperature"
+                },
+                "w_ice": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Ice mass per area in the layer"
+                },
+                "w_liq": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 50.0,
+                    "description": "Liquid water mass per area in the layer"
+                },
+                "Δz": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.5,
+                    "description": "Layer thickness (must be > 0 — the divide-by-Δz in Eqs. 4.82, 4.85 is undefined at zero)"
+                },
+                "T_f": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Freezing temperature of water (Oleson Table 1.4 — 273.15 K)"
+                },
+                "ρ_liq": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of liquid water (Oleson Table 1.4)"
+                },
+                "ρ_ice": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 917.0,
+                    "description": "Density of ice (Oleson Table 1.4)"
+                },
+                "C_liq": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 4188.0,
+                    "description": "Specific heat of liquid water (Oleson Table 1.4)"
+                },
+                "C_ice": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 2117.27,
+                    "description": "Specific heat of ice (Oleson Table 1.4)"
+                },
+                "λ_liq_const": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 0.6,
+                    "description": "Thermal conductivity of liquid water (Oleson Table 1.4) — named with `_const` suffix upstream to disambiguate from the state variable λ_s"
+                },
+                "λ_ice_const": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 2.29,
+                    "description": "Thermal conductivity of ice (Oleson Table 1.4)"
+                },
+                "one_W_per_mK": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 1.0,
+                    "description": "Unit thermal conductivity used as a non-dimensionalization reference inside Eq. 4.78 — preserved from upstream MTK unit-balancing pattern (the fractional-power exponents in Eq. 4.78 require dimensionless bases). Renamed from upstream `one_Wm⁻¹K⁻¹` for ASCII-safe JSON keys."
+                },
+                "one_kg_per_m3": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.0,
+                    "description": "Unit density used as a non-dimensionalization reference inside Eq. 4.80 (the `λ_dry_denom_coeff * ρ_d` term in the denominator must be dimensionless). Renamed from upstream `one_kgm⁻³` for ASCII-safe JSON keys."
+                },
+                "λ_s_sand_coeff": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 8.8,
+                    "description": "Empirical coefficient for sand in Eq. 4.79 (W m⁻¹ K⁻¹ per percent sand)"
+                },
+                "λ_s_clay_coeff": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 2.92,
+                    "description": "Empirical coefficient for clay in Eq. 4.79"
+                },
+                "ρ_mineral": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 2700.0,
+                    "description": "Mineral soil particle density (Section 4.3 bulk-density formula)"
+                },
+                "λ_dry_numerator_coeff": {
+                    "type": "parameter",
+                    "units": "W*m^2/(kg*K)",
+                    "default": 0.135,
+                    "description": "Empirical numerator coefficient in Eq. 4.80"
+                },
+                "λ_dry_numerator_offset": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 64.7,
+                    "description": "Empirical numerator offset in Eq. 4.80"
+                },
+                "λ_dry_denom_offset": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2700.0,
+                    "description": "Empirical denominator offset in Eq. 4.80 (dimensionless)"
+                },
+                "λ_dry_denom_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.947,
+                    "description": "Empirical denominator coefficient in Eq. 4.80 (dimensionless)"
+                },
+                "c_s_sand_coeff": {
+                    "type": "parameter",
+                    "units": "J/(m^3*K)",
+                    "default": 2128000.0,
+                    "description": "Empirical coefficient for sand in Eq. 4.86 (J m⁻³ K⁻¹ per percent sand)"
+                },
+                "c_s_clay_coeff": {
+                    "type": "parameter",
+                    "units": "J/(m^3*K)",
+                    "default": 2385000.0,
+                    "description": "Empirical coefficient for clay in Eq. 4.86"
+                },
+                "λ_s": {
+                    "type": "state",
+                    "units": "W/(m*K)",
+                    "description": "Thermal conductivity of soil solids (Eq. 4.79): mass-weighted blend of sand and clay coefficients"
+                },
+                "λ_sat": {
+                    "type": "state",
+                    "units": "W/(m*K)",
+                    "description": "Saturated thermal conductivity (Eq. 4.78): geometric mean of solid, liquid, and (when frozen) ice phases weighted by their pore-volume fractions"
+                },
+                "λ_dry": {
+                    "type": "state",
+                    "units": "W/(m*K)",
+                    "description": "Dry (zero-water-content) thermal conductivity (Eq. 4.80): empirical fit in ρ_d"
+                },
+                "ρ_d": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Bulk density of dry soil = ρ_mineral · (1 - θ_sat) (Section 4.3)"
+                },
+                "S_r": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Degree of saturation (Eq. 4.82): fraction of pore volume occupied by liquid water plus ice"
+                },
+                "K_e": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Kersten number (Eq. 4.81): interpolation weight between λ_sat and λ_dry. Unfrozen branch: max(log(max(S_r, 1e-10)) + 1, 0) — the inner `max` keeps log finite at S_r = 0; the outer `max` clamps the result to be non-negative. Frozen branch: K_e = S_r."
+                },
+                "λ_soil": {
+                    "type": "state",
+                    "units": "W/(m*K)",
+                    "description": "Soil thermal conductivity (Eq. 4.77): K_e · λ_sat + (1 - K_e) · λ_dry for S_r > 1e-7; falls back to λ_dry below that threshold"
+                },
+                "c_s": {
+                    "type": "state",
+                    "units": "J/(m^3*K)",
+                    "description": "Heat capacity of soil solids (Eq. 4.86): mass-weighted blend of sand and clay coefficients"
+                },
+                "c_soil": {
+                    "type": "state",
+                    "units": "J/(m^3*K)",
+                    "description": "Volumetric heat capacity of soil (Eq. 4.85): solid contribution + ice + liquid water contributions per unit volume"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "λ_s",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "*", "args": ["λ_s_sand_coeff", "pct_sand"] },
+                                    { "op": "*", "args": ["λ_s_clay_coeff", "pct_clay"] }
+                                ]
+                            },
+                            { "op": "+", "args": ["pct_sand", "pct_clay"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "λ_sat",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">=", "args": ["T_i", "T_f"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    { "op": "/", "args": ["λ_s", "one_W_per_mK"] },
+                                                    { "op": "-", "args": [1, "θ_sat"] }
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    { "op": "/", "args": ["λ_liq_const", "one_W_per_mK"] },
+                                                    "θ_sat"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "one_W_per_mK"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            { "op": "/", "args": ["λ_s", "one_W_per_mK"] },
+                                                            { "op": "-", "args": [1, "θ_sat"] }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            { "op": "/", "args": ["λ_liq_const", "one_W_per_mK"] },
+                                                            "θ_liq"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    { "op": "/", "args": ["λ_ice_const", "one_W_per_mK"] },
+                                                    { "op": "-", "args": ["θ_sat", "θ_liq"] }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "one_W_per_mK"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ρ_d",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "ρ_mineral",
+                            { "op": "-", "args": [1, "θ_sat"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "λ_dry",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "*", "args": ["λ_dry_numerator_coeff", "ρ_d"] },
+                                    "λ_dry_numerator_offset"
+                                ]
+                            },
+                            {
+                                "op": "-",
+                                "args": [
+                                    "λ_dry_denom_offset",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "λ_dry_denom_coeff",
+                                            { "op": "/", "args": ["ρ_d", "one_kg_per_m3"] }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_r",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_liq",
+                                            { "op": "*", "args": ["ρ_liq", "Δz"] }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_ice",
+                                            { "op": "*", "args": ["ρ_ice", "Δz"] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "θ_sat"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_e",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">=", "args": ["T_i", "T_f"] },
+                            {
+                                "op": "max",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    { "op": "max", "args": ["S_r", 1.0e-10] }
+                                                ]
+                                            },
+                                            1.0
+                                        ]
+                                    },
+                                    0.0
+                                ]
+                            },
+                            "S_r"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "λ_soil",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["S_r", 1.0e-7] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "*", "args": ["K_e", "λ_sat"] },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "-", "args": [1, "K_e"] },
+                                            "λ_dry"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "λ_dry"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c_s",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "*", "args": ["c_s_sand_coeff", "pct_sand"] },
+                                    { "op": "*", "args": ["c_s_clay_coeff", "pct_clay"] }
+                                ]
+                            },
+                            { "op": "+", "args": ["pct_sand", "pct_clay"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c_soil",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "c_s",
+                                            { "op": "-", "args": [1, "θ_sat"] }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "/", "args": ["w_ice", "Δz"] },
+                                            "C_ice"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "/", "args": ["w_liq", "Δz"] },
+                                    "C_liq"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_equation_verification",
+                    "description": "Reproduces upstream `SoilThermalProperties - Equation Verification` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:56-98). Typical sandy soil: pct_sand=60, pct_clay=20, θ_sat=0.4, θ_liq=0.1, T_i=293.15 K (above freezing), w_ice=0, w_liq=50 kg/m^2, Δz=0.5 m. Upstream asserts λ_s≈7.33, c_s≈expected formula, ρ_d≈1620, λ_dry≈expected formula, S_r≈0.25 (all at rtol=1e-6) plus λ_soil>0 and λ_soil ≥ λ_dry-1e-10. We anchor every state output by value at the IEEE-754 precision the upstream MTK evaluation produces — the upstream test does not pin λ_sat, K_e, λ_soil, c_soil by value, but pinning them here defends against silent regressions in the fractional-power path of Eq. 4.78 and the `ifelse` paths of Eqs. 4.77 and 4.81. The unfrozen-branch K_e formula reduces to 0 at S_r=0.25 since log(0.25)+1 ≈ -0.386 < 0, so λ_soil collapses to λ_dry (a feature, not a regression — Farouki's interpolation predicts dry-equivalent conductivity at low saturation).",
+                    "parameter_overrides": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.1,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 50.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_s",   "time": 0.0, "expected": 7.33 },
+                        { "variable": "λ_sat", "time": 0.0, "expected": 2.693536623483748 },
+                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.25 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "c_s",   "time": 0.0, "expected": 2192250.0 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1734150.0 }
+                    ]
+                },
+                {
+                    "id": "upstream_dry_soil_limit",
+                    "description": "Reproduces upstream `SoilThermalProperties - Dry Soil Limit` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:100-125). Completely dry soil: pct_sand=50, pct_clay=30, θ_sat=0.4, θ_liq=0, T_i=293.15 K, w_ice=0, w_liq=0, Δz=0.5. With S_r=0, the upstream test asserts S_r=0 (atol=1e-15), λ_soil ≈ λ_dry (rtol=1e-6), and c_soil = c_s · (1-θ_sat) (rtol=1e-6). We anchor every output at IEEE-754 precision. Exercises the `S_r ≤ 1e-7` branch of Eq. 4.77 (the λ_soil fallback to λ_dry) and the zero-water branch of Eq. 4.85.",
+                    "parameter_overrides": {
+                        "pct_sand": 50.0,
+                        "pct_clay": 30.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.0,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 0.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_s",   "time": 0.0, "expected": 6.595000000000001 },
+                        { "variable": "λ_sat", "time": 0.0, "expected": 2.5280716594775163 },
+                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "c_s",   "time": 0.0, "expected": 2224375.0 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1334625.0 }
+                    ]
+                },
+                {
+                    "id": "upstream_frozen_kersten",
+                    "description": "Reproduces upstream `SoilThermalProperties - Frozen Kersten` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:127-148). Fully frozen soil with no liquid water: pct_sand=60, pct_clay=20, θ_sat=0.4, θ_liq=0, T_i=263.15 K (10 K below T_f), w_ice=100 kg/m^2, w_liq=0, Δz=0.5. Upstream test pins K_e ≈ S_r = (100/(917·0.5))/0.4 ≈ 0.545 at rtol=1e-6 — anchors that the `T_i < T_f` branch of Eq. 4.81 sets K_e = S_r (no log-clamp). With S_r > 1e-7, λ_soil = K_e·λ_sat + (1-K_e)·λ_dry. λ_sat picks up the ice-conductivity term λ_ice^(θ_sat-θ_liq) = 2.29^0.4 from the frozen branch of Eq. 4.78. We pin all nine outputs at IEEE-754 precision.",
+                    "parameter_overrides": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.0,
+                        "T_i": 263.15,
+                        "w_ice": 100.0,
+                        "w_liq": 0.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_s",   "time": 0.0, "expected": 7.33 },
+                        { "variable": "λ_sat", "time": 0.0, "expected": 4.60252946732673 },
+                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.5452562704471101 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.5452562704471101 },
+                        { "variable": "λ_soil","time": 0.0, "expected": 2.62009823086286 },
+                        { "variable": "c_s",   "time": 0.0, "expected": 2192250.0 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1738804.0 }
+                    ]
+                },
+                {
+                    "id": "fully_saturated_warm",
+                    "description": "Pore volume completely filled with liquid water (no ice), unfrozen regime. w_liq=200 kg/m^2 fills θ_sat·Δz·ρ_liq = 0.4·0.5·1000 = 200 — exactly saturating, so S_r=1. With θ_liq = θ_sat = 0.4 the unfrozen Eq. 4.78 reduces to λ_sat = λ_s^(1-θ_sat) · λ_liq^θ_sat (no ice term needed). The unfrozen K_e formula gives max(log(1)+1, 0) = max(1, 0) = 1, so λ_soil = λ_sat exactly. Anchors the S_r=1 limit of Farouki's interpolation: at full saturation the soil takes the saturated conductivity verbatim with no λ_dry contribution.",
+                    "parameter_overrides": {
+                        "pct_sand": 40.0,
+                        "pct_clay": 40.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.4,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 200.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "S_r",   "time": 0.0, "expected": 1.0 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 1.0 },
+                        { "variable": "λ_sat", "time": 0.0, "expected": 2.3550442395110673 },
+                        { "variable": "λ_soil","time": 0.0, "expected": 2.3550442395110673 },
+                        { "variable": "c_soil","time": 0.0, "expected": 3029100.0 }
+                    ]
+                },
+                {
+                    "id": "fully_saturated_frozen",
+                    "description": "Pore volume completely filled with ice (no liquid), deep-frozen regime. w_ice = θ_sat·ρ_ice·Δz = 0.4·917·0.5 = 183.4 exactly fills the pore space with ice. T_i = 263.15 K is below T_f so the frozen branches of Eqs. 4.78 and 4.81 fire. S_r = (0 + 183.4/(917·0.5))/0.4 = 0.4/0.4 = 1; K_e = S_r = 1, so λ_soil = λ_sat. The frozen Eq. 4.78 with θ_liq=0 reduces to λ_sat = λ_s^(1-θ_sat) · λ_liq^0 · λ_ice^(θ_sat) = λ_s^0.6 · λ_ice^0.4 — exercises the ice-conductivity exponent in the saturated-frozen limit.",
+                    "parameter_overrides": {
+                        "pct_sand": 40.0,
+                        "pct_clay": 40.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.0,
+                        "T_i": 263.15,
+                        "w_ice": 183.4,
+                        "w_liq": 0.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "S_r",   "time": 0.0, "expected": 1.0 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 1.0 },
+                        { "variable": "λ_sat", "time": 0.0, "expected": 4.024137045216292 },
+                        { "variable": "λ_soil","time": 0.0, "expected": 4.024137045216292 },
+                        { "variable": "c_soil","time": 0.0, "expected": 2130514.636 }
+                    ]
+                },
+                {
+                    "id": "mixed_ice_liquid",
+                    "description": "Mixed-phase soil layer (partially-frozen regime, T_i = 268.15 K < T_f): pct_sand=60, pct_clay=20, θ_sat=0.4, θ_liq=0.05, w_ice=50 kg/m^2, w_liq=25 kg/m^2. Both phases contribute to S_r per Eq. 4.82. The frozen branch of Eq. 4.78 picks up both λ_liq^θ_liq and λ_ice^(θ_sat-θ_liq) terms — exercises the three-phase fractional-power chain. K_e = S_r in the frozen branch. λ_soil interpolates between λ_sat and λ_dry weighted by K_e.",
+                    "parameter_overrides": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.05,
+                        "T_i": 268.15,
+                        "w_ice": 50.0,
+                        "w_liq": 25.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_sat", "time": 0.0, "expected": 4.304397456767052 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.39762813522355506 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.39762813522355506 },
+                        { "variable": "λ_soil","time": 0.0, "expected": 1.8579755083641263 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1736477.0 }
+                    ]
+                },
+                {
+                    "id": "sandy_soil_low_clay",
+                    "description": "Sandy regime: pct_sand=90, pct_clay=5 (mostly sand), θ_sat=0.35. The high sand fraction drives λ_s ≈ (8.8·90 + 2.92·5)/95 ≈ 8.49 — much higher than the 7.33 of the equation-verification fixture. Surfaces sensitivity to sand fraction in Eqs. 4.79 and 4.86 (c_s drops because c_s_clay_coeff > c_s_sand_coeff). With S_r=0.1 in the unfrozen branch, the K_e log-formula clamps to 0 and λ_soil = λ_dry.",
+                    "parameter_overrides": {
+                        "pct_sand": 90.0,
+                        "pct_clay": 5.0,
+                        "θ_sat": 0.35,
+                        "θ_liq": 0.1,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 17.5,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_s",   "time": 0.0, "expected": 8.490526315789475 },
+                        { "variable": "ρ_d",   "time": 0.0, "expected": 1755.0 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "λ_soil","time": 0.0, "expected": 0.2905786525242891 },
+                        { "variable": "c_s",   "time": 0.0, "expected": 2141526.3157894737 }
+                    ]
+                },
+                {
+                    "id": "clay_soil_high_porosity",
+                    "description": "Clay-dominated regime: pct_sand=10, pct_clay=80, θ_sat=0.55 (high porosity typical of clay). λ_s ≈ (8.8·10 + 2.92·80)/90 ≈ 3.57 — substantially lower than sandy regime per Eq. 4.79. ρ_d = 2700·(1-0.55) = 1215 kg/m^3 is lower than the equation-verification 1620 (clay has more pore space). c_s is higher than sandy regime since c_s_clay_coeff > c_s_sand_coeff. Exercises the low-λ_s / high-porosity corner of the soil-texture parameter space.",
+                    "parameter_overrides": {
+                        "pct_sand": 10.0,
+                        "pct_clay": 80.0,
+                        "θ_sat": 0.55,
+                        "θ_liq": 0.2,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 100.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_s",   "time": 0.0, "expected": 3.5733333333333337 },
+                        { "variable": "ρ_d",   "time": 0.0, "expected": 1214.9999999999998 },
+                        { "variable": "λ_dry", "time": 0.0, "expected": 0.1476221363822653 },
+                        { "variable": "c_s",   "time": 0.0, "expected": 2356444.4444444445 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1898000.0 }
+                    ]
+                },
+                {
+                    "id": "epsilon_below_freezing",
+                    "description": "T_i = 273.149 K — 1 mK below T_f. Frozen branches of Eqs. 4.78 and 4.81 fire: K_e = S_r, λ_sat picks up the λ_ice^(θ_sat-θ_liq) factor. With S_r ≈ 0.234, λ_soil = K_e·λ_sat + (1-K_e)·λ_dry ≈ 1.19. Paired with `just_above_freezing` (1 mK on the unfrozen side) to anchor the T_f boundary at the 1-mK scale — the upstream Julia `ifelse(T_i ≥ T_f)` uses `≥` (not strict `>`), so equality belongs to the unfrozen branch; this pair brackets the boundary tightly enough to detect any swap.",
+                    "parameter_overrides": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.05,
+                        "T_i": 273.149,
+                        "w_ice": 20.0,
+                        "w_liq": 25.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_sat", "time": 0.0, "expected": 4.304397456767052 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.23405125408942204 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.23405125408942204 },
+                        { "variable": "λ_soil","time": 0.0, "expected": 1.1936382514997879 }
+                    ]
+                },
+                {
+                    "id": "just_above_freezing",
+                    "description": "T_i = 273.151 K — 1 mK above T_f. Unfrozen branches: K_e log-formula evaluates at S_r ≈ 0.234, giving max(log(0.234)+1, 0) = max(-0.453, 0) = 0; with K_e=0, λ_soil = λ_dry. λ_sat takes the unfrozen form (no λ_ice term) so the value differs sharply from the frozen-side value (4.30 → 2.69) — the discontinuity is in λ_sat and K_e individually, while λ_soil shows a smaller discontinuity because both K_e and (1-K_e)·λ_dry rebalance. Paired with `epsilon_below_freezing`. The c_soil output is identical to the frozen case (Eq. 4.85 does not depend on T_i directly — only through C_ice / C_liq which are fixed constants).",
+                    "parameter_overrides": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.05,
+                        "T_i": 273.151,
+                        "w_ice": 20.0,
+                        "w_liq": 25.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_sat", "time": 0.0, "expected": 2.693536623483748 },
+                        { "variable": "S_r",   "time": 0.0, "expected": 0.23405125408942204 },
+                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
+                        { "variable": "c_soil","time": 0.0, "expected": 1609440.8 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "lambda_soil_vs_saturation_unfrozen",
+                    "description": "Sweep w_liq (liquid water mass) across the full range from 0 (dry) to θ_sat·ρ_liq·Δz = 200 kg/m^2 (saturated) at fixed unfrozen T_i = 293.15 K. Surfaces the Farouki (1981) thermal-conductivity curve: λ_soil rises from λ_dry at low saturation, transitions through the log-Kersten-clamp regime, and approaches λ_sat at S_r = 1. Reproduces the canonical low-saturation plateau visible in Oleson Fig. 4.5-style plots — the Kersten-number log clamp keeps λ_soil = λ_dry until S_r ≈ 0.37 (where log(S_r)+1 = 0), then ramps up as K_e rises toward 1.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.4,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "w_liq",
+                                "range": { "start": 0.0, "stop": 200.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_soil_curve",
+                            "type": "line",
+                            "description": "λ_soil vs w_liq at fixed unfrozen T_i = 293.15 K. Flat at λ_dry below the Kersten-log threshold (S_r ≈ 0.37), then ramps up as K_e rises toward 1 at S_r = 1.",
+                            "x": { "variable": "w_liq",  "label": "w_liq (kg/m^2)" },
+                            "y": { "variable": "λ_soil", "label": "λ_soil (W/(m·K))" }
+                        },
+                        {
+                            "id": "kersten_curve",
+                            "type": "line",
+                            "description": "K_e vs w_liq at fixed unfrozen T_i. Stays clamped at 0 below the log-threshold, then rises monotonically toward 1.",
+                            "x": { "variable": "w_liq", "label": "w_liq (kg/m^2)" },
+                            "y": { "variable": "K_e",   "label": "K_e (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "lambda_soil_vs_temperature_transition",
+                    "description": "Sweep T_i across the freezing transition at fixed w_ice and w_liq partitioned so that ice forms in the cold half and liquid in the warm half. At fixed total water content w_total ≈ 80 kg/m^2 partitioned as w_ice=80, w_liq=0 in the frozen regime and w_ice=0, w_liq=80 in the unfrozen regime — chooses the partition by indexing the sweep. (This example uses the simpler fixed-partition sweep: w_ice and w_liq held at a partial-frozen mix throughout, revealing the discontinuity in λ_soil at T_i = T_f from the ifelse branches of Eqs. 4.78 and 4.81.) Surfaces the K_e and λ_sat discontinuities at T_f from the upstream `ifelse` structure.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "pct_sand": 60.0,
+                        "pct_clay": 20.0,
+                        "θ_sat": 0.4,
+                        "θ_liq": 0.05,
+                        "w_ice": 20.0,
+                        "w_liq": 25.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_i",
+                                "range": { "start": 253.15, "stop": 293.15, "count": 41, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_soil_vs_T_curve",
+                            "type": "line",
+                            "description": "λ_soil vs T_i at fixed partial-frozen mix. Step at T_i = T_f = 273.15 K from the ifelse branches of Eqs. 4.78 and 4.81 — the frozen side carries the λ_ice contribution and the linear K_e=S_r, the unfrozen side switches to log-Kersten which clamps to 0 at this S_r.",
+                            "x": { "variable": "T_i",    "label": "T_i (K)" },
+                            "y": { "variable": "λ_soil","label": "λ_soil (W/(m·K))" }
+                        },
+                        {
+                            "id": "K_e_vs_T_curve",
+                            "type": "line",
+                            "description": "K_e vs T_i at the same fixture. Frozen side: K_e = S_r ≈ 0.234. Unfrozen side: max(log(S_r)+1, 0) = 0. Step discontinuity at T_f from the strict `≥` branch boundary.",
+                            "x": { "variable": "T_i", "label": "T_i (K)" },
+                            "y": { "variable": "K_e", "label": "K_e (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "soil_texture_response_surface",
+                    "description": "Joint sweep over pct_sand and θ_sat at fixed moderate saturation (w_liq=50, T_i = 293.15 K) to surface the soil-texture sensitivity of λ_dry. λ_dry rises with ρ_d = ρ_mineral·(1-θ_sat) — high-porosity clays have lower λ_dry; sandy soils with low porosity have higher λ_dry. Reproduces the Oleson (2010) Eq. 4.80 dry-thermal-conductivity surface as a function of texture and porosity.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "θ_liq": 0.1,
+                        "T_i": 293.15,
+                        "w_ice": 0.0,
+                        "w_liq": 50.0,
+                        "Δz": 0.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "pct_sand",
+                                "range": { "start": 10.0, "stop": 90.0, "count": 9, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "θ_sat",
+                                "range": { "start": 0.3, "stop": 0.6, "count": 7, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_dry_heatmap",
+                            "type": "heatmap",
+                            "description": "λ_dry as a function of pct_sand and θ_sat. λ_dry is a function of ρ_d = ρ_mineral·(1-θ_sat) only (no texture dependence in Eq. 4.80), so the surface is constant along the pct_sand axis and monotone-decreasing along θ_sat — surfaces the Eq. 4.80 ρ_d-only structure.",
+                            "x": { "variable": "pct_sand", "label": "Percent sand" },
+                            "y": { "variable": "θ_sat",    "label": "θ_sat (dimensionless)" },
+                            "value": { "variable": "λ_dry", "reduce": "final" }
+                        },
+                        {
+                            "id": "c_s_heatmap",
+                            "type": "heatmap",
+                            "description": "c_s as a function of pct_sand and θ_sat. c_s depends on the sand/clay blend per Eq. 4.86 — varies along pct_sand, constant along θ_sat. Surfaces the orthogonal sensitivity structure of c_s vs λ_dry.",
+                            "x": { "variable": "pct_sand", "label": "Percent sand" },
+                            "y": { "variable": "θ_sat",    "label": "θ_sat (dimensionless)" },
+                            "value": { "variable": "c_s", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
