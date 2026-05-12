@@ -686,7 +686,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
 | LevelSetFireSpread | `src/level_set_fire_spread.jl:73` | Model | PDESystem, partialderivative_transforms (metric-tensor coord transforms), boundary_conditions | **gt-vzwk(PDE-tests); other:P3-A-metric-tensor-coord-transforms** | XL | Y | Y | `components/wildland_fire/level_set_fire_spread.esm` | — |
-| FuelConsumption | `src/level_set_fire_spread.jl:243` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fuel_consumption.esm` | — |
+| FuelConsumption | `src/level_set_fire_spread.jl:243` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fuel_consumption.esm` | — | **status: complete, sha: f817edbc9d9945003a446197c5ba5c6f3bf7ac02** (mdl-r2s6; Mandel et al. 2011 Eq. 3 fuel-fraction decay D(F) = -is_burning*F/T_f + algebraic w0_effective = F*w0_initial, 5 tests / 24 assertions, 2 examples; tracker-sync esm-arm7 — work landed under mdl-r2s6 but the row had no completion marker) |
 | FireHeatFlux | `src/level_set_fire_spread.jl:295` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fire_heat_flux.esm` | — |
 
 ### 14.3 Clark 1996 (4, `none`)
