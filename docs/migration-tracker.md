@@ -640,7 +640,7 @@ Repo purpose: CLMU-style urban canopy (roof/wall/road thermal conduction, snow, 
 | SoilWaterEquilibrium | `:509` | Model | variables, parameters, equations; internally builds Richards-eq PDE (`:674`) via MOLFiniteDifference | **other:discretization-plan** | L | Y | Y | `components/urban_canopy/hydro/soil_water_equilibrium.esm` | — |
 | GroundwaterDrainage | `:698` | Model | variables, parameters, observed | none | S | Y | Y | `components/urban_canopy/hydro/groundwater_drainage.esm` | — |
 | WaterTableDepth | `:743` | Model | variables, parameters, observed | none | S | Y | Y | `components/urban_canopy/hydro/water_table_depth.esm` | — |
-| AquiferWaterBalance | `:791` | Model | variables, parameters, equations | none | S | Y | Y | `components/urban_canopy/hydro/aquifer_water_balance.esm` | — |
+| AquiferWaterBalance | `:791` | Model | variables, parameters, equations | none | S | Y | Y | `components/urban_canopy/hydro/aquifer_water_balance.esm` | — | **status: complete, sha: d2297b09a4c56970cf668b7392bc2fb69a22bb8c** (mdl-jocz; 8 tests, 2 examples) |
 | SnowCappingRunoff | `:823` | Model | variables, parameters, observed | none | S | Y | Y | `components/urban_canopy/hydro/snow_capping_runoff.esm` | — |
 | SurfaceLayerUpdate | `:860` | Model | variables, parameters, equations | none | S | Y | Y | `components/urban_canopy/hydro/surface_layer_update.esm` | — |
 | PerviousRoadWaterBalance | `:900` | Model | variables, parameters, equations | none | S | Y | Y | `components/urban_canopy/hydro/pervious_road_water_balance.esm` | — |
