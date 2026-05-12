@@ -1,0 +1,286 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "StefanBoltzmann",
+        "description": "Stefan-Boltzmann law for blackbody radiation — Seinfeld & Pandis (2006) Ch. 4 Eq. 4.4. Total emissive power F_B of a blackbody at temperature T integrated over all wavelengths: F_B = σ·T^4, where σ = 5.671×10⁻⁸ W·m⁻²·K⁻⁴. Migrated from GasChem.jl@8c12c048 src/radiation_fundamentals.jl:164 (`StefanBoltzmann` @component). One observed binding (F_B) over two parameters (T input + σ as a fixed-default parameter encoding the upstream `@constants` block per the rig convention of translating `@constants` to fixed-default parameters so units flow through MTK's unit checker — matches sibling clmu_atmosphere.esm/surface_energy_flux.esm). Closed-form algebraic: after mtkcompile the system has zero ODE states and the inline-test runner exercises F_B at its observed algebraic value.",
+        "tags": [
+            "gaschem",
+            "radiation",
+            "blackbody",
+            "stefan-boltzmann",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-mbfz)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 4, Equation 4.4 (Stefan-Boltzmann law); Page 101 (Earth equilibrium T_e = 255 K → F_B ≈ 240 W/m²)."
+            }
+        ]
+    },
+    "models": {
+        "StefanBoltzmann": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/radiation_fundamentals.jl:164\nUpstream `StefanBoltzmann` is an MTK `@component` with one algebraic equation `F_B ~ σ * T^4`, one `@constants` (σ = 5.671e-8 W·m⁻²·K⁻⁴, Seinfeld & Pandis Page 101), one `@parameters` (T = 255 K Earth-equilibrium default), and one `@variables` (F_B in W/m²). After mtkcompile the system collapses to zero ODE states and one observed binding for F_B.\n\nObservability classification: F_B is an algebraic function of T and σ — bound as a `type: observed` variable with its `expression` carrying the Eq. 4.4 right-hand side σ·T^4.\n\nConstant→parameter translation: the upstream `@constants σ = 5.671e-8` is encoded as a fixed-default parameter `σ` carrying the upstream Float64 value bit-for-bit. This mirrors the sibling convention in clmu_atmosphere.esm/surface_energy_flux.esm of translating `@constants` to fixed-default parameters (a) so MTK's unit checker sees σ as a named quantity rather than a magic literal in the equation RHS, and (b) so any sensitivity study can override σ if it ever needs to (the default value is the canonical Seinfeld & Pandis Eq. 4.4 value and is not expected to change in routine use).\n\nTolerance rationale (model-level rel=1e-10 / abs=1e-12): F_B = σ·T^4 is a two-step IEEE-754 evaluation (one ^ + one ×) over fixed Float64 inputs, so rel=1e-10 captures float64 ULP roundoff with ~6 orders of magnitude margin to the ~1e-16 IEEE-754 ULP floor. abs=1e-12 floors the T=0 sentinel (F_B → 0) and any near-zero-K cold-limit testing. Matches the closed-form-algebraic tolerance convention in sibling cloud_albedo.esm (rel=1e-8) and critical_ssa.esm (rel=1e-8); the tighter 1e-10 here reflects the simpler two-op expression."
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 255.0,
+                    "description": "Temperature (input parameter; default 255 K is Earth's equilibrium temperature per S&P Page 101)"
+                },
+                "σ": {
+                    "type": "parameter",
+                    "units": "W/(m^2*K^4)",
+                    "default": 5.671e-8,
+                    "description": "Stefan-Boltzmann constant (upstream `@constants` value 5.671×10⁻⁸ W·m⁻²·K⁻⁴ from S&P Page 101; encoded as a fixed-default parameter per rig convention)"
+                },
+                "F_B": {
+                    "type": "observed",
+                    "units": "W/m^2",
+                    "description": "Total blackbody emissive power (Eq. 4.4): F_B = σ·T^4 integrated over all wavelengths.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "σ",
+                            {
+                                "op": "^",
+                                "args": [
+                                    "T",
+                                    4
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-10,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "upstream_earth_equilibrium_T255",
+                    "description": "Reproduces the upstream `Equation: StefanBoltzmann (Eq. 4.4)` testitem default case from GasChem.jl test/radiation_fundamentals_test.jl. At T = 255 K (Earth's equilibrium temperature, Seinfeld & Pandis Page 101), F_B = 5.671e-8 × 255^4 = 239.78409294375 W/m². Upstream asserts rtol = 1e-2 against 239.7; we pin the exact analytic value at full Float64 precision.",
+                    "parameter_overrides": {
+                        "T": 255.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 239.78409294375
+                        },
+                        {
+                            "variable": "F_B",
+                            "time": 1.0,
+                            "expected": 239.78409294375
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_solar_surface_T5800",
+                    "description": "Reproduces the upstream `Equation: StefanBoltzmann (Eq. 4.4)` second case at T = 5800 K (Sun's effective surface temperature). F_B = 5.671e-8 × 5800^4 = 5.671e-8 × 1.1316496e15 = 64175848.816 W/m². Upstream asserts rtol = 1e-2 against 6.42e7; we pin the exact analytic value at full Float64 precision.",
+                    "parameter_overrides": {
+                        "T": 5800.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 64175848.816
+                        },
+                        {
+                            "variable": "F_B",
+                            "time": 1.0,
+                            "expected": 64175848.816
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_limit_T100",
+                    "description": "Cold-limit cross-check well below Earth's equilibrium temperature. At T = 100 K, F_B = 5.671e-8 × 100^4 = 5.671 W/m². Anchors the T^4 scaling: 100 K is ~2.55× below 255 K, so F_B drops by (2.55)^4 ≈ 42× relative to the Earth-equilibrium case.",
+                    "parameter_overrides": {
+                        "T": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 5.671
+                        }
+                    ]
+                },
+                {
+                    "id": "hot_limit_T1000",
+                    "description": "Hot-limit cross-check intermediate between Earth equilibrium (255 K) and Sun surface (5800 K). At T = 1000 K, F_B = 5.671e-8 × 1000^4 = 56710 W/m². Anchors the T^4 scaling at a round value: a 3.92× temperature increase over 255 K gives a (3.92)^4 ≈ 236× increase in F_B.",
+                    "parameter_overrides": {
+                        "T": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 56710.0
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_temperature_limit",
+                    "description": "Boundary case T = 0 K → F_B = 0 W/m² (T^4 collapses the σ·T^4 product). Uses abs tolerance to gate the stuck-at-non-zero failure mode. Physically T = 0 is the absolute-zero limit; the model's algebraic equation evaluates exactly at IEEE-754 zero.",
+                    "parameter_overrides": {
+                        "T": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "doubling_T_amplifies_16x",
+                    "description": "Verifies the canonical T^4 quartic scaling by doubling T = 255 K to T = 510 K. Expected ratio F_B(510)/F_B(255) = 2^4 = 16 exactly. At T = 510 K, F_B = 5.671e-8 × 510^4 = 3836.5454871 W/m² = 16 × 239.78409294375 W/m².",
+                    "parameter_overrides": {
+                        "T": 510.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 3836.5454871
+                        }
+                    ]
+                },
+                {
+                    "id": "sigma_override_sensitivity",
+                    "description": "Verifies the parameter-passthrough of σ at T = 255 K. Overriding σ to 1.0 W/(m²·K⁴) (a non-physical sentinel) makes F_B = 1.0 × 255^4 = 4.228250625e9 W/m² — confirms σ acts as a linear multiplier in the observed binding and is not accidentally hard-coded into the expression. Pinned at the analytic Float64 value.",
+                    "parameter_overrides": {
+                        "T": 255.0,
+                        "σ": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "F_B",
+                            "time": 0.0,
+                            "expected": 4228250625.0
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "F_B_vs_T_canonical_curve",
+                    "description": "Stefan-Boltzmann F_B = σ·T^4 over the planetary-temperature range covering Mars (~210 K), Earth (~255 K equilibrium / ~288 K surface), Venus (~735 K surface) up through cool-star photospheres (~3000 K). Confirms the T^4 monotonic increase: F_B rises by ~262× over the 210-3000 K range (T-ratio 14.29, T^4 ratio ≈ 41680). The Earth-equilibrium point (255 K, 239.78 W/m²) is the canonical S&P Page 101 anchor; the visible-light onset at ~3000 K marks where blackbody emission shifts from longwave to optical regime.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 210.0,
+                                    "stop": 3000.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_vs_T_linear",
+                            "type": "line",
+                            "description": "Total blackbody emissive power F_B vs. temperature T (linear axes).",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "y": {
+                                "variable": "F_B",
+                                "label": "Emissive power F_B (W/m²)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "F_B_vs_T_log_sweep_solar",
+                    "description": "Stefan-Boltzmann log-T sweep spanning planetary equilibrium temperatures (~200 K cold outer-planet) through solar photosphere (~6000 K). On a log-log plot F_B = σ·T^4 is a straight line with slope 4; confirms the T^4 scaling visually across ~5 orders of magnitude in F_B (from ~10² W/m² at 200 K to ~10⁸ W/m² at 6000 K). The reference points Earth (255 K, ~240 W/m²) and Sun (5800 K, ~6.42e7 W/m²) bracket the canonical S&P examples.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 200.0,
+                                    "stop": 6000.0,
+                                    "count": 80,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_vs_T_log",
+                            "type": "line",
+                            "description": "Total blackbody emissive power F_B vs. temperature T (log-log axes — should show slope-4 power law).",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K, log)"
+                            },
+                            "y": {
+                                "variable": "F_B",
+                                "label": "Emissive power F_B (W/m², log)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
