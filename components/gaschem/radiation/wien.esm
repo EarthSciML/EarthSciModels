@@ -1,0 +1,274 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "WienDisplacement",
+        "description": "Wien's displacement law (Seinfeld & Pandis 2006 Ch. 4, Eq. 4.3) — the peak emission wavelength λ_max of a blackbody at temperature T is given by the simple inverse relation λ_max = b / T where b is Wien's displacement constant (2.897×10⁻³ m·K). The component is observed-only: one algebraic equation on one state variable (λ_max the peak wavelength) driven by one input parameter (T the temperature) and one constant (b the displacement constant). No time derivatives, no PDE, no coupling. Migrated from GasChem.jl@8c12c048 src/radiation_fundamentals.jl:121 (`WienDisplacement` @component). Wien's law is one half of the radiative-transfer toolkit for blackbody emission: paired with the Stefan-Boltzmann law σT⁴ (total emitted power) and the Planck function (spectral distribution), it lets a radiative-transfer model identify which spectral region a body's emission concentrates in. The 5800 K Sun peaks at ~500 nm (visible green); the 255 K Earth peaks at ~10 μm (thermal infrared); the 3 K cosmic microwave background peaks at ~1 mm (microwave). The temperature-inverse scaling means hotter sources emit at shorter wavelengths — the canonical fact behind the visible spectrum of stars (red giants vs blue dwarfs) and the separation of solar (shortwave) from terrestrial (longwave) radiation that anchors the planetary energy balance.",
+        "tags": [
+            "gaschem",
+            "radiation",
+            "wien-displacement",
+            "blackbody",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-3e2g)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 4 (The Earth's Climate System), §4.1 (Radiation), Eq. 4.3, p. 100 — Wien's displacement law λ_max = b/T relating peak emission wavelength to blackbody temperature."
+            },
+            {
+                "citation": "Wien, W. (1893). Eine neue Beziehung der Strahlung schwarzer Körper zum zweiten Hauptsatz der Wärmetheorie. Sitzungsberichte der Königlich Preussischen Akademie der Wissenschaften zu Berlin, 1, 55-62. The original derivation of the displacement law as a consequence of the second law of thermodynamics applied to blackbody radiation."
+            }
+        ]
+    },
+    "models": {
+        "WienDisplacement": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/radiation_fundamentals.jl:121\n\nUpstream `WienDisplacement` is an MTK `@component` declaring one `@constants` (`b` = 2.897e-3 m·K, Wien's displacement constant), one `@parameters` (`T` = 5800.0 K, the temperature input — the upstream default is the Sun's effective surface temperature giving the canonical ~500 nm visible peak), one time-indexed `@variables` (`λ_max` — algebraic with no derivative) and one algebraic equation (`λ_max ~ b / T`). Identical structure preserved here. Upstream structural test (`Structural: WienDisplacement system`, test/radiation_fundamentals_test.jl:61-68) asserts `length(equations(wien)) == 1` and `length(unknowns(wien)) == 1` and that the system compiles — matched here by the single entry in `equations` and the single state-typed variable (λ_max) plus the two input-typed parameters (b, T).\n\nThe single upstream `@constants` (b) is encoded here as `type: parameter` with the upstream default value, matching the rig-wide convention used by sibling radiation migrations (climate_sensitivity.esm at components/gaschem/radiation/climate_sensitivity.esm encodes its σ `@constants` the same way; chapman.esm at components/gaschem/stratospheric/chapman.esm encodes its four `@constants` k2_A/k4_A/C_k4/T_ref the same way). This makes b overridable from a downstream consumer's `parameter_overrides` block — useful for unit-test variants (e.g., the CODATA-2018 value 2.897771955e-3 vs the upstream rounded 2.897e-3) and for sensitivity studies that probe the Wien pre-factor. The upstream `@parameters` (T) is `type: parameter` with its upstream default of 5800.0 K — already an MTK parameter upstream, so the parameter-vs-constant distinction collapses at the `.esm` schema level.\n\nObservability classification: this component is observed-only — the output variable is given by a single algebraic equation in the inputs (no time derivative, the `(t)` time index has no role since there is no `D(·)` operator in the equation). Test scenarios use `time_span: [0.0, 1.0]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (climate_sensitivity.esm at components/gaschem/radiation/climate_sensitivity.esm, typical.esm at components/gaschem/combined/typical.esm, slip.esm at components/aerosol/particle_dyn/slip.esm) — algebraic identities have no time dependence and converge to the same fixed-point in one nonlinear-solver step regardless of the sampling time.\n\nPhysics structure: Wien's displacement law (S&P Eq. 4.3) follows from the analytic derivative of the Planck spectral function with respect to wavelength, setting ∂F_Bλ/∂λ = 0 and solving for λ. The result is the transcendental equation x = 5(1 - e^(-x)) where x = hc/(kλT); the numerical solution x ≈ 4.9651 gives the displacement constant b = hc/(k·x) = 2.8977719e-3 m·K. Upstream uses the rounded value 2.897e-3 m·K (S&P Page 100, 4-digit-rounded CODATA), reproduced here verbatim. The relation λ_max = b/T is the canonical signature that hotter sources emit at shorter wavelengths: the 5800 K Sun peaks in the visible (~500 nm), the 300 K Earth peaks in the thermal infrared (~10 μm), the 3 K cosmic microwave background peaks in the microwave (~1 mm).\n\nNumerical defaults (S&P Page 100, Sun's effective temperature canonical):\n  b  = 2.897e-3 m·K     (Wien's displacement constant, 4-digit-rounded CODATA)\n  T  = 5800.0   K       (Sun's effective surface temperature)\nAt these defaults:\n  λ_max = 2.897e-3 / 5800 = 4.994827586206897e-7 m ≈ 499.5 nm (yellow-green visible)\nThis matches the upstream test `Equation: WienDisplacement (Eq. 4.3)` at test/radiation_fundamentals_test.jl:121-134 which asserts λ_max ≈ 500e-9 m rtol=2e-3 at default T=5800 K. The migration tightens the assertion to rel=1e-10 on the exact division result.\n\nUpstream test reproduction:\n- The upstream `Structural: WienDisplacement system` test (test/radiation_fundamentals_test.jl:61-68) asserts the system has 1 equation and 1 unknown and compiles — reproduced by the test-level shape (1 entry in `equations`, 1 state-typed variable).\n- The upstream `Equation: WienDisplacement (Eq. 4.3)` test (test/radiation_fundamentals_test.jl:121-134) asserts at default T=5800 K that λ_max ≈ 500e-9 m rtol=2e-3, and at T=300 K that λ_max ≈ 10e-6 m rtol=5e-2. Reproduced and tightened by `default_solar_peak_5800K` (pins λ_max = 4.994827586206897e-7 m at rel=1e-10) and `terrestrial_peak_300K` (pins λ_max = 9.656666666666667e-6 m at rel=1e-10).\n- The upstream `Limiting: Wien's law at extreme temperatures` test (test/radiation_fundamentals_test.jl:268-284) asserts at T=1e6 K that λ_max < 1e-8, and at T=3 K that λ_max > 1e-4 and ≈ 9.66e-4 m rtol=1e-2. Reproduced and tightened by `extreme_hot_xray_1e6K` (pins λ_max = 2.897e-9 m at rel=1e-10) and `cmb_microwave_3K` (pins λ_max = 9.656666666666667e-4 m at rel=1e-10).\n- The upstream `Qualitative: Wien peak shifts to shorter λ at higher T` test (test/radiation_fundamentals_test.jl:398-417) sweeps T ∈ [300, 1000, 3000, 5800] K and asserts strict monotonic decrease of λ_max with T. The .esm runner does not directly support cross-test monotonicity assertions, so reproduced by pinning all four absolute λ_max values at rel=1e-10 — by the IEEE-754 monotonicity of division (1/x is strictly decreasing in x for positive x), the cross-test inequalities are exact.\n- The upstream `Analytical: Planck spectrum peak matches Wien prediction` test (test/radiation_fundamentals_test.jl:423-453) asserts that BlackbodyRadiation peaks at the wavelength predicted by WienDisplacement at T ∈ [300, 1000, 5800] K. This cross-component test cannot be reproduced standalone (it requires both WienDisplacement and BlackbodyRadiation); the WienDisplacement side is covered by `qualitative_temp_*` pinning the Wien peak at the same three temperatures.\n\nTolerance rationale (model-level rel=1e-10): observed-only algebraic system with a single division. The right-hand side is a single arithmetic operation (b/T) on two IEEE-754 double parameters, so the result is correctly-rounded to within 0.5 ULP — comfortably below the 1e-10 tolerance bound at any of the tested magnitudes (λ_max ranges from ~3e-9 m at T=1e6 K to ~1e-3 m at T=3 K, so 0.5 ULP ≈ 5e-17 in relative terms across the full range). Matches the convention used by sibling algebraic ESM files in this rig (climate_sensitivity.esm at rel=1e-10, typical.esm at rel=1e-10, slip.esm at rel=1e-9). The upstream Julia tests use rtol=2e-3 (default-T equation test) and rtol=5e-2 (300 K equation test) and rtol=1e-2 (CMB limiting test) — re-asserted here at the uniform rel=1e-10 model-level.\n\nUnit balance (verified): the single equation balances dimensionally. `λ_max ~ b / T`: (m·K) / K = m ✓. The migrated `.esm` preserves the upstream units verbatim — b in m·K, T in K, λ_max in m. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10
+            },
+            "variables": {
+                "b": {
+                    "type": "parameter",
+                    "units": "m*K",
+                    "default": 2.897e-3,
+                    "description": "Wien's displacement constant (S&P Page 100, 4-digit-rounded CODATA). The proportionality between blackbody temperature and peak emission wavelength in λ_max = b/T. The upstream default 2.897e-3 m·K is the historical 4-digit-rounded value; the modern CODATA-2018 value is 2.897771955e-3 m·K which round-trips to 2.898e-3 at four-digit precision (the upstream choice of 2.897 reflects the pre-2014 CODATA value before the latest least-squares adjustment). The constant follows analytically from the transcendental equation x = 5(1-e^(-x)) where x = hc/(kλT) gives x ≈ 4.965114, so b = hc/(k·x) — anchored by the fundamental constants h (Planck), c (speed of light), k_B (Boltzmann)."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 5800.0,
+                    "description": "Temperature of the emitting blackbody (S&P Page 100). The upstream default 5800.0 K is the Sun's effective surface temperature (the temperature of an ideal blackbody emitting the same total radiative flux as the Sun) — sometimes given as 5778 K (the modern IAU 2015 value) but the upstream uses the classic 5800 K round figure. At this temperature, Wien's law gives λ_max = 2.897e-3/5800 = 499.5 nm, the yellow-green visible peak that anchors the human visual system's evolved sensitivity range. Other canonical temperatures: 300 K (Earth surface) → 9.66 μm thermal-IR, 3 K (CMB) → 0.97 mm microwave, 1e6 K (stellar corona/X-ray emission line region) → 2.9 nm soft X-ray."
+                },
+                "λ_max": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Peak emission wavelength of the blackbody at temperature T (S&P Eq. 4.3). λ_max is the wavelength at which the Planck spectral function dF_Bλ/dλ = 0 — the maximum of the spectral emission curve. The temperature-inverse scaling λ_max ∝ 1/T means hotter sources emit at shorter wavelengths: the canonical fact behind the visible spectrum of stars (red giants vs blue dwarfs), the color of a heated metal as it warms from red-hot to white-hot, and the separation of solar (shortwave) from terrestrial (longwave) radiation that anchors the planetary energy balance in S&P Chapter 4. The peak wavelength is one of three derived quantities from the Planck function (peak λ_max from Wien, total flux F_B from Stefan-Boltzmann, spectral shape F_Bλ from Planck itself) that together characterize blackbody emission."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "λ_max",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["b", "T"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_solar_peak_5800K",
+                    "description": "At default T = 5800 K (Sun's effective surface temperature), λ_max = b/T = 2.897e-3/5800 = 4.994827586206897e-7 m ≈ 499.5 nm — the yellow-green visible peak that anchors the human visual system's evolved sensitivity range and matches the canonical S&P Page 100 example. Reproduces and tightens the upstream `Equation: WienDisplacement (Eq. 4.3)` test (GasChem.jl test/radiation_fundamentals_test.jl:121-134) first case: upstream asserts λ_max ≈ 500e-9 m at rtol=2e-3, this one pins λ_max = 4.994827586206897e-7 m (the exact IEEE-754 result of 2.897e-3 / 5800) at the tighter rel=1e-10.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 4.994827586206897e-7, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "terrestrial_peak_300K",
+                    "description": "At T = 300 K (~Earth-surface temperature), λ_max = 2.897e-3/300 = 9.656666666666667e-6 m ≈ 9.66 μm — the thermal infrared peak of Earth's longwave emission, anchoring the separation of solar (shortwave, ~0.5 μm) from terrestrial (longwave, ~10 μm) radiation that drives the planetary energy balance in S&P Chapter 4. Reproduces and tightens the upstream `Equation: WienDisplacement (Eq. 4.3)` test (GasChem.jl test/radiation_fundamentals_test.jl:121-134) second case: upstream asserts λ_max ≈ 10e-6 m at rtol=5e-2, this one pins λ_max = 9.656666666666667e-6 m (the exact IEEE-754 result of 2.897e-3 / 300) at rel=1e-10.",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 9.656666666666667e-6, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "extreme_hot_xray_1e6K",
+                    "description": "At T = 1e6 K (~stellar corona / X-ray emission line region), λ_max = 2.897e-3/1e6 = 2.897e-9 m ≈ 2.9 nm — soft X-ray range, well below the visible/UV regime. Reproduces and tightens the upstream `Limiting: Wien's law at extreme temperatures` test (GasChem.jl test/radiation_fundamentals_test.jl:268-284) hot case: upstream asserts λ_max < 1e-8 (qualitative bound), this one pins λ_max = 2.897e-9 m at rel=1e-10. The expected value is exact because 2.897e-3 / 1e6 = 2.897e-3 · 1e-6 = 2.897e-9 has no intermediate rounding (single division reproduces the literal scale).",
+                    "parameter_overrides": {
+                        "T": 1.0e6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 2.897e-9, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "cmb_microwave_3K",
+                    "description": "At T = 3 K (~cosmic microwave background temperature), λ_max = 2.897e-3/3 = 9.656666666666667e-4 m ≈ 0.97 mm — the microwave regime characterizing the CMB. (The actual CMB temperature is 2.725 K giving λ_max ≈ 1.063 mm; the test uses the round 3 K from the upstream test.) Reproduces and tightens the upstream `Limiting: Wien's law at extreme temperatures` test (GasChem.jl test/radiation_fundamentals_test.jl:268-284) cold case: upstream asserts λ_max > 1e-4 AND λ_max ≈ 9.66e-4 m rtol=1e-2, this one pins λ_max = 9.656666666666667e-4 m (the exact IEEE-754 result of 2.897e-3 / 3) at rel=1e-10.",
+                    "parameter_overrides": {
+                        "T": 3.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 9.656666666666667e-4, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "qualitative_temp_300K",
+                    "description": "First entry in the `qualitative_temp_*` series (300/1000/3000/5800 K) that reproduces the upstream `Qualitative: Wien peak shifts to shorter λ at higher T` test (GasChem.jl test/radiation_fundamentals_test.jl:398-417) which asserts strict monotonic decrease of λ_max across temps = [300, 1000, 3000, 5800] K. The .esm runner does not directly support cross-test monotonicity assertions; reproduced here by pinning the four absolute λ_max values at rel=1e-10 — by the IEEE-754 monotonicity of division (1/x is strictly decreasing in x for positive x), the cross-test inequalities are exact. At T = 300 K, λ_max = 9.656666666666667e-6 m. (Duplicates `terrestrial_peak_300K` but in isolation from the limiting-behavior anchor, so a regression in the qualitative monotonicity series surfaces independently.)",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 9.656666666666667e-6, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "qualitative_temp_1000K",
+                    "description": "Second entry in the `qualitative_temp_*` series. At T = 1000 K (incandescent-metal range, ~727 °C just below a typical metal's bright-red glow point of ~973 K), λ_max = 2.897e-3/1000 = 2.897e-6 m ≈ 2.9 μm — the mid-IR regime. Verifies the 300 → 1000 K (factor 3.33) reduction in λ_max — by IEEE-754 division 9.6567e-6 / 2.897e-6 = 3.333... ≈ 300/1000 inverted ✓.",
+                    "parameter_overrides": {
+                        "T": 1000.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 2.897e-6, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "qualitative_temp_3000K",
+                    "description": "Third entry in the `qualitative_temp_*` series. At T = 3000 K (~tungsten filament incandescent bulb operating temperature), λ_max = 2.897e-3/3000 = 9.656666666666665e-7 m ≈ 966 nm — the near-IR regime just beyond the visible-red boundary, explaining why incandescent bulbs are warm-color (peak below visible) and why their luminous efficacy is poor (most emitted power is in the IR rather than the visible).",
+                    "parameter_overrides": {
+                        "T": 3000.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 9.656666666666665e-7, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "qualitative_temp_5800K",
+                    "description": "Fourth entry in the `qualitative_temp_*` series (and the largest-T entry). At T = 5800 K (Sun's effective surface temperature, the canonical default), λ_max = 4.994827586206897e-7 m ≈ 499.5 nm — the yellow-green visible peak. Together with `qualitative_temp_300K`, `_1000K`, `_3000K` verifies the 300 → 1000 → 3000 → 5800 K temperature sequence produces strictly-decreasing λ_max values 9.66 μm → 2.90 μm → 0.97 μm → 0.50 μm — the canonical Wien-displacement monotonicity. (Duplicates `default_solar_peak_5800K` but in isolation from the default-conditions anchor, so a regression in the qualitative monotonicity series surfaces independently.)",
+                    "parameter_overrides": {
+                        "T": 5800.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 4.994827586206897e-7, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "earth_equilibrium_T_e_255K",
+                    "description": "At T = 255 K (Earth's no-greenhouse equilibrium temperature, S&P Page 104 — the temperature the planet would have absent the greenhouse effect), λ_max = 2.897e-3/255 = 1.1360784313725491e-5 m ≈ 11.36 μm — thermal IR. Anchors the canonical Earth radiative-balance temperature used in `climate_sensitivity.esm` and `planetary_energy_balance.esm`, complementing the 300 K surface-temperature case at `terrestrial_peak_300K`. The 255 K vs 300 K difference (45 K → 17%) gives 11.36 vs 9.66 μm (18%) — both Earth-relevant cases peak in the same thermal-IR band but at different fine-resolution wavelengths.",
+                    "parameter_overrides": {
+                        "T": 255.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 1.1360784313725491e-5, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "codata_constant_override",
+                    "description": "Override Wien's displacement constant to b = 2.897771955e-3 (CODATA-2018 unrounded value, vs the upstream 2.897e-3 four-digit-rounded value) at the default T = 5800 K. The output shifts by the relative difference (2.897771955 - 2.897) / 2.897 ≈ 2.67e-4: λ_max_new = 2.897771955e-3 / 5800 = 4.996158543103448e-7 m vs the default 4.994827586206897e-7 m. Confirms b behaves as a parameter (not a hardcoded constant) at the .esm boundary: a downstream consumer can override the upstream-rounded value to the modern CODATA value without forking the component.",
+                    "parameter_overrides": {
+                        "b": 2.897771955e-3
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 4.996158543103448e-7, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "iau_solar_T_e_5778K",
+                    "description": "At T = 5778 K (modern IAU 2015 nominal solar effective temperature, vs the upstream rounded 5800 K), λ_max = 2.897e-3/5778 = 5.013845621322256e-7 m ≈ 501.4 nm — still in the yellow-green visible. The 5800 → 5778 K difference (-22 K, -0.38%) gives 499.5 → 501.4 nm (+0.38%), reflecting the inverse temperature scaling. Anchors a precision-T override case that exercises the same physical regime as the default (visible peak) but at a slightly shifted wavelength — catches a stuck-at-default-T regression that would have left λ_max unchanged from the default test."
+                    ,
+                    "parameter_overrides": {
+                        "T": 5778.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "λ_max", "time": 0.0, "expected": 5.013845621322256e-7, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "wien_temperature_sweep",
+                    "description": "Sweep T from 100 K (cold thermal-IR regime, ~Mars night-side surface or Antarctica winter) to 1e4 K (~stellar atmosphere, blue O-type stars) across 5 orders of magnitude on a log scale, plotting λ_max(T) — the canonical Wien-displacement curve from microwave/far-IR through thermal-IR, mid-IR, near-IR, visible, UV, into vacuum-UV. Reproduces the textbook Wien-displacement-law figure (S&P Page 100 derivation). Anchors the design observation that hotter sources emit at shorter wavelengths and that the 1/T scaling spans many orders of magnitude in λ_max as T spans the corresponding range in temperature.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 100.0, "stop": 10000.0, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_max_vs_T_loglog",
+                            "type": "line",
+                            "description": "Peak emission wavelength λ_max as a function of temperature T on a log-log plot — exact straight line of slope -1 (because λ_max = b/T means log(λ_max) = log(b) - log(T)). At T=100 K, λ_max ≈ 29 μm (far-IR); at T=300 K (Earth), λ_max ≈ 9.66 μm (thermal-IR); at T=5800 K (Sun), λ_max ≈ 500 nm (visible); at T=1e4 K, λ_max ≈ 290 nm (mid-UV). The shape verifies the canonical 1/T inverse-temperature scaling across 5 orders of magnitude.",
+                            "x": {"variable": "T", "label": "T (K)"},
+                            "y": {"variable": "λ_max", "label": "λ_max (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "earth_relevant_temperature_sweep",
+                    "description": "Sweep T from 200 K (~stratospheric tropopause, polar winter surface) to 320 K (~tropical summer surface) at fine resolution, surfacing the variation in Earth's emitted-radiation peak wavelength across realistic terrestrial temperature ranges. At T=200 K, λ_max = 14.49 μm; at T=255 K (Earth's no-greenhouse equilibrium), λ_max = 11.36 μm; at T=288 K (Earth's actual surface mean), λ_max = 10.06 μm; at T=320 K (hot deserts/heat waves), λ_max = 9.05 μm — all in the thermal-IR atmospheric window from ~8 to 14 μm. Anchors the Earth-radiative-balance application: surface emission peaks within the longwave band where atmospheric water-vapor and CO₂ absorption operate, and small T shifts redistribute emission across the atmospheric-window region differently than across the saturated H₂O/CO₂ absorption bands.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 200.0, "stop": 320.0, "count": 25, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_max_vs_T_earth_band",
+                            "type": "line",
+                            "description": "Peak emission wavelength λ_max as a function of temperature across the Earth-relevant range [200, 320] K. Strictly decreasing curve from ~14.5 μm at 200 K to ~9.05 μm at 320 K, with the canonical 255 K (no-greenhouse equilibrium) at 11.36 μm and 288 K (actual surface) at 10.06 μm marking the standard reference points.",
+                            "x": {"variable": "T", "label": "T (K)"},
+                            "y": {"variable": "λ_max", "label": "λ_max (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "stellar_temperature_sweep",
+                    "description": "Sweep T from 2500 K (~late M-type red-dwarf surface) to 40000 K (~early O-type blue-giant surface) across the main stellar effective-temperature range, surfacing how Wien's displacement law explains the visible color sequence of stars from red (cool) through orange, yellow, white, to blue-white (hot). At T=2500 K, λ_max = 1.16 μm (near-IR, beyond visible — explains why M-dwarfs look dim red); at T=5800 K (Sun, G-type), λ_max = 500 nm (yellow-green visible); at T=10000 K (~A-type Vega), λ_max = 290 nm (mid-UV — explains why A-type stars look blue-white as the peak falls below visible); at T=40000 K (O-type), λ_max = 72 nm (extreme UV — only the long-wavelength tail of the Planck spectrum is in the visible). Anchors the canonical astronomical application: stellar spectral type (OBAFGKM) is essentially a proxy for surface temperature, and Wien's law gives the analytic basis for the color-temperature relation.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 2500.0, "stop": 40000.0, "count": 30, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_max_vs_T_stellar",
+                            "type": "line",
+                            "description": "Peak emission wavelength λ_max as a function of stellar effective temperature across the main sequence range — strictly decreasing from near-IR (M-type) through visible (G/K-type Sun-like) into the UV (A/B/O-type hot stars). The visible band (400-700 nm) corresponds to T ≈ 4140-7240 K, capturing the F/G/K spectral-type range which is exactly the band where stellar surface emission peaks within human-visible wavelengths.",
+                            "x": {"variable": "T", "label": "T (K)"},
+                            "y": {"variable": "λ_max", "label": "λ_max (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
