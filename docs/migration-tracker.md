@@ -678,7 +678,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 | fuel_heat | `src/coupling.jl:127` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_heat` | — |
 | fuel_weight | `src/coupling.jl:128` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_weight` | — |
 | FuelModelLookup | `src/coupling.jl:155` | Model | variables, parameters, observed, registered_function calls (fuel_*) | gt-p3ep(lookup) | M | Y | Y | `components/wildland_fire/fuel_model_lookup.esm` | fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight |
-| TerrainSlope | `src/coupling.jl:205` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/terrain_slope.esm` | — |
+| TerrainSlope | `src/coupling.jl:205` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/terrain_slope.esm` | — | **status: complete, sha: 944d4abbb79c142e809168fbd8ef2398d6148f1d** (mdl-kh9; 11 tests / 44 assertions, 2 examples) |
 | MidflameWind | `src/coupling.jl:249` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/midflame_wind.esm` | — |
 
 ### 14.2 PDE: level set fire spread
