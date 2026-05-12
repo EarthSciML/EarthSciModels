@@ -1,0 +1,717 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "Clark1996FireSpread",
+        "description": "Coupled atmosphere-fire model for a dry eucalyptus forest implementing the McArthur fire-spread formula and four-fuel-type consumption from Clark et al. (1996). Migrated from WildlandFire.jl@126976f2 src/clark1996.jl:81 (`Clark1996FireSpread` @component). Five ODE states (M_litter, M_trash, M_scrub, M_canopy, Q_cumulative) and seven algebraic state variables (B_ratio, S_f, canopy_burning, ground_burn_rate, total_burn_rate, F_s, F_l). The cumulative ground heat flux Q_cumulative drives an automatic canopy ignition threshold at 170 kJ/m^2 (p. 180, Clark et al. 1996); each ground fuel is gated by an ifelse against eps_fuel so consumption stops cleanly when the pool is depleted.",
+        "tags": [
+            "wildland_fire",
+            "clark1996",
+            "fire_spread",
+            "mcarthur",
+            "coupled_atmosphere_fire"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "WildlandFire.jl contributors",
+            "EarthSciModels migration (esm-44h0)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T.L., Jenkins, M.A., Coen, J.L., and Packham, D.R. (1996). A Coupled Atmosphere-Fire Model: Role of the Convective Froude Number and Dynamic Fingering at the Fireline. International Journal of Wildland Fire, 6(4), 177-190. Eq. 8 (burn-rate ratio B_ratio), Eq. 9 (McArthur forward spread rate S_f), p. 180 (combustion coefficient H_c, fuel-type burn rates R_*, canopy ignition threshold Q_canopy_threshold)."
+            },
+            {
+                "citation": "Noble, I.R., Bary, G.A.V., and Gill, A.M. (1980). McArthur's fire-danger meters expressed as equations. Australian Journal of Ecology, 5, 201-203. (Source of Eq. 9, S_f = S_a * exp(k_spread * |V_A|), with S_a = 0.18 m/s and k_spread = 0.08424 s/m.)"
+            },
+            {
+                "citation": "Walker, J. (1981). Fuel dynamics in Australian vegetation. In Fire in the Australian Biota, ed. A.M. Gill, R.H. Groves, and I.R. Noble. Australian Academy of Science, 582 pp. (Source of fuel-type nominal burn rates R_litter, R_trash, R_scrub, R_canopy, cited on p. 180 of Clark et al. 1996.)"
+            }
+        ]
+    },
+    "models": {
+        "Clark1996FireSpread": {
+            "reference": {
+                "citation": "Clark, T.L., Jenkins, M.A., Coen, J.L., and Packham, D.R. (1996). A Coupled Atmosphere-Fire Model: Role of the Convective Froude Number and Dynamic Fingering at the Fireline. International Journal of Wildland Fire, 6(4), 177-190.",
+                "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/clark1996.jl:81\nUpstream `Clark1996FireSpread` is an MTK `@component` with 12 equations and 12 unknowns. Three time-indexed @variables are algebraic (B_ratio, S_f, ground_burn_rate, total_burn_rate, canopy_burning, F_s, F_l — seven total) and five are ODE states (M_litter, M_trash, M_scrub, M_canopy, Q_cumulative). The single MTK `@parameter` is V_A (15 m AGL wind speed). All other inputs are MTK `@constants` (18 total) which are preserved here as ESM parameters with their upstream values to maintain 1:1 structural fidelity with the upstream component — the same convention used by sibling Clark1996 migrations (e.g. components/wildland_fire/clark1996/heat_flux_profile.esm).\n\nThe twelve equations preserved verbatim from the upstream `eqs` block:\n\n  1.  B_ratio = sqrt((|V_A| + one_vel) / (|V_A| + four_vel))                             (Eq. 8)\n  2.  S_f = min(S_a * exp(k_spread * |V_A|), |V_A|)                                       (Eq. 9 with limiting)\n  3.  D(M_litter) = -R_litter * B_ratio * ifelse(M_litter > eps_fuel, 1, 0)               (p. 180)\n  4.  D(M_trash)  = -R_trash  * B_ratio * ifelse(M_trash  > eps_fuel, 1, 0)               (p. 180)\n  5.  D(M_scrub)  = -R_scrub  * B_ratio * ifelse(M_scrub  > eps_fuel, 1, 0)               (p. 180)\n  6.  D(Q_cumulative) = (1 - f_evap) * H_c * ground_burn_rate                             (p. 180)\n  7.  canopy_burning = ifelse(Q_cumulative > Q_canopy_threshold, 1, 0)                    (p. 180)\n  8.  D(M_canopy) = -R_canopy * B_ratio * canopy_burning * ifelse(M_canopy > eps_fuel, 1, 0)\n  9.  ground_burn_rate = sum over {litter, trash, scrub} of R_i*B_ratio*ifelse(M_i>eps_fuel, 1, 0)\n  10. total_burn_rate = ground_burn_rate + R_canopy*B_ratio*canopy_burning*ifelse(M_canopy>eps_fuel, 1, 0)\n  11. F_s = (1 - f_evap) * H_c * total_burn_rate                                          (p. 180)\n  12. F_l = f_water * L_v * total_burn_rate + f_evap * H_c * total_burn_rate              (p. 180)\n\nThe upstream MTK component leaves the random-spread factor r_f (≈ 1 ± 0.05) out for deterministic simulation; the ESM preserves that choice. The S_f `min(...)` clamp keeps the forward spread rate from exceeding the wind speed at low |V_A| (consistent with the Clark et al. text describing S_f as a wind-driven advance rate, never faster than the ambient wind itself).\n\nUnused-but-preserved constants: `zero_fuel` (kg/m^2) and `alpha_ext` (m, the heat-flux extinction depth used by the sibling Clark1996HeatFluxProfile component) appear in the upstream `@constants` block but never enter the equations of this component. They are preserved as parameters with their upstream defaults — same fidelity convention as `one_m` in components/wildland_fire/clark1996/heat_flux_profile.esm.\n\nDefaults for ODE states match the upstream docstring example (a moderately loaded dry eucalyptus stand): M_litter = 2.0, M_trash = 0.5, M_scrub = 0.2, M_canopy = 1.2 kg/m^2; Q_cumulative = 0 J/m^2 (no heat yet accumulated). V_A defaults to 3.0 m/s (the FIR7CR experiment value cited in the upstream docstring).\n\nThe canopy-ignition switch (eq. 7) is a hard discontinuity: when Q_cumulative crosses Q_canopy_threshold, canopy_burning flips from 0 to 1 and D(M_canopy) changes sign. Tsit5 with reltol=1e-10 captures this transition by reducing step size around it, but assertions that depend on the exact crossing time (e.g. M_canopy at a t between ignition and the end of the burn) will show small integrator-truncation error. The tests below avoid asserting M_canopy at intermediate times near the switch; ground-fuel masses, Q_cumulative (whose RHS is independent of M_canopy), and canopy_burning itself (a step function in Q) are clean.\n\nTolerance rationale (model-level rel=1e-6): linear constant-coefficient ODEs for the ground fuels and Q_cumulative (while their gating ifelse arguments are above eps_fuel and Q below the canopy threshold, respectively); the canopy ODE has one discontinuous switch. Tsit5 reltol=1e-10/abstol=1e-12 keeps integrator truncation comfortably below 1e-6 over the tested horizons (≤ 30 s) for all clean assertions; algebraic-only assertions at t=0 are exact to float64 ULP and are checked with the model-level tolerance — no per-test loosening is needed."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "V_A": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 3.0,
+                    "description": "Tracer-advecting wind speed at 15 m AGL. Drives both the McArthur forward spread rate S_f (Eq. 9) and the burn-rate ratio B_ratio (Eq. 8). Default 3.0 m/s matches the FIR7CR experiment in Clark et al. (1996); upstream has no default."
+                },
+                "S_a": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.18,
+                    "description": "Backing/base fire spread rate (McArthur). Upstream `@constant`; preserved for 1:1 structural fidelity. Clark et al. (1996), Eq. 9."
+                },
+                "k_spread": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 0.08424,
+                    "description": "McArthur spread-rate coefficient. Upstream `@constant`; preserved for 1:1 structural fidelity. Clark et al. (1996), Eq. 9."
+                },
+                "R_litter": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.04,
+                    "description": "Litter nominal burn rate. Walker (1981); p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "R_trash": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.005,
+                    "description": "Trash nominal burn rate. Walker (1981); p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "R_scrub": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.004,
+                    "description": "Scrub nominal burn rate. Walker (1981); p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "R_canopy": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.02,
+                    "description": "Dry canopy fuel nominal burn rate. Walker (1981); p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "H_c": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 1.7e7,
+                    "description": "Combustion coefficient (sensible heat released per kg of dry fuel burned). p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "f_evap": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.03,
+                    "description": "Fraction of combustion sensible heat used to evaporate ground-fuel moisture (dimensionless). p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "f_water": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.56,
+                    "description": "Fraction of dry fuel mass converted to water vapor by cellulose combustion (dimensionless). p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "L_v": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 2.5e6,
+                    "description": "Latent heat of vaporization of water. Upstream `@constant`."
+                },
+                "one_vel": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "Reference velocity for unit-balancing the numerator of B_ratio (Eq. 8). Upstream `@constant` preserved for fidelity."
+                },
+                "four_vel": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 4.0,
+                    "description": "Reference velocity for unit-balancing the denominator of B_ratio (Eq. 8). Upstream `@constant` preserved for fidelity."
+                },
+                "one_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dimensionless one (selector value when ifelse condition holds; also (1 - f_evap) in F_s and Q_cumulative ODE). Upstream `@constant`."
+                },
+                "zero_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Dimensionless zero (selector value when ifelse condition fails). Upstream `@constant`."
+                },
+                "zero_fuel": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Zero fuel mass reference. Upstream `@constant` declared but unused in the equations — preserved for 1:1 structural fidelity with the upstream component (same convention as `one_m` in components/wildland_fire/clark1996/heat_flux_profile.esm)."
+                },
+                "eps_fuel": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 1.0e-10,
+                    "description": "Small epsilon for fuel-depletion comparison. Each fuel mass M_i > eps_fuel selects the burning branch of the ifelse (D(M_i) = -R_i * B_ratio); otherwise D(M_i) = 0 and the pool stops draining. Upstream `@constant`."
+                },
+                "alpha_ext": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 50.0,
+                    "description": "Heat-flux e-folding extinction depth (Clark et al. 1996, Eq. 10). Upstream `@constant` declared in this component but used only by the sibling Clark1996HeatFluxProfile — preserved here for 1:1 structural fidelity (same convention as `one_m` in components/wildland_fire/clark1996/heat_flux_profile.esm)."
+                },
+                "Q_canopy_threshold": {
+                    "type": "parameter",
+                    "units": "J/m^2",
+                    "default": 170000.0,
+                    "description": "Cumulative ground-fuel heat flux at which the canopy ignites (170 kJ/m^2). p. 180 of Clark et al. (1996). Upstream `@constant`."
+                },
+                "M_litter": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "default": 2.0,
+                    "description": "Litter fuel mass remaining. Default 2.0 kg/m^2 matches the moderately loaded dry-eucalyptus stand used in the upstream docstring example (the FIR7CR experiment ICs)."
+                },
+                "M_trash": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "default": 0.5,
+                    "description": "Trash fuel mass remaining. Default 0.5 kg/m^2; upstream docstring example IC."
+                },
+                "M_scrub": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "default": 0.2,
+                    "description": "Scrub fuel mass remaining. Default 0.2 kg/m^2; upstream docstring example IC."
+                },
+                "M_canopy": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "default": 1.2,
+                    "description": "Dry canopy fuel mass remaining. Default 1.2 kg/m^2; upstream docstring example IC. Consumption begins only after Q_cumulative crosses Q_canopy_threshold."
+                },
+                "Q_cumulative": {
+                    "type": "state",
+                    "units": "J/m^2",
+                    "default": 0.0,
+                    "description": "Cumulative ground-fuel heat flux. Drives the canopy-ignition switch (Q > Q_canopy_threshold). Starts at 0 J/m^2 — no heat accumulated."
+                },
+                "B_ratio": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Burn-rate modulation factor B_ratio = sqrt((|V_A| + 1)/(|V_A| + 4)) (dimensionless). Eq. 8 of Clark et al. (1996). Algebraic — constant in time when V_A is constant."
+                },
+                "S_f": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Forward fire spread rate S_f = min(S_a * exp(k_spread * |V_A|), |V_A|). Eq. 9 of Clark et al. (1996); the min(...) clamp keeps the McArthur spread rate from exceeding the wind speed at low |V_A|. Algebraic — constant in time when V_A is constant."
+                },
+                "canopy_burning": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Canopy ignition flag (1 = burning, 0 = not burning). Algebraic step function in Q_cumulative: canopy_burning = ifelse(Q_cumulative > Q_canopy_threshold, 1, 0). Switches from 0 to 1 when cumulative ground heat flux crosses 170 kJ/m^2 (p. 180 of Clark et al. 1996)."
+                },
+                "ground_burn_rate": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Total ground-fuel burn rate (litter + trash + scrub contributions, each gated by ifelse(M_i > eps_fuel, 1, 0)). Algebraic; feeds D(Q_cumulative)."
+                },
+                "total_burn_rate": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Total fuel burn rate = ground_burn_rate + R_canopy * B_ratio * canopy_burning * ifelse(M_canopy > eps_fuel, 1, 0). Algebraic; feeds F_s and F_l."
+                },
+                "F_s": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Surface sensible heat flux from the fire. F_s = (1 - f_evap) * H_c * total_burn_rate — 97% of combustion heat goes to sensible flux (3% drives moisture evaporation). p. 180 of Clark et al. (1996). Algebraic."
+                },
+                "F_l": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Surface latent heat flux from the fire. F_l = f_water * L_v * total_burn_rate + f_evap * H_c * total_burn_rate — water vapor from cellulose combustion (56% of dry-fuel mass) plus the evaporated ground-fuel moisture. p. 180 of Clark et al. (1996). Algebraic."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "B_ratio",
+                    "rhs": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {"op": "abs", "args": ["V_A"]},
+                                            "one_vel"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {"op": "abs", "args": ["V_A"]},
+                                            "four_vel"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_f",
+                    "rhs": {
+                        "op": "min",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "S_a",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k_spread",
+                                                    {"op": "abs", "args": ["V_A"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {"op": "abs", "args": ["V_A"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M_litter"]},
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            "R_litter",
+                            "B_ratio",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {"op": ">", "args": ["M_litter", "eps_fuel"]},
+                                    "one_dimless",
+                                    "zero_dimless"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M_trash"]},
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            "R_trash",
+                            "B_ratio",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {"op": ">", "args": ["M_trash", "eps_fuel"]},
+                                    "one_dimless",
+                                    "zero_dimless"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M_scrub"]},
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            "R_scrub",
+                            "B_ratio",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {"op": ">", "args": ["M_scrub", "eps_fuel"]},
+                                    "one_dimless",
+                                    "zero_dimless"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["Q_cumulative"]},
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": ["one_dimless", "f_evap"]
+                            },
+                            "H_c",
+                            "ground_burn_rate"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "canopy_burning",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {"op": ">", "args": ["Q_cumulative", "Q_canopy_threshold"]},
+                            "one_dimless",
+                            "zero_dimless"
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M_canopy"]},
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            "R_canopy",
+                            "B_ratio",
+                            "canopy_burning",
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {"op": ">", "args": ["M_canopy", "eps_fuel"]},
+                                    "one_dimless",
+                                    "zero_dimless"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ground_burn_rate",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_litter",
+                                    "B_ratio",
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {"op": ">", "args": ["M_litter", "eps_fuel"]},
+                                            "one_dimless",
+                                            "zero_dimless"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_trash",
+                                    "B_ratio",
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {"op": ">", "args": ["M_trash", "eps_fuel"]},
+                                            "one_dimless",
+                                            "zero_dimless"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_scrub",
+                                    "B_ratio",
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {"op": ">", "args": ["M_scrub", "eps_fuel"]},
+                                            "one_dimless",
+                                            "zero_dimless"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "total_burn_rate",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "ground_burn_rate",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_canopy",
+                                    "B_ratio",
+                                    "canopy_burning",
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {"op": ">", "args": ["M_canopy", "eps_fuel"]},
+                                            "one_dimless",
+                                            "zero_dimless"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_s",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": ["one_dimless", "f_evap"]
+                            },
+                            "H_c",
+                            "total_burn_rate"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_l",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["f_water", "L_v", "total_burn_rate"]
+                            },
+                            {
+                                "op": "*",
+                                "args": ["f_evap", "H_c", "total_burn_rate"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "zero_wind_initial_algebraic",
+                    "description": "V_A = 0: B_ratio = sqrt(1/4) = 0.5 (Eq. 8 with |V_A|=0); S_f = min(0.18, 0) = 0 (Eq. 9, the |V_A| clamp wins). All ground fuels above eps_fuel so ground_burn_rate = (R_litter + R_trash + R_scrub) * 0.5 = 0.0245 kg/(m^2*s). Q_cumulative = 0 ⇒ canopy_burning = 0 ⇒ total_burn_rate = ground_burn_rate. F_s = 0.97 * 1.7e7 * 0.0245 = 404005 W/m^2; F_l = 0.56*2.5e6*0.0245 + 0.03*1.7e7*0.0245 = 34300 + 12495 = 46795 W/m^2.",
+                    "parameter_overrides": {"V_A": 0.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "B_ratio", "time": 0.0, "expected": 0.5},
+                        {"variable": "S_f", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-15}},
+                        {"variable": "canopy_burning", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-15}},
+                        {"variable": "ground_burn_rate", "time": 0.0, "expected": 0.0245},
+                        {"variable": "total_burn_rate", "time": 0.0, "expected": 0.0245},
+                        {"variable": "F_s", "time": 0.0, "expected": 404005.0},
+                        {"variable": "F_l", "time": 0.0, "expected": 46795.0}
+                    ]
+                },
+                {
+                    "id": "moderate_wind_3ms_algebraic",
+                    "description": "V_A = 3 m/s (FIR7CR experiment value): B_ratio = sqrt(4/7) ≈ 0.7559289460184544 (Eq. 8). S_f = min(0.18 * exp(0.08424*3), 3) = min(0.231754..., 3) = 0.231754... (Eq. 9; the exponential wins, not the |V_A| clamp). ground_burn_rate = 0.049 * 0.755929... = 0.037040518... kg/(m^2*s); F_s = 0.97 * 1.7e7 * 0.037040518 = 610798.148 W/m^2.",
+                    "parameter_overrides": {"V_A": 3.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "B_ratio", "time": 0.0, "expected": 0.7559289460184544},
+                        {"variable": "S_f", "time": 0.0, "expected": 0.23175408959953731},
+                        {"variable": "canopy_burning", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-15}},
+                        {"variable": "ground_burn_rate", "time": 0.0, "expected": 0.037040518354904265},
+                        {"variable": "total_burn_rate", "time": 0.0, "expected": 0.037040518354904265},
+                        {"variable": "F_s", "time": 0.0, "expected": 610798.1476723714},
+                        {"variable": "F_l", "time": 0.0, "expected": 70747.39005786716}
+                    ]
+                },
+                {
+                    "id": "strong_wind_10ms_algebraic",
+                    "description": "V_A = 10 m/s: B_ratio = sqrt(11/14) ≈ 0.886405... ; S_f = min(0.18 * exp(0.8424), 10) = 0.417948... (exp branch wins, well below the |V_A|=10 clamp); ground_burn_rate scales linearly with B_ratio.",
+                    "parameter_overrides": {"V_A": 10.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "B_ratio", "time": 0.0, "expected": 0.8864052604279183},
+                        {"variable": "S_f", "time": 0.0, "expected": 0.4179479281204271},
+                        {"variable": "ground_burn_rate", "time": 0.0, "expected": 0.043433857760968},
+                        {"variable": "F_s", "time": 0.0, "expected": 716224.3144783623},
+                        {"variable": "F_l", "time": 0.0, "expected": 82958.66832344889}
+                    ]
+                },
+                {
+                    "id": "S_f_clamped_by_wind_speed",
+                    "description": "Low-wind regime where the min(...) clamp in Eq. 9 selects |V_A|, not S_a*exp(k*|V_A|). At V_A = 0.1 m/s, S_a*exp(k_spread*0.1) = 0.18*exp(0.008424) ≈ 0.18152 m/s, which exceeds |V_A| = 0.1. min(0.18152, 0.1) = 0.1. Exercises the clamp branch of S_f.",
+                    "parameter_overrides": {"V_A": 0.1},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "B_ratio", "time": 0.0, "expected": 0.5179697702828123},
+                        {"variable": "S_f", "time": 0.0, "expected": 0.1}
+                    ]
+                },
+                {
+                    "id": "depleted_litter_gates_burn",
+                    "description": "M_litter = 0 < eps_fuel (1e-10) so the ifelse selects zero_dimless and the litter contribution to ground_burn_rate vanishes; trash and scrub still burn. V_A = 0 ⇒ B_ratio = 0.5. ground_burn_rate = (R_trash + R_scrub) * 0.5 = 0.0045 kg/(m^2*s); F_s = 0.97 * 1.7e7 * 0.0045 = 74205 W/m^2. Verifies the per-fuel eps_fuel gate stops consumption cleanly at depletion.",
+                    "parameter_overrides": {"V_A": 0.0},
+                    "initial_conditions": {
+                        "M_litter": 0.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ground_burn_rate", "time": 0.0, "expected": 0.0045},
+                        {"variable": "total_burn_rate", "time": 0.0, "expected": 0.0045},
+                        {"variable": "F_s", "time": 0.0, "expected": 74205.0}
+                    ]
+                },
+                {
+                    "id": "canopy_burning_when_Q_above_threshold",
+                    "description": "Initialise Q_cumulative = 200000 J/m^2, above the 170000 J/m^2 canopy ignition threshold. canopy_burning flips to 1 at t = 0 and the canopy contributes to total_burn_rate. V_A = 0 ⇒ B_ratio = 0.5; total_burn_rate = ground (0.0245) + R_canopy*B_ratio*1*1 = 0.0245 + 0.01 = 0.0345 kg/(m^2*s); F_s = 0.97 * 1.7e7 * 0.0345 = 568905 W/m^2; F_l = 0.56*2.5e6*0.0345 + 0.03*1.7e7*0.0345 = 48300 + 17595 = 65895 W/m^2. Exercises the canopy_burning step function in Q_cumulative.",
+                    "parameter_overrides": {"V_A": 0.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 200000.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "canopy_burning", "time": 0.0, "expected": 1.0},
+                        {"variable": "total_burn_rate", "time": 0.0, "expected": 0.0345},
+                        {"variable": "F_s", "time": 0.0, "expected": 568905.0},
+                        {"variable": "F_l", "time": 0.0, "expected": 65895.0}
+                    ]
+                },
+                {
+                    "id": "pre_ignition_linear_evolution_V_A_3",
+                    "description": "Short-time linear evolution before the canopy-ignition switch. V_A = 3 gives constant B_ratio = sqrt(4/7), ground_burn_rate = 0.037040518... kg/(m^2*s), and dQ/dt = 0.97 * 1.7e7 * 0.037040518 = 610798.148 W/m^2 (J/m^2/s). The threshold (170000 J/m^2) is crossed at t ≈ 0.27832 s; sampling at t = 0.1 stays well inside the pre-ignition regime where every state evolves linearly: M_litter(0.1) = 2 - R_litter*B_ratio*0.1; M_trash(0.1) = 0.5 - R_trash*B_ratio*0.1; M_scrub(0.1) = 0.2 - R_scrub*B_ratio*0.1; Q_cumulative(0.1) = dQ/dt * 0.1 = 61079.81... J/m^2 (below threshold ⇒ canopy_burning = 0, M_canopy unchanged at 1.2).",
+                    "parameter_overrides": {"V_A": 3.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 0.1},
+                    "assertions": [
+                        {"variable": "M_litter", "time": 0.1, "expected": 1.9969762841759817},
+                        {"variable": "M_trash", "time": 0.1, "expected": 0.4996221855219977},
+                        {"variable": "M_scrub", "time": 0.1, "expected": 0.1996977284175982},
+                        {"variable": "M_canopy", "time": 0.1, "expected": 1.2},
+                        {"variable": "Q_cumulative", "time": 0.1, "expected": 61079.81476723714},
+                        {"variable": "canopy_burning", "time": 0.1, "expected": 0.0, "tolerance": {"abs": 1.0e-15}}
+                    ]
+                },
+                {
+                    "id": "post_ignition_canopy_flag_V_A_3",
+                    "description": "Run V_A = 3 m/s long enough to cross the canopy ignition threshold (t_ignite ≈ 0.27832 s) and confirm canopy_burning = 1 at t = 1.0 s. Q_cumulative growth is independent of canopy state (dQ/dt depends only on ground_burn_rate), and all ground fuels remain well-stocked over [0, 1] s ⇒ Q(1.0) = dQ/dt * 1.0 ≈ 610798.15 J/m^2 (well above the 170 kJ/m^2 threshold).",
+                    "parameter_overrides": {"V_A": 3.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "canopy_burning", "time": 1.0, "expected": 1.0},
+                        {"variable": "Q_cumulative", "time": 1.0, "expected": 610798.1476723714}
+                    ]
+                },
+                {
+                    "id": "ground_fuel_linear_decay_V_A_0",
+                    "description": "Longer-horizon linear decay of the three ground fuels at V_A = 0 (B_ratio = 0.5, all fuels constant-rate). At t = 10 s: M_litter = 2.0 - 0.04*0.5*10 = 1.8; M_trash = 0.5 - 0.005*0.5*10 = 0.475; M_scrub = 0.2 - 0.004*0.5*10 = 0.18 (all comfortably above eps_fuel). Q_cumulative(10) = 404005 * 10 = 4040050 J/m^2 (dQ/dt is constant while ground fuels are all above eps_fuel). canopy_burning(10) = 1 (Q crossed threshold at t ≈ 0.42 s). M_canopy is NOT asserted at this sampling time — the ifelse switch around t ≈ 0.42 s creates small integrator-truncation error in the canopy state.",
+                    "parameter_overrides": {"V_A": 0.0},
+                    "initial_conditions": {
+                        "M_litter": 2.0,
+                        "M_trash": 0.5,
+                        "M_scrub": 0.2,
+                        "M_canopy": 1.2,
+                        "Q_cumulative": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 10.0},
+                    "assertions": [
+                        {"variable": "M_litter", "time": 10.0, "expected": 1.8},
+                        {"variable": "M_trash", "time": 10.0, "expected": 0.475},
+                        {"variable": "M_scrub", "time": 10.0, "expected": 0.18},
+                        {"variable": "Q_cumulative", "time": 10.0, "expected": 4040050.0},
+                        {"variable": "canopy_burning", "time": 10.0, "expected": 1.0}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "fir7cr_short_burn",
+                    "description": "Short 30-second burn at V_A = 3 m/s (the FIR7CR experiment wind), starting from the moderately loaded dry-eucalyptus initial state used in the upstream docstring example (M_litter = 2.0, M_trash = 0.5, M_scrub = 0.2, M_canopy = 1.2 kg/m^2; Q_cumulative = 0). The canopy ignites automatically at t ≈ 0.28 s when Q_cumulative crosses 170 kJ/m^2; the full burn then drives F_s, F_l, and total_burn_rate at canopy-active levels through the end of the run. Reproduces the qualitative behaviour shown in Fig. 6 of Clark et al. (1996) over the first half-minute.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "V_A": 3.0
+                    },
+                    "time_span": {"start": 0.0, "end": 30.0},
+                    "plots": [
+                        {
+                            "id": "ground_fuels_vs_time",
+                            "type": "line",
+                            "description": "Ground-fuel masses (litter, trash, scrub) vs. time over the 30-second burn — illustrates the linear-decay regime and the ordering of depletion times set by the per-fuel R_i.",
+                            "x": {"variable": "t", "label": "Time t (s)"},
+                            "y": {"variable": "M_litter", "label": "Fuel mass (kg/m^2)"}
+                        },
+                        {
+                            "id": "F_s_vs_time",
+                            "type": "line",
+                            "description": "Surface sensible heat flux F_s vs. time. Step-up at t ≈ 0.28 s when the canopy ignites and joins the total burn rate.",
+                            "x": {"variable": "t", "label": "Time t (s)"},
+                            "y": {"variable": "F_s", "label": "Sensible heat flux F_s (W/m^2)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "no_wind_baseline",
+                    "description": "V_A = 0 m/s baseline: the McArthur spread rate S_f collapses to 0 (the wind-speed clamp wins) and B_ratio = 0.5 is the lower bound of the burn-rate ratio. All ground fuels still burn at half their nominal rate; the canopy ignites at t ≈ 0.42 s. Useful for isolating wind-independent terms when interpreting the wind-driven scenarios.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "V_A": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 30.0},
+                    "plots": [
+                        {
+                            "id": "Q_cumulative_vs_time",
+                            "type": "line",
+                            "description": "Cumulative ground heat flux Q_cumulative vs. time — linear ramp at dQ/dt = 0.97 * 1.7e7 * 0.0245 ≈ 404 kW/m^2 (constant while all ground fuels stay above eps_fuel). The 170 kJ/m^2 canopy-ignition threshold is crossed at t ≈ 0.42 s.",
+                            "x": {"variable": "t", "label": "Time t (s)"},
+                            "y": {"variable": "Q_cumulative", "label": "Cumulative ground heat flux (J/m^2)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
