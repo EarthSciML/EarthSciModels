@@ -687,7 +687,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 |---|---|---|---|---|---|---|---|---|---|
 | LevelSetFireSpread | `src/level_set_fire_spread.jl:73` | Model | PDESystem, partialderivative_transforms (metric-tensor coord transforms), boundary_conditions | **gt-vzwk(PDE-tests); other:P3-A-metric-tensor-coord-transforms** | XL | Y | Y | `components/wildland_fire/level_set_fire_spread.esm` | — |
 | FuelConsumption | `src/level_set_fire_spread.jl:243` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fuel_consumption.esm` | — | **status: complete, sha: f817edbc9d9945003a446197c5ba5c6f3bf7ac02** (mdl-r2s6; Mandel et al. 2011 Eq. 3 fuel-fraction decay D(F) = -is_burning*F/T_f + algebraic w0_effective = F*w0_initial, 5 tests / 24 assertions, 2 examples; tracker-sync esm-arm7 — work landed under mdl-r2s6 but the row had no completion marker) |
-| FireHeatFlux | `src/level_set_fire_spread.jl:295` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fire_heat_flux.esm` | — |
+| FireHeatFlux | `src/level_set_fire_spread.jl:295` | Model | variables, parameters, equations | none | S | Y | Y | `components/wildland_fire/level_set/fire_heat_flux.esm` | — | **status: complete, sha: b1d5dfa60ff412f6010aa73a8c221ed93f5a2cf7** (mdl-gwf7; observed-only Mandel et al. (2011) Eqs. 4–5 sensible/latent heat flux, 7 tests / 14 assertions, 2 examples; tracker-sync esm-d4ed — work landed under mdl-gwf7 but the row had no completion marker) |
 
 ### 14.3 Clark 1996 (4, `none`)
 
