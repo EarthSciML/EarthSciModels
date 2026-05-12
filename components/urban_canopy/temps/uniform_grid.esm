@@ -1,0 +1,1243 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "UniformGrid",
+        "description": "Uniform vertical grid discretization for roof and wall columns in the urban canopy thermal solver. Computes node depths at layer midpoints (Oleson Eq. 4.5), layer thicknesses (Eq. 4.6), and interface depths (Eq. 4.7) for a column of total thickness `dz_total` divided into N equal-thickness layers. Used for roofs and walls (homogeneous opaque material — concrete, brick, etc.); the road column uses the exponential grid (sibling `exponential_grid.esm`) because it overlies real soil where near-surface diurnal cycles dominate. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:830 (`UniformGrid` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4 §4.1, Eqs. 4.5-4.7). Parameterized as observed-only: `dz_total` is the only input parameter; z_node_i, dz_layer_i, z_interface_j are algebraic outputs. Upstream `N` (number of layers) is fixed to its canonical default 15 for serialization (per-N templating lives outside the ESM scalar schema and is not needed for the urban-canopy use case).",
+        "tags": [
+            "urban_canopy",
+            "temperatures",
+            "grid",
+            "discretization",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-0254)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.1, Eqs. 4.5-4.7, p. 91."
+            }
+        ]
+    },
+    "models": {
+        "UniformGrid": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:830\nUpstream `UniformGrid` is an MTK `@component` parameterized by N (default 15) declaring one `@parameters` (`Δz_total`, total column thickness in m) and three arrays of `@variables`: z_node(t)[1:N], Δz_layer(t)[1:N], z_interface(t)[1:N+1] (with N+1 entries where index j maps to paper i=j-1). Unlike the sibling `ExponentialGrid` (which uses a `@constants` block to fix the scaling factor `f_s = 0.025` m), the UniformGrid takes the column thickness as a hand-set parameter — canonical caller is the roof/wall PDESystem at roof_wall_road_snow_temperatures.jl:1112 which passes `Δz_total = 0.3` m.\n\nFor ESM serialization N is fixed to the canonical upstream default of 15; the .esm encodes the full unfolded scalar system: 15 z_node states, 15 dz_layer states, 16 z_interface states (46 algebraic equations total). This matches the unfold-to-scalar convention adopted by the other urban-canopy temps migrations in this rig (e.g. exponential_grid.esm, snow_melt_no_layers.esm, total_phase_change_energy.esm). The upstream Julia tests (roof_wall_road_snow_temperatures_test.jl:912-972) exercise multiple N values (3, 5, 15); the inner-layer formulas are identical for any N (only dz_layer_15 and z_interface_16 depend explicitly on N), so the assertion values pinned here at N=15, dz_total=0.3 m are also exact for any larger N choice with the dz/N spacing rescaled — i.e. moving to a templated representation in the future will not invalidate the per-layer reference values, only extend them.\n\nUnicode `Δ` in `Δz_total` and `Δz_layer` is renamed `dz_total` and `dz_layer` for ASCII identifier names per the urban-canopy convention (matches snow_density.esm renaming `ρ` → `rho` and exponential_grid.esm renaming `Δz_layer` → `dz_layer`); the ESM identifier-pattern allows unicode but the rig-wide ASCII convention keeps editor and tooling support uniform.\n\nObservability classification: this component is functionally observed-only — every output state is given by a single algebraic equation in terms of the parameter dz_total and other state outputs (the `(t)` time index has no role since there is no derivative anywhere). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only files (exponential_grid.esm, snow_melt_no_layers.esm, total_phase_change_energy.esm, snow_density.esm).\n\nDefault parameter rationale: `dz_total = 0.3` m matches the upstream canonical caller (`RoofTemperaturePDE` at roof_wall_road_snow_temperatures.jl:1112) which is the only consumer of UniformGrid in the upstream model. With N=15 this yields a uniform 2 cm layer thickness — appropriate for capturing diurnal-scale heat conduction through opaque urban materials. Upstream Julia has no default in the `@parameters` block; the canonical value is supplied by the caller.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the only non-trivial roundoff path is the chain `(i - 0.5) * (dz_total / N)` → linear combinations — IEEE-754 ULP precision throughout. 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files in this rig (exponential_grid.esm, total_phase_change_energy.esm, etc.). The pinned `dz_layer_i` reference values include ULP-level deviations from the algebraic value 0.02 m (e.g. `dz_layer_3 = 0.020000000000000004`, `dz_layer_15 = 0.019999999999999962`) reflecting the order-of-evaluation in the upstream IEEE-754 expression; the rel=1e-9 tolerance accommodates these without requiring a relaxed tolerance per assertion. Tighter `abs: 1.0e-12` is asserted on z_interface_1 = 0 (exactly zero by construction) so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1e-09
+            },
+            "variables": {
+                "dz_total": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.3,
+                    "description": "Total thickness of the roof or wall column (Oleson et al. 2010 Table 1.3). Canonical value 0.3 m matches the upstream RoofTemperaturePDE caller."
+                },
+                "z_node_1": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 1 (Oleson Eq. 4.5): z_1 = (1 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_2": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 2 (Oleson Eq. 4.5): z_2 = (2 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_3": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 3 (Oleson Eq. 4.5): z_3 = (3 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_4": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 4 (Oleson Eq. 4.5): z_4 = (4 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_5": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 5 (Oleson Eq. 4.5): z_5 = (5 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_6": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 6 (Oleson Eq. 4.5): z_6 = (6 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_7": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 7 (Oleson Eq. 4.5): z_7 = (7 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_8": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 8 (Oleson Eq. 4.5): z_8 = (8 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_9": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 9 (Oleson Eq. 4.5): z_9 = (9 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_10": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 10 (Oleson Eq. 4.5): z_10 = (10 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_11": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 11 (Oleson Eq. 4.5): z_11 = (11 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_12": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 12 (Oleson Eq. 4.5): z_12 = (12 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_13": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 13 (Oleson Eq. 4.5): z_13 = (13 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_14": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 14 (Oleson Eq. 4.5): z_14 = (14 - 0.5) * (dz_total / 15)"
+                },
+                "z_node_15": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Node depth of layer 15 (Oleson Eq. 4.5): z_15 = (15 - 0.5) * (dz_total / 15)"
+                },
+                "dz_layer_1": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 1 (Oleson Eq. 4.6, top): 0.5 * (z_node_1 + z_node_2)"
+                },
+                "dz_layer_2": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 2 (Oleson Eq. 4.6, interior): 0.5 * (z_node_3 - z_node_1)"
+                },
+                "dz_layer_3": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 3 (Oleson Eq. 4.6, interior): 0.5 * (z_node_4 - z_node_2)"
+                },
+                "dz_layer_4": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 4 (Oleson Eq. 4.6, interior): 0.5 * (z_node_5 - z_node_3)"
+                },
+                "dz_layer_5": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 5 (Oleson Eq. 4.6, interior): 0.5 * (z_node_6 - z_node_4)"
+                },
+                "dz_layer_6": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 6 (Oleson Eq. 4.6, interior): 0.5 * (z_node_7 - z_node_5)"
+                },
+                "dz_layer_7": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 7 (Oleson Eq. 4.6, interior): 0.5 * (z_node_8 - z_node_6)"
+                },
+                "dz_layer_8": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 8 (Oleson Eq. 4.6, interior): 0.5 * (z_node_9 - z_node_7)"
+                },
+                "dz_layer_9": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 9 (Oleson Eq. 4.6, interior): 0.5 * (z_node_10 - z_node_8)"
+                },
+                "dz_layer_10": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 10 (Oleson Eq. 4.6, interior): 0.5 * (z_node_11 - z_node_9)"
+                },
+                "dz_layer_11": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 11 (Oleson Eq. 4.6, interior): 0.5 * (z_node_12 - z_node_10)"
+                },
+                "dz_layer_12": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 12 (Oleson Eq. 4.6, interior): 0.5 * (z_node_13 - z_node_11)"
+                },
+                "dz_layer_13": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 13 (Oleson Eq. 4.6, interior): 0.5 * (z_node_14 - z_node_12)"
+                },
+                "dz_layer_14": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 14 (Oleson Eq. 4.6, interior): 0.5 * (z_node_15 - z_node_13)"
+                },
+                "dz_layer_15": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Layer thickness 15 (Oleson Eq. 4.6, bottom): z_node_15 - z_node_14"
+                },
+                "z_interface_1": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,0} = 0 (Oleson Eq. 4.7, surface)"
+                },
+                "z_interface_2": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,1} = 0.5 * (z_node_1 + z_node_2) (Oleson Eq. 4.7)"
+                },
+                "z_interface_3": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,2} = 0.5 * (z_node_2 + z_node_3) (Oleson Eq. 4.7)"
+                },
+                "z_interface_4": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,3} = 0.5 * (z_node_3 + z_node_4) (Oleson Eq. 4.7)"
+                },
+                "z_interface_5": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,4} = 0.5 * (z_node_4 + z_node_5) (Oleson Eq. 4.7)"
+                },
+                "z_interface_6": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,5} = 0.5 * (z_node_5 + z_node_6) (Oleson Eq. 4.7)"
+                },
+                "z_interface_7": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,6} = 0.5 * (z_node_6 + z_node_7) (Oleson Eq. 4.7)"
+                },
+                "z_interface_8": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,7} = 0.5 * (z_node_7 + z_node_8) (Oleson Eq. 4.7)"
+                },
+                "z_interface_9": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,8} = 0.5 * (z_node_8 + z_node_9) (Oleson Eq. 4.7)"
+                },
+                "z_interface_10": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,9} = 0.5 * (z_node_9 + z_node_10) (Oleson Eq. 4.7)"
+                },
+                "z_interface_11": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,10} = 0.5 * (z_node_10 + z_node_11) (Oleson Eq. 4.7)"
+                },
+                "z_interface_12": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,11} = 0.5 * (z_node_11 + z_node_12) (Oleson Eq. 4.7)"
+                },
+                "z_interface_13": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,12} = 0.5 * (z_node_12 + z_node_13) (Oleson Eq. 4.7)"
+                },
+                "z_interface_14": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,13} = 0.5 * (z_node_13 + z_node_14) (Oleson Eq. 4.7)"
+                },
+                "z_interface_15": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,14} = 0.5 * (z_node_14 + z_node_15) (Oleson Eq. 4.7)"
+                },
+                "z_interface_16": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Interface depth z_{h,15} = z_node_15 + 0.5 * dz_layer_15 (Oleson Eq. 4.7, bottom)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "z_node_1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            1.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            2.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_4",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            3.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_5",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            4.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_6",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            5.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_7",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            6.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_8",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            7.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_9",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            8.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_10",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            9.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_11",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            10.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_12",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            11.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_13",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            12.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_14",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            13.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_node_15",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            14.5,
+                            {
+                                "op": "/",
+                                "args": ["dz_total", 15.0]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_1", "z_node_2"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_3", "z_node_1"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_4", "z_node_2"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_4",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_5", "z_node_3"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_5",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_6", "z_node_4"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_6",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_7", "z_node_5"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_7",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_8", "z_node_6"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_8",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_9", "z_node_7"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_9",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_10", "z_node_8"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_10",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_11", "z_node_9"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_11",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_12", "z_node_10"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_12",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_13", "z_node_11"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_13",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_14", "z_node_12"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_14",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "-",
+                                "args": ["z_node_15", "z_node_13"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_layer_15",
+                    "rhs": {
+                        "op": "-",
+                        "args": ["z_node_15", "z_node_14"]
+                    }
+                },
+                {
+                    "lhs": "z_interface_1",
+                    "rhs": 0.0
+                },
+                {
+                    "lhs": "z_interface_2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_1", "z_node_2"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_2", "z_node_3"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_4",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_3", "z_node_4"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_5",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_4", "z_node_5"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_6",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_5", "z_node_6"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_7",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_6", "z_node_7"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_8",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_7", "z_node_8"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_9",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_8", "z_node_9"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_10",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_9", "z_node_10"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_11",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_10", "z_node_11"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_12",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_11", "z_node_12"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_13",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_12", "z_node_13"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_14",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_13", "z_node_14"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_15",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": ["z_node_14", "z_node_15"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_interface_16",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "z_node_15",
+                            {
+                                "op": "*",
+                                "args": [0.5, "dz_layer_15"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "z_node_full_column",
+                    "description": "Verifies Oleson Eq. 4.5 across all 15 grid layers: z_i = (i - 0.5) * (dz_total / N) with dz_total = 0.3 m and N = 15. Reference values computed directly from the closed-form expression and matched to the upstream Julia component which integrates the same equation symbolically (`roof_wall_road_snow_temperatures_test.jl:935-939` Equation Verification). This anchors the layer-node depth profile that drives the roof/wall thermal grid in CLMU.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_node_1",
+                            "time": 0.0,
+                            "expected": 0.01
+                        },
+                        {
+                            "variable": "z_node_2",
+                            "time": 0.0,
+                            "expected": 0.03
+                        },
+                        {
+                            "variable": "z_node_3",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "z_node_4",
+                            "time": 0.0,
+                            "expected": 0.07
+                        },
+                        {
+                            "variable": "z_node_5",
+                            "time": 0.0,
+                            "expected": 0.09
+                        },
+                        {
+                            "variable": "z_node_6",
+                            "time": 0.0,
+                            "expected": 0.11
+                        },
+                        {
+                            "variable": "z_node_7",
+                            "time": 0.0,
+                            "expected": 0.13
+                        },
+                        {
+                            "variable": "z_node_8",
+                            "time": 0.0,
+                            "expected": 0.15
+                        },
+                        {
+                            "variable": "z_node_9",
+                            "time": 0.0,
+                            "expected": 0.17
+                        },
+                        {
+                            "variable": "z_node_10",
+                            "time": 0.0,
+                            "expected": 0.19
+                        },
+                        {
+                            "variable": "z_node_11",
+                            "time": 0.0,
+                            "expected": 0.21
+                        },
+                        {
+                            "variable": "z_node_12",
+                            "time": 0.0,
+                            "expected": 0.23
+                        },
+                        {
+                            "variable": "z_node_13",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "z_node_14",
+                            "time": 0.0,
+                            "expected": 0.27
+                        },
+                        {
+                            "variable": "z_node_15",
+                            "time": 0.0,
+                            "expected": 0.29
+                        }
+                    ]
+                },
+                {
+                    "id": "z_interface_surface_boundary",
+                    "description": "Verifies the surface boundary condition: z_interface_1 = z_{h,0} = 0 m exactly (Oleson Eq. 4.7, paper index i=0; matches upstream `roof_wall_road_snow_temperatures_test.jl:948`). Tightened absolute tolerance to catch any stuck-at-nonzero regression in the boundary equation.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_interface_1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "dz_layer_full_column",
+                    "description": "Verifies Oleson Eq. 4.6 layer-thickness recurrence across all 15 layers: top dz_layer_1 = 0.5 * (z_node_1 + z_node_2), interior dz_layer_i = 0.5 * (z_node_{i+1} - z_node_{i-1}), bottom dz_layer_15 = z_node_15 - z_node_14. For a uniform grid all layer thicknesses collapse to dz_total / N = 0.02 m algebraically (matches upstream `roof_wall_road_snow_temperatures_test.jl:942-945` Equation Verification). Pinned values include ULP-level deviations from 0.02 (e.g. dz_layer_3 = 0.020000000000000004) reflecting the order-of-evaluation in the upstream IEEE-754 expression; the rel=1e-9 tolerance accommodates these.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "dz_layer_1",
+                            "time": 0.0,
+                            "expected": 0.02
+                        },
+                        {
+                            "variable": "dz_layer_2",
+                            "time": 0.0,
+                            "expected": 0.02
+                        },
+                        {
+                            "variable": "dz_layer_3",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_4",
+                            "time": 0.0,
+                            "expected": 0.019999999999999997
+                        },
+                        {
+                            "variable": "dz_layer_5",
+                            "time": 0.0,
+                            "expected": 0.019999999999999997
+                        },
+                        {
+                            "variable": "dz_layer_6",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_7",
+                            "time": 0.0,
+                            "expected": 0.019999999999999997
+                        },
+                        {
+                            "variable": "dz_layer_8",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_9",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_10",
+                            "time": 0.0,
+                            "expected": 0.01999999999999999
+                        },
+                        {
+                            "variable": "dz_layer_11",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_12",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_13",
+                            "time": 0.0,
+                            "expected": 0.020000000000000004
+                        },
+                        {
+                            "variable": "dz_layer_14",
+                            "time": 0.0,
+                            "expected": 0.01999999999999999
+                        },
+                        {
+                            "variable": "dz_layer_15",
+                            "time": 0.0,
+                            "expected": 0.019999999999999962
+                        }
+                    ]
+                },
+                {
+                    "id": "z_interface_full_column",
+                    "description": "Verifies Oleson Eq. 4.7 interface-depth recurrence across all 16 interfaces: surface z_interface_1 = 0, interior z_interface_{i+1} = 0.5 * (z_node_i + z_node_{i+1}) for i = 1..14, and bottom z_interface_16 = z_node_15 + 0.5 * dz_layer_15. For a uniform grid the interior interfaces fall at integer multiples of dz_total / N = 0.02 m and the bottom interface equals dz_total = 0.3 m (matches upstream `roof_wall_road_snow_temperatures_test.jl:951` bottom-interface check at dz_total). Anchors the interface positions used for inter-layer thermal-conductivity coupling.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_interface_1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "z_interface_2",
+                            "time": 0.0,
+                            "expected": 0.02
+                        },
+                        {
+                            "variable": "z_interface_3",
+                            "time": 0.0,
+                            "expected": 0.04
+                        },
+                        {
+                            "variable": "z_interface_4",
+                            "time": 0.0,
+                            "expected": 0.060000000000000005
+                        },
+                        {
+                            "variable": "z_interface_5",
+                            "time": 0.0,
+                            "expected": 0.08
+                        },
+                        {
+                            "variable": "z_interface_6",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "z_interface_7",
+                            "time": 0.0,
+                            "expected": 0.12
+                        },
+                        {
+                            "variable": "z_interface_8",
+                            "time": 0.0,
+                            "expected": 0.14
+                        },
+                        {
+                            "variable": "z_interface_9",
+                            "time": 0.0,
+                            "expected": 0.16
+                        },
+                        {
+                            "variable": "z_interface_10",
+                            "time": 0.0,
+                            "expected": 0.18
+                        },
+                        {
+                            "variable": "z_interface_11",
+                            "time": 0.0,
+                            "expected": 0.2
+                        },
+                        {
+                            "variable": "z_interface_12",
+                            "time": 0.0,
+                            "expected": 0.22
+                        },
+                        {
+                            "variable": "z_interface_13",
+                            "time": 0.0,
+                            "expected": 0.24
+                        },
+                        {
+                            "variable": "z_interface_14",
+                            "time": 0.0,
+                            "expected": 0.26
+                        },
+                        {
+                            "variable": "z_interface_15",
+                            "time": 0.0,
+                            "expected": 0.28
+                        },
+                        {
+                            "variable": "z_interface_16",
+                            "time": 0.0,
+                            "expected": 0.29999999999999993
+                        }
+                    ]
+                },
+                {
+                    "id": "monotonic_increasing_depths",
+                    "description": "Spot-checks the monotonic-increasing-with-depth invariant of the uniform grid: z_node_1 < z_node_7 < z_node_15 and z_interface_1 < z_interface_8 < z_interface_16. The full-column tests above already pin every layer; this test documents the monotonicity contract for downstream consumers and matches the structural-invariant style of the sibling ExponentialGrid Increasing Depth test (`roof_wall_road_snow_temperatures_test.jl:1016`).",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_node_1",
+                            "time": 0.0,
+                            "expected": 0.01
+                        },
+                        {
+                            "variable": "z_node_7",
+                            "time": 0.0,
+                            "expected": 0.13
+                        },
+                        {
+                            "variable": "z_node_15",
+                            "time": 0.0,
+                            "expected": 0.29
+                        },
+                        {
+                            "variable": "z_interface_1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "z_interface_8",
+                            "time": 0.0,
+                            "expected": 0.14
+                        },
+                        {
+                            "variable": "z_interface_16",
+                            "time": 0.0,
+                            "expected": 0.29999999999999993
+                        }
+                    ]
+                },
+                {
+                    "id": "node_at_midpoint",
+                    "description": "Verifies the geometric midpoint invariant: each z_node_i lies exactly midway between its surrounding interfaces, z_node_i = 0.5 * (z_interface_i + z_interface_{i+1}). This is the upstream `UniformGrid - Node at Midpoint` test (`roof_wall_road_snow_temperatures_test.jl:954-972`) reformulated as direct assertions on z_node values for layers 1, 8, and 15 (the same values asserted in z_node_full_column above — repeated here to document the invariant). For a uniform grid this is satisfied trivially by construction since both z_node and z_interface fall at multiples of dz_total/N.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_node_1",
+                            "time": 0.0,
+                            "expected": 0.01
+                        },
+                        {
+                            "variable": "z_node_8",
+                            "time": 0.0,
+                            "expected": 0.15
+                        },
+                        {
+                            "variable": "z_node_15",
+                            "time": 0.0,
+                            "expected": 0.29
+                        }
+                    ]
+                },
+                {
+                    "id": "dz_total_doubled_scales_linearly",
+                    "description": "Verifies the linear scaling of the grid with the dz_total parameter: doubling dz_total from 0.3 m to 0.6 m doubles every z_node value, since z_i = (i - 0.5) * (dz_total / N) is linear in dz_total. Spot-checks layers 1, 8, and 15 (top, middle, and bottom). Guards against regressions that pin the column thickness or break the linear coupling — analog of the `f_s_doubled_scales_linearly` test in exponential_grid.esm.",
+                    "parameter_overrides": {
+                        "dz_total": 0.6
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "z_node_1",
+                            "time": 0.0,
+                            "expected": 0.02
+                        },
+                        {
+                            "variable": "z_node_8",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "z_node_15",
+                            "time": 0.0,
+                            "expected": 0.58
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
