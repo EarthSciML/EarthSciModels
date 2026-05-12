@@ -12,10 +12,11 @@ PNG per plot under
 the artifacts on the rendered Hugo page (mdl-f42).
 
 Expression evaluation is delegated to the `earthsci_toolkit` Python binding
-(ESS) — this file imports `load` and `evaluate` from there and walks each
-sweep grid point through the ESS evaluator. That keeps op semantics
-single-sourced with the rest of the toolchain (Rust ndarray runtime,
-Julia SymbolicUtils path, conformance fixtures).
+(ESS) — this file imports `load` from the package root and the scalar AST
+evaluator `fold_constant_expr` from `earthsci_toolkit.numpy_interpreter`,
+walking each sweep grid point through the ESS evaluator. That keeps op
+semantics single-sourced with the rest of the toolchain (Rust ndarray
+runtime, Julia SymbolicUtils path, conformance fixtures).
 
 Renderable components:
 - Algebraic models (no `D` op in equations) drive the cartesian-sweep path:
@@ -49,7 +50,7 @@ from typing import Any
 
 # Big reaction systems (e.g. geoschem_fullchem with 819 reactions × 272 species)
 # build per-species rhs trees hundreds of `+` ops deep, which the recursive
-# `evaluate` walks once per integration step. Default 1000 is too tight.
+# `fold_constant_expr` walks once per integration step. Default 1000 is too tight.
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 10000))
 
 # Headless backend so this works in CI without a display.
@@ -64,7 +65,6 @@ from earthsci_toolkit import (  # noqa: E402
     EsmFile,
     ExprNode,
     Model,
-    evaluate,
     free_variables,
     from_sympy,
     load,
@@ -82,6 +82,10 @@ from earthsci_toolkit.esm_types import (  # noqa: E402
     SweepDimension,
 )
 from earthsci_toolkit.flatten import FlattenedSystem, flatten  # noqa: E402
+from earthsci_toolkit.numpy_interpreter import (  # noqa: E402
+    NumpyInterpreterError,
+    fold_constant_expr,
+)
 from earthsci_toolkit.simulation import simulate  # noqa: E402
 
 
@@ -90,8 +94,9 @@ class UnsupportedExpression(Exception):
 
     Wraps both renderer-side problems (missing variable bindings, unsupported
     plot types, sweep shapes) and ESS-side errors propagated from
-    `earthsci_toolkit.evaluate` (unbound symbols, unsupported ops including
-    `call` and time-derivatives reached at evaluation time).
+    `earthsci_toolkit.numpy_interpreter.fold_constant_expr` (unbound symbols,
+    unsupported ops including `call` and time-derivatives reached at
+    evaluation time).
     """
 
 
@@ -288,7 +293,7 @@ def _evaluate_grid(
 
     The resolution plan is built once symbolically (handling forward
     definitions and constraint equations alike) and then evaluated per
-    grid point through ESS's scalar `evaluate()`.
+    grid point through ESS's scalar `fold_constant_expr()`.
     """
     grids = np.meshgrid(*sweep_values, indexing="ij")
     shape = grids[0].shape
@@ -308,8 +313,8 @@ def _evaluate_grid(
             env[name] = float(fg[i])
         for name, expr in plan:
             try:
-                env[name] = float(evaluate(expr, env))
-            except (ValueError, TypeError) as exc:
+                env[name] = float(fold_constant_expr(expr, env))
+            except (ValueError, TypeError, NumpyInterpreterError) as exc:
                 raise UnsupportedExpression(
                     f"could not evaluate {name!r} at grid point {i}: {exc}"
                 ) from exc
@@ -434,9 +439,10 @@ def _solve_time_series(
     internally. simulate's `vars` only surface state variables; observed
     variables (e.g. fastjx's `j_NO2 = Σ F_i·σ_i`) are recovered here by
     walking the model's resolution plan against each saved time sample,
-    using `earthsci_toolkit.evaluate` — the canonical Python AST evaluator
-    — at every point. That's a post-integration consumer of the integrated
-    state, not a parallel ODE pipeline.
+    using `earthsci_toolkit.numpy_interpreter.fold_constant_expr` — the
+    canonical Python scalar AST evaluator — at every point. That's a
+    post-integration consumer of the integrated state, not a parallel ODE
+    pipeline.
 
     `flat` is an optional pre-built :class:`FlattenedSystem`. Passing it
     lets sweep loops reuse simulate's `_simulate_compile_cache` (attached
@@ -505,8 +511,8 @@ def _solve_time_series(
                     env[name] = float(np.asarray(v))
             for name, expr in plan:
                 try:
-                    env[name] = float(evaluate(expr, env))
-                except (ValueError, TypeError, KeyError, ZeroDivisionError):
+                    env[name] = float(fold_constant_expr(expr, env))
+                except (ValueError, TypeError, KeyError, ZeroDivisionError, NumpyInterpreterError):
                     env[name] = float("nan")
                 plan_arrs[name][k] = env[name]
         for name, arr in plan_arrs.items():
