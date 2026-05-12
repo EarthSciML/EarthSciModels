@@ -231,6 +231,54 @@ class EvaluateGridTest(unittest.TestCase):
         np.testing.assert_allclose(env["K_w"], np.full(2, 298.0 * 1e-10))
         np.testing.assert_allclose(env["OH_minus"], np.array([2.98e-4, 2.98e-5]))
 
+    def test_zero_division_substitutes_nan(self):
+        # Sweep includes the divisor=0 boundary point. ESS's ifelse() does
+        # not short-circuit, so even when the .esm guards the division
+        # behind `ifelse(x > 0, a/x, 0)`, the evaluator hits 0/0 and
+        # raises Python's native ZeroDivisionError. The renderer must
+        # substitute NaN at that grid point rather than abandoning the
+        # whole example — matches the snow_melt_no_layers.esm failure
+        # mode (W_sno_np1 / W_sno_n at the W_sno_n=0 endpoint).
+        m = _model(
+            {"x": {"type": "parameter", "default": 1.0}, "y": {"type": "state"}},
+            equations=[{"lhs": "y", "rhs": ExprNode(op="/", args=[1.0, "x"])}],
+        )
+        env = mod._evaluate_grid(
+            m,
+            base_bindings={"x": 1.0},
+            sweep_names=["x"],
+            sweep_values=[np.array([0.0, 1.0, 2.0])],
+        )
+        self.assertTrue(np.isnan(env["y"][0]))
+        np.testing.assert_array_equal(env["y"][1:], np.array([1.0, 0.5]))
+
+    def test_zero_division_propagates_nan_to_downstream(self):
+        # If a NaN-substituted grid point feeds a later expression in the
+        # plan, the downstream value also becomes NaN via standard IEEE-754
+        # NaN propagation — no second exception. Verifies the catch leaves
+        # the rest of the plan in a numerically-safe state.
+        m = _model(
+            {
+                "x": {"type": "parameter", "default": 1.0},
+                "y": {"type": "state"},
+                "z": {"type": "state"},
+            },
+            equations=[
+                {"lhs": "y", "rhs": ExprNode(op="/", args=[1.0, "x"])},
+                {"lhs": "z", "rhs": ExprNode(op="*", args=["y", 2.0])},
+            ],
+        )
+        env = mod._evaluate_grid(
+            m,
+            base_bindings={"x": 1.0},
+            sweep_names=["x"],
+            sweep_values=[np.array([0.0, 1.0])],
+        )
+        self.assertTrue(np.isnan(env["y"][0]))
+        self.assertTrue(np.isnan(env["z"][0]))
+        np.testing.assert_array_equal(env["y"][1:], np.array([1.0]))
+        np.testing.assert_array_equal(env["z"][1:], np.array([2.0]))
+
 
 class ExtractOdeEquationsTest(unittest.TestCase):
     def test_separates_ode_from_algebraic(self):

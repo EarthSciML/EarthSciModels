@@ -318,6 +318,18 @@ def _evaluate_grid(
                 raise UnsupportedExpression(
                     f"could not evaluate {name!r} at grid point {i}: {exc}"
                 ) from exc
+            except ZeroDivisionError:
+                # Sweep crossed a denominator-is-zero point. Substitute NaN
+                # so subsequent expressions in the plan NaN-propagate (no
+                # further raise) and matplotlib draws a gap in the rendered
+                # plot at this grid point — better than skipping the whole
+                # example for one degenerate point. ESS's ifelse() doesn't
+                # short-circuit (both branches are eagerly evaluated), so
+                # a `ifelse(W > 0, A/W, 0)` guard in the .esm still trips
+                # the division at W=0; this catch is the renderer-side
+                # defense (numpy_interpreter raises Python's native
+                # ZeroDivisionError because env is a dict[str, float]).
+                env[name] = math.nan
         for name in target_names:
             point_results[name][i] = env[name]
 

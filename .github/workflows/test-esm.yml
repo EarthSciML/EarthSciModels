@@ -15,80 +15,11 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  julia-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - id: check_project
-        run: |
-          if [ -f Project.toml ]; then
-            echo "has_project=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_project=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No Project.toml yet — skipping Julia tests until the shim lands (mdl-8y7)."
-          fi
-      - uses: julia-actions/setup-julia@v2
-        if: steps.check_project.outputs.has_project == 'true'
-        with:
-          version: '1.12'
-      - uses: julia-actions/cache@v2
-        if: steps.check_project.outputs.has_project == 'true'
-      # EarthSciSerialization is not yet in the General registry. The setup
-      # script falls back to Pkg.add(url=..., rev="main") when no local
-      # checkout is present (which is the case in CI). It is the same script
-      # polecats run locally — see docs/migration-guide.md (mdl-cac).
-      - name: Resolve unregistered deps (EarthSciSerialization)
-        if: steps.check_project.outputs.has_project == 'true'
-        run: scripts/setup_polecat_env.sh
-      # Smoke test: fail fast here (with a clear message) if the URL-fallback
-      # resolution is broken, so we don't blame downstream build/test steps.
-      - name: Smoke test EarthSciSerialization resolution
-        if: steps.check_project.outputs.has_project == 'true'
-        run: julia --project=. -e 'using EarthSciSerialization; println(pathof(EarthSciSerialization))'
-      - uses: julia-actions/julia-buildpkg@v1
-        if: steps.check_project.outputs.has_project == 'true'
-      # Pkg.test runs test/runtests.jl, which exercises:
-      #   - the Julia shim's unit tests (mdl-8y7), and
-      #   - run_esm_tests over fixtures — the inline-test runner mechanism
-      #     itself, including discover/exclude semantics and junit emission
-      #     (mdl-08t, mdl-lvu).
-      #
-      # ESM_TESTS_SKIP_LIVE_REPO defers the components/ walk to the
-      # python-inline-tests job below (the gate of record per mdl-lvu).
-      # The in-process MTK walk scales linearly with component count
-      # (~85 s/file under the active migration burst) and was blowing the
-      # 30-minute job budget once the repo crossed ~25 .esm files; the
-      # python gate covers the same files via per-file subprocess in ~9 min
-      # (esm-g97l). Local devs running `pkg test` still get the full walk.
-      #
-      # ESM_TESTS_JUNIT_XML stays set so any future Julia walk emits a
-      # junit artifact in the same pass — a second `julia --project=.`
-      # walker isn't viable because ModelingToolkit is a test-only dep
-      # (see mdl-89o).
-      #
-      # ESM_TESTS_EXCLUDE still drops the full-chemistry inline test from
-      # any Julia walk that does happen. The 819-reaction Catalyst → MTK
-      # build for geoschem_fullchem peaks ~13 GB on a single MTK process
-      # and OOM-kills the 16 GB GHA runner; it's covered by the
-      # python-inline-tests gate below (per-file subprocess, peak ~196 MB).
-      # See bead mdl-lvu.
-      - uses: julia-actions/julia-runtest@v1
-        if: steps.check_project.outputs.has_project == 'true'
-        env:
-          ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/esm-tests.xml
-          ESM_TESTS_EXCLUDE: components/gaschem/geoschem_fullchem.esm
-          ESM_TESTS_SKIP_LIVE_REPO: '1'
-      - name: Upload junit XML
-        if: always() && steps.check_project.outputs.has_project == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: esm-inline-tests-junit
-          path: esm-tests.xml
-          if-no-files-found: ignore
-
   # Python inline-test gate (mdl-w1j, promoted to required in mdl-lvu,
-  # extended to all live-repo coverage in esm-g97l).
+  # extended to all live-repo coverage in esm-g97l, made the sole CI gate
+  # in esm-m0r2 — the Julia walker was removed because in-process MTK
+  # builds do not scale to the live migration burst and were blowing job
+  # timeouts even with ESM_TESTS_SKIP_LIVE_REPO).
   #
   # Walks components/**/*.esm and lib/**/*.esm (mdl-14s) and runs every inline
   # test through the canonical ESS Python runner
@@ -100,12 +31,11 @@ jobs:
   # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
   # job timeout.
   #
-  # This is the **gate of record** for live-repo inline tests. The Julia job
-  # above (a) excludes geoschem_fullchem via ESM_TESTS_EXCLUDE because the
-  # 819-reaction Catalyst → MTK build OOM-kills the 16 GB GHA runner, and
-  # (b) skips the full components/ walk entirely via ESM_TESTS_SKIP_LIVE_REPO
-  # because the in-process MTK build does not scale to the live migration
-  # burst (esm-g97l). Local devs still get full Julia coverage via `pkg test`.
+  # This is the **gate of record** for live-repo inline tests. The 819-reaction
+  # geoschem_fullchem.esm Catalyst → MTK build OOM-kills the 16 GB GHA runner
+  # in-process, but this gate exercises it safely via per-file subprocess
+  # (peak ~196 MB). Local devs still get full Julia coverage via `pkg test`
+  # — see docs/migration-guide.md (mdl-cac).
   python-inline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
