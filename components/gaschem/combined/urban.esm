@@ -1,0 +1,386 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "UrbanConditions",
+        "description": "Parameter-preset condition system representing typical urban-air-quality lower-troposphere conditions with elevated NOx, CO, and reduced HOx, following Seinfeld & Pandis (2006) Chapter 6. Migrated from GasChem.jl@8c12c048 src/combined_system.jl:219 (`UrbanConditions` @component). The component declares 11 species number-density parameters (M, O2, H2O, O3, NO, NO2, CO, CH4, OH, HO2, CH3O2) with urban-regime defaults in SI units (m^-3) and 11 corresponding `_out` output state variables, one per parameter, defined by identity equations `*_out ~ *`. The component is a sibling preset to `TypicalConditions` (background-air defaults) and `RemoteConditions` (clean-remote defaults); together they parametrize the three canonical regimes the upstream `TroposphericChemistrySystem` is exercised against. Compared to TypicalConditions: NO is 100x higher (10 vs 0.1 ppb), NO2 is 30x higher (30 vs 1 ppb), CO is 20x higher (2000 vs 100 ppb), and OH/HO2 are reduced 2x (titrated by the elevated NOx and CO oxidation chain). All concentrations are positive number densities at standard temperature and pressure; the `_out` indirection lets downstream consumers wire the preset values into the canonical tropospheric-chemistry input interface without renaming.",
+        "tags": [
+            "gaschem",
+            "tropospheric_chemistry",
+            "conditions",
+            "urban",
+            "parameters-preset",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-8100)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., and S. N. Pandis (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. John Wiley & Sons. Chapter 6 (Chemistry of the Troposphere) — provides the species-concentration regime defaults (Table 6.2-style background / urban / remote NOx and HOx levels) that this preset encodes."
+            }
+        ]
+    },
+    "models": {
+        "UrbanConditions": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/combined_system.jl:219\nUpstream `UrbanConditions` is an MTK `@component` with 11 `@parameters` (M, O2, H2O, O3, NO, NO2, CO, CH4, OH, HO2, CH3O2) each carrying a numeric default and a u\"m^-3\" unit annotation, 11 time-indexed `@variables` (M_out, O2_out, ..., CH3O2_out) of the same dimension, and 11 trivial algebraic identity equations `*_out ~ *`. No `@constants`, no derivatives, no coupling — the component is a pure parameter-preset shim whose only role is to expose a named set of regime-specific default values to a downstream consumer (the `TroposphericChemistrySystem` is the canonical consumer per the upstream `combined_system.md` docs page).\n\nSibling components (TypicalConditions @ src/combined_system.jl:177, RemoteConditions @ src/combined_system.jl:261) follow exactly the same shape — same 11 parameter names, same 11 output variable names, same 11 identity equations — but with regime-specific defaults: background / urban / remote. The three together parametrize the NOx-VOC regime sweep in Chapter 6: urban (high NOx, VOC-limited, low OPE) → typical / background (moderate, mixed) → remote (low NOx, NOx-limited, high OPE). The upstream `get_conditions_dict(sys)` helper extracts the default parameter values as a `Dict{Symbol,Float64}` and is what callers (e.g. the `TypicalConditions vs UrbanConditions` regime-comparison test at test/test_combined_system.jl:73-83) actually consume. Within an ESM context, `get_conditions_dict` is not a separate spec element — the preset values are accessible directly via the variable defaults in this file.\n\nUrban-regime defaults (SI: m^-3) and the upstream rationale (Seinfeld & Pandis 2006 Chapter 6):\n- M = 2.5e25 — total air number density at standard temperature and pressure (STP, 273.15 K, 101325 Pa); a fundamental atmospheric constant, identical across all three regimes.\n- O2 = 5.25e24 — molecular oxygen, exactly 21% of M (0.21 mole fraction); identical across all three regimes because O2 is a long-lived atmospheric constituent essentially decoupled from short-term photochemistry.\n- H2O = 4.0e23 — water vapor at ~50% relative humidity at 298 K (~1.6% mole fraction); identical here to TypicalConditions because water vapor is set by meteorology, not by air-quality regime.\n- O3 = 2.0e18 — ozone at ~80 ppb (2x TypicalConditions's 40 ppb); represents the elevated photochemically-produced O3 typical of an urban-VOC-limited regime under sunny conditions (e.g. Los Angeles smog episodes, Mexico City).\n- NO = 2.5e17 — nitric oxide at ~10 ppb (100x TypicalConditions's 0.1 ppb); reflects direct combustion emissions from urban traffic and point sources — the hallmark urban regime indicator.\n- NO2 = 7.5e17 — nitrogen dioxide at ~30 ppb (30x TypicalConditions's 1 ppb); the dominant NOx species after rapid NO → NO2 conversion by O3 and peroxy radicals (typical NO2/NO ratio ~3 in midday urban air).\n- CO = 5.0e19 — carbon monoxide at ~2 ppm (20x TypicalConditions's 100 ppb); incomplete-combustion product of mobile sources, the dominant OH sink in urban air and the major VOC chain initiator for the model.\n- CH4 = 4.5e19 — methane at ~1800 ppb; identical across all three regimes because CH4's atmospheric lifetime (~10 years) makes it well-mixed globally.\n- OH = 5.0e11 — hydroxyl radical at ~half the TypicalConditions value (1.0e12); reduced because the elevated CO + NOx in urban air increases the OH sink rate (k_OH_CO * CO + k_OH_NO2 * NO2 dominate the OH budget here, suppressing the steady-state OH concentration).\n- HO2 = 5.0e13 — hydroperoxy radical at ~half the TypicalConditions value (1.0e14); reduced for the same reason as OH (the high-NO scenario consumes HO2 via HO2 + NO → OH + NO2 faster than it can be regenerated from CO + OH or RO2 + NO chain steps).\n- CH3O2 = 5.0e13 — methylperoxy radical at ~half the TypicalConditions value (1.0e14); reduced for the same NOx-titration reason as HO2 (CH3O2 + NO → CH3O + NO2 is the dominant CH3O2 sink in urban air).\n\nOutput equations: all 11 are exact identity assignments `*_out ~ *`. The 11 `_out` state variables are the public interface that downstream consumers wire to (e.g. `compiled.O3 => cond[:O3]` in the upstream test setup at test/test_combined_system.jl:108-113). The indirection through `_out` lets the parameter names and the output names stay aligned with the canonical `TroposphericChemistrySystem` interface (which exposes input variables named M, O2, ..., CH3O2 — same names as the parameters here) without naming conflicts in the upstream MTK macro expansion.\n\nObservability classification: this component is functionally observed-only — each of the 11 output state variables is given by a single algebraic identity equation in one parameter (the `(t)` time index on the upstream `@variables` has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (heat_flux.esm, heating_cooling_flux.esm, surface_energy_flux.esm).\n\nTolerance rationale (model-level rel=1.0e-12): pure-identity algebraic system — 11 single-RHS equations that each copy a parameter into its corresponding `_out` state. No arithmetic operations, no roundoff accumulation; output values are bit-for-bit identical to the parameter defaults at IEEE-754 precision (~1e-16). rel=1.0e-12 leaves comfortable headroom above ULP roundoff while remaining tighter than the model-level defaults in sibling files (heat_flux.esm uses 1e-9 because Eq. 4.11 involves three arithmetic ops; the conditions presets do not). No special `abs:` tolerance is needed since all output defaults are strictly positive."
+            },
+            "tolerance": {
+                "rel": 1.0e-12
+            },
+            "variables": {
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e25,
+                    "description": "Total air number density at STP (Seinfeld & Pandis 2006 Ch. 6) — a fundamental atmospheric constant; identical across TypicalConditions, UrbanConditions, RemoteConditions"
+                },
+                "O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.25e24,
+                    "description": "Molecular oxygen at 21% of M (0.21 mole fraction); long-lived background constituent, identical across all three regimes"
+                },
+                "H2O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4.0e23,
+                    "description": "Water vapor at ~50% relative humidity at 298 K (~1.6% mole fraction); set by meteorology, identical here to TypicalConditions"
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.0e18,
+                    "description": "Ozone at ~80 ppb (2x TypicalConditions); elevated photochemically-produced O3 typical of urban VOC-limited regime under sunny conditions"
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e17,
+                    "description": "Nitric oxide at ~10 ppb (100x TypicalConditions's 0.1 ppb); direct combustion emissions from urban traffic and point sources — hallmark urban-regime indicator"
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 7.5e17,
+                    "description": "Nitrogen dioxide at ~30 ppb (30x TypicalConditions's 1 ppb); dominant NOx species after rapid NO → NO2 conversion by O3 and peroxy radicals"
+                },
+                "CO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e19,
+                    "description": "Carbon monoxide at ~2 ppm (20x TypicalConditions's 100 ppb); incomplete-combustion product of mobile sources, dominant OH sink in urban air"
+                },
+                "CH4": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4.5e19,
+                    "description": "Methane at ~1800 ppb; well-mixed globally due to ~10-year lifetime, identical across all three regimes"
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e11,
+                    "description": "Hydroxyl radical at ~half the TypicalConditions value (1.0e12); reduced because elevated CO + NOx in urban air increases the OH sink rate, suppressing the steady-state OH concentration"
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e13,
+                    "description": "Hydroperoxy radical at ~half the TypicalConditions value (1.0e14); reduced because high-NO scenario consumes HO2 via HO2 + NO → OH + NO2 faster than CO + OH chain regeneration"
+                },
+                "CH3O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e13,
+                    "description": "Methylperoxy radical at ~half the TypicalConditions value (1.0e14); reduced by NOx titration (CH3O2 + NO → CH3O + NO2 is the dominant CH3O2 sink in urban air)"
+                },
+                "M_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total air number density output state — identity passthrough of the M parameter; consumed downstream by TroposphericChemistrySystem input wiring"
+                },
+                "O2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Molecular oxygen output state — identity passthrough of the O2 parameter"
+                },
+                "H2O_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Water vapor output state — identity passthrough of the H2O parameter"
+                },
+                "O3_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Ozone output state — identity passthrough of the O3 parameter"
+                },
+                "NO_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Nitric oxide output state — identity passthrough of the NO parameter"
+                },
+                "NO2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Nitrogen dioxide output state — identity passthrough of the NO2 parameter"
+                },
+                "CO_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Carbon monoxide output state — identity passthrough of the CO parameter"
+                },
+                "CH4_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Methane output state — identity passthrough of the CH4 parameter"
+                },
+                "OH_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Hydroxyl radical output state — identity passthrough of the OH parameter"
+                },
+                "HO2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Hydroperoxy radical output state — identity passthrough of the HO2 parameter"
+                },
+                "CH3O2_out": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Methylperoxy radical output state — identity passthrough of the CH3O2 parameter"
+                }
+            },
+            "equations": [
+                { "lhs": "M_out",     "rhs": "M" },
+                { "lhs": "O2_out",    "rhs": "O2" },
+                { "lhs": "H2O_out",   "rhs": "H2O" },
+                { "lhs": "O3_out",    "rhs": "O3" },
+                { "lhs": "NO_out",    "rhs": "NO" },
+                { "lhs": "NO2_out",   "rhs": "NO2" },
+                { "lhs": "CO_out",    "rhs": "CO" },
+                { "lhs": "CH4_out",   "rhs": "CH4" },
+                { "lhs": "OH_out",    "rhs": "OH" },
+                { "lhs": "HO2_out",   "rhs": "HO2" },
+                { "lhs": "CH3O2_out", "rhs": "CH3O2" }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_default_values",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: TypicalConditions` testitem (GasChem.jl test/test_combined_system.jl:51-71) adapted for the urban regime: confirms each of the 11 parameter defaults flows through to its corresponding `_out` state at the documented urban-regime value. Asserts the upstream-documented urban values: M=2.5e25, O2=5.25e24, H2O=4.0e23, O3=2.0e18, NO=2.5e17, NO2=7.5e17, CO=5.0e19, CH4=4.5e19, OH=5.0e11, HO2=5.0e13, CH3O2=5.0e13 m^-3.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out",     "time": 0.0, "expected": 2.5e25 },
+                        { "variable": "O2_out",    "time": 0.0, "expected": 5.25e24 },
+                        { "variable": "H2O_out",   "time": 0.0, "expected": 4.0e23 },
+                        { "variable": "O3_out",    "time": 0.0, "expected": 2.0e18 },
+                        { "variable": "NO_out",    "time": 0.0, "expected": 2.5e17 },
+                        { "variable": "NO2_out",   "time": 0.0, "expected": 7.5e17 },
+                        { "variable": "CO_out",    "time": 0.0, "expected": 5.0e19 },
+                        { "variable": "CH4_out",   "time": 0.0, "expected": 4.5e19 },
+                        { "variable": "OH_out",    "time": 0.0, "expected": 5.0e11 },
+                        { "variable": "HO2_out",   "time": 0.0, "expected": 5.0e13 },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 5.0e13 }
+                    ]
+                },
+                {
+                    "id": "upstream_o2_is_21_percent_of_m",
+                    "description": "Reproduces the upstream `TypicalConditions` physical-consistency assertion (GasChem.jl test/test_combined_system.jl:70, also reused at test/test_combined_system.jl:437 in the `Atmospheric Composition Consistency` test for UrbanConditions): O2 should be ~21% of M (the standard atmospheric mole fraction of O2). At the urban defaults M = 2.5e25 and O2 = 5.25e24: O2/M = 0.21 exactly. Asserted by checking O2_out at the value 0.21 * M = 5.25e24 — equivalent to the upstream `cond[:O2] / cond[:M] ≈ 0.21 rtol = 0.01`, here re-cast as an absolute-value check since the parameters are deterministic.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "O2_out", "time": 0.0, "expected": 5.25e24, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_no_elevated",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:NO] > typical[:NO]` (GasChem.jl test/test_combined_system.jl:77). The TypicalConditions default is NO = 2.5e15 m^-3 (~0.1 ppb); the UrbanConditions default is NO = 2.5e17 m^-3 (~10 ppb). The urban value is 100x larger, hallmark of urban combustion emissions. Asserts the urban absolute value of NO_out = 2.5e17 directly (which by construction is strictly greater than 2.5e15).",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NO_out", "time": 0.0, "expected": 2.5e17 }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_no2_elevated",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:NO2] > typical[:NO2]` (GasChem.jl test/test_combined_system.jl:78). TypicalConditions NO2 = 2.5e16 (~1 ppb); UrbanConditions NO2 = 7.5e17 (~30 ppb), 30x larger.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "NO2_out", "time": 0.0, "expected": 7.5e17 }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_co_elevated",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:CO] > typical[:CO]` (GasChem.jl test/test_combined_system.jl:79). TypicalConditions CO = 2.5e18 (~100 ppb); UrbanConditions CO = 5.0e19 (~2 ppm), 20x larger.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "CO_out", "time": 0.0, "expected": 5.0e19 }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_oh_reduced",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:OH] <= typical[:OH]` (GasChem.jl test/test_combined_system.jl:80). TypicalConditions OH = 1.0e12; UrbanConditions OH = 5.0e11, exactly half — reflecting NOx-titration suppression of steady-state OH in urban regimes.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "OH_out", "time": 0.0, "expected": 5.0e11 }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_m_equal",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:M] ≈ typical[:M]` (GasChem.jl test/test_combined_system.jl:81). Both regimes use the standard atmospheric number density M = 2.5e25 m^-3 (STP). Urban air-quality scenarios do not change the total air density — only the trace-gas mixture.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out", "time": 0.0, "expected": 2.5e25 }
+                    ]
+                },
+                {
+                    "id": "urban_vs_typical_ch4_equal",
+                    "description": "Reproduces the upstream `UrbanConditions vs TypicalConditions` assertion `urban[:CH4] ≈ typical[:CH4]` (GasChem.jl test/test_combined_system.jl:82). Both regimes use CH4 = 4.5e19 m^-3 (~1800 ppb) — methane is well-mixed globally on its ~10-year lifetime and does not vary across urban / typical / remote air-quality regimes.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "CH4_out", "time": 0.0, "expected": 4.5e19 }
+                    ]
+                },
+                {
+                    "id": "physical_bounds_all_positive",
+                    "description": "Reproduces the upstream `Physical Bounds` testitem (GasChem.jl test/test_combined_system.jl:401-408) for UrbanConditions: every species number density must be strictly positive. By construction every default is in the e11-e25 range; this test re-asserts all 11 outputs at their non-zero defaults to anchor against an accidental zero-default regression. Numerical agreement at the absolute value confirms `> 0`.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out",     "time": 0.0, "expected": 2.5e25 },
+                        { "variable": "O2_out",    "time": 0.0, "expected": 5.25e24 },
+                        { "variable": "H2O_out",   "time": 0.0, "expected": 4.0e23 },
+                        { "variable": "O3_out",    "time": 0.0, "expected": 2.0e18 },
+                        { "variable": "NO_out",    "time": 0.0, "expected": 2.5e17 },
+                        { "variable": "NO2_out",   "time": 0.0, "expected": 7.5e17 },
+                        { "variable": "CO_out",    "time": 0.0, "expected": 5.0e19 },
+                        { "variable": "CH4_out",   "time": 0.0, "expected": 4.5e19 },
+                        { "variable": "OH_out",    "time": 0.0, "expected": 5.0e11 },
+                        { "variable": "HO2_out",   "time": 0.0, "expected": 5.0e13 },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 5.0e13 }
+                    ]
+                },
+                {
+                    "id": "atmospheric_composition_o3_much_less_than_o2",
+                    "description": "Reproduces the upstream `Atmospheric Composition Consistency` assertion `cond[:O3] < cond[:O2] * 1.0e-6` (GasChem.jl test/test_combined_system.jl:440) for the urban regime. UrbanConditions O3 = 2.0e18; O2 * 1e-6 = 5.25e18. Ratio O3/O2 = 3.81e-7 — confirms ozone is a trace species below the 1 ppm threshold even in the elevated urban regime.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "O3_out", "time": 0.0, "expected": 2.0e18 },
+                        { "variable": "O2_out", "time": 0.0, "expected": 5.25e24 }
+                    ]
+                },
+                {
+                    "id": "atmospheric_composition_ho2_dominates_oh",
+                    "description": "Reproduces the upstream `Atmospheric Composition Consistency` assertion `cond[:HO2] / cond[:OH] > 1` (GasChem.jl test/test_combined_system.jl:446) for the urban regime. UrbanConditions HO2/OH = 5.0e13 / 5.0e11 = 100. HO2 vastly exceeds OH in any tropospheric regime because the HO2 → OH conversion via NO is slower than the OH + CO/CH4 → HO2 chain initiation; this asserts the urban ratio is 100, well above the upstream `> 1` lower bound.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "HO2_out", "time": 0.0, "expected": 5.0e13 },
+                        { "variable": "OH_out",  "time": 0.0, "expected": 5.0e11 }
+                    ]
+                },
+                {
+                    "id": "parameter_override_preserves_identity",
+                    "description": "Sanity check that the identity equations `*_out ~ *` propagate parameter overrides — not just default values. Overrides every parameter to a distinct non-default value (offset by an order of magnitude from each default) and confirms the corresponding `_out` state takes the overridden value. Anchors against an accidental regression where the equations get tied to the defaults instead of the live parameter symbols.",
+                    "parameter_overrides": {
+                        "M":     1.0e25,
+                        "O2":    2.0e24,
+                        "H2O":   1.0e23,
+                        "O3":    1.0e18,
+                        "NO":    1.0e17,
+                        "NO2":   2.0e17,
+                        "CO":    1.0e19,
+                        "CH4":   1.0e19,
+                        "OH":    1.0e11,
+                        "HO2":   1.0e13,
+                        "CH3O2": 1.0e13
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "M_out",     "time": 0.0, "expected": 1.0e25 },
+                        { "variable": "O2_out",    "time": 0.0, "expected": 2.0e24 },
+                        { "variable": "H2O_out",   "time": 0.0, "expected": 1.0e23 },
+                        { "variable": "O3_out",    "time": 0.0, "expected": 1.0e18 },
+                        { "variable": "NO_out",    "time": 0.0, "expected": 1.0e17 },
+                        { "variable": "NO2_out",   "time": 0.0, "expected": 2.0e17 },
+                        { "variable": "CO_out",    "time": 0.0, "expected": 1.0e19 },
+                        { "variable": "CH4_out",   "time": 0.0, "expected": 1.0e19 },
+                        { "variable": "OH_out",    "time": 0.0, "expected": 1.0e11 },
+                        { "variable": "HO2_out",   "time": 0.0, "expected": 1.0e13 },
+                        { "variable": "CH3O2_out", "time": 0.0, "expected": 1.0e13 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "no_sensitivity_sweep",
+                    "description": "Sweep the NO parameter across 4 orders of magnitude (1e15 → 1e18 m^-3, spanning remote → typical → urban → highly polluted) at all other parameters fixed at the urban defaults. Demonstrates that NO_out tracks the NO parameter exactly (identity equation), confirming the preset is a transparent input proxy and not a derived quantity. The NO range spans the full atmospheric regime sweep — from ~0.04 ppb (clean remote) to ~40 ppb (highly polluted megacity).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": { "start": 1.0e15, "stop": 1.0e18, "count": 13, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "no_out_vs_no_line",
+                            "type": "line",
+                            "description": "NO_out vs the swept NO parameter at the urban regime — perfect linear identity y = x by construction. The diagonal anchors the input-passthrough character of the preset.",
+                            "x": { "variable": "NO",     "label": "NO parameter (m^-3)" },
+                            "y": { "variable": "NO_out", "label": "NO_out (m^-3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "oh_ho2_response_to_nox",
+                    "description": "Joint sweep of OH and HO2 parameters across a 100x range each, holding all other parameters at the urban defaults. Surfaces the two radicals' independent identity passthroughs (OH_out = OH, HO2_out = HO2). Useful for downstream wiring tests — confirms a consumer can adjust the radical inputs without disturbing the other preset values.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH",
+                                "range": { "start": 1.0e10, "stop": 1.0e12, "count": 5, "scale": "log" }
+                            },
+                            {
+                                "parameter": "HO2",
+                                "range": { "start": 1.0e12, "stop": 1.0e14, "count": 5, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "oh_heatmap",
+                            "type": "heatmap",
+                            "description": "OH_out across the (OH, HO2) grid — varies only along OH (vertical stripes) because the equations are uncoupled identity passthroughs. Anchors the orthogonality of the 11 parameter inputs.",
+                            "x": { "variable": "OH",      "label": "OH parameter (m^-3)" },
+                            "y": { "variable": "HO2",     "label": "HO2 parameter (m^-3)" },
+                            "value": { "variable": "OH_out", "reduce": "final" }
+                        },
+                        {
+                            "id": "ho2_heatmap",
+                            "type": "heatmap",
+                            "description": "HO2_out across the same (OH, HO2) grid — varies only along HO2 (horizontal stripes), the orthogonal complement of the OH_out plot.",
+                            "x": { "variable": "OH",       "label": "OH parameter (m^-3)" },
+                            "y": { "variable": "HO2",      "label": "HO2 parameter (m^-3)" },
+                            "value": { "variable": "HO2_out", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
