@@ -1,0 +1,288 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "UrbanSurfaceThermalProperties",
+        "description": "Prescribed thermal conductivity and volumetric heat capacity for urban surface layers (roof, wall, and impervious road) in the urban canopy thermal column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:245 (`UrbanSurfaceThermalProperties` @component). Implements Section 4.3 of Oleson et al. (2010, CLM Tech Note Ch. 4): for roof, wall, and impervious road layers (i = 1, ..., N_imprvrd) the thermal conductivity λ_surf and the volumetric heat capacity c_surf are specified by the surface dataset (Table 1.3) rather than computed from the layer state. The component takes those prescribed values as parameters and returns them as time-indexed observables — a passthrough/identity wrapper that exposes the surface dataset values on the canonical (λ_surf, c_surf) names the downstream HeatFlux / SurfaceEnergyFlux components consume. Parameterized as observed-only with two algebraic equations: λ_surf and c_surf are state variables; λ_prescribed and c_prescribed are inputs (parameters in standalone form).",
+        "tags": [
+            "urban_canopy",
+            "temperatures",
+            "thermal_properties",
+            "passthrough",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-tm10)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.3 (Urban surface thermal properties — prescribed values from the surface dataset, Table 1.3), p. 106."
+            }
+        ]
+    },
+    "models": {
+        "UrbanSurfaceThermalProperties": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:245\nUpstream `UrbanSurfaceThermalProperties` is an MTK `@component` with two `@parameters` (λ_prescribed, c_prescribed), two time-indexed `@variables` (λ_surf, c_surf), and two trivial algebraic equations (`λ_surf ~ λ_prescribed`, `c_surf ~ c_prescribed`). No `@constants` are declared. Identical equation structure preserved here.\n\nFunctionally this is a passthrough/identity wrapper: the equations contain no arithmetic at all, only the two assignment links from the prescribed-input parameters to the surface-output observables. The upstream design exists because the downstream HeatFlux (Eq. 4.12), SurfaceEnergyFlux (Section 4.5), and InterfaceThermalConductivity components consume thermal properties via the canonical `λ_surf(t)` / `c_surf(t)` names. The roof, wall, and impervious-road layers (i = 1, ..., N_imprvrd) get their thermal properties from the surface dataset (Table 1.3) rather than from the layer state (which is the case for soil and snow layers — see SoilThermalProperties at :75 and SnowThermalProperties at :190). Wrapping the prescribed dataset values into the same observable names lets the downstream consumers stay layer-type-agnostic.\n\nUnicode parameter and variable names (λ_prescribed, c_prescribed, λ_surf, c_surf) are preserved verbatim from upstream — peer ESM components in this rig already use Greek letters in identifiers (snow_density.esm uses ρ_*, freezing_point_depression.esm uses ψ_sat / θ_sat, layer_phase_change_energy.esm uses Δt) and the schema's identifier pattern allows them.\n\nObservability classification: this component is functionally observed-only — the two output variables are each given by a single algebraic equation in the parameters (the `(t)` time index has no role since there are no derivatives, and the right-hand sides are bare parameters with no time dependence). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (heating_cooling_flux.esm, freezing_point_depression.esm, total_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1e-10): observed-only passthrough/identity equations — the right-hand sides are bare parameter references with no arithmetic, so the only error path is the final assignment, which is exact in IEEE-754 (one copy, zero rounding). 1e-10 matches the upstream test `rtol = 1.0e-10` (test/roof_wall_road_snow_temperatures_test.jl:904-905). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (the zero-input pathway) so the assertion does not silently accept a stuck-at-1e-3 regression.\n\nUpstream tolerance reproduction: upstream `UrbanSurfaceThermalProperties - Passthrough` test (test/roof_wall_road_snow_temperatures_test.jl:895) asserts `rtol = 1.0e-10`. Re-asserted at the same tolerance via per-assertion `tolerance: { rel: 1.0e-10 }` on the upstream-canonical test, identical to the model-level default."
+            },
+            "tolerance": {
+                "rel": 1.0e-10
+            },
+            "variables": {
+                "λ_prescribed": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 1.0,
+                    "description": "Prescribed thermal conductivity from the surface dataset (Oleson et al. 2010 Table 1.3). For urban surface layers (roof, wall, impervious road) this is supplied externally rather than computed from layer state."
+                },
+                "c_prescribed": {
+                    "type": "parameter",
+                    "units": "J/(m^3*K)",
+                    "default": 1.0e6,
+                    "description": "Prescribed volumetric heat capacity from the surface dataset (Oleson et al. 2010 Table 1.3). For urban surface layers (roof, wall, impervious road) this is supplied externally rather than computed from layer state."
+                },
+                "λ_surf": {
+                    "type": "state",
+                    "units": "W/(m*K)",
+                    "description": "Surface thermal conductivity exposed on the canonical observable name consumed by downstream HeatFlux / InterfaceThermalConductivity / SurfaceEnergyFlux. Equals λ_prescribed by construction (passthrough)."
+                },
+                "c_surf": {
+                    "type": "state",
+                    "units": "J/(m^3*K)",
+                    "description": "Surface volumetric heat capacity exposed on the canonical observable name consumed by downstream SurfaceEnergyFlux. Equals c_prescribed by construction (passthrough)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "λ_surf",
+                    "rhs": "λ_prescribed"
+                },
+                {
+                    "lhs": "c_surf",
+                    "rhs": "c_prescribed"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "canonical_passthrough",
+                    "description": "Reproduces upstream `UrbanSurfaceThermalProperties - Passthrough` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:895). Sets λ_prescribed = 1.5 W/(m*K), c_prescribed = 2.5e6 J/(m^3*K), then asserts λ_surf and c_surf track those values exactly at the upstream tolerance rtol = 1.0e-10. Anchors fidelity to the upstream Julia component at the canonical fixture point.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 1.5,
+                        "c_prescribed": 2.5e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 1.5, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 2.5e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "default_values",
+                    "description": "Verifies the default parameter values flow through to the observables when no overrides are supplied. λ_prescribed default 1.0 W/(m*K) → λ_surf = 1.0; c_prescribed default 1.0e6 J/(m^3*K) → c_surf = 1.0e6. Confirms the passthrough behavior is independent of the input magnitude and that the default block matches the observable behavior.",
+                    "parameter_overrides": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 1.0, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 1.0e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "zero_inputs",
+                    "description": "Passthrough with zero-valued prescribed inputs: λ_prescribed = 0 → λ_surf = 0, c_prescribed = 0 → c_surf = 0. While not physically meaningful (a real surface layer has positive thermal conductivity and heat capacity), the passthrough equation is sign-agnostic and the upstream MTK component imposes no positivity gating. Uses `abs` tolerance because the expected values are exactly zero by construction — a `rel` tolerance is undefined at zero and a stuck-at-1e-3 regression must not be silently accepted.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 0.0,
+                        "c_prescribed": 0.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "concrete_wall_typical",
+                    "description": "Representative dense-concrete urban wall layer: λ_prescribed = 1.7 W/(m*K) (dense reinforced concrete, near the upper end of the CLM urban wall range), c_prescribed = 2.1e6 J/(m^3*K). Anchors that realistic urban material values pass through faithfully at the magnitudes used by the downstream HeatFlux / InterfaceThermalConductivity components.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 1.7,
+                        "c_prescribed": 2.1e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 1.7, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 2.1e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "insulated_roof_typical",
+                    "description": "Representative insulated urban roof layer: λ_prescribed = 0.3 W/(m*K) (low-conductivity insulation), c_prescribed = 1.5e6 J/(m^3*K). Together with `concrete_wall_typical` and `asphalt_road_typical`, covers the three urban surface-layer types listed in CLM Table 1.3 (roof, wall, impervious road) so the passthrough is exercised across the realistic range of urban thermal properties.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 0.3,
+                        "c_prescribed": 1.5e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 0.3, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 1.5e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "asphalt_road_typical",
+                    "description": "Representative asphalt impervious-road layer: λ_prescribed = 0.75 W/(m*K), c_prescribed = 1.94e6 J/(m^3*K). The third of the three urban surface-layer types (roof, wall, impervious road) listed in CLM Table 1.3; covers the mid-range thermal properties of typical urban paving materials.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 0.75,
+                        "c_prescribed": 1.94e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 0.75, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 1.94e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "extreme_high_conductivity",
+                    "description": "High-end stress: λ_prescribed = 100 W/(m*K) (metallic-roof regime, well above the typical urban-material range but within the range of float64), c_prescribed = 4.0e6 J/(m^3*K). Verifies the passthrough is unaffected at the upper magnitude corner — any spurious arithmetic in the equation would surface here as ULP-level drift relative to the prescribed value.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 100.0,
+                        "c_prescribed": 4.0e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 100.0, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 4.0e6, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "small_magnitude",
+                    "description": "Low-end stress: λ_prescribed = 1.0e-6 W/(m*K) (deep-vacuum-insulation regime, well below the typical urban-material range), c_prescribed = 1.0e3 J/(m^3*K) (air-like). Pairs with `extreme_high_conductivity` to span ~8 orders of magnitude on λ and ~3 on c — anchors that the passthrough does not introduce magnitude-dependent rounding.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 1.0e-6,
+                        "c_prescribed": 1.0e3
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 1.0e-6, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 1.0e3, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                },
+                {
+                    "id": "independent_channels",
+                    "description": "Cross-channel independence: λ_prescribed and c_prescribed are completely decoupled inputs feeding decoupled outputs. Picks asymmetric values (λ_prescribed = 2.0, c_prescribed = 5.0e5) to verify changing one channel's input does not bleed into the other channel's output — there is no coupling term in either equation. Sanity check that the two equations are independent identities, not (e.g.) an accidental shared assignment.",
+                    "parameter_overrides": {
+                        "λ_prescribed": 2.0,
+                        "c_prescribed": 5.0e5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "λ_surf", "time": 0.0, "expected": 2.0, "tolerance": { "rel": 1.0e-10 } },
+                        { "variable": "c_surf", "time": 0.0, "expected": 5.0e5, "tolerance": { "rel": 1.0e-10 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "lambda_passthrough_sweep",
+                    "description": "Sweep λ_prescribed across the full realistic urban-material range (0.1 → 3.0 W/(m*K), spanning insulation through dense concrete and into metallic regimes) with c_prescribed held fixed at a typical concrete-wall value. Confirms the identity λ_surf = λ_prescribed across the operating envelope and surfaces the trivial 1:1 line that downstream HeatFlux consumers depend on.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "c_prescribed": 2.1e6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ_prescribed",
+                                "range": { "start": 0.1, "stop": 3.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_identity_line",
+                            "type": "line",
+                            "description": "λ_surf vs λ_prescribed: 1:1 identity line — the passthrough behavior the downstream HeatFlux and InterfaceThermalConductivity components rely on.",
+                            "x": { "variable": "λ_prescribed", "label": "λ_prescribed (W/(m*K))" },
+                            "y": { "variable": "λ_surf", "label": "λ_surf (W/(m*K))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "c_passthrough_sweep",
+                    "description": "Sweep c_prescribed across the full realistic urban-material range (1.0e5 → 5.0e6 J/(m^3*K), spanning low-density insulation through dense concrete) on a log scale with λ_prescribed held fixed at a typical concrete-wall value. Confirms the identity c_surf = c_prescribed across the operating envelope and exercises the second observable independent of the first.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "λ_prescribed": 1.7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "c_prescribed",
+                                "range": { "start": 1.0e5, "stop": 5.0e6, "count": 25, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "c_identity_line",
+                            "type": "line",
+                            "description": "c_surf vs c_prescribed: 1:1 identity line on a log-x axis — the passthrough behavior the downstream SurfaceEnergyFlux component relies on across the full urban-material heat-capacity range.",
+                            "x": { "variable": "c_prescribed", "label": "c_prescribed (J/(m^3*K))" },
+                            "y": { "variable": "c_surf", "label": "c_surf (J/(m^3*K))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "urban_material_grid",
+                    "description": "Joint sweep over the urban-material (λ, c) plane: λ_prescribed from 0.2 → 2.5 W/(m*K) (insulation → dense concrete) and c_prescribed from 1.0e6 → 3.0e6 J/(m^3*K) (low-density insulation → dense concrete). Surfaces the 2D passthrough as a planar identity surface in (λ_surf, c_surf) — the three CLM Table 1.3 urban surface-layer types (roof, wall, impervious road) all sit inside this rectangle, so the heatmap also serves as a quick visual reference for where the typical urban-material thermal properties live.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ_prescribed",
+                                "range": { "start": 0.2, "stop": 2.5, "count": 12, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "c_prescribed",
+                                "range": { "start": 1.0e6, "stop": 3.0e6, "count": 10, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_surf_surface",
+                            "type": "heatmap",
+                            "description": "λ_surf as a function of (λ_prescribed, c_prescribed): planar surface that depends only on λ_prescribed (rows constant in c) — confirms the two observables are independent channels.",
+                            "x": { "variable": "λ_prescribed", "label": "λ_prescribed (W/(m*K))" },
+                            "y": { "variable": "c_prescribed", "label": "c_prescribed (J/(m^3*K))" },
+                            "value": { "variable": "λ_surf", "reduce": "final" }
+                        },
+                        {
+                            "id": "c_surf_surface",
+                            "type": "heatmap",
+                            "description": "c_surf as a function of (λ_prescribed, c_prescribed): planar surface that depends only on c_prescribed (columns constant in λ) — the orthogonal independence partner of `lambda_surf_surface`.",
+                            "x": { "variable": "λ_prescribed", "label": "λ_prescribed (W/(m*K))" },
+                            "y": { "variable": "c_prescribed", "label": "c_prescribed (J/(m^3*K))" },
+                            "value": { "variable": "c_surf", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
