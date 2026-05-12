@@ -694,7 +694,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
 | Clark1996FireSpread | `src/clark1996.jl:81` | Model | variables, parameters, equations | none | L | Y | Y | `components/wildland_fire/clark1996/fire_spread.esm` | — |
-| Clark1996HeatFluxProfile | `src/clark1996.jl:206` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/clark1996/heat_flux_profile.esm` | — |
+| Clark1996HeatFluxProfile | `src/clark1996.jl:206` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/clark1996/heat_flux_profile.esm` | — | **status: complete, sha: d577ebec344c123a171e28304909e6c82442fafe** (mdl-y7ew; observed-only F_s/F_l = F_sfc · exp(−z/alpha_ext), 9 tests / 18 assertions, 2 examples; tracker-sync esm-if7u — work landed under mdl-y7ew but the row had no completion marker) |
 | Clark1996ConvectiveFroudeNumber | `src/clark1996.jl:253` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/clark1996/froude.esm` | — |
 | Clark1996WindProfile | `src/clark1996.jl:299` | Model | variables, parameters, observed | none | S | Y | Y | `components/wildland_fire/clark1996/wind_profile.esm` | — |
 
