@@ -27,7 +27,7 @@
             "reference": {
                 "doi": "10.1016/j.ecolmodel.2004.01.022",
                 "citation": "Scheller, R.M. and Mladenoff, D.J. (2004). A forest growth and biomass module for a landscape simulation model, LANDIS: design, validation, and application. Ecological Modelling, 180, 211-229.",
-                "notes": "source_ref: Vegetation.jl@573a3733ee575c6e28f73c9c02ee419e07fb839c:src/landis_biomass.jl:28\nUpstream LANDISBiomass is an MTK @component implementing the Scheller & Mladenoff (2004) biomass module for a single species-age cohort. The component declares 2 state @variables (B, D_wood), 9 algebraic @variables (cohort_age, B_MAX, B_POT, B_AP, B_PM, ANPP_ACT, M_BIO, M_AGE, M_total), 9 @parameters (ANPP_MAX, max_age, r, y0, d, k, B_MAX_site, B_other, age_init), and 3 @constants (e1=exp(1), B_MAX_ratio=30·yr_to_s, one_yr=yr_to_s). The 3 upstream @constants are preserved here as parameters with the upstream defaults — same pattern as components/wildland_fire/level_set/fire_heat_flux.esm — so the standalone ESM model is well-posed without external coupling.\n\nThe 11 equations are preserved verbatim from the source:\n  1. cohort_age = age_init + t                                  (independent var t enters Eq. 6)\n  2. B_MAX = ANPP_MAX · B_MAX_ratio                              (Eq. 2)\n  3. B_POT = max(B, min(B_MAX, B_MAX_site - B_other))            (Eq. 3 — available growing space)\n  4. B_AP = B / B_POT                                            (Eq. 4 auxiliary, ratio of actual to potential)\n  5. B_PM = B_POT / B_MAX                                        (Eq. 4 auxiliary, ratio of potential to maximum)\n  6. ANPP_ACT = ANPP_MAX · e1 · B_AP · exp(-B_AP) · B_PM         (Eq. 4 — peaked growth)\n  7. M_BIO = ANPP_MAX · y0 / (y0 + (1-y0)·exp(-r/y0·B_AP)) · B_PM (Eq. 5 — logistic biomass mortality)\n  8. M_AGE = (B/one_yr) · exp((cohort_age/max_age)·d) / exp(d)   (Eq. 6 — exponential age mortality)\n  9. M_total = M_BIO + M_AGE\n 10. D(B) = ANPP_ACT - M_total                                   (Eq. 1)\n 11. D(D_wood) = M_total - k·D_wood                              (Eq. 7)\n\nTODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\n(Note: max/min are in the v0.4.0 schema's op enum, so the gt-p3ep marker is informational here — same pattern as components/wildland_fire/nfdrs/lightning_fire_occurrence.esm and woody_moisture.esm, which also use min/max ops directly. The migration tracker records blocking_gap=none.)\n\nTolerance rationale (model-level rel=1e-6): the equation set is a 2-state ODE with smooth, well-behaved RHS over the realistic age range (cohort_age < max_age); the age-related mortality term exp(d·cohort_age/max_age) grows exponentially past max_age, making the system effectively stiff at the end of a species' lifespan. Tsit5 with reltol=1e-10/abstol=1e-12 (the walker defaults) gives sub-1e-9 truncation across the 0-200 yr tests against the analytical algebraic checks; rel=1e-6 is comfortably above this and below the ~1% range cited for biomass measurements in Scheller & Mladenoff (2004). Tests use the model-level default throughout."
+                "notes": "source_ref: Vegetation.jl@573a3733ee575c6e28f73c9c02ee419e07fb839c:src/landis_biomass.jl:28\nUpstream LANDISBiomass is an MTK @component implementing the Scheller & Mladenoff (2004) biomass module for a single species-age cohort. The component declares 2 state @variables (B, D_wood), 9 algebraic @variables (cohort_age, B_MAX, B_POT, B_AP, B_PM, ANPP_ACT, M_BIO, M_AGE, M_total), 9 @parameters (ANPP_MAX, max_age, r, y0, d, k, B_MAX_site, B_other, age_init), and 3 @constants (e1=exp(1), B_MAX_ratio=30·yr_to_s, one_yr=yr_to_s). The 3 upstream @constants are preserved here as parameters with the upstream defaults — same pattern as components/wildland_fire/level_set/fire_heat_flux.esm — so the standalone ESM model is well-posed without external coupling.\n\nThe 11 source equations are preserved as follows:\n  1. D(cohort_age)/dt = 1   with   cohort_age(0) = age_init      (Eq. 1: cohort_age = age_init + t, expressed as an ODE because the ESS Python runner only plumbs the independent variable t through observed-expression bodies, not algebraic/differential RHS — cohort_age is a tracked state with trivial dynamics so M_AGE's downstream algebraic reference to it stays well-defined)\n  2. B_MAX = ANPP_MAX · B_MAX_ratio                              (Eq. 2)\n  3. B_POT = max(B, min(B_MAX, B_MAX_site - B_other))            (Eq. 3 — available growing space)\n  4. B_AP = B / B_POT                                            (Eq. 4 auxiliary, ratio of actual to potential)\n  5. B_PM = B_POT / B_MAX                                        (Eq. 4 auxiliary, ratio of potential to maximum)\n  6. ANPP_ACT = ANPP_MAX · e1 · B_AP · exp(-B_AP) · B_PM         (Eq. 4 — peaked growth)\n  7. M_BIO = ANPP_MAX · y0 / (y0 + (1-y0)·exp(-r/y0·B_AP)) · B_PM (Eq. 5 — logistic biomass mortality)\n  8. M_AGE = (B/one_yr) · exp((cohort_age/max_age)·d) / exp(d)   (Eq. 6 — exponential age mortality)\n  9. M_total = M_BIO + M_AGE\n 10. D(B) = ANPP_ACT - M_total                                   (Eq. 1, upstream)\n 11. D(D_wood) = M_total - k·D_wood                              (Eq. 7)\n\nTODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\n(Note: max/min are in the v0.4.0 schema's op enum, so the gt-p3ep marker is informational here — same pattern as components/wildland_fire/nfdrs/lightning_fire_occurrence.esm and woody_moisture.esm, which also use min/max ops directly. The migration tracker records blocking_gap=none.)\n\nTolerance rationale (model-level rel=1e-6): the equation set is a 3-state ODE (B, D_wood, cohort_age) with smooth, well-behaved RHS over the realistic age range (cohort_age < max_age); the age-related mortality term exp(d·cohort_age/max_age) grows exponentially past max_age, making the system effectively stiff at the end of a species' lifespan. The cohort_age channel has trivial D(cohort_age)/dt=1 dynamics and adds no integrator stiffness. Tsit5 with reltol=1e-10/abstol=1e-12 (the walker defaults) gives sub-1e-9 truncation across the 0-200 yr tests against the analytical algebraic checks; rel=1e-6 is comfortably above this and below the ~1% range cited for biomass measurements in Scheller & Mladenoff (2004). Tests use the model-level default throughout."
             },
             "tolerance": {
                 "rel": 1.0e-6
@@ -120,7 +120,8 @@
                 "cohort_age": {
                     "type": "state",
                     "units": "s",
-                    "description": "Cohort age (age_init + t). Drives the M_AGE term in Eq. 6."
+                    "default": 315576000.0,
+                    "description": "Cohort age. Mathematically cohort_age(t) = age_init + t (Eq. 1, drives the M_AGE term in Eq. 6). Carried as a differential state with D(cohort_age)/dt = 1 and initial value = age_init, because the ESS Python runner only plumbs the independent variable t through observed-expression bodies (not algebraic/differential RHS); promoting cohort_age to a tracked state is the standard MTK→ESS workaround. Default 10 years in seconds matches age_init's default — tests that override age_init must also supply cohort_age via initial_conditions to keep the system consistent."
                 },
                 "B_MAX": {
                     "type": "state",
@@ -165,11 +166,8 @@
             },
             "equations": [
                 {
-                    "lhs": "cohort_age",
-                    "rhs": {
-                        "op": "+",
-                        "args": ["age_init", "t"]
-                    }
+                    "lhs": {"op": "D", "wrt": "t", "args": ["cohort_age"]},
+                    "rhs": 1
                 },
                 {
                     "lhs": "B_MAX",
@@ -429,13 +427,14 @@
                 },
                 {
                     "id": "age_mortality_at_half_max_age",
-                    "description": "Eq. 6 shape check: cohort at age=200 yr with max_age=400 yr (default). Closed-form: M_AGE = (B/one_yr) * exp((cohort_age/max_age)*d) / exp(d) = (B/yr_to_s) * exp(0.5*10) / exp(10) = (B/yr_to_s) * exp(-5). With B=1.0 kg/m^2 (=10 Mg/ha), M_AGE = 1.0/3.15576e7 * exp(-5) ≈ 2.135e-10 kg/m^2/s. Verifies the exponential age-mortality multiplier crosses exp(-d/2) at half the max age.",
+                    "description": "Eq. 6 shape check: cohort at age=200 yr with max_age=400 yr (default). Closed-form: M_AGE = (B/one_yr) * exp((cohort_age/max_age)*d) / exp(d) = (B/yr_to_s) * exp(0.5*10) / exp(10) = (B/yr_to_s) * exp(-5). With B=1.0 kg/m^2 (=10 Mg/ha), M_AGE = 1.0/3.15576e7 * exp(-5) ≈ 2.135e-10 kg/m^2/s. Verifies the exponential age-mortality multiplier crosses exp(-d/2) at half the max age. cohort_age is set as an initial_condition (not the default) because the model carries it as a D(cohort_age)/dt=1 state — see the variables.cohort_age description.",
                     "parameter_overrides": {
                         "age_init": 6.31152e9
                     },
                     "initial_conditions": {
                         "B": 1.0,
-                        "D_wood": 0.0
+                        "D_wood": 0.0,
+                        "cohort_age": 6.31152e9
                     },
                     "time_span": {"start": 0.0, "end": 1.0},
                     "assertions": [
