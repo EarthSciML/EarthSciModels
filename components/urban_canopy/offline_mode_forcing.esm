@@ -1,0 +1,925 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "OfflineModeForcing",
+        "description": "Offline-mode atmospheric forcing processor for the Community Land Model Urban (CLMU). Migrated from UrbanCanopy.jl@9200edd4 src/offline_mode.jl:33 (`OfflineModeForcing` @component). Implements Oleson et al. (2010, NCAR Tech Note CLMU Ch. 6): given the raw observational inputs total incident solar radiation S_atm, atmospheric temperature T_atm, pressure P_atm, specific humidity q_atm, wind speed W_atm, and total precipitation rate P_precip, it derives (a) the four-way solar partition into direct/diffuse × visible/NIR via the Eq. 6.7-6.8 cubic polynomials and Eqs. 6.2-6.5 visibility / NIR weighting; (b) the downwelling longwave radiation L_atm_down from the Idso (1981) formula (Eqs. 6.9-6.10) including the vapor-pressure conversion from specific humidity; (c) the rain/snow phase partition from a linear T_atm - T_f ramp (Eqs. 6.11-6.13); and (d) the wind components, potential temperature, and atmospheric reference height (p.149) needed by CLMU's surface-layer routines. Eq. 6.1 (temporal downscaling of 6-hourly solar to model time steps) and Eqs. 6.14-6.15 (specific humidity from RH / dewpoint) are upstream data-preprocessing steps and are intentionally not implemented here; S_atm and q_atm are taken as already at the model time step. Parameterized as observed-only with 18 algebraic equations and 18 state-variable outputs — no time derivatives, no `@register_symbolic` dependencies, no PDE — matching the upstream `length(equations(sys)) == 18` / `length(unknowns(sys)) == 18` structural tests.",
+        "tags": [
+            "urban_canopy",
+            "atmospheric_forcing",
+            "solar_partitioning",
+            "longwave_idso",
+            "precipitation_phase",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-9gcn)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., G. B. Bonan, J. J. Feddema, M. Vertenstein, and E. Kluzek (2010). Technical Description of an Urban Parameterization for the Community Land Model (CLMU). NCAR Technical Note NCAR/TN-480+STR, National Center for Atmospheric Research, Boulder, CO. Chapter 6 (Offline Mode), Eqs. 6.2-6.13 and p.149."
+            },
+            {
+                "citation": "Idso, S. B. (1981). A set of equations for full spectrum and 8- to 14-μm and 10.5- to 12.5-μm thermal radiation from cloudless skies. Water Resources Research 17(2), 295-304. Eq. (3) — basis for the L_atm_down formula in Oleson Eq. 6.9."
+            }
+        ]
+    },
+    "models": {
+        "OfflineModeForcing": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/offline_mode.jl:33\nUpstream `OfflineModeForcing` is an MTK `@component` with six `@parameters` (S_atm, T_atm, P_atm, q_atm, W_atm, P_precip), 24 `@constants` (σ_SB, T_f, MW_da, MW_wv, ε_ratio, one_minus_ε, α_vis, a_0-a_3, b_0-b_3, idso_base, idso_coeff, idso_T_ref, f_P_slope, R_min, R_max, zero_dimless, one_dimless, sqrt2_inv, z_prime_atm_val), 18 time-indexed `@variables` (R_vis_raw, R_nir_raw, R_vis, R_nir, S_atm_dir_vis, S_atm_dir_nir, S_atm_dif_vis, S_atm_dif_nir, e_atm, L_atm_down, f_P_raw, f_P, q_rain, q_snow, u_atm, v_atm, θ_atm, z_prime_atm), and 18 algebraic equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares 24 `@constants`, all encoded here as parameters with the upstream default values (matching the convention used by sibling files: surface_energy_flux.esm encodes sigma_SB and one_K as parameters; waste_heat_ac.esm encodes f_heat, f_cool, H_wasteheat_max as parameters; soil_thermal.esm encodes the Oleson Table 1.4 constants ρ_liq, C_liq, λ_liq, etc. as parameters). Greek `σ_SB`, `α_vis`, `ε_ratio`, `one_minus_ε`, and the variable `θ_atm` are renamed `sigma_SB`, `alpha_vis`, `epsilon_ratio`, `one_minus_epsilon`, and `theta_atm` for ASCII identifier names per the surface_energy_flux.esm rig convention. The upstream-derived constants ε_ratio = MW_wv/MW_da and one_minus_ε = 1 - MW_wv/MW_da are evaluated once at the upstream-default MW_wv = 0.018016, MW_da = 0.028966 and frozen in as 0.6219705862045157 and 0.37802941379548427 respectively — the IEEE-754 double values produced by the literal Julia expression `0.018016 / 0.028966`. MW_wv and MW_da are also exposed as parameters (with their upstream defaults) so a user can rebind them and recompute the ratio externally if needed, but the ratio itself is a leaf parameter in the AST (the AST does not contain a `MW_wv / MW_da` op tree; this matches the upstream Julia AST after the `@constants` initializer evaluates the division).\n\nUnits: SI throughout. Solar fluxes W/m^2, longwave fluxes W/m^2, precipitation rates kg/(m^2*s), temperatures K, vapor pressures Pa, wind components m/s, reference height m. The Idso coefficient idso_coeff = 5.95e-7 Pa^-1 encodes the upstream pre-multiplied form `5.95e-5 * 0.01` (Eq. 6.9 as written in the upstream comment) so the equation reads `idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)` without an inline literal 0.01 factor — preserves the upstream Julia formulation verbatim.\n\nClamping pattern: Eqs. 6.7-6.8 produce R_vis_raw and R_nir_raw which may go outside [0.01, 0.99] at extreme S_atm; these are clamped to R_vis and R_nir via `max(R_min, min(R_max, R_raw))`. Eq. 6.13 produces f_P_raw = 0.5*(T_atm - T_f) which may go outside [0, 1]; clamped to f_P via `max(0, min(1, f_P_raw))`. Both clamps follow the convention used by sibling files (waste_heat_ac.esm uses `min(H_wasteheat_unclamped, H_wasteheat_max)` for the upper-bound clamp). The raw and clamped variables are both exposed as state outputs — the upstream test exercises both (R_vis_raw appears implicitly in the polynomial cross-check at S_atm = 0).\n\nSign and energy conservation: by construction `S_atm_dir_vis + S_atm_dir_nir + S_atm_dif_vis + S_atm_dif_nir = S_atm` (sum of the four solar partition components equals the input total). Within the visible band `S_atm_dir_vis + S_atm_dif_vis = α_vis * S_atm`; within NIR `S_atm_dir_nir + S_atm_dif_nir = (1 - α_vis) * S_atm`. Each component is non-negative for non-negative S_atm because R_vis and R_nir are clamped to [0.01, 0.99]. These conservation properties are anchored by the `solar_partition_energy_conservation` test.\n\nNote on Eq. 6.10 special case: the formula `e_atm = P_atm * q_atm / (epsilon_ratio + one_minus_epsilon * q_atm)` is the exact algebraic form from the upstream component. At q_atm = 0 the numerator is 0 and the denominator is epsilon_ratio = 0.6219... ≠ 0, so e_atm = 0 exactly (anchored by the `dry_air_zero_vapor_pressure` test). The denominator is bounded below by min(epsilon_ratio, 1.0) > 0 for all physical q_atm ∈ [0, 1], so no division-by-zero is reachable from physical inputs.\n\nNote on Eq. 6.11-6.12 conservation: by construction `q_rain + q_snow = P_precip * (f_P + (1 - f_P)) = P_precip` for any f_P ∈ [0, 1], so total precipitation mass is conserved by the rain/snow partition. Anchored by the `precipitation_mass_conservation` test.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of parameters and other state outputs (the `(t)` time index has no role since there are no derivatives anywhere). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (surface_energy_flux.esm, waste_heat_ac.esm, heat_flux.esm, exponential_grid.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); equations involve addition, subtraction, multiplication, division, integer powers (^2, ^3, ^4), min/max clamps, and a single `exp` call in the Idso formula — all at IEEE-754 ULP precision (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files in this rig (surface_energy_flux.esm uses 1e-9, waste_heat_ac.esm uses 1e-9, heat_flux.esm uses 1e-9). The Idso formula's `exp(1500/T_atm)` at T_atm ≈ 293 K evaluates to `exp(5.12...)` ≈ 167.4 — well within the range where exp's transcendental implementation is ULP-accurate. Tighter `abs: 1.0e-12` is asserted on outputs that are exactly zero by construction (S_atm = 0 → all four radiation components = 0; q_atm = 0 → e_atm = 0; T_atm ≤ T_f → f_P = 0, q_rain = 0; T_atm ≥ T_f + 2 → q_snow = 0; P_precip = 0 → q_rain = q_snow = 0) so the assertion does not silently accept a stuck-at-1e-3 regression."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "sigma_SB": {
+                    "type": "parameter",
+                    "units": "W/(m^2*K^4)",
+                    "default": 5.67e-8,
+                    "description": "Stefan-Boltzmann constant (Oleson Table 1.4) — upstream `@constants` σ_SB; coefficient on the T_atm^4 upward emission term in Eq. 6.9"
+                },
+                "T_f": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Freezing temperature of water (Oleson Table 1.4) — reference temperature for the rain/snow partition (Eq. 6.13): below T_f the slope-0.5 ramp goes negative and clamps to 0 (all snow); above T_f + 2 K it goes above 1 and clamps (all rain)"
+                },
+                "MW_da": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.028966,
+                    "description": "Molecular weight of dry air (Oleson Table 1.4) — upstream `@constants`; used to derive the ε_ratio and one_minus_ε constants below. The derivation is evaluated at the upstream defaults and the resulting ratios are frozen in as their own parameters; this MW_da default is exposed for cross-reference"
+                },
+                "MW_wv": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.018016,
+                    "description": "Molecular weight of water vapor (Oleson Table 1.4) — upstream `@constants`; used to derive the ε_ratio and one_minus_ε constants below"
+                },
+                "epsilon_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.6219705862045157,
+                    "description": "Ratio of molecular weights MW_wv/MW_da ≈ 0.622 (Oleson Table 1.4, p. 12) — upstream `@constants` ε_ratio = MW_wv/MW_da, frozen at the upstream-default IEEE-754 value `0.018016 / 0.028966`. Appears in Eq. 6.10 as the constant term in the denominator: e_atm = P_atm * q_atm / (epsilon_ratio + one_minus_epsilon * q_atm)"
+                },
+                "one_minus_epsilon": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.37802941379548427,
+                    "description": "One minus MW_wv/MW_da ≈ 0.378 — upstream `@constants` one_minus_ε = 1.0 - MW_wv/MW_da, frozen at the upstream-default IEEE-754 value. Appears in Eq. 6.10 as the coefficient of q_atm in the denominator. Note: epsilon_ratio + one_minus_epsilon is exactly 1.0 by construction at the upstream defaults"
+                },
+                "alpha_vis": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Ratio of visible to total incident solar radiation (Oleson Eq. 6.6) — upstream `@constants` α_vis = 0.5. Within the canonical S_atm = 500 W/m^2 fixture, alpha_vis * S_atm = 250 W/m^2 in visible and (1 - alpha_vis) * S_atm = 250 W/m^2 in NIR. The 50/50 split is a standard solar-band partition for clear-sky surface conditions in CLM"
+                },
+                "a_0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.17639,
+                    "description": "Visible direct-fraction polynomial coefficient a_0 (Oleson Eq. 6.7, dimensionless) — at zero visible flux R_vis_raw = a_0 = 0.17639 (the y-intercept of the cubic)"
+                },
+                "a_1": {
+                    "type": "parameter",
+                    "units": "m^2/W",
+                    "default": 0.0038,
+                    "description": "Visible direct-fraction polynomial coefficient a_1 (Oleson Eq. 6.7) — linear term in (alpha_vis * S_atm)"
+                },
+                "a_2": {
+                    "type": "parameter",
+                    "units": "m^4/W^2",
+                    "default": -9.0039e-6,
+                    "description": "Visible direct-fraction polynomial coefficient a_2 (Oleson Eq. 6.7) — quadratic term in (alpha_vis * S_atm); negative, bending the cubic downward at mid-range fluxes"
+                },
+                "a_3": {
+                    "type": "parameter",
+                    "units": "m^6/W^3",
+                    "default": 8.1351e-9,
+                    "description": "Visible direct-fraction polynomial coefficient a_3 (Oleson Eq. 6.7) — cubic term in (alpha_vis * S_atm); positive, bending the cubic back upward at high fluxes"
+                },
+                "b_0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.29548,
+                    "description": "NIR direct-fraction polynomial coefficient b_0 (Oleson Eq. 6.8, dimensionless) — at zero NIR flux R_nir_raw = b_0 = 0.29548"
+                },
+                "b_1": {
+                    "type": "parameter",
+                    "units": "m^2/W",
+                    "default": 0.00504,
+                    "description": "NIR direct-fraction polynomial coefficient b_1 (Oleson Eq. 6.8) — linear term in ((1 - alpha_vis) * S_atm)"
+                },
+                "b_2": {
+                    "type": "parameter",
+                    "units": "m^4/W^2",
+                    "default": -1.4957e-5,
+                    "description": "NIR direct-fraction polynomial coefficient b_2 (Oleson Eq. 6.8) — quadratic term in ((1 - alpha_vis) * S_atm); negative"
+                },
+                "b_3": {
+                    "type": "parameter",
+                    "units": "m^6/W^3",
+                    "default": 1.4881e-8,
+                    "description": "NIR direct-fraction polynomial coefficient b_3 (Oleson Eq. 6.8) — cubic term in ((1 - alpha_vis) * S_atm); positive"
+                },
+                "idso_base": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.7,
+                    "description": "Idso (1981) base emissivity factor (Oleson Eq. 6.9, dimensionless) — the additive constant in the bracketed emissivity factor `[0.70 + idso_coeff * e_atm * exp(idso_T_ref / T_atm)]`. Represents the dry-air contribution to clear-sky atmospheric emissivity"
+                },
+                "idso_coeff": {
+                    "type": "parameter",
+                    "units": "Pa^-1",
+                    "default": 5.95e-7,
+                    "description": "Idso (1981) vapor-pressure coefficient (Oleson Eq. 6.9) — encodes the upstream pre-multiplied form `5.95e-5 * 0.01 = 5.95e-7` Pa^-1 from the upstream comment, so the equation reads `idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)` without an inline literal 0.01 factor. The 0.01 factor converts e_atm from Pa to a 100-Pa unit equivalent (a hectopascal) so that the dimensionless product idso_coeff * e_atm is at unit order ~0.1 for moist atmospheres"
+                },
+                "idso_T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 1500.0,
+                    "description": "Idso (1981) temperature reference (Oleson Eq. 6.9) — argument of the exp() factor: exp(1500/T_atm). At T_atm = 273.15 K the factor is exp(5.49) ≈ 242; at T_atm = 293.15 K it is exp(5.12) ≈ 167. Captures the strong moisture-temperature coupling of clear-sky downwelling longwave"
+                },
+                "f_P_slope": {
+                    "type": "parameter",
+                    "units": "K^-1",
+                    "default": 0.5,
+                    "description": "Rain-fraction slope (Oleson Eq. 6.13) — coefficient of (T_atm - T_f) in the linear rain-fraction ramp. With slope 0.5 K^-1, f_P_raw crosses 0 at T_atm = T_f and crosses 1 at T_atm = T_f + 2 K, giving a 2-K-wide transition zone for the rain/snow partition"
+                },
+                "R_min": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.01,
+                    "description": "Minimum direct fraction (Oleson Eqs. 6.7-6.8, dimensionless) — lower bound of the [R_min, R_max] clamp on R_vis_raw and R_nir_raw; prevents the polynomial fit from producing implausibly small direct fractions at the polynomial's roots / sign changes"
+                },
+                "R_max": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.99,
+                    "description": "Maximum direct fraction (Oleson Eqs. 6.7-6.8, dimensionless) — upper bound of the [R_min, R_max] clamp; prevents the polynomial fit from producing a direct fraction > 1 at high S_atm (where the polynomial extrapolates outside its calibration range)"
+                },
+                "zero_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Zero (dimensionless) — upstream `@constants` zero_dimless used as the lower clamp on f_P (Eq. 6.13). Identically 0.0; the parameter form preserves the upstream contract that all clamp bounds are declared `@constants` rather than inline literals"
+                },
+                "one_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "One (dimensionless) — upstream `@constants` one_dimless used (a) as the upper clamp on f_P (Eq. 6.13), (b) as the multiplicand in `(1 - alpha_vis)` for NIR weighting, (c) as the multiplicand in `(1 - R_vis)` and `(1 - R_nir)` for diffuse-fraction extraction, and (d) as the multiplicand in `(1 - f_P)` for the snow-fraction extraction. Identically 1.0"
+                },
+                "sqrt2_inv": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.7071067811865475,
+                    "description": "1/√2 (dimensionless) — upstream `@constants` sqrt2_inv = 1.0 / sqrt(2.0), frozen at the IEEE-754 double value. Used in the wind decomposition u_atm = v_atm = sqrt2_inv * W_atm so that u_atm^2 + v_atm^2 = W_atm^2 exactly (anchored by the wind_decomposition_pythagorean test). The decomposition assumes the wind is equally split between zonal and meridional components in offline mode — a default that downstream CLMU surface-layer routines can override if a wind-direction observation is available"
+                },
+                "z_prime_atm_val": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 30.0,
+                    "description": "Atmospheric reference height (Oleson CLMU Tech Note p. 149) — upstream `@constants`. The reference height at which the atmospheric forcing inputs (T_atm, q_atm, W_atm) are measured; CLMU's surface-layer turbulence parameterizations use this to compute the Monin-Obukhov stability profile. 30 m is the standard CLMU default; downstream consumers can rebind this parameter for site-specific tower heights"
+                },
+                "S_atm": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 500.0,
+                    "description": "Total incident solar radiation at the model time step (Oleson Eq. 6.1 output) — upstream `@parameters`. The single solar-radiation input to the four-way partition (Eqs. 6.2-6.5); already at the model time step (Eq. 6.1 temporal-downscaling is an upstream preprocessing step). Default 500 W/m^2 mirrors the upstream-test canonical fixture"
+                },
+                "T_atm": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Atmospheric temperature at z_prime_atm_val (Oleson CLMU Ch. 6) — upstream `@parameters`. Used in the Idso longwave formula (Eq. 6.9), the rain/snow partition (Eq. 6.13), and assigned to theta_atm directly (p. 149). Default 293.15 K (20°C) mirrors the upstream canonical fixture"
+                },
+                "P_atm": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Atmospheric pressure at z_prime_atm_val — upstream `@parameters`. Multiplies q_atm in the vapor-pressure formula (Eq. 6.10) — at standard pressure 101325 Pa and q_atm = 0.01 the vapor pressure e_atm ≈ 1619 Pa (about 16 hPa)"
+                },
+                "q_atm": {
+                    "type": "parameter",
+                    "units": "kg/kg",
+                    "default": 0.01,
+                    "description": "Atmospheric specific humidity at z_prime_atm_val — upstream `@parameters`. The single moisture input to the Idso longwave formula (via e_atm in Eq. 6.10). Default 0.01 kg/kg (10 g of water per kg of moist air) is representative of mid-latitude summer surface conditions"
+                },
+                "W_atm": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 5.0,
+                    "description": "Atmospheric wind speed at z_prime_atm_val — upstream `@parameters`. Split equally between zonal and meridional via the sqrt2_inv decomposition (p. 149). Default 5 m/s is a moderate breeze"
+                },
+                "P_precip": {
+                    "type": "parameter",
+                    "units": "kg/(m^2*s)",
+                    "default": 0.0,
+                    "description": "Total precipitation rate (rain + snow) — upstream `@parameters`. Partitioned into q_rain and q_snow via the temperature-dependent f_P ramp (Eqs. 6.11-6.13). Default 0 (dry conditions) so non-precipitation tests do not need to override this parameter"
+                },
+                "R_vis_raw": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Unclamped visible direct fraction (Oleson Eq. 6.7) — the raw polynomial output `a_0 + a_1*(alpha_vis*S_atm) + a_2*(alpha_vis*S_atm)^2 + a_3*(alpha_vis*S_atm)^3` before the [R_min, R_max] clamp. Exposed so downstream consumers can detect when the clamp activates (the polynomial may exceed 0.99 or fall below 0.01 at extreme S_atm)"
+                },
+                "R_nir_raw": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Unclamped NIR direct fraction (Oleson Eq. 6.8) — the raw polynomial output `b_0 + b_1*((1-alpha_vis)*S_atm) + b_2*((1-alpha_vis)*S_atm)^2 + b_3*((1-alpha_vis)*S_atm)^3` before the [R_min, R_max] clamp"
+                },
+                "R_vis": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Visible direct fraction clamped to [R_min, R_max] (Oleson Eq. 6.7): max(R_min, min(R_max, R_vis_raw)). The fraction of the visible incident flux that is direct beam (rest is diffuse)"
+                },
+                "R_nir": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "NIR direct fraction clamped to [R_min, R_max] (Oleson Eq. 6.8): max(R_min, min(R_max, R_nir_raw))"
+                },
+                "S_atm_dir_vis": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Direct-beam visible solar radiation at the surface (Oleson Eq. 6.2): R_vis * (alpha_vis * S_atm). The shortwave-vis component that hits a horizontal surface from the direct solar beam"
+                },
+                "S_atm_dir_nir": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Direct-beam NIR solar radiation at the surface (Oleson Eq. 6.3): R_nir * ((1 - alpha_vis) * S_atm)"
+                },
+                "S_atm_dif_vis": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Diffuse visible solar radiation at the surface (Oleson Eq. 6.4): (1 - R_vis) * (alpha_vis * S_atm)"
+                },
+                "S_atm_dif_nir": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Diffuse NIR solar radiation at the surface (Oleson Eq. 6.5): (1 - R_nir) * ((1 - alpha_vis) * S_atm)"
+                },
+                "e_atm": {
+                    "type": "state",
+                    "units": "Pa",
+                    "description": "Atmospheric vapor pressure (Oleson Eq. 6.10): P_atm * q_atm / (epsilon_ratio + one_minus_epsilon * q_atm). The partial pressure of water vapor in the atmosphere derived from specific humidity using the molecular-weight-ratio formula. Zero at q_atm = 0; bounded above by P_atm * q_atm / epsilon_ratio at small q_atm"
+                },
+                "L_atm_down": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Atmospheric downwelling longwave radiation at the surface (Oleson Eq. 6.9, after Idso 1981): (idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)) * sigma_SB * T_atm^4. Sum of a clear-sky dry-air contribution and a moisture-amplification term — increases monotonically with both T_atm (Stefan-Boltzmann ^4) and q_atm (through e_atm)"
+                },
+                "f_P_raw": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Unclamped rain fraction (Oleson Eq. 6.13): f_P_slope * (T_atm - T_f). The linear T_atm - T_f ramp before the [0, 1] clamp. Negative below freezing, > 1 above T_f + 2 K"
+                },
+                "f_P": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Rain fraction clamped to [zero_dimless, one_dimless] (Oleson Eq. 6.13): max(zero_dimless, min(one_dimless, f_P_raw)). The fraction of total precipitation that falls as rain; complement (1 - f_P) falls as snow"
+                },
+                "q_rain": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Rain (liquid precipitation) rate (Oleson Eq. 6.11): P_precip * f_P. Zero below T_f; equals P_precip above T_f + 2 K"
+                },
+                "q_snow": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Snow (solid precipitation) rate (Oleson Eq. 6.12): P_precip * (one_dimless - f_P). Equals P_precip below T_f; zero above T_f + 2 K. By construction q_rain + q_snow = P_precip for all T_atm"
+                },
+                "u_atm": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Zonal (east-west) wind component (Oleson CLMU p. 149): sqrt2_inv * W_atm. Equal-split assumption — offline mode lacks wind-direction information, so the wind is decomposed isotropically. By construction u_atm^2 + v_atm^2 = W_atm^2"
+                },
+                "v_atm": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Meridional (north-south) wind component (Oleson CLMU p. 149): sqrt2_inv * W_atm. Equal-split assumption, see u_atm"
+                },
+                "theta_atm": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Atmospheric potential temperature (Oleson CLMU p. 149) — upstream `θ_atm`; identified with T_atm in offline mode (no atmospheric layer above z_prime_atm_val, so the potential-temperature reference is the surface). Used by CLMU's Monin-Obukhov surface-layer routine"
+                },
+                "z_prime_atm": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Atmospheric reference height (Oleson CLMU p. 149) — assigned to z_prime_atm_val (default 30 m). Exposed as a state output so a coupled CLMU build can wire it to the surface-layer routine via observed-equation forwarding"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "R_vis_raw",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "a_0",
+                            {"op": "*", "args": ["a_1", {"op": "*", "args": ["alpha_vis", "S_atm"]}]},
+                            {"op": "*", "args": [
+                                "a_2",
+                                {"op": "^", "args": [
+                                    {"op": "*", "args": ["alpha_vis", "S_atm"]},
+                                    2.0
+                                ]}
+                            ]},
+                            {"op": "*", "args": [
+                                "a_3",
+                                {"op": "^", "args": [
+                                    {"op": "*", "args": ["alpha_vis", "S_atm"]},
+                                    3.0
+                                ]}
+                            ]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_nir_raw",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "b_0",
+                            {"op": "*", "args": [
+                                "b_1",
+                                {"op": "*", "args": [
+                                    {"op": "-", "args": ["one_dimless", "alpha_vis"]},
+                                    "S_atm"
+                                ]}
+                            ]},
+                            {"op": "*", "args": [
+                                "b_2",
+                                {"op": "^", "args": [
+                                    {"op": "*", "args": [
+                                        {"op": "-", "args": ["one_dimless", "alpha_vis"]},
+                                        "S_atm"
+                                    ]},
+                                    2.0
+                                ]}
+                            ]},
+                            {"op": "*", "args": [
+                                "b_3",
+                                {"op": "^", "args": [
+                                    {"op": "*", "args": [
+                                        {"op": "-", "args": ["one_dimless", "alpha_vis"]},
+                                        "S_atm"
+                                    ]},
+                                    3.0
+                                ]}
+                            ]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_vis",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "R_min",
+                            {"op": "min", "args": ["R_max", "R_vis_raw"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_nir",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "R_min",
+                            {"op": "min", "args": ["R_max", "R_nir_raw"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_atm_dir_vis",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "R_vis",
+                            {"op": "*", "args": ["alpha_vis", "S_atm"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_atm_dir_nir",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "R_nir",
+                            {"op": "*", "args": [
+                                {"op": "-", "args": ["one_dimless", "alpha_vis"]},
+                                "S_atm"
+                            ]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_atm_dif_vis",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {"op": "-", "args": ["one_dimless", "R_vis"]},
+                            {"op": "*", "args": ["alpha_vis", "S_atm"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "S_atm_dif_nir",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {"op": "-", "args": ["one_dimless", "R_nir"]},
+                            {"op": "*", "args": [
+                                {"op": "-", "args": ["one_dimless", "alpha_vis"]},
+                                "S_atm"
+                            ]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "e_atm",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["P_atm", "q_atm"]},
+                            {"op": "+", "args": [
+                                "epsilon_ratio",
+                                {"op": "*", "args": ["one_minus_epsilon", "q_atm"]}
+                            ]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_atm_down",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {"op": "+", "args": [
+                                "idso_base",
+                                {"op": "*", "args": [
+                                    "idso_coeff",
+                                    "e_atm",
+                                    {"op": "exp", "args": [
+                                        {"op": "/", "args": ["idso_T_ref", "T_atm"]}
+                                    ]}
+                                ]}
+                            ]},
+                            "sigma_SB",
+                            {"op": "^", "args": ["T_atm", 4.0]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "f_P_raw",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "f_P_slope",
+                            {"op": "-", "args": ["T_atm", "T_f"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "f_P",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "zero_dimless",
+                            {"op": "min", "args": ["one_dimless", "f_P_raw"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "q_rain",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["P_precip", "f_P"]
+                    }
+                },
+                {
+                    "lhs": "q_snow",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "P_precip",
+                            {"op": "-", "args": ["one_dimless", "f_P"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "u_atm",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["sqrt2_inv", "W_atm"]
+                    }
+                },
+                {
+                    "lhs": "v_atm",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["sqrt2_inv", "W_atm"]
+                    }
+                },
+                {
+                    "lhs": "theta_atm",
+                    "rhs": "T_atm"
+                },
+                {
+                    "lhs": "z_prime_atm",
+                    "rhs": "z_prime_atm_val"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_canonical_polynomial_R_vis_R_nir",
+                    "description": "Reproduces upstream `Eq. 6.7-6.8 - Direct Fraction Polynomials` test (UrbanCanopy.jl test/offline_mode_test.jl: alpha_vis=0.5, S_atm=500 → vis_flux = nir_flux = 250 W/m^2). At these inputs neither polynomial saturates the [0.01, 0.99] clamp, so R_vis = R_vis_raw and R_nir = R_nir_raw exactly. Expected R_vis = 0.17639 + 0.0038*250 + (-9.0039e-6)*250^2 + 8.1351e-9*250^3 = 0.6907571875 (a clear-sky moderate-direct-fraction regime). Expected R_nir = 0.29548 + 0.00504*250 + (-1.4957e-5)*250^2 + 1.4881e-8*250^3 = 0.853183125 (NIR is more strongly direct because the b_* polynomial has a larger linear term and the same flux input). rtol = 1.0e-10 matches the upstream test fixture; tighter than the model-default 1e-9 because the polynomial only involves multiplication, addition, and integer powers at ULP precision.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "R_vis_raw", "time": 0.0, "expected": 0.6907571875, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_nir_raw", "time": 0.0, "expected": 0.853183125, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_vis", "time": 0.0, "expected": 0.6907571875, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_nir", "time": 0.0, "expected": 0.853183125, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "solar_partition_energy_conservation",
+                    "description": "Reproduces upstream `Eqs. 6.2-6.5 - Solar Radiation Partitioning` test (UrbanCanopy.jl test/offline_mode_test.jl, S_atm = 800 fixture). Anchors the four-way solar partition at S_atm = 800 W/m^2: vis_flux = 400, nir_flux = 400. Pins the canonical values: R_vis(400) = 0.17639 + 0.0038*400 + (-9.0039e-6)*400^2 + 8.1351e-9*400^3 = 0.7764124; dir_vis = 0.7764124 * 400 = 310.56496; dif_vis = (1 - 0.7764124) * 400 = 89.43504. R_nir(400) = 0.29548 + 0.00504*400 + (-1.4957e-5)*400^2 + 1.4881e-8*400^3 = 0.870744; dir_nir = 0.870744 * 400 = 348.2976; dif_nir = (1 - 0.870744) * 400 = 51.7024. Within the visible band, dir_vis + dif_vis = alpha_vis * S_atm = 400 exactly; within NIR, dir_nir + dif_nir = (1 - alpha_vis) * S_atm = 400 exactly. The total energy conservation S_atm_dir_vis + S_atm_dir_nir + S_atm_dif_vis + S_atm_dif_nir = 800 follows from `(R + (1-R)) * flux = flux` at IEEE-754 precision.",
+                    "parameter_overrides": {
+                        "S_atm": 800.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "R_vis", "time": 0.0, "expected": 0.7764124, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_nir", "time": 0.0, "expected": 0.870744, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "S_atm_dir_vis", "time": 0.0, "expected": 310.56496, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "S_atm_dif_vis", "time": 0.0, "expected": 89.43504, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "S_atm_dir_nir", "time": 0.0, "expected": 348.2976, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "S_atm_dif_nir", "time": 0.0, "expected": 51.7024, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "zero_solar_radiation",
+                    "description": "Reproduces upstream `Eqs. 6.2-6.5 - Zero Solar Radiation` test. At S_atm = 0, vis_flux = nir_flux = 0, so all four solar-partition components are exactly 0. R_vis_raw collapses to a_0 = 0.17639 (the y-intercept of the visible polynomial); R_nir_raw collapses to b_0 = 0.29548 (the NIR y-intercept). Both are inside [0.01, 0.99] so R_vis = a_0 and R_nir = b_0. Verifies (a) the multiplication-by-zero structure of Eqs. 6.2-6.5, (b) the y-intercept of the polynomials matches the upstream `@constants` defaults, and (c) the clamp passes through values already inside the bounds. abs: 1e-12 on the four exact-zero outputs prevents a stuck-at-1e-3 regression silently passing.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "R_vis_raw", "time": 0.0, "expected": 0.17639, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_nir_raw", "time": 0.0, "expected": 0.29548, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_vis", "time": 0.0, "expected": 0.17639, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "R_nir", "time": 0.0, "expected": 0.29548, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "S_atm_dir_vis", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_atm_dir_nir", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_atm_dif_vis", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_atm_dif_nir", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "direct_fraction_high_S_clamping",
+                    "description": "Exercises the [R_min, R_max] clamp on R_vis_raw at extreme S_atm. At S_atm = 2000 (visible band: 1000 W/m^2), R_vis_raw = 0.17639 + 0.0038*1000 + (-9.0039e-6)*1000^2 + 8.1351e-9*1000^3 = 0.17639 + 3.8 - 9.0039 + 8.1351 = 3.10759. This exceeds R_max = 0.99, so R_vis clamps to 0.99 exactly. R_nir at NIR_flux = 1000 evaluates to a similarly out-of-bounds value (b_3 has positive sign, and the cubic dominates), also clamping to 0.99. Anchors that the upper clamp activates; the upstream test `Eq. 6.7-6.8 - Direct Fraction Clamping` checks the same regime at S_atm = 2000 (asserting 0.01 ≤ R ≤ 0.99 without pinning the raw value).",
+                    "parameter_overrides": {
+                        "S_atm": 2000.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "R_vis_raw", "time": 0.0, "expected": 3.10759, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "R_vis", "time": 0.0, "expected": 0.99, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "R_nir", "time": 0.0, "expected": 0.99, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "vapor_pressure_canonical",
+                    "description": "Reproduces upstream `Eq. 6.10 - Vapor Pressure` test. Canonical case at q_atm = 0.01, P_atm = 101325 Pa with epsilon_ratio = 0.018016/0.028966 = 0.6219705862045157 and one_minus_epsilon = 0.37802941379548427: e_atm = 101325 * 0.01 / (0.6219705862045157 + 0.37802941379548427 * 0.01) = 1013.25 / 0.6257508803424706 = 1619.2546136658295 Pa (about 16.2 hPa). Anchors the IEEE-754 result at the canonical fixture point so any drift in the epsilon constants or the formula structure is caught.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "e_atm", "time": 0.0, "expected": 1619.2546136658295, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "dry_air_zero_vapor_pressure",
+                    "description": "Boundary case from upstream `Eq. 6.10 - Vapor Pressure` test: q_atm = 0 → e_atm = P_atm * 0 / (epsilon_ratio + 0) = 0 / epsilon_ratio = 0 exactly. Verifies the numerator-zero short-circuit (no division-by-zero exposure since epsilon_ratio ≠ 0). Without water vapor in the atmosphere there is also no Idso moisture-amplification, so the longwave equation reduces to L_atm_down = idso_base * sigma_SB * T_atm^4 = 0.7 * 5.67e-8 * 293.15^4 ≈ 293.12 W/m^2 (verified separately by an assertion). Anchors both the exact-zero limit of Eq. 6.10 and the dry-air contribution of Eq. 6.9.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.0,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "e_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "L_atm_down", "time": 0.0, "expected": 293.11678800972106, "tolerance": {"rel": 1.0e-8}}
+                    ]
+                },
+                {
+                    "id": "longwave_canonical_idso_formula",
+                    "description": "Reproduces upstream `Eq. 6.9 - Longwave Radiation` test. At the canonical fixture (S_atm = 500, T_atm = 293.15, P_atm = 101325, q_atm = 0.01, W_atm = 5, P_precip = 0): e_atm = 1619.2546136658295 (as above), exp(1500/293.15) = exp(5.1167...) ≈ 167.029..., bracketed factor = 0.7 + 5.95e-7 * 1619.2546136658295 * 167.029... = 0.7 + 0.160878... = 0.860878..., L_atm_down = 0.860878... * 5.67e-8 * 293.15^4 = 360.41254769304726 W/m^2. The upstream test uses rtol = 1e-8 because the `exp` transcendental contributes a few ULPs of roundoff on top of the polynomial; reproduced at the same tolerance here. Falls within the expected clear-sky downwelling longwave range for mid-latitude surface conditions at 20 °C (typically 300-400 W/m^2).",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_atm_down", "time": 0.0, "expected": 360.41254769304726, "tolerance": {"rel": 1.0e-8}}
+                    ]
+                },
+                {
+                    "id": "longwave_hot_surface_monotone_in_T",
+                    "description": "Reproduces the temperature-monotonicity check from upstream `Eq. 6.9 - Longwave Radiation`: at T_atm = 313.15 K (40 °C, holding all other inputs at the canonical values), L_atm_down = 444.8715726457007 W/m^2 — larger than the 360.4 value at T_atm = 293.15 K. The Stefan-Boltzmann T^4 dominates; the bracketed Idso emissivity is also slightly different at the new T because exp(1500/T) decreases (167 → 121) but the T^4 ratio (313/293)^4 ≈ 1.31 dominates. The 23 % increase in L_atm_down anchors the seasonal / urban-heat-island sensitivity of clear-sky downwelling longwave.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 313.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_atm_down", "time": 0.0, "expected": 444.8715726457007, "tolerance": {"rel": 1.0e-8}}
+                    ]
+                },
+                {
+                    "id": "longwave_moist_air_monotone_in_q",
+                    "description": "Reproduces the humidity-monotonicity check from upstream `Eq. 6.9 - Longwave Radiation`: at q_atm = 0.02 (double the canonical 0.01, holding T_atm = 293.15), e_atm increases from 1619.25 to (101325 * 0.02 / (0.6219... + 0.378... * 0.02)) ≈ 3225.18 Pa, and L_atm_down rises from 360.4 to 426.9000939751862 W/m^2. The ~18 % increase reflects the linear-in-e_atm moisture amplification of the bracketed Idso emissivity factor (clear-sky downwelling longwave is more sensitive to humidity in moist atmospheres because exp(1500/T) is constant for fixed T, so the moisture term grows linearly in e_atm).",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.02,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_atm_down", "time": 0.0, "expected": 426.9000939751862, "tolerance": {"rel": 1.0e-8}}
+                    ]
+                },
+                {
+                    "id": "precipitation_mass_conservation",
+                    "description": "Reproduces upstream `Eqs. 6.11-6.13 - Precipitation Partitioning` test. At T_atm = 274.15 K = T_f + 1, P_precip = 1e-3 kg/(m^2*s): f_P_raw = 0.5 * 1 = 0.5, f_P = clamp(0.5, 0, 1) = 0.5 exactly. q_rain = 1e-3 * 0.5 = 5e-4, q_snow = 1e-3 * (1 - 0.5) = 5e-4. Total mass conservation: q_rain + q_snow = 1e-3 = P_precip exactly. Anchors (a) the midpoint of the f_P ramp (50/50 rain/snow split at T_f + 1 K), (b) the multiplicative form of Eqs. 6.11-6.12, and (c) the mass-conservation identity that arises from the (f_P, 1 - f_P) partition structure.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 274.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "f_P_raw", "time": 0.0, "expected": 0.5, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "f_P", "time": 0.0, "expected": 0.5, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "q_rain", "time": 0.0, "expected": 5.0e-4, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "q_snow", "time": 0.0, "expected": 5.0e-4, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "precipitation_all_snow_well_below_freezing",
+                    "description": "Reproduces upstream `Eq. 6.13 - Rain Fraction Limiting Cases` cold limb. At T_atm = 263.15 K = T_f - 10 K: f_P_raw = 0.5 * (-10) = -5, f_P = clamp(-5, 0, 1) = 0 (lower clamp activates). q_rain = P_precip * 0 = 0 exactly, q_snow = P_precip * 1 = P_precip = 1e-3 exactly. Verifies (a) the lower clamp at f_P = 0, (b) the all-snow regime well below freezing, and (c) abs: 1e-12 on the exact-zero q_rain output.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 263.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "f_P_raw", "time": 0.0, "expected": -5.0, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "f_P", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q_snow", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "precipitation_at_freezing_boundary",
+                    "description": "Reproduces upstream `Eq. 6.13 - Rain Fraction Limiting Cases` freezing-point boundary. At T_atm = T_f = 273.15 K exactly: f_P_raw = 0.5 * 0 = 0, f_P = clamp(0, 0, 1) = 0 (the boundary itself sits at the lower clamp). All precipitation is snow: q_rain = 0, q_snow = P_precip = 1e-3. Anchors the convention that f_P = 0 at T = T_f exactly (not f_P = 0+ε from numerical noise) and that the transition starts strictly above T_f.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 273.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "f_P_raw", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "f_P", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q_snow", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "precipitation_all_rain_well_above_freezing",
+                    "description": "Reproduces upstream `Eq. 6.13 - Rain Fraction Limiting Cases` warm limb. At T_atm = 283.15 K = T_f + 10 K: f_P_raw = 0.5 * 10 = 5, f_P = clamp(5, 0, 1) = 1 (upper clamp activates). q_rain = P_precip * 1 = P_precip = 1e-3 exactly, q_snow = P_precip * 0 = 0 exactly. Verifies (a) the upper clamp at f_P = 1, (b) the all-rain regime well above freezing, and (c) abs: 1e-12 on the exact-zero q_snow.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 283.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "f_P_raw", "time": 0.0, "expected": 5.0, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "f_P", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "q_rain", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "q_snow", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "precipitation_transition_upper_clamp_just_active",
+                    "description": "Reproduces upstream `Eq. 6.13 - Rain Fraction Limiting Cases` at T_atm = T_f + 2 K = 275.15 K, the threshold above which f_P_raw exceeds 1 and the upper clamp activates. f_P_raw = 0.5 * 2 = 1.0 exactly (boundary value); f_P = clamp(1, 0, 1) = 1.0 (boundary is inclusive of the upper clamp limit). q_rain = P_precip * 1 = P_precip, q_snow = P_precip * 0 = 0. Brackets the warm side of the 2-K-wide transition zone (T_f to T_f + 2) where the rain fraction transitions from 0 to 1.",
+                    "parameter_overrides": {
+                        "S_atm": 0.0,
+                        "T_atm": 275.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "f_P_raw", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "f_P", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "zero_precipitation_no_rain_no_snow",
+                    "description": "Degenerate boundary: P_precip = 0 (default value) at any temperature. q_rain = 0 * f_P = 0 and q_snow = 0 * (1 - f_P) = 0 exactly, regardless of f_P. Pairs with the precipitation_mass_conservation test to anchor the all-radiation-only operating regime (no precipitation processing). abs: 1e-12 on the exact-zero outputs prevents a stuck-at-1e-3 regression silently passing.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q_snow", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "wind_decomposition_pythagorean",
+                    "description": "Reproduces upstream `Wind Decomposition and Derived Variables` test. At W_atm = 10 m/s: u_atm = v_atm = sqrt2_inv * 10 = 7.0710678118654755 m/s; u_atm^2 + v_atm^2 = 50 + 50 = 100 = W_atm^2 exactly. Verifies (a) the equal-split structure of the decomposition, (b) the Pythagorean identity that arises from sqrt2_inv being the IEEE-754 double of 1/√2, and (c) theta_atm = T_atm and z_prime_atm = z_prime_atm_val = 30 m (the trivial-but-required forwarding of T_atm and the reference height). The pythagorean exactness is anchored as a derived expectation in the comment but not asserted directly because the .esm test runner does not yet support cross-variable algebraic assertions; individual values cover the same algebraic constraint.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 300.0,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 10.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "u_atm", "time": 0.0, "expected": 7.0710678118654755, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "v_atm", "time": 0.0, "expected": 7.0710678118654755, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "theta_atm", "time": 0.0, "expected": 300.0, "tolerance": {"rel": 1.0e-12}},
+                        {"variable": "z_prime_atm", "time": 0.0, "expected": 30.0, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "calm_wind_zero_components",
+                    "description": "Degenerate boundary: W_atm = 0. u_atm = sqrt2_inv * 0 = 0 and v_atm = 0 exactly; u_atm^2 + v_atm^2 = 0 = W_atm^2. theta_atm = T_atm = 293.15 still (independent of wind); z_prime_atm = 30 m still (independent of wind). Pairs with wind_decomposition_pythagorean to anchor the trivial fixed point W_atm = 0 of the decomposition.",
+                    "parameter_overrides": {
+                        "S_atm": 500.0,
+                        "T_atm": 293.15,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 0.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "u_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "v_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "theta_atm", "time": 0.0, "expected": 293.15, "tolerance": {"rel": 1.0e-12}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "L_atm_down_vs_T_atm_idso_curve",
+                    "description": "Sweep T_atm from 240 K to 320 K (mid-latitude winter to summer extremes) at fixed q_atm = 0.01 to surface the Stefan-Boltzmann T^4 × Idso (1 + moisture * exp(-1500/T)) coupling. L_atm_down grows monotonically with T_atm — at cold T the dry-air term 0.7 * sigma_SB * T^4 dominates; at warm T the moisture-amplification term 5.95e-7 * e_atm * exp(1500/T) * sigma_SB * T^4 contributes more strongly (in absolute value, even though exp(1500/T) decreases, because the T^4 baseline grows faster). The curve is the foundation of the seasonal cycle of clear-sky urban downwelling longwave forcing in CLMU's offline driver.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "S_atm": 500.0,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.01,
+                        "W_atm": 5.0,
+                        "P_precip": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_atm",
+                                "range": {"start": 240.0, "stop": 320.0, "count": 41, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "L_atm_down_curve",
+                            "type": "line",
+                            "description": "L_atm_down vs T_atm: roughly T^4-shaped curve with an additional moisture-amplification contribution that scales with exp(1500/T) — visibly steeper than pure T^4 because the moisture term adds curvature at warm T.",
+                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
+                            "y": {"variable": "L_atm_down", "label": "L_atm_down (W/m^2)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "f_P_transition_zone",
+                    "description": "Sweep T_atm across the [T_f - 5, T_f + 5] = [268.15, 278.15] K range at fixed P_precip = 1e-3 kg/(m^2*s) to surface the rain/snow phase transition (Eq. 6.13). f_P transitions linearly from 0 to 1 over the 2 K window [T_f, T_f + 2] = [273.15, 275.15]; outside this window the clamps pin f_P at 0 (snow) or 1 (rain). q_rain and q_snow are the corresponding mass fluxes; their sum is identically P_precip across the sweep (mass conservation).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "S_atm": 0.0,
+                        "P_atm": 101325.0,
+                        "q_atm": 0.005,
+                        "W_atm": 3.0,
+                        "P_precip": 0.001
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_atm",
+                                "range": {"start": 268.15, "stop": 278.15, "count": 41, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_P_ramp",
+                            "type": "line",
+                            "description": "f_P vs T_atm: piecewise-linear ramp — 0 below T_f, linear from 0 to 1 across [T_f, T_f + 2], 1 above T_f + 2. The 2 K transition zone produces a smooth rain/snow handoff at the freezing point.",
+                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
+                            "y": {"variable": "f_P", "label": "f_P (dimensionless)"}
+                        },
+                        {
+                            "id": "q_rain_q_snow_partition",
+                            "type": "line",
+                            "description": "q_rain and q_snow vs T_atm: mirror-image curves crossing at T_f + 1 K (the 50/50 midpoint of the transition). q_rain + q_snow = P_precip at every T_atm.",
+                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
+                            "y": {"variable": "q_rain", "label": "q_rain (kg/(m^2*s))"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
