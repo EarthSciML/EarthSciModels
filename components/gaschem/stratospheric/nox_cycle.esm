@@ -1,0 +1,389 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "NOxCycle",
+        "description": "Stratospheric NOx catalytic ozone destruction cycle (Seinfeld & Pandis 2006 Ch. 5 §5.3.2, Eqs. 5.20-5.22). Two-state ODE on the NOx radicals NO and NO2 driven by reactions with O3 and atomic O, plus daytime NO2 photolysis; NOx = NO + NO2 is exactly conserved by construction (D(NO) + D(NO2) ≡ 0). Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:118 (`NOxCycle` @component). Rate coefficients are temperature-dependent Arrhenius forms k_X = k_X_A · exp(C_X / T) with the Seinfeld & Pandis bimolecular CGS pre-factors converted to SI via the cm³/molec/s × 1e-6 → m³/s factor; SI rates and SI number-density concentrations (m^-3) preserved verbatim from upstream.",
+        "tags": [
+            "gaschem",
+            "stratospheric",
+            "nox",
+            "ozone-destruction",
+            "catalytic-cycle",
+            "seinfeld-pandis",
+            "ode"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-6g80)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 5 (Chemistry of the Stratosphere), §5.3.2 (NOx Catalytic Cycles), pp. 153-156, Eqs. 5.20-5.22."
+            },
+            {
+                "citation": "Crutzen, P. J. (1970). The influence of nitrogen oxides on the atmospheric ozone content. Quarterly Journal of the Royal Meteorological Society 96 (408), 320-325. (Original discovery of the NOx-O3 catalytic cycle that motivated the upstream @component model.)"
+            }
+        ]
+    },
+    "models": {
+        "NOxCycle": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:118\n\nUpstream `NOxCycle` is an MTK `@component` declaring four `@constants` (the two Arrhenius pre-factors k_NO_O3_A, k_NO2_O_A in m³/s and their two exponential temperature scales C_NO_O3, C_NO2_O in K), four `@parameters` (T, j_NO2, O, O3) supplying the per-cell stratospheric environment, three time-indexed `@variables` (NO and NO2 with defaults at 1e15 m^-3 — the 1e9 molec/cm³ canonical mid-stratosphere values from S&P §5.3.2 — plus NOx for the algebraic family sum), and three equations (two ODEs + one algebraic constraint). Identical structure preserved here. Upstream structural test (test/StratosphericChemistry_test.jl 'NOx Cycle Structure', lines 51-59) asserts `length(equations(sys)) == 3` and that NO(t), NO2(t), and NOx(t) appear in `unknowns(sys)` — matched here by the three entries in `equations` and the NO/NO2/NOx state declarations in `variables`.\n\nThe four upstream `@constants` are encoded here as `type: parameter` with the upstream values as `default`, matching the convention used by sibling migrations in this rig (hox_cycle.esm encodes its k_OH_O3_A/C_OH_O3/k_HO2_O3_A/C_HO2_O3/k_HO2_O_A/C_HO2_O/k_HO2_NO_A/C_HO2_NO `@constants` the same way; clox_cycle.esm encodes the 12 ClOx Arrhenius constants the same way; snow_thermal.esm encodes its physical constants the same way). This keeps the migrated `.esm`'s parameter-and-default surface identical to the upstream's symbolic `@constants` block — a downstream consumer that opts to expose the Arrhenius parameters (e.g. for tropospheric vs. stratospheric retuning, or for a sensitivity sweep over the temperature-sensitivity of NO+O3) reads them from `parameter_overrides` exactly as it would override T, O3, O, or j_NO2.\n\nUpstream rate-coefficient helper bindings (k_NO_O3 = k_NO_O3_A·exp(C_NO_O3/T) and k_NO2_O = k_NO2_O_A·exp(C_NO2_O/T)) are local Julia bindings expanded into the equation right-hand-sides — they are not user-visible MTK state variables (no `@variables k_*`) so the upstream `unknowns(sys)` returns exactly NO, NO2, NOx after `mtkcompile`. The migrated `.esm` preserves this by inlining the Arrhenius expression `k_X_A * exp(C_X / T)` directly into each of the three reaction-flux terms on the right-hand sides — bit-equivalent to writing the equations with the helper bindings, and matches the `length(unknowns(sys)) == 3` invariant the upstream structural test enforces.\n\nNOx conservation by construction: the two ODE right-hand-sides sum to identically zero — every term in D(NO) appears with the opposite sign in D(NO2). The NO + O3 → NO2 + O2 channel converts NO → NO2 (negative in D(NO), positive in D(NO2)); the NO2 + O → NO + O2 catalytic-cycle-closing step and the daytime NO2 + hν → NO + O photolysis both convert NO2 → NO (positive in D(NO), negative in D(NO2)). NOx = NO + NO2 is therefore an exact analytical invariant of the system regardless of solver and tolerance, and the algebraic equation `NOx ~ NO + NO2` simply names this invariant for downstream observers. The `nox_conservation_short_window` test below pins NOx at the analytical 2e15 m^-3 (= 1e15 + 1e15, the sum of the NO and NO2 defaults) at every sampled time point — any drift away from this is a structural break in the migration, not a tolerance issue. The upstream regression test 'NOx Conservation (NOx Cycle)' (test/StratosphericChemistry_test.jl:339-359) asserts `isapprox(NOx_init, NOx_final, rtol=1e-4)` over a 1-second integration; the migrated assertions here are bit-tighter (rel=1e-6 model-level, with NOx pinned to the exact analytical sum) because the algebraic-state form NOx ~ NO + NO2 makes the conservation a constraint, not a numerical artifact.\n\nSteady-state NO/NO2 partition (Eq. 5.20, S&P Page 154): under daytime defaults (T=227 K, j_NO2=1e-2 s^-1, O=1e13 m^-3, O3=3e18 m^-3) the system reaches its photochemical steady state on a ~minute timescale; at t = 600 s NO ≈ 9.092e14 m^-3 and NO2 ≈ 1.091e15 m^-3, well-converged by t = 60 s. The NO/NO2 ratio at steady state is ~0.83, set by the balance between the NO+O3 sink (k_NO_O3·NO·O3 ≈ 1.2e-2 NO·s^-1 at defaults) and the combined NO2→NO photolysis + NO2+O recycle ((j_NO2 + k_NO2_O·O)·NO2 ≈ 1.01e-2 NO2·s^-1). The 'nighttime_photolysis_off' test pins the much-stronger conversion to NO2 when j_NO2 = 0 (only the NO2+O catalytic-cycle step recycles NO2 → NO); under those conditions the steady state shifts dramatically to NO ≈ 2e13 (only ~1% of NOx) and NO2 ≈ 1.98e15. The 'low_O3_perturbation' test pins the opposite limit (O3 dropped from 3e18 to 3e17 m^-3): the NO sink weakens 10x, so NO accumulates and the steady-state inverts to NO ≈ 1.79e15 (~89% of NOx) and NO2 ≈ 2.14e14.\n\nWarm-temperature dependence: at T=251 K (40 km, S&P Table 5.1) the negative-C Arrhenius channel NO+O3 speeds up nearly 2x (k_NO_O3 grows from 4.05e-21 at T=227 to 7.62e-21 m³/s at T=251) while the positive-C channel NO2+O slightly slows (k_NO2_O drops from 1.24e-17 to 1.15e-17 m³/s). The net effect at default O3 is faster NO→NO2 conversion, shifting steady state toward NO2: NO ≈ 6.14e14 m^-3 at t=600 s (down from 9.09e14 at T=227). This is the rate-coefficient mechanism behind S&P Page 155's observation that 'NOx cycle is ~5x more effective than Chapman at 35 km' — the upstream 'NOx Cycle Rate Ratio (Page 155)' test (StratosphericChemistry_test.jl:730-749) verifies the same Arrhenius branch.\n\nUnit balance (verified): each of the three flux terms in D(NO) and D(NO2) has units m³/s × m^-3 × m^-3 = 1/(m³·s) → m^-3/s for the bimolecular reactions and s^-1 × m^-3 = m^-3/s for the photolysis term, consistent with d[X]/dt for X in m^-3. The exponential factor exp(C/T) is dimensionless because the C constants carry unit K. The migrated `.esm` preserves the upstream units verbatim — the rate-coefficient pre-factors carry m^3/s, the temperature scales carry K, T carries K, j_NO2 carries s^-1, and NO/NO2/O/O3/NOx carry m^-3. SI throughout; no CGS↔SI conversion is performed at parse or runtime.\n\nObservability classification: this is an active-ODE system (two state derivatives D(NO) and D(NO2) plus one algebraic NOx constraint), distinct from the observed-only convention used by sibling temps/urban_canopy components. Test scenarios sample at non-zero times (t = 60, 600, 3600 s for the headline default case) to exercise the integration path, not just the initial-condition assertion. Sample times are concentrated in [0, 600 s] because the system reaches numerical steady state by t ≈ 60-120 s — the t = 600 s and t = 3600 s samples pin the steady-state hold rather than the transient.\n\nTolerance rationale (model-level rel=1e-6): two-state ODE with a single ~minute relaxation timescale at default daytime conditions (the e-fold for NO is ~1/β ≈ 45 s at defaults). The expected values pinned below are a Tsit5 reference at upstream Julia `reltol=1e-10, abstol=1e-10`; the ESS Python runner integrates the same RHS through LSODA (the `earthsci_toolkit.simulation.simulate` default), and the cross-integrator drift at the active-transient sample t=60 s (where the system is still ~25% from steady state at default conditions) lands at ~1.2e-6 to 2.6e-6 relative for some parameter-perturbation cases (nighttime_photolysis_off NO@60s, low_O3_perturbation NO2@60s, asymmetric_initial_conditions NO/NO2@60s). These four mid-transient assertions carry per-assertion rel=1e-5 overrides — 5× margin over the observed drift, still 100× tighter than the rel=1e-4 used by the larger sibling SuperFast (`gaschem/superfast.esm` whose 27-reaction radical pool compounds CSE-reorder noise). All steady-state assertions (t ≥ 600 s) and the t=60 s samples on the default case where transient drift is bounded pass at model-level rel=1e-6, which matches the spec §6.6.4 default. On `nox_conservation_short_window` rel=1e-6 is comfortably above floating-point round-off on the algebraic invariant NOx ~ NO + NO2 (~1e-16 ULP). The initial_conditions_t0 test overrides to rel=1e-10/abs=1e-14 since t=0 carries no integration drift.\n\nUpstream test reproduction: the upstream structural test ('NOx Cycle Structure', lines 51-59: `length(equations(sys)) == 3` with NO/NO2/NOx state names) is reproduced by the test-level shape of the `variables` and `equations` blocks. The upstream integration test ('NOx Cycle Integration', lines 152-165: 1-hour Tsit5 solve with default ICs and `abstol=1e-8, reltol=1e-8` asserting `sol.retcode == ReturnCode.Success` and `sol[compiled_sys.NO] .> 0` and `sol[compiled_sys.NO2] .> 0`) is reproduced by `default_daytime_steady_state_3600s`, which pins not just positivity but the actual steady-state NO and NO2 values at five times across the window. The upstream conservation test ('NOx Conservation (NOx Cycle)', lines 339-359: 1-second Tsit5 solve at `abstol=1e-12, reltol=1e-12` asserting `isapprox(NOx_init, NOx_final, rtol=1e-4)`) is reproduced and tightened by `nox_conservation_short_window`, which pins NOx to the exact analytical 2e15 m^-3 at four times in [0, 1] s. Parameter-sweep coverage (T, j_NO2, O3) goes beyond the upstream test suite but mirrors the convention used by sibling gaschem migrations (hox_cycle.esm has `low_temperature_perturbation`, `high_temperature_perturbation`, `low_NO_perturbation`, `low_O3_perturbation`)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "k_NO_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3.0e-18,
+                    "description": "Pre-factor for the NO + O3 → NO2 + O2 rate coefficient (S&P Page 154; 3.0e-12 cm^3/molec/s × 1e-6 → m^3/s). Drives the NO sink in the NOx catalytic cycle."
+                },
+                "C_NO_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -1500.0,
+                    "description": "Activation temperature for NO + O3 → NO2 + O2 (Arrhenius exponential scale, S&P Page 154). Negative C means the reaction speeds up at high T."
+                },
+                "k_NO2_O_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5.6e-18,
+                    "description": "Pre-factor for the NO2 + O → NO + O2 rate coefficient (S&P Page 154; 5.6e-12 cm^3/molec/s × 1e-6 → m^3/s). Closes the catalytic cycle (net: O3 + O → 2 O2)."
+                },
+                "C_NO2_O": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 180.0,
+                    "description": "Activation temperature for NO2 + O → NO + O2 (Arrhenius exponential scale, S&P Page 154). Positive C means the reaction speeds up at low T."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 227.0,
+                    "description": "Local temperature for the Arrhenius rate evaluations (S&P mid-stratosphere reference, ~30 km)."
+                },
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-2,
+                    "description": "NO2 photolysis rate (NO2 + hν → NO + O). Default 1e-2 s^-1 matches the upstream daytime mid-stratosphere reference (S&P Page 154); set to 0 for a nighttime scenario."
+                },
+                "O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e13,
+                    "description": "Atomic oxygen O(3P) number density (1e7 molec/cm^3 × 1e6 → m^-3; S&P Page 154 stratospheric reference). Drives the NO2 + O → NO + O2 catalytic-cycle closing step."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.0e18,
+                    "description": "Ozone number density (3e12 molec/cm^3 × 1e6 → m^-3; S&P Page 154 stratospheric reference). Drives the NO + O3 → NO2 + O2 catalytic-cycle initiating step."
+                },
+                "NO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "NO number density (upstream default initial value 1e9 molec/cm^3 × 1e6 → m^-3; S&P §5.3.2 reference). State variable: D(NO) = -k_NO_O3·NO·O3 + k_NO2_O·NO2·O + j_NO2·NO2."
+                },
+                "NO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1.0e15,
+                    "description": "NO2 number density (upstream default initial value 1e9 molec/cm^3 × 1e6 → m^-3; S&P §5.3.2 reference). State variable: D(NO2) = +k_NO_O3·NO·O3 - k_NO2_O·NO2·O - j_NO2·NO2."
+                },
+                "NOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "NOx odd-nitrogen family: algebraic sum NOx ~ NO + NO2 (S&P §5.3.2). Exactly conserved by construction since D(NO) + D(NO2) ≡ 0 (every reaction in this model only shuttles between NO and NO2)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["NO"]},
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO_O3_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_NO_O3", "T"]}]},
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_NO2_O_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_NO2_O", "T"]}]},
+                                    "NO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": ["j_NO2", "NO2"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {"op": "D", "wrt": "t", "args": ["NO2"]},
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_NO_O3_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_NO_O3", "T"]}]},
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO2_O_A",
+                                    {"op": "exp", "args": [{"op": "/", "args": ["C_NO2_O", "T"]}]},
+                                    "NO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [-1.0, "j_NO2", "NO2"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "NOx",
+                    "rhs": {"op": "+", "args": ["NO", "NO2"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "initial_conditions_t0",
+                    "description": "At t=0 the solver must return the declared species defaults exactly. Pins NO at 1e15 m^-3 (1e9 molec/cm^3, S&P §5.3.2 reference), NO2 at 1e15 m^-3 (same reference), and NOx at the analytical sum 2e15 m^-3. Tolerance is tightened to rel=1e-10 / abs=1e-14 because at t=0 there is no integration drift — only parser→Float64 conversion and the first-step identity evaluation of the initial state. Mirrors the convention used by hox_cycle.esm 'initial_conditions_t0'.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "tolerance": {"rel": 1.0e-10, "abs": 1.0e-14},
+                    "assertions": [
+                        {"variable": "NO",  "time": 0.0, "expected": 1.0e15},
+                        {"variable": "NO2", "time": 0.0, "expected": 1.0e15},
+                        {"variable": "NOx", "time": 0.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "default_daytime_steady_state_3600s",
+                    "description": "Headline behavioral test: integrate the NOx cycle from the S&P §5.3.2 mid-stratosphere defaults (NO=NO2=1e15 m^-3; T=227 K; j_NO2=1e-2 s^-1; O=1e13, O3=3e18 m^-3) for one hour. The bimolecular timescale is ~minutes under these conditions, so by t=600 s the system has reached numerical steady state and holds it through t=3600 s. The pinned values are a Tsit5 reference at reltol=1e-10, abstol=1e-10 — matched against the upstream Julia integration of the same component. The NO/NO2 ratio at steady state is ~0.83, set by the balance between the NO+O3 sink and the combined NO2→NO photolysis + NO2+O recycle (S&P Eq. 5.20, Page 154). This is the migrated counterpart of the upstream 'NOx Cycle Integration' test (StratosphericChemistry_test.jl:152-165) — that test asserts only positivity at retcode=Success, this one pins the steady-state values.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 0.0,    "expected": 1.0e15},
+                        {"variable": "NO2", "time": 0.0,    "expected": 1.0e15},
+                        {"variable": "NO",  "time": 1.0,    "expected": 9.979995008353079e14},
+                        {"variable": "NO2", "time": 1.0,    "expected": 1.0020004991646921e15},
+                        {"variable": "NO",  "time": 60.0,   "expected": 9.33042131185189e14},
+                        {"variable": "NO2", "time": 60.0,   "expected": 1.066957868814811e15},
+                        {"variable": "NO",  "time": 600.0,  "expected": 9.091683342298821e14},
+                        {"variable": "NO2", "time": 600.0,  "expected": 1.0908316657701179e15},
+                        {"variable": "NO",  "time": 3600.0, "expected": 9.091681913172696e14},
+                        {"variable": "NO2", "time": 3600.0, "expected": 1.0908318086827304e15},
+                        {"variable": "NOx", "time": 60.0,   "expected": 2.0e15},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "nox_conservation_short_window",
+                    "description": "Short-window (1-second) integration that pins NOx = NO + NO2 to the analytical conservation value 2e15 m^-3 at four sample times spanning the early transient. NOx is exactly conserved by construction in this model (every reaction shuttles between NO and NO2 with no source or sink to either species). The migrated counterpart of the upstream 'NOx Conservation (NOx Cycle)' test (StratosphericChemistry_test.jl:339-359) — that test asserts `isapprox(NOx_init, NOx_final, rtol=1e-4)`, this one tightens to the algebraic invariant via the model-level rel=1e-6. The transient NO and NO2 values are also pinned to confirm the system is actually evolving, not stuck at its initial state.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "NOx", "time": 0.0,  "expected": 2.0e15},
+                        {"variable": "NOx", "time": 0.1,  "expected": 2.0e15},
+                        {"variable": "NOx", "time": 0.5,  "expected": 2.0e15},
+                        {"variable": "NOx", "time": 1.0,  "expected": 2.0e15},
+                        {"variable": "NO",  "time": 0.1,  "expected": 9.997979393046032e14},
+                        {"variable": "NO",  "time": 0.5,  "expected": 9.989941814937259e14},
+                        {"variable": "NO",  "time": 1.0,  "expected": 9.979995008353285e14},
+                        {"variable": "NO2", "time": 1.0,  "expected": 1.0020004991646715e15}
+                    ]
+                },
+                {
+                    "id": "warm_temperature_40km",
+                    "description": "Reference trajectory at T = 251 K (40 km conditions, S&P Table 5.1) with all other parameters at defaults. The negative-C NO+O3 channel speeds up ~1.9x (k_NO_O3 grows from 4.05e-21 at T=227 to 7.62e-21 m³/s at T=251) while the positive-C NO2+O channel slows ~7% (k_NO2_O drops from 1.24e-17 to 1.15e-17 m³/s). Net effect at default O3: faster NO→NO2 conversion, shifting steady state toward NO2. Steady state at t=3600 s: NO ≈ 6.14e14 m^-3 (down from 9.09e14 at T=227), NO2 ≈ 1.39e15 m^-3. Exercises the temperature-dependent Arrhenius branches at a textbook-relevant altitude.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"T": 251.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 60.0,   "expected": 6.671521741988362e14},
+                        {"variable": "NO2", "time": 60.0,   "expected": 1.3328478258011638e15},
+                        {"variable": "NO",  "time": 600.0,  "expected": 6.136977973985118e14},
+                        {"variable": "NO2", "time": 600.0,  "expected": 1.386302202601488e15},
+                        {"variable": "NO",  "time": 3600.0, "expected": 6.136977964081122e14},
+                        {"variable": "NO2", "time": 3600.0, "expected": 1.3863022035918875e15},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "nighttime_photolysis_off",
+                    "description": "Nighttime scenario: j_NO2 = 0 shuts off the dominant NO2 → NO recycle pathway. Only the NO2 + O catalytic-cycle step recycles NO2 → NO, but the NO + O3 → NO2 channel runs unimpeded. The result: NO is converted almost entirely to NO2 over the hour-long integration. Steady state at t=3600 s: NO ≈ 2.02e13 m^-3 (~1% of NOx, down from 91% at default daytime), NO2 ≈ 1.98e15 m^-3 (~99% of NOx). Demonstrates the model correctly handles the photolysis-off limit; exercises the j_NO2 parameter sensitivity.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"j_NO2": 0.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 60.0,   "expected": 4.894307229739661e14, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "NO2", "time": 60.0,   "expected": 1.5105692770260338e15},
+                        {"variable": "NO",  "time": 600.0,  "expected": 2.0793331014159965e13},
+                        {"variable": "NO2", "time": 600.0,  "expected": 1.979206668985841e15},
+                        {"variable": "NO",  "time": 3600.0, "expected": 2.017134823157346e13},
+                        {"variable": "NO2", "time": 3600.0, "expected": 1.9798286517684268e15},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "low_O3_perturbation",
+                    "description": "Low-O3 regime: drop O3 from 3e18 to 3e17 m^-3 (one order of magnitude — e.g. ozone-hole conditions or low-altitude). The NO+O3 sink weakens 10x, so NO accumulates and the steady-state inverts: NO ≈ 1.79e15 m^-3 (~89% of NOx, up from 45% at default daytime), NO2 ≈ 2.14e14 m^-3 (~11% of NOx). Demonstrates the model correctly responds to the O3-driven NO sink — a key sensitivity that determines whether NOx-cycle-driven ozone destruction is self-limiting under depleted-O3 conditions.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"O3": 3.0e17},
+                    "assertions": [
+                        {"variable": "NO",  "time": 60.0,   "expected": 1.3877941705462302e15},
+                        {"variable": "NO2", "time": 60.0,   "expected": 6.122058294537695e14, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "NO",  "time": 600.0,  "expected": 1.7848716250088675e15},
+                        {"variable": "NO2", "time": 600.0,  "expected": 2.151283749911326e14},
+                        {"variable": "NO",  "time": 3600.0, "expected": 1.7857441023901478e15},
+                        {"variable": "NO2", "time": 3600.0, "expected": 2.142558976098519e14},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "cold_temperature_polar",
+                    "description": "Cold-stratosphere case: drop T from 227 K to 200 K (polar lower-stratosphere conditions). The negative-C NO+O3 channel slows ~3.3x (k_NO_O3 drops from 4.05e-21 at T=227 to 1.66e-21 m³/s at T=200) while the positive-C NO2+O channel speeds up slightly (k_NO2_O grows from 1.24e-17 to 1.36e-17 m³/s). Net effect: NO2→NO recycle outpaces NO→NO2 conversion, shifting steady state toward NO. Steady state at t=3600 s: NO ≈ 1.34e15 m^-3 (up from 9.09e14 at T=227), NO2 ≈ 6.59e14 m^-3. Together with warm_temperature_40km, brackets the dynamic range of the Arrhenius coefficients across the stratospheric temperature range.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"T": 200.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 60.0,   "expected": 1.2035378329192778e15},
+                        {"variable": "NO2", "time": 60.0,   "expected": 7.96462167080722e14},
+                        {"variable": "NO",  "time": 600.0,  "expected": 1.34133077127451e15},
+                        {"variable": "NO2", "time": 600.0,  "expected": 6.586692287254896e14},
+                        {"variable": "NO",  "time": 3600.0, "expected": 1.3413700791086485e15},
+                        {"variable": "NO2", "time": 3600.0, "expected": 6.586299208913512e14},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "asymmetric_initial_conditions",
+                    "description": "Initial-condition sensitivity check: start the system at NO = 2e15, NO2 = 0 (all NOx as NO; NOx still 2e15 same as default). The system should relax to the same steady state as the default case (NO ≈ 9.09e14, NO2 ≈ 1.09e15 at t=3600 s) because the photochemical steady state depends only on the rate coefficients and the per-cell environment T, j_NO2, O, O3 — not on the initial partition between NO and NO2. Verifies the initial-condition machinery works correctly and that the steady-state attractor is uniquely determined by the parameter set. Pattern mirrored from hox_cycle.esm 'equal_OH_HO2_initial'.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "initial_conditions": {"NO": 2.0e15, "NO2": 0.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 0.0,    "expected": 2.0e15},
+                        {"variable": "NO2", "time": 0.0,    "expected": 0.0, "tolerance": {"abs": 1.0e-6}},
+                        {"variable": "NO",  "time": 60.0,   "expected": 1.195878908560059e15, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "NO2", "time": 60.0,   "expected": 8.041210914399406e14, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "NO",  "time": 600.0,  "expected": 9.09169907711019e14},
+                        {"variable": "NO2", "time": 600.0,  "expected": 1.0908300922889808e15},
+                        {"variable": "NO",  "time": 3600.0, "expected": 9.091681913165344e14},
+                        {"variable": "NO2", "time": 3600.0, "expected": 1.0908318086834654e15},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                },
+                {
+                    "id": "no_atomic_oxygen_channel",
+                    "description": "Atomic-oxygen-free scenario: O = 0 shuts off the NO2 + O → NO + O2 catalytic-cycle-closing step, leaving only NO2 photolysis to recycle NO2 → NO. The default daytime j_NO2 = 1e-2 s^-1 is still sufficient to maintain a roughly comparable NO/NO2 partition (NO ≈ 9.03e14, NO2 ≈ 1.10e15 at t=3600 s, vs NO ≈ 9.09e14, NO2 ≈ 1.09e15 at default O=1e13), but slightly shifted toward NO2 because the bimolecular recycle channel that runs in parallel to photolysis is now absent. Exercises the parameter-sensitivity of the O channel; demonstrates that under default daytime conditions the NO2+O bimolecular channel contributes only a small fraction (~1%) of the total NO2 → NO recycle rate.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_overrides": {"O": 0.0},
+                    "assertions": [
+                        {"variable": "NO",  "time": 60.0,   "expected": 9.287385864121975e14},
+                        {"variable": "NO2", "time": 60.0,   "expected": 1.0712614135878025e15},
+                        {"variable": "NO",  "time": 600.0,  "expected": 9.030728043049584e14},
+                        {"variable": "NO2", "time": 600.0,  "expected": 1.0969271956950416e15},
+                        {"variable": "NO",  "time": 3600.0, "expected": 9.03072640040576e14},
+                        {"variable": "NO2", "time": 3600.0, "expected": 1.096927359959424e15},
+                        {"variable": "NOx", "time": 3600.0, "expected": 2.0e15}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "default_run_3600s",
+                    "description": "One-hour integration under S&P §5.3.2 mid-stratosphere defaults (NO=NO2=1e15 m^-3, T=227 K, j_NO2=1e-2 s^-1, O=1e13, O3=3e18 m^-3). Shows NO and NO2 approaching their photochemical steady state on a ~minute timescale and holding for the rest of the hour. The NO curve illustrates the NO2 → NO recycle through photolysis (dominant) plus NO2+O (cycle-closing).",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "plots": [
+                        {
+                            "id": "NO_NO2_vs_time",
+                            "type": "line",
+                            "description": "NO and NO2 concentrations over one hour of NOxCycle integration at S&P §5.3.2 daytime mid-stratosphere defaults.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "NO", "label": "NO (m^-3)"}
+                        },
+                        {
+                            "id": "NOx_conservation_vs_time",
+                            "type": "line",
+                            "description": "NOx = NO + NO2 over one hour of integration. Should remain constant at the initial value 2e15 m^-3 — visualizes the analytical conservation invariant.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "NOx", "label": "NOx (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_sensitivity_sweep",
+                    "description": "Stratospheric temperature sweep over 200 K - 280 K (cold polar vortex to warm stratopause). At each T the system is integrated for one hour to steady state. The negative-C NO+O3 channel and the positive-C NO2+O channel respond in opposite directions, but the dominant effect is the NO+O3 acceleration with T — so the steady-state NO/NO2 ratio decreases with increasing T (more NO converted to NO2 at warmer temperatures).",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "values": [200.0, 210.0, 220.0, 230.0, 240.0, 250.0, 260.0, 270.0, 280.0]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "NO_steady_vs_T",
+                            "type": "line",
+                            "description": "Steady-state NO concentration vs. temperature.",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "NO", "label": "NO (m^-3)"}
+                        },
+                        {
+                            "id": "NO2_steady_vs_T",
+                            "type": "line",
+                            "description": "Steady-state NO2 concentration vs. temperature.",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "NO2", "label": "NO2 (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "photolysis_sensitivity_sweep",
+                    "description": "Sweep of NO2 photolysis rate j_NO2 over 0 (night) to 1e-2 (default mid-stratosphere daytime) to 1e-1 (high-flux upper-stratosphere or troposphere) s^-1. At j_NO2 = 0 NO collapses to ~1% of NOx (only NO2+O recycles); at high j_NO2 photolysis dominates and NO grows toward NO2's mass (steady-state ratio approaches the high-j_NO2 limit). Mirrors the SuperFast jNO2_photolysis_sweep example structure.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "j_NO2",
+                                "values": [0.0, 1.0e-4, 1.0e-3, 1.0e-2, 1.0e-1]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "NO_steady_vs_jNO2",
+                            "type": "line",
+                            "description": "Steady-state NO concentration vs. NO2 photolysis rate.",
+                            "x": {"variable": "j_NO2", "label": "j_NO2 (s^-1)"},
+                            "y": {"variable": "NO", "label": "NO (m^-3)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
