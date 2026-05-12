@@ -1,0 +1,367 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TOARadiativeForcing",
+        "description": "Top-of-atmosphere (TOA) radiative-flux balance for a 0-D planetary climate model, following Seinfeld & Pandis (2006) Chapter 4 Eq. 4.11. Implements the net incoming flux F_net = S_0/4 · (1 - R_p) - F_L as a single algebraic relation between the absorbed shortwave flux F_S = S_0/4 · (1 - R_p) (Eq. 4.5, the spherical-projection factor of 1/4 accounts for the planet receiving solar flux over its cross-section πR² but emitting over its full surface 4πR²) and the outgoing longwave flux F_L (input parameter, typically supplied by the sibling PlanetaryEnergyBalance / StefanBoltzmann components in this domain). Sign convention: positive F_net means the planet is gaining energy (warming); negative F_net means losing energy (cooling). At default parameters (S_0=1370 W/m², R_p=0.3, F_L=239.75 W/m²) the planet is in exact radiative equilibrium (F_net = 0). Migrated from GasChem.jl@8c12c048 src/radiation_fundamentals.jl:327 (`TOARadiativeForcing` @component). Sibling component to PhotonEnergy (Eq. 4.1), BlackbodyRadiation (Eq. 4.2), WienDisplacement (Eq. 4.3), StefanBoltzmann (Eq. 4.4), PlanetaryEnergyBalance (Eqs. 4.5-4.7), ClimateSensitivity (Eqs. 4.8-4.10) — together they compose the upstream RadiationFundamentals (radiation_fundamentals.jl:367) system.",
+        "tags": [
+            "gaschem",
+            "radiation",
+            "climate",
+            "energy-balance",
+            "toa",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-pbbo)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 4 (Atmospheric Radiation and Photochemistry), §4.1 (Radiation), Eq. 4.11 (TOA energy balance, p. 102)."
+            }
+        ]
+    },
+    "models": {
+        "TOARadiativeForcing": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/radiation_fundamentals.jl:327\n\nUpstream `TOARadiativeForcing` is an MTK `@component` declaring three `@parameters` (S_0 = 1370.0 W/m² solar constant, R_p = 0.3 dimensionless planetary albedo, F_L = 239.75 W/m² emitted longwave flux input) and two time-indexed `@variables` (F_net W/m² net radiative flux at TOA, F_S W/m² absorbed solar flux), with two algebraic equations `F_S ~ S_0/4 * (1 - R_p)` and `F_net ~ F_S - F_L`. The component is observed-only — there are no derivatives, the `(t)` time index on the upstream `@variables` has no role since the system is a steady-state energy balance, not a temporal evolution. Identical structure preserved here. Upstream structural test (`Structural: TOARadiativeForcing system`, GasChem.jl test/radiation_fundamentals_test.jl:88-95) asserts `length(equations(toa)) == 2` and `length(unknowns(toa)) == 2` — matched here by the two entries in `equations` and the F_S/F_net state declarations in `variables`.\n\nUpstream sign convention (commit-preserved): the upstream docstring (radiation_fundamentals.jl:312-314) is explicit that Seinfeld & Pandis Eq. 4.11 is written as `-F_net = S_0/4·(1-R_p) - F_L` with the convention that `-F_net` represents *net downward flux* (i.e. positive `-F_net` means the planet absorbs more than it emits → warming). The upstream component defines `F_net` directly as net *incoming* flux (`F_net = F_S - F_L`), so positive `F_net` means warming and negative `F_net` means cooling — a sign flip from the textbook's convention but consistent with how net energy fluxes are usually reported in the climate literature (e.g. IPCC AR6 Chapter 7 Figure 7.6 reports the planetary energy imbalance as +0.79 W/m² for the 2006-2018 period, positive = warming). Preserved verbatim; the migrated `F_net` carries the same sign as the upstream output.\n\nGeometric factor of 1/4 in F_S (Eq. 4.5, S&P Page 99): the solar constant S_0 is the solar irradiance at the top of Earth's atmosphere measured perpendicular to the Sun-Earth line. A planet of radius R intercepts solar flux over its cross-section πR² but distributes the absorbed energy over its full surface area 4πR² (assuming the planet rotates fast enough to be well-mixed at the climate-equilibrium timescale). So the spherically-averaged TOA solar flux is S_0·πR² / 4πR² = S_0/4 — for Earth, 1370 W/m² / 4 = 342.5 W/m² before albedo reflection. The factor (1 - R_p) accounts for the fraction of incoming solar absorbed (1 - reflected). At defaults: F_S = 342.5 · 0.7 = 239.75 W/m², which is also the Stefan-Boltzmann outgoing longwave at T_e = 255 K (σT_e^4 = 5.671e-8 · 255^4 ≈ 239.75). Default parameters are therefore in exact radiative equilibrium by construction (F_net = 0).\n\nDefault-parameter physical context (S&P p. 101): the canonical Earth-radiative-balance defaults are S_0 = 1370 W/m² (solar constant, the IPCC TAR / Hansen et al. (2005) round value; modern accepted ~1361 W/m² per CODATA / TIM measurements), R_p = 0.3 (Bond albedo of Earth including clouds, S&P Page 101), F_L = 239.75 W/m² (the outgoing longwave that exactly balances F_S at the default parameters — derived from the Stefan-Boltzmann law at T_e = 255 K). These three values jointly anchor the planetary energy balance in a way that gives F_net = 0 — perturbing any one parameter produces a non-zero forcing. A consumer interested in climate-forcing scenarios overrides one or more parameters: e.g. doubling CO₂ raises F_L by ~4 W/m² holding the planet's surface state fixed, which gives F_net ≈ -4 W/m² as the instantaneous radiative forcing before the climate responds (S&P p. 105, IPCC AR6 §7.3.2).\n\nUnit balance (verified): S_0 carries W/m², R_p is dimensionless (the (1-R_p) factor preserves W/m²), the divisor 4 is dimensionless, so F_S = S_0/4·(1-R_p) carries W/m². F_L carries W/m², so F_net = F_S - F_L carries W/m². All five quantities (the three parameters and the two state variables) carry W/m² or are dimensionless. SI throughout; no CGS↔SI conversion is performed at parse or runtime.\n\nObservability classification: pure algebraic system — both state variables are given by a single algebraic equation in terms of the parameters and (in the case of F_net) an earlier-computed state. No derivatives, no integration. Test scenarios use `time_span: [0, 1]` and sample at t=0, mirroring the convention used by sibling observed-only ESM files (urban_radiation.esm uses t=0 sampling with arithmetic-only equations; combined/typical.esm and combined/urban.esm use t=0 sampling with identity-passthrough equations). The Stefan-Boltzmann sibling `gaschem/radiation/stefan_boltzmann.esm` and the PlanetaryEnergyBalance sibling are migrated separately under their own beads (esm-pkny is HOxCycle; the radiation beads are independent), each one a single-equation observed-only component matching this same pattern.\n\nTolerance rationale (model-level rel=1.0e-10): two-equation algebraic system with at most three arithmetic operations per equation (F_S: one subtraction `1 - R_p`, one division `S_0/4`, one multiplication; F_net: one subtraction `F_S - F_L`). No transcendental functions, no iterative solves, no ODE integration. Floating-point roundoff on a chain of three IEEE-754 operations is bounded by ~3 ULP ≈ 1e-15 at the magnitudes here, so rel=1.0e-10 leaves five orders of magnitude of headroom while remaining tighter than the model-level defaults in sibling files (heat_flux.esm uses 1e-9 for a single-equation Fourier-flux additive; surface_energy_flux.esm uses 1e-9 for additive flux balances; urban_radiation.esm uses 1e-8 for the canyon multi-reflection closed-form with much higher polynomial degree). Tighter `abs: 1.0e-12` is asserted on F_net outputs that are exactly zero by construction (default equilibrium case, the symmetric F_S = F_L scenario) so the assertion does not silently accept a stuck-at-nonzero regression.\n\nUpstream test reproduction: the upstream structural test (`Structural: TOARadiativeForcing system`, radiation_fundamentals_test.jl:88-95) asserts equation- and unknown-counts (2 and 2 respectively) — reproduced here by the shape of the `equations` and `variables` blocks. The upstream equation test (`Equation: TOARadiativeForcing (Eq. 4.11)`, lines 204-218) asserts F_net ≈ 0 at defaults (`atol = 1.0e-6`) and F_S ≈ 239.75 (`rtol = 1.0e-6`), plus F_net < 0 when F_L is increased to 250 — reproduced by `upstream_equation_eq411` and `upstream_increased_F_L_cooling`. The upstream steady-state test (`Steady-State: TOA net flux zero at equilibrium`, lines 241-250) asserts F_net ≈ 0 at defaults with `atol = 1.0e-6` — reproduced by `upstream_steady_state_net_zero` with a tighter `abs=1.0e-12` (no integration drift, pure arithmetic). Parameter-sweep coverage (R_p and S_0 sweeps, linear-response checks, CO₂-doubling forcing anchor) goes beyond the upstream test suite but mirrors the convention used by sibling gaschem migrations and the upstream `Qualitative: T_e increases with increasing solar constant` (radiation_fundamentals_test.jl:355-374) and `Qualitative: ΔT_e proportional to radiative forcing` (lines 376-396) tests which exercise the same parameters in the sibling PlanetaryEnergyBalance and ClimateSensitivity components."
+            },
+            "tolerance": {
+                "rel": 1.0e-10
+            },
+            "variables": {
+                "S_0": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 1370.0,
+                    "description": "Solar constant — the time-averaged solar irradiance at the top of Earth's atmosphere measured perpendicular to the Sun-Earth line (Seinfeld & Pandis 2006 Page 100, IPCC TAR canonical value). Modern accepted value from CODATA / TIM satellite measurements is ~1361 W/m²; the upstream uses the round 1370 W/m² for textbook consistency. Drives the absorbed solar flux F_S via the planetary-cross-section factor 1/4."
+                },
+                "R_p": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.3,
+                    "description": "Planetary albedo (dimensionless) — the fraction of incoming solar flux reflected back to space by clouds (~2/3), ice/snow, ocean, and land surfaces. Default 0.3 is Earth's Bond albedo including clouds (S&P Page 101). Removing clouds gives R_p ≈ 0.15 (T_e ≈ 268 K, S&P Page 102); the no-cloud / no-ice limit gives R_p ≈ 0.07 (just ocean / land surface reflection); the all-ice snowball-Earth limit gives R_p ≈ 0.6+ (T_e ≈ 220 K). The (1-R_p) factor in F_S is the fraction of incoming solar absorbed by the planet."
+                },
+                "F_L": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 239.75,
+                    "description": "Emitted longwave flux at TOA (W/m²) — the outgoing thermal radiation the planet emits, treated here as an input parameter. Default 239.75 W/m² is chosen to exactly balance F_S at the default solar constant and albedo (radiative equilibrium F_net = 0). In a coupled system, F_L would be computed by the sibling StefanBoltzmann component as σT_e^4 with T_e ≈ 255 K (5.671e-8 · 255^4 ≈ 239.75 W/m²). A consumer studying a forcing scenario can override F_L: e.g. doubling CO₂ raises F_L by ~4-5 W/m² instantaneously before the surface temperature responds (S&P Page 105 quotes 4.6 W/m² for CO₂ doubling), producing a transient negative F_net ≈ -4 W/m² that drives subsequent warming."
+                },
+                "F_net": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Net radiative flux at TOA (W/m²) — F_net = F_S - F_L. Positive: planet gaining energy (warming). Negative: planet losing energy (cooling). At Earth's default radiative-balance parameters F_net = 0 exactly. The IPCC AR6 estimate of the present-day Earth-system energy imbalance is +0.79 W/m² (2006-2018, Forster et al. 2021), consistent with ongoing greenhouse-driven warming."
+                },
+                "F_S": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Absorbed solar flux at TOA (W/m²) — F_S = S_0/4 · (1 - R_p). The factor 1/4 is the planetary geometric correction (planet intercepts solar flux over πR² but emits over 4πR²); the factor (1 - R_p) is the fraction of incoming solar absorbed (1 minus reflected). At Earth's defaults: F_S = 1370/4 · 0.7 = 239.75 W/m²."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_S",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            { "op": "/", "args": ["S_0", 4.0] },
+                            { "op": "-", "args": [1.0, "R_p"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_net",
+                    "rhs": { "op": "-", "args": ["F_S", "F_L"] }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_equation_eq411",
+                    "description": "Reproduces the upstream `Equation: TOARadiativeForcing (Eq. 4.11)` test (GasChem.jl test/radiation_fundamentals_test.jl:204-218). At equilibrium parameters (S_0=1370, R_p=0.3, F_L=239.75) Eq. 4.11 gives F_S = 1370/4 · 0.7 = 239.75 W/m² and F_net = F_S - F_L = 0.0 W/m² exactly. The upstream test asserts `atol = 1.0e-6` on F_net and `rtol = 1.0e-6` on F_S; tightened here to `abs=1.0e-12` on F_net (zero by construction at defaults — no integration drift, just arithmetic roundoff bounded by ~3 ULP) and rel=1.0e-10 on F_S.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 239.75 },
+                        { "variable": "F_net", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "upstream_steady_state_net_zero",
+                    "description": "Reproduces the upstream `Steady-State: TOA net flux zero at equilibrium` test (GasChem.jl test/radiation_fundamentals_test.jl:241-250). With the default emitted longwave flux F_L = 239.75 W/m² matching the absorbed solar flux F_S at the default S_0 and R_p, the net flux is identically zero. Upstream `atol = 1.0e-6`, tightened here to `abs=1.0e-12`. This is the radiative-equilibrium anchor that the three default parameters jointly construct.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_net", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "upstream_increased_F_L_cooling",
+                    "description": "Reproduces the upstream `Equation: TOARadiativeForcing (Eq. 4.11)` second-case assertion at radiation_fundamentals_test.jl:214-217. Increasing the emitted longwave flux to F_L = 250 W/m² (representing the planet emitting more LW than the absorbed solar) drives F_net negative — the planet is losing more energy than it absorbs, so it cools. F_S is unchanged at 239.75 W/m² (depends only on S_0 and R_p); F_net = 239.75 - 250 = -10.25 W/m². The upstream test only asserts `sol2[toa.F_net] < 0`; here we pin the exact value.",
+                    "parameter_overrides": { "F_L": 250.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 239.75 },
+                        { "variable": "F_net", "time": 0.0, "expected": -10.25 }
+                    ]
+                },
+                {
+                    "id": "decreased_F_L_warming",
+                    "description": "Opposite-direction sensitivity check: decreasing F_L below the equilibrium value (e.g. F_L = 230 W/m²) drives F_net positive — the planet is absorbing more solar than it emits, so it warms. F_S unchanged at 239.75; F_net = 239.75 - 230 = +9.75 W/m². Brackets `upstream_increased_F_L_cooling` from below to confirm the F_L sensitivity is linear and sign-symmetric about the equilibrium F_L = 239.75 anchor.",
+                    "parameter_overrides": { "F_L": 230.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 239.75 },
+                        { "variable": "F_net", "time": 0.0, "expected": 9.75 }
+                    ]
+                },
+                {
+                    "id": "co2_doubling_forcing_anchor",
+                    "description": "Reproduces the canonical CO₂-doubling instantaneous radiative forcing of +4.6 W/m² (S&P Page 105, IPCC AR6 §7.3.2 Table 7.SM.1) as an F_L perturbation. At baseline F_L = 239.75 the system is in radiative equilibrium; doubling CO₂ raises the effective outgoing-longwave-relevant absorption such that F_L drops by ~4.6 W/m² to F_L = 235.15 W/m² (the troposphere emits less LW to space at constant T because the new CO₂ layer absorbs and re-emits at a colder stratospheric temperature — net effect: less outgoing LW for the same surface T). Result: F_net = 239.75 - 235.15 = +4.6 W/m² instantaneous forcing, which drives subsequent warming until F_L is restored via T_e increase (the ClimateSensitivity sibling component computes that final temperature response). The sign here is positive because we frame CO₂ doubling as a *reduction* in outgoing LW; equivalently one could increase F_L by +4.6 to model a reverse-forcing (e.g. SO₂ aerosol cooling).",
+                    "parameter_overrides": { "F_L": 235.15 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 239.75 },
+                        { "variable": "F_net", "time": 0.0, "expected": 4.6, "tolerance": { "rel": 1.0e-10, "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "zero_albedo_max_F_S",
+                    "description": "Limiting case from the upstream `Limiting: Equilibrium temperature at extreme albedo` test (GasChem.jl test/radiation_fundamentals_test.jl:286-303) cast for the TOA component. At R_p = 0 (perfectly absorbing planet — black sphere limit), the absorbed solar flux reaches its maximum F_S = S_0/4 = 1370/4 = 342.5 W/m². Net flux F_net = 342.5 - 239.75 = +102.75 W/m² — planet absorbs 43% more than equilibrium and would have to warm significantly (T_e ≈ 280 K via Stefan-Boltzmann) to restore balance.",
+                    "parameter_overrides": { "R_p": 0.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 342.5 },
+                        { "variable": "F_net", "time": 0.0, "expected": 102.75 }
+                    ]
+                },
+                {
+                    "id": "high_albedo_minimum_F_S",
+                    "description": "Limiting case from the upstream `Limiting: Equilibrium temperature at extreme albedo` test second sub-case (radiation_fundamentals_test.jl:297-302). At R_p = 0.99 (near-perfect reflection — frozen-snowball-Earth limit), F_S = 1370/4 · 0.01 = 3.425 W/m² (only 1.4% of equilibrium absorption), F_net = 3.425 - 239.75 = -236.325 W/m² — planet emits 70x more than it absorbs and would have to cool dramatically (T_e ≈ 85 K) to balance. The pairing of zero_albedo_max_F_S and high_albedo_minimum_F_S brackets the full physical range of the albedo response.",
+                    "parameter_overrides": { "R_p": 0.99 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 3.425 },
+                        { "variable": "F_net", "time": 0.0, "expected": -236.325 }
+                    ]
+                },
+                {
+                    "id": "no_cloud_albedo_S_P_p102",
+                    "description": "Reproduces the S&P Page 102 sub-case of the upstream `Equation: PlanetaryEnergyBalance` test (radiation_fundamentals_test.jl:178-181) cast for the TOA component. Reducing the albedo to R_p = 0.15 (representing Earth without clouds — surface-only reflection from ocean, land, ice) gives F_S = 1370/4 · 0.85 = 291.125 W/m² and F_net = 291.125 - 239.75 = +51.375 W/m². The Stefan-Boltzmann equilibrium would give T_e ≈ 268 K (~13 K warmer than current Earth), bracketing the cloud-radiative-effect contribution to Earth's climate.",
+                    "parameter_overrides": { "R_p": 0.15 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 291.125 },
+                        { "variable": "F_net", "time": 0.0, "expected": 51.375 }
+                    ]
+                },
+                {
+                    "id": "low_solar_constant_glacial",
+                    "description": "Reproduces the lower end of the upstream `Qualitative: T_e increases with increasing solar constant` parameter sweep (radiation_fundamentals_test.jl:355-374, which exercises S_0 ∈ {1000, 1200, 1370, 1500, 1800} W/m² in the sibling PlanetaryEnergyBalance) cast for the TOA component. At S_0 = 1000 W/m² (representing a Pliocene-style or glacial-period reduction): F_S = 1000/4 · 0.7 = 175.0 W/m², F_net = 175.0 - 239.75 = -64.75 W/m². The planet would cool until T_e reduces to balance (Stefan-Boltzmann gives T_e ≈ 235 K), consistent with the long-term solar luminosity history (~30% lower in the Archean).",
+                    "parameter_overrides": { "S_0": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 175.0 },
+                        { "variable": "F_net", "time": 0.0, "expected": -64.75 }
+                    ]
+                },
+                {
+                    "id": "high_solar_constant_main_sequence",
+                    "description": "Reproduces the upper end of the upstream `Qualitative: T_e increases with increasing solar constant` sweep (radiation_fundamentals_test.jl:355-374). At S_0 = 1800 W/m² (representing a hypothetical late-main-sequence Sun ~30% brighter): F_S = 1800/4 · 0.7 = 315.0 W/m², F_net = 315.0 - 239.75 = +75.25 W/m². Pairs with low_solar_constant_glacial to cover the full upstream S_0 sweep range.",
+                    "parameter_overrides": { "S_0": 1800.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 315.0 },
+                        { "variable": "F_net", "time": 0.0, "expected": 75.25 }
+                    ]
+                },
+                {
+                    "id": "modern_solar_constant_anchor",
+                    "description": "Anchors against the modern CODATA / TIM satellite-measured solar constant S_0 = 1361 W/m² (lower than the textbook 1370 used at default). F_S = 1361/4 · 0.7 = 238.175 W/m²; F_net = 238.175 - 239.75 = -1.575 W/m². Shows the small ~0.7% drift between the textbook S_0 and the modern accepted value — a useful sensitivity benchmark for downstream consumers comparing the textbook climatology to satellite-era forcing studies.",
+                    "parameter_overrides": { "S_0": 1361.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 238.175 },
+                        { "variable": "F_net", "time": 0.0, "expected": -1.575 }
+                    ]
+                },
+                {
+                    "id": "linearity_S_0_response",
+                    "description": "Reproduces the upstream `Qualitative: ΔT_e proportional to radiative forcing` linearity check (radiation_fundamentals_test.jl:376-396) cast for the F_S response. F_S = S_0/4 · (1-R_p) is exactly linear in S_0 at fixed R_p — doubling S_0 doubles F_S. At R_p = 0.3 and S_0 = 2740 (= 2 · 1370): F_S = 2740/4 · 0.7 = 479.5 = 2 · 239.75 exactly. Anchors the linearity of the absorbed-solar response, mirroring the upstream linearity assertion `delta_Ts[2] / delta_Ts[1] ≈ 2.0` for the sibling ClimateSensitivity component.",
+                    "parameter_overrides": { "S_0": 2740.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 479.5 },
+                        { "variable": "F_net", "time": 0.0, "expected": 239.75 }
+                    ]
+                },
+                {
+                    "id": "linearity_one_minus_R_p_response",
+                    "description": "Linearity check for the albedo response: F_S = S_0/4 · (1-R_p) is exactly linear in (1-R_p) at fixed S_0. Halving (1-R_p) from 0.7 (R_p=0.3) to 0.35 (R_p=0.65) halves F_S from 239.75 to 119.875. Anchors the (1-R_p) coefficient explicitly so a regression that accidentally swapped the (1-R_p) sense (i.e. wrote `R_p` instead of `1-R_p`) would fail.",
+                    "parameter_overrides": { "R_p": 0.65 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 119.875 },
+                        { "variable": "F_net", "time": 0.0, "expected": -119.875 }
+                    ]
+                },
+                {
+                    "id": "geometric_factor_one_quarter_anchor",
+                    "description": "Anchors the geometric factor 1/4 in F_S = S_0/4 · (1-R_p) by setting R_p = 0 to remove the albedo term and reading off F_S = S_0/4 at the default S_0. F_S = 1370/4 = 342.5 W/m² exactly. The 1/4 factor is the spherical-projection correction (cross-section πR² / surface 4πR² = 1/4); a regression that accidentally dropped or doubled this factor would fail this assertion.",
+                    "parameter_overrides": { "R_p": 0.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S", "time": 0.0, "expected": 342.5 }
+                    ]
+                },
+                {
+                    "id": "all_parameters_overridden_consistency",
+                    "description": "Joint sensitivity / consistency check: override all three parameters simultaneously to a Venus-like regime (S_0 = 2643 W/m² Venus orbital irradiance, R_p = 0.77 Venus Bond albedo, F_L = 158 W/m² Venus TOA outgoing LW). Expected F_S = 2643/4 · 0.23 = 151.9725 W/m²; F_net = 151.9725 - 158 = -6.0275 W/m². Venus is in approximate radiative balance at TOA despite having a much larger greenhouse effect than Earth because most of its trapped energy is in the lower atmosphere; the small negative F_net here is well within observational uncertainty. Verifies that all three parameter dials act independently as expected — a regression where two parameters were accidentally coupled would not produce the right Venus number.",
+                    "parameter_overrides": {
+                        "S_0": 2643.0,
+                        "R_p": 0.77,
+                        "F_L": 158.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_S",   "time": 0.0, "expected": 151.9725 },
+                        { "variable": "F_net", "time": 0.0, "expected": -6.0275 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "albedo_sweep_at_default_solar",
+                    "description": "Reproduces Seinfeld & Pandis Page 102 Figure 4.4 (planetary equilibrium temperature vs albedo) cast for the TOA component: sweep R_p from 0 to 0.9 at the default S_0 = 1370 W/m² and F_L = 239.75 W/m². At R_p = 0 the planet absorbs maximum solar and F_net peaks at +102.75 W/m² (strong warming forcing); at R_p = 0.3 the planet is in radiative balance F_net = 0; above R_p = 0.3 the planet emits more than it absorbs and F_net goes negative (cooling). Two output curves: F_S (absorbed solar) linearly decreasing from 342.5 to 34.25; F_net (net flux) linearly decreasing from +102.75 to -205.5 — the same shape since F_net = F_S - F_L is just a vertical translation. Anchors the (1-R_p) linear-response character of F_S, the most numerically important sensitivity in this component.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": { "start": 0.0, "stop": 0.9, "count": 19, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_s_vs_albedo",
+                            "type": "line",
+                            "description": "Absorbed solar flux F_S vs planetary albedo R_p at the default solar constant — strictly linear y = S_0/4 · (1-R_p) declining from 342.5 W/m² (R_p=0) to 34.25 W/m² (R_p=0.9).",
+                            "x": { "variable": "R_p", "label": "Planetary albedo (dimensionless)" },
+                            "y": { "variable": "F_S", "label": "Absorbed solar flux F_S (W/m^2)" }
+                        },
+                        {
+                            "id": "f_net_vs_albedo",
+                            "type": "line",
+                            "description": "Net TOA flux F_net vs planetary albedo R_p — same linear shape as F_S, shifted down by F_L. Crosses zero at R_p = 0.3 (Earth's Bond albedo at radiative balance); positive above (warming) and negative below (cooling), bounding the cloud-radiative-effect range relevant to climate sensitivity studies.",
+                            "x": { "variable": "R_p",   "label": "Planetary albedo (dimensionless)" },
+                            "y": { "variable": "F_net", "label": "Net radiative flux F_net (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "solar_constant_sweep_at_default_albedo",
+                    "description": "Reproduces the upstream `Qualitative: T_e increases with increasing solar constant` sweep (radiation_fundamentals_test.jl:355-374) cast for the TOA component: sweep S_0 from 1000 to 1800 W/m² at the default R_p = 0.3 and F_L = 239.75 W/m². Covers the full glacial-to-bright-Sun range from the upstream test. F_S grows linearly from 175 W/m² to 315 W/m²; F_net grows from -64.75 to +75.25, crossing zero at S_0 = 1370 (the equilibrium-anchor solar constant). Useful for downstream consumers studying the deep-time solar evolution (Archean-Sun reduction ~25% relative to today; main-sequence brightening).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "S_0",
+                                "range": { "start": 1000.0, "stop": 1800.0, "count": 17, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_s_vs_solar_constant",
+                            "type": "line",
+                            "description": "Absorbed solar flux F_S vs solar constant S_0 — strictly linear y = S_0/4 · 0.7 from 175 W/m² (S_0=1000) to 315 W/m² (S_0=1800).",
+                            "x": { "variable": "S_0", "label": "Solar constant S_0 (W/m^2)" },
+                            "y": { "variable": "F_S", "label": "Absorbed solar flux F_S (W/m^2)" }
+                        },
+                        {
+                            "id": "f_net_vs_solar_constant",
+                            "type": "line",
+                            "description": "Net TOA flux F_net vs solar constant S_0 — same linear shape, vertically translated by F_L. Crosses zero at S_0 = 1370 W/m² (Earth's radiative-equilibrium anchor); positive above (warming) and negative below (cooling), capturing the full upstream sweep range and the textbook S&P p. 101 climatology.",
+                            "x": { "variable": "S_0",   "label": "Solar constant S_0 (W/m^2)" },
+                            "y": { "variable": "F_net", "label": "Net radiative flux F_net (W/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "joint_albedo_solar_constant_2d",
+                    "description": "Joint 2-D sweep of R_p and S_0 covering the Earth-like regime: R_p ∈ [0.1, 0.5] (snowless to ice-age) and S_0 ∈ [1200, 1500] W/m² (deep glacial to bright-Sun). At fixed F_L = 239.75 the F_net heatmap surfaces the equilibrium contour F_net = 0 as a diagonal in (R_p, S_0) space — high-albedo regimes need high solar to maintain balance; low-albedo regimes need low solar. Anchors the joint two-parameter sensitivity that any climate-feedback analysis would need to navigate (e.g. ice-albedo feedback couples R_p and the climate state).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": { "start": 0.1, "stop": 0.5, "count": 9, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "S_0",
+                                "range": { "start": 1200.0, "stop": 1500.0, "count": 7, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_net_2d_heatmap",
+                            "type": "heatmap",
+                            "description": "F_net heatmap over (R_p, S_0) at default F_L. The zero contour (radiative equilibrium) runs as a positive-slope diagonal from low-R_p / low-S_0 to high-R_p / high-S_0. Top-right (high S_0, high R_p) is near-balanced; top-left (high S_0, low R_p) is strongly warming; bottom-right (low S_0, high R_p) is strongly cooling. Anchors the Earth-like parameter regime visually.",
+                            "x": { "variable": "R_p",   "label": "Planetary albedo (dimensionless)" },
+                            "y": { "variable": "S_0",   "label": "Solar constant S_0 (W/m^2)" },
+                            "value": { "variable": "F_net", "reduce": "final" }
+                        }
+                    ]
+                },
+                {
+                    "id": "f_l_co2_doubling_forcing_sweep",
+                    "description": "Sweep the emitted longwave flux F_L across the canonical climate-forcing range of ±10 W/m² around the equilibrium F_L = 239.75 W/m². Covers the full physically-motivated range from a strong negative forcing (F_L = 230, akin to large aerosol cooling or a major volcanic eruption) through equilibrium (F_L = 239.75) to a strong positive-forcing-equivalent (F_L = 249.75, akin to a 2x CO₂ doubling). F_S is unchanged at 239.75 (independent of F_L); F_net traces a strictly-linear y = 239.75 - F_L from +9.75 to -10.0, crossing zero at F_L = 239.75. The IPCC AR6 doubled-CO₂ instantaneous forcing of +4-5 W/m² maps to the F_L ≈ 235 sub-range on this plot.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "F_L",
+                                "range": { "start": 229.75, "stop": 249.75, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_net_vs_f_l",
+                            "type": "line",
+                            "description": "Net TOA flux F_net vs outgoing longwave F_L — strictly linear y = 239.75 - F_L, declining from +10 (F_L=229.75) through 0 (F_L=239.75) to -10 (F_L=249.75). Reads off the instantaneous radiative forcing for any greenhouse-forcing scenario by setting F_L = 239.75 - ΔF.",
+                            "x": { "variable": "F_L",   "label": "Emitted longwave flux F_L (W/m^2)" },
+                            "y": { "variable": "F_net", "label": "Net radiative flux F_net (W/m^2)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
