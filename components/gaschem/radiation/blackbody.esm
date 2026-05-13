@@ -1,0 +1,634 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "BlackbodyRadiation",
+        "description": "Planck's blackbody radiation law (Seinfeld & Pandis 2006 Ch. 4, Eq. 4.2) — the monochromatic emissive power F_B_λ of a blackbody at temperature T as a function of wavelength λ via Planck's constant h, the speed of light c, and the Boltzmann constant k_B: F_B_λ = 2π·c²·h·λ⁻⁵ / (exp(c·h/(k_B·λ·T)) - 1). The component is observed-only: one algebraic equation on one state variable (F_B_λ the monochromatic emissive power per unit wavelength in W/m³) driven by two input parameters (T temperature in K, λ wavelength in m) and four constants (h Planck's constant, c speed of light, k_B Boltzmann constant, π_val mathematical π as a Float64 value). No time derivatives, no PDE, no coupling. Migrated from GasChem.jl@8c12c048 src/radiation_fundamentals.jl:73 (`BlackbodyRadiation` @component). The Planck function is the spectral energy density of thermal radiation from an opaque, non-reflective body in thermodynamic equilibrium — the foundational equation of quantum radiative transfer. Integrating F_B_λ over all wavelengths gives the Stefan-Boltzmann total flux σT⁴ (see stefan_boltzmann.esm); the wavelength where F_B_λ peaks is λ_max = b/T from Wien's displacement law (see wien.esm). At the default T=5800 K (Sun's effective surface temperature) and λ=500 nm (visible green, the canonical solar-peak wavelength), F_B_λ ≈ 8.46e13 W/m³ — the peak intensity that anchors the Sun's irradiance at Earth's distance and the solar-driven photochemistry of the atmosphere. At T=300 K (Earth surface) and λ=10 μm (thermal-IR), F_B_λ ≈ 3.12e7 W/m³ — the canonical longwave outgoing radiation peak that drives the planetary energy balance.",
+        "tags": [
+            "gaschem",
+            "radiation",
+            "blackbody",
+            "planck",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-4gsh)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 4 (The Earth's Climate System), §4.1 (Radiation), Eq. 4.2, p. 99 — Planck's blackbody radiation law F_B_λ = 2πc²h/λ⁵ · 1/(exp(ch/kλT) - 1) relating monochromatic emissive power to wavelength and temperature."
+            },
+            {
+                "citation": "Planck, M. (1901). Ueber das Gesetz der Energieverteilung im Normalspectrum. Annalen der Physik, 309(3), 553-563. The original derivation of the spectral distribution from quantum-statistical reasoning that resolved the ultraviolet catastrophe of classical Rayleigh-Jeans theory and inaugurated quantum physics."
+            }
+        ]
+    },
+    "models": {
+        "BlackbodyRadiation": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/radiation_fundamentals.jl:73\n\nUpstream `BlackbodyRadiation` is an MTK `@component` declaring four `@constants` (`h` = 6.626e-34 J·s Planck's constant; `c` = 2.9979e8 m/s speed of light; `k_B` = 1.381e-23 J/K Boltzmann's constant; `π_val` = Float64(π) = 3.141592653589793 dimensionless — explicitly stored as a Float64 to avoid Julia's automatic Irrational→BigFloat promotion inside MTK's symbolic expressions), two `@parameters` (`T` = 5800.0 K, the temperature input — the upstream default is the Sun's effective surface temperature; `λ` = 5.0e-7 m, the wavelength input — the upstream default is 500 nm matching the canonical visible-green solar-peak wavelength), one time-indexed `@variables` (`F_B_λ` — algebraic monochromatic emissive power in W/m³ with no derivative), and one algebraic equation (`F_B_λ ~ 2 * π_val * c^2 * h * λ^(-5) / (exp(c * h / (k_B * λ * T)) - 1)`). Identical structure preserved here. Upstream structural test (`Structural: BlackbodyRadiation system`, test/radiation_fundamentals_test.jl:52-59) asserts `length(equations(bb)) == 1` and `length(unknowns(bb)) == 1` and that the system compiles — matched here by the single entry in `equations` and the single state-typed variable (F_B_λ) plus the six input-typed parameters (h, c, k_B, π_val, T, λ).\n\nThe four upstream `@constants` (h, c, k_B, π_val) are encoded here as `type: parameter` with the upstream default values, matching the rig-wide convention used by sibling radiation migrations (photon_energy.esm at components/gaschem/radiation/photon_energy.esm encodes its h and c `@constants` the same way; wien.esm at components/gaschem/radiation/wien.esm encodes its b `@constants` the same way; stefan_boltzmann.esm at components/gaschem/radiation/stefan_boltzmann.esm encodes its σ `@constants` the same way; chapman.esm at components/gaschem/stratospheric/chapman.esm encodes its four `@constants` k2_A/k4_A/C_k4/T_ref the same way). This makes h, c, k_B, and π_val overridable from a downstream consumer's `parameter_overrides` block — useful for unit-test variants (e.g., the CODATA-2019 exact values h = 6.62607015e-34 J·s and c = 2.99792458e8 m/s and k_B = 1.380649e-23 J/K vs the upstream rounded 6.626e-34, 2.9979e8, 1.381e-23) and for sensitivity studies that probe the Planck-function prefactor. The two upstream `@parameters` (T, λ) are `type: parameter` with their upstream defaults of 5800.0 K and 5.0e-7 m — already MTK parameters upstream, so the parameter-vs-constant distinction collapses at the `.esm` schema level.\n\nObservability classification: this component is observed-only — the output variable F_B_λ is given by a single algebraic equation in the inputs (no time derivative, the `(t)` time index has no role since there is no `D(·)` operator in the equation). Test scenarios use `time_span: [0.0, 1.0]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (photon_energy.esm, wien.esm, stefan_boltzmann.esm at components/gaschem/radiation/, typical.esm at components/gaschem/combined/typical.esm) — algebraic identities have no time dependence and converge to the same fixed-point value regardless of the sampling time.\n\nPhysics structure: Planck's law (S&P Eq. 4.2) is the canonical spectral energy density of a blackbody in thermodynamic equilibrium — the resolution of the classical ultraviolet catastrophe in the Rayleigh-Jeans theory of cavity radiation. The formula has two factors: the prefactor 2πc²h/λ⁵ rising sharply at short wavelengths (the wavelength-fifth divergence), and the Bose-Einstein occupation factor 1/(exp(ch/kλT) - 1) damping the short-wavelength rise via the exponential. The product peaks at λ_max = b/T (Wien's law, see wien.esm) and integrates over all λ to give the Stefan-Boltzmann total flux σT⁴ (see stefan_boltzmann.esm). The two limiting forms:\n  • Rayleigh-Jeans (low frequency, ch ≪ kλT): exp(x) - 1 ≈ x giving F_B_λ ≈ 2πckT/λ⁴ (classical equipartition limit)\n  • Wien tail (high frequency, ch ≫ kλT): exp(x) ≫ 1 giving F_B_λ ≈ 2πc²h/λ⁵ · exp(-ch/(kλT)) (exponential cutoff)\nThe 2π factor (rather than π) gives the hemispherical emissive power per unit wavelength integrated over the outward-facing 2π solid angle — the quantity directly usable in radiative-transfer codes that distinguish upwelling vs downwelling flux.\n\nNumerical defaults (S&P Page 99, solar-peak canonical):\n  h    = 6.626e-34         J·s   (Planck's constant, 4-digit-rounded CODATA value)\n  c    = 2.9979e8          m/s   (speed of light, 5-digit-rounded value)\n  k_B  = 1.381e-23         J/K   (Boltzmann constant, 4-digit-rounded CODATA value)\n  π_val= 3.141592653589793 1     (Float64(π), explicit double-precision π)\n  T    = 5800.0            K     (Sun's effective surface temperature)\n  λ    = 5.0e-7            m     (visible-green wavelength, ~500 nm)\nAt these defaults the Planck function gives F_B_λ = 84565887378394.64 W/m³ ≈ 8.46e13 W/m³. This matches the upstream test `Equation: BlackbodyRadiation (Eq. 4.2)` at test/radiation_fundamentals_test.jl:151-165 which asserts F_B_λ ≈ 8.46e13 W/m³ at rtol=5e-2 with the default (T=5800, λ=5e-7) parameters. The migration tightens the assertion to rel=1e-9 on the exact IEEE-754 result. The factor evaluates via the chain c·h/(k_B·λ·T) = 1.986307254e-25 / 4.0049e-26 ≈ 4.9599 (dimensionless), exp(4.9599) - 1 ≈ 141.59, prefactor 2π·c²·h·λ⁻⁵ ≈ 1.1975e16, ratio ≈ 8.4566e13 W/m³ — the canonical solar-peak spectral irradiance.\n\nUpstream test reproduction:\n- The upstream `Structural: BlackbodyRadiation system` test (test/radiation_fundamentals_test.jl:52-59) asserts the system has 1 equation and 1 unknown and compiles — reproduced by the test-level shape (1 entry in `equations`, 1 state-typed variable F_B_λ).\n- The upstream `Equation: BlackbodyRadiation (Eq. 4.2)` test (test/radiation_fundamentals_test.jl:151-165) asserts at default T=5800/λ=5e-7 that F_B_λ ≈ 8.46e13 W/m³ at rtol=5e-2, and at T=300/λ=1e-5 (Earth thermal-IR peak) that F_B_λ ≈ 3.13e7 W/m³ at rtol=5e-2. Reproduced and tightened by `upstream_solar_peak_5800K_500nm` (pins F_B_λ = 84565887378394.64 W/m³ at rel=1e-9) and `upstream_earth_thermal_300K_10um` (pins F_B_λ = 31217606.963872723 W/m³ at rel=1e-9).\n- The upstream `Limiting: Blackbody radiation non-negative for all positive T and λ` test (test/radiation_fundamentals_test.jl:305-328) sweeps T ∈ {100, 300, 1000, 5800, 10000} K × λ ∈ {1e-7, 1e-6, 1e-5, 1e-4} m and asserts F_B_λ ≥ 0 across all 20 combinations, then asserts F_B_λ > 0 strictly at three physically-relevant (T, λ) points. Reproduced by 20 `nonneg_T*_lam*` tests pinning the actual IEEE-754 value at each combination — the strict-positivity bound is implicit in pinning a positive value, and the underflow case (T=100, λ=1e-7) is pinned to 0.0 with abs=1e-12 (the integer denominator `exp(arg) - 1` for arg ≈ 1438 returns Inf in IEEE-754; numerator/Inf = +0.0). The three strictly-positive anchor cases `strict_positive_solar_visible_5800K_500nm` / `strict_positive_earth_thermal_300K_10um` / `strict_positive_intermediate_1000K_3um` pin the actual IEEE-754 values for the (T, λ) triples called out in the upstream test.\n- The upstream `Analytical: Planck spectrum peak matches Wien prediction` test (test/radiation_fundamentals_test.jl:423-453) asserts at T ∈ {300, 1000, 5800} K that F_B_λ(T, λ_peak) > F_B_λ(T, 0.9·λ_peak) AND F_B_λ(T, λ_peak) > F_B_λ(T, 1.1·λ_peak), where λ_peak = 2.897e-3 / T is the Wien-displacement peak. The .esm runner does not directly support cross-test inequality assertions, so reproduced by pinning the actual IEEE-754 values at the three Wien-peak wavelengths and the two off-peak wavelengths (0.9·λ_peak and 1.1·λ_peak) for each temperature — by the IEEE-754 monotonicity of the Planck-function near its maximum, the strict inequality F_peak > F_0.9 and F_peak > F_1.1 is exact at machine precision. Nine tests total: `wien_peak_match_T<T>K` for T ∈ {300, 1000, 5800} with three sub-tests each (`_at_peak`, `_below_peak_0.9`, `_above_peak_1.1`).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system with the Planck function — five floating-point ops on the prefactor (constant×constant×^××× with 5 ops, ~5 ULP accumulated), three ops in the exponent (one division, one multiplication chain ×k_B×λ×T, ~3 ULP), one transcendental exp() (~1-2 ULP for high-quality libm), one subtraction (exp - 1), one final division — total ~10-15 ULP of accumulated error. For Float64 magnitudes ranging from 0.0 (underflow case) to ~1e14 (default), the ULP-relative error is ~5e-16 to ~5e-15, comfortably below the rel=1e-9 tolerance bound with ~6 orders of magnitude headroom. Matches the convention used by sibling observed-only ESM files in this rig with similar exp-containing closed-form expressions (surface_energy_flux.esm at rel=1e-9 for its `exp(...)` term; offline_mode_forcing.esm at rel=1e-8 on the longwave tests for its single `exp(idso_T_ref/T)`); the rel=1e-9 here is the slightly tighter bound supported by the Planck function's simpler exp() chain. `abs=1e-12` floors the underflow case (T=100, λ=1e-7 → exp(1438) overflows to Inf in IEEE-754, F_B_λ = finite/Inf = +0.0) without false-negative on the relative bound. The upstream Julia tests use rtol=5e-2 (the equation-verification tests at default and Earth-thermal conditions) — re-asserted here at the much tighter uniform rel=1e-9 model-level.\n\nUnit balance (verified): the single equation balances dimensionally. `F_B_λ ~ 2 * π_val * c^2 * h * λ^(-5) / (exp(c * h / (k_B * λ * T)) - 1)`. Numerator: (1) · (m/s)² · (J·s) · (m)⁻⁵ = m²/s² · J·s · m⁻⁵ = J·s⁻¹·m⁻³ = W·m⁻³. Denominator: dimensionless (the argument c·h/(k_B·λ·T) has units (m/s · J·s)/(J/K · m · K) = (J·m)/(J·m) = 1, so exp(·) is dimensionless and exp(·) - 1 is dimensionless). Ratio: W·m⁻³ ✓. The migrated `.esm` preserves the upstream units verbatim — h in J·s, c in m/s, k_B in J/K, π_val dimensionless, T in K, λ in m, F_B_λ in W/m³. SI throughout; no unit conversion at parse or runtime.\n\nGreek-character preservation: the upstream uses Greek λ for wavelength and π_val for the explicit Float64 π constant; both are preserved verbatim here (matching the sibling photon_energy.esm convention which also keeps λ as Greek). The output F_B_λ is also kept as the upstream identifier with a Greek λ subscript — distinguishing it from the integrated quantity F_B (W/m²) in stefan_boltzmann.esm and the absorbed/emitted fluxes F_S and F_L (also W/m²) in planetary_energy_balance.esm. The Greek-vs-ASCII choice is consistent with the photon_energy.esm sibling that also keeps Δε, ν, and λ in Greek; the stratospheric chapman.esm sibling that keeps k2, k4, T, M, O, O3, Ox as ASCII; and the surface_energy_flux.esm sibling that translates Greek to ASCII (σ_SB → sigma_SB, ε_g → epsilon_g) — the rig convention is per-file, with this file following the radiation_fundamentals.jl sibling pattern of preserving the upstream Greek identifiers."
+            },
+            "tolerance": {
+                "rel": 1.0e-9,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "h": {
+                    "type": "parameter",
+                    "units": "J*s",
+                    "default": 6.626e-34,
+                    "description": "Planck's constant (S&P Page 99, 4-digit-rounded CODATA value). The fundamental quantum of action that anchors the discrete photon picture and the Bose-Einstein occupation factor in Planck's law. The upstream default 6.626e-34 J·s is the historical 4-digit-rounded value; the modern CODATA-2019 exact definition is h = 6.62607015e-34 J·s (the SI redefinition of the kilogram fixes h to this value exactly). The two differ by ~1e-5 relative — well within the rtol=5e-2 upstream test gate, encoded as a parameter so downstream consumers can override h to the modern CODATA value for precision applications without forking the component."
+                },
+                "c": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.9979e8,
+                    "description": "Speed of light in vacuum (S&P Page 99, 5-digit-rounded value). The upstream default 2.9979e8 m/s is the historical 5-digit-rounded value; the modern CODATA-1983 exact definition is c = 2.99792458e8 m/s (the SI redefinition of the meter fixes c to this value exactly via the meter being defined as the distance light travels in 1/299792458 s). The two differ by ~8e-7 relative — well within the rtol=5e-2 upstream test gate, encoded as a parameter to support CODATA-precision overrides."
+                },
+                "k_B": {
+                    "type": "parameter",
+                    "units": "J/K",
+                    "default": 1.381e-23,
+                    "description": "Boltzmann constant (S&P Page 99, 4-digit-rounded CODATA value). The fundamental quantity linking thermal-statistical mechanics (mean energy per degree of freedom = (1/2)k_B·T) and macroscopic thermodynamics; appears in the Bose-Einstein occupation factor exp(hν/kT) - 1 of Planck's law. The upstream default 1.381e-23 J/K is the historical 4-digit-rounded value; the modern CODATA-2019 exact definition is k_B = 1.380649e-23 J/K (the SI redefinition of the kelvin fixes k_B to this value exactly via the Boltzmann constant becoming a defining constant). The two differ by ~3e-4 relative — within the rtol=5e-2 upstream test gate, encoded as a parameter to support precision overrides."
+                },
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Mathematical pi as a Float64 constant (Float64(π) in Julia, ~3.141592653589793). Encoded explicitly as a fixed-default parameter because the upstream Julia source declares `π_val = Float64(π)` as a `@constants` — the conversion to Float64 is required to avoid Julia's automatic Irrational→BigFloat promotion inside MTK's symbolic expressions. The upstream default value is the IEEE-754 double-precision representation of π (3.141592653589793 = the round-to-nearest-even of the exact mathematical π); this exact bit pattern is preserved here. Downstream consumers needing extended precision (e.g., quad-precision sensitivity studies) can override π_val, but the default matches Julia's `Float64(π)` exactly."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 5800.0,
+                    "description": "Temperature of the emitting blackbody (S&P Page 99). The upstream default 5800.0 K is the Sun's effective surface temperature — sometimes given as 5778 K (the modern IAU 2015 value derived from the Sun's total luminosity and radius) but the upstream uses the classic 5800 K round figure. At this temperature paired with the default λ=500 nm wavelength, Planck's law gives F_B_λ ≈ 8.46e13 W/m³ — the canonical solar-peak spectral irradiance per unit wavelength that anchors the Sun's irradiance at Earth's distance and the solar-driven photochemistry of the atmosphere. Other canonical temperatures: 300 K (Earth surface) gives a thermal-IR peak at ~9.66 μm with F_B_λ at 10 μm ≈ 3.12e7 W/m³, 3 K (CMB) gives a microwave peak at ~0.97 mm, 1e4 K (cool-star photosphere or stellar corona) gives a UV/X-ray peak shifted by Wien's law."
+                },
+                "λ": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5.0e-7,
+                    "description": "Wavelength of the emitted photon (S&P Page 99, visible-green canonical default). The upstream default 5.0e-7 m = 500 nm is the yellow-green visible peak that matches Wien's law applied to T_sun ≈ 5800 K and anchors the solar-peak photon used in actinic-flux and spectral-irradiance calculations. Other canonical wavelengths used in atmospheric radiative-transfer applications: 200-300 nm (UV-B/UV-C, the Hartley-Huggins ozone-photolysis bands O3 + hν → O + O2), 300-400 nm (UV-A, the O3 + hν → O(1D) + O2 channel and NO2-photolysis band), 400-700 nm (visible, solar-energy-balance photometric range), 700-3000 nm (near-IR, solar-IR component), 3-50 μm (thermal-IR, the Earth-radiation longwave range), 1 mm (microwave, the cosmic-microwave-background Wien peak)."
+                },
+                "F_B_λ": {
+                    "type": "state",
+                    "units": "W/m^3",
+                    "description": "Monochromatic blackbody emissive power in watts per cubic meter (W·m⁻³ = W·m⁻²·m⁻¹, i.e., emitted power per unit area per unit wavelength). Equivalently called the spectral radiance per unit wavelength integrated over the outward 2π hemisphere. F_B_λ(λ, T) gives the wavelength-resolved emission of a thermal source: integrating over all wavelengths recovers the total emissive power F_B = ∫₀^∞ F_B_λ dλ = σT⁴ (Stefan-Boltzmann; see stefan_boltzmann.esm), and the wavelength where F_B_λ is maximized is λ_max = b/T (Wien's law; see wien.esm). At the default solar-peak (T=5800, λ=500 nm), F_B_λ ≈ 8.46e13 W/m³ — the canonical solar-peak spectral irradiance per unit wavelength used in radiative-transfer codes to bin solar energy across the visible band. At the Earth-thermal peak (T=300, λ=10 μm), F_B_λ ≈ 3.12e7 W/m³ — the canonical longwave outgoing radiation peak driving the planetary energy balance (S&P Eq. 4.6 / planetary_energy_balance.esm)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_B_λ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    "π_val",
+                                    {"op": "^", "args": ["c", 2]},
+                                    "h",
+                                    {"op": "^", "args": ["λ", -5]}
+                                ]
+                            },
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {"op": "*", "args": ["c", "h"]},
+                                                    {"op": "*", "args": ["k_B", "λ", "T"]}
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    1
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_solar_peak_5800K_500nm",
+                    "description": "At default T = 5800 K (Sun's effective surface temperature) and λ = 500 nm (visible-green solar peak), Planck's law gives F_B_λ = 2π·c²·h·λ⁻⁵ / (exp(c·h/(k_B·λ·T)) - 1) = 84565887378394.64 W/m³ ≈ 8.46e13 W/m³ — the canonical solar-peak spectral irradiance per unit wavelength that anchors solar radiative transfer. The exponent c·h/(k_B·λ·T) = 1.986307254e-25 / 4.0049e-26 ≈ 4.9599 (dimensionless), so exp(4.9599) - 1 ≈ 141.59 dominates the Bose-Einstein occupation factor. Reproduces and tightens the upstream `Equation: BlackbodyRadiation (Eq. 4.2)` test (GasChem.jl test/radiation_fundamentals_test.jl:151-165) default case: upstream asserts F_B_λ ≈ 8.46e13 at rtol=5e-2, this one pins the exact IEEE-754 result 84565887378394.64 at rel=1e-9.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 84565887378394.64}
+                    ]
+                },
+                {
+                    "id": "upstream_earth_thermal_300K_10um",
+                    "description": "At T = 300 K (~Earth surface temperature) and λ = 10 μm (thermal-IR peak), Planck's law gives F_B_λ = 31217606.963872723 W/m³ ≈ 3.12e7 W/m³ — the canonical longwave-outgoing-radiation peak that drives the planetary energy balance (S&P Eq. 4.6). The exponent c·h/(k_B·λ·T) ≈ 4.7949 here, just slightly below the solar-peak exponent of 4.96 — by Wien's displacement law, the peak shifts to longer wavelengths at lower T such that the dimensionless exponent at the peak is approximately constant (~4.97 from the transcendental x = 5(1-e^(-x)) solution). Reproduces and tightens the upstream `Equation: BlackbodyRadiation (Eq. 4.2)` test (GasChem.jl test/radiation_fundamentals_test.jl:151-165) Earth-thermal case: upstream asserts F_B_λ ≈ 3.13e7 at rtol=5e-2, this one pins the exact IEEE-754 result 31217606.963872723 at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 31217606.963872723}
+                    ]
+                },
+                {
+                    "id": "strict_positive_solar_visible_5800K_500nm",
+                    "description": "First of the three strictly-positive anchor cases reproducing the upstream `Limiting: Blackbody radiation non-negative for all positive T and λ` test (GasChem.jl test/radiation_fundamentals_test.jl:305-328) which asserts F_B_λ > 0 strictly at three physically-relevant (T, λ) triples. At T=5800 K, λ=500 nm (visible-green solar peak), F_B_λ = 84565887378394.64 W/m³ — pinning a positive value enforces strict positivity by construction. Duplicates `upstream_solar_peak_5800K_500nm` to surface the regression independently if the strict-positivity series breaks while the equation-verification anchor still passes.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 5.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 84565887378394.64}
+                    ]
+                },
+                {
+                    "id": "strict_positive_earth_thermal_300K_10um",
+                    "description": "Second strictly-positive anchor case at T=300 K, λ=10 μm (Earth thermal-IR peak). F_B_λ = 31217606.963872723 W/m³ — pinning a positive value enforces strict positivity. Duplicates `upstream_earth_thermal_300K_10um` to surface the regression independently if the strict-positivity series breaks while the equation-verification anchor still passes.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 31217606.963872723}
+                    ]
+                },
+                {
+                    "id": "strict_positive_intermediate_1000K_3um",
+                    "description": "Third strictly-positive anchor case at T=1000 K, λ=3 μm (intermediate-temperature mid-IR peak — incandescent-metal range). F_B_λ = 12846751836.984661 W/m³ ≈ 1.28e10 W/m³ — the canonical incandescent-IR emission peak. At T=1000 K Wien's law gives λ_peak = b/T = 2.897e-3/1000 = 2.897 μm, so λ=3 μm is essentially at peak (just 3.5% above). The third anchor in the upstream strict-positivity series (test/radiation_fundamentals_test.jl:323-327).",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 3.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 12846751836.984661}
+                    ]
+                },
+                {
+                    "id": "nonneg_T100K_lam1e-7m",
+                    "description": "Cold-source UV underflow case in the upstream `Limiting: Blackbody radiation non-negative` 5×4 grid (test/radiation_fundamentals_test.jl:314-320). At T=100 K, λ=100 nm the exponent c·h/(k_B·λ·T) ≈ 1438.4 ≫ 1, so exp(1438) overflows to +Inf in IEEE-754; F_B_λ = finite_numerator / (+Inf - 1) = finite / +Inf = +0.0. Upstream test comment: 'at extreme combinations (e.g., T=100K, λ=100nm), the exponent ch/kλT can exceed ~1400, causing numerical underflow to 0.0'. Asserted at abs=1e-12 (the value is exactly 0.0 by IEEE-754 division-by-infinity rule; abs tolerance gates stuck-at-nonzero regressions).",
+                    "parameter_overrides": {
+                        "T": 100.0,
+                        "λ": 1.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "nonneg_T100K_lam1um",
+                    "description": "Cold-source IR case in the upstream non-negativity grid. At T=100 K, λ=1 μm the exponent ch/kλT ≈ 143.84, exp(143.84) ≈ 5.65e62, so F_B_λ ≈ 2π·c²·h·λ⁻⁵ / exp(143.84) ≈ 1.27e-48 W/m³ — vanishingly small but strictly positive (no overflow). At T=100 K Wien's peak is at λ_max = 2.897e-5 m = 28.97 μm, so 1 μm is deep in the short-wavelength Wien tail where the spectrum exponentially decays. Pins the exact value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 100.0,
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 1.2730186220843828e-48}
+                    ]
+                },
+                {
+                    "id": "nonneg_T100K_lam10um",
+                    "description": "Cold-source thermal-IR case in the upstream non-negativity grid. At T=100 K, λ=10 μm the exponent ch/kλT ≈ 14.384, exp(14.384) ≈ 1.77e6, so F_B_λ ≈ 2119.55 W/m³ — well in the Wien-tail decay just to the short side of the peak (Wien-peak at 29 μm for T=100 K). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 100.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 2119.5455170133896}
+                    ]
+                },
+                {
+                    "id": "nonneg_T100K_lam100um",
+                    "description": "Cold-source far-IR case in the upstream non-negativity grid. At T=100 K, λ=100 μm = 1e-4 m the exponent ch/kλT ≈ 1.4384, exp(1.4384) - 1 ≈ 3.214, so F_B_λ ≈ 11642.22 W/m³ — past the Wien peak (29 μm at T=100 K) and now in the Rayleigh-Jeans tail where F_B_λ ≈ 2πckT/λ⁴ ≈ 1.16e4 W/m³ at these inputs. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 100.0,
+                        "λ": 1.0e-4
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 11642.21828641284}
+                    ]
+                },
+                {
+                    "id": "nonneg_T300K_lam100nm",
+                    "description": "Earth-thermal source UV case in the upstream non-negativity grid. At T=300 K, λ=100 nm the exponent ch/kλT ≈ 479.46, exp(479.46) ≈ 2.07e208, so F_B_λ ≈ 2.22e-189 W/m³ — well into the Wien-tail underflow regime where the spectral density is below numerical floor for any practical radiative-transfer code. Pins the exact IEEE-754 value at rel=1e-9 — the result is non-zero but ~189 orders of magnitude below 1, so the relative tolerance is meaningful at IEEE-754 precision.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 2.216304828210492e-189}
+                    ]
+                },
+                {
+                    "id": "nonneg_T300K_lam1um",
+                    "description": "Earth-thermal source near-IR case in the upstream non-negativity grid. At T=300 K, λ=1 μm the exponent ch/kλT ≈ 47.95, exp(47.95) ≈ 6.66e20, so F_B_λ ≈ 5.63e-7 W/m³ — in the Wien-tail decay short of the Earth-thermal peak (9.66 μm). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 5.627583854842813e-7}
+                    ]
+                },
+                {
+                    "id": "nonneg_T300K_lam100um",
+                    "description": "Earth-thermal source far-IR case in the upstream non-negativity grid. At T=300 K, λ=100 μm = 1e-4 m the exponent ch/kλT ≈ 0.4795, exp(0.4795) - 1 ≈ 0.6151, so F_B_λ ≈ 60819.98 W/m³ — past the Earth-thermal peak (9.66 μm at T=300 K) into the Rayleigh-Jeans tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0e-4
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 60819.982404858034}
+                    ]
+                },
+                {
+                    "id": "nonneg_T1000K_lam100nm",
+                    "description": "Incandescent-source UV case in the upstream non-negativity grid. At T=1000 K, λ=100 nm the exponent ch/kλT ≈ 143.84, exp(143.84) ≈ 5.65e62, so F_B_λ ≈ 1.27e-43 W/m³ — deep Wien-tail underflow. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 1.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 1.2730186220843827e-43}
+                    ]
+                },
+                {
+                    "id": "nonneg_T1000K_lam1um",
+                    "description": "Incandescent-source near-IR case in the upstream non-negativity grid. At T=1000 K, λ=1 μm the exponent ch/kλT ≈ 14.384, exp(14.384) ≈ 1.77e6, so F_B_λ ≈ 2.12e8 W/m³ — just short of the incandescent peak (Wien-peak at 2.9 μm for T=1000 K). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 211954551.70133904}
+                    ]
+                },
+                {
+                    "id": "nonneg_T1000K_lam10um",
+                    "description": "Incandescent-source mid-IR case in the upstream non-negativity grid. At T=1000 K, λ=10 μm the exponent ch/kλT ≈ 1.4384, exp(1.4384) - 1 ≈ 3.214, so F_B_λ ≈ 1.164e9 W/m³ — past the incandescent peak (2.9 μm) into the Rayleigh-Jeans tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 1164221828.641284}
+                    ]
+                },
+                {
+                    "id": "nonneg_T1000K_lam100um",
+                    "description": "Incandescent-source far-IR case in the upstream non-negativity grid. At T=1000 K, λ=100 μm = 1e-4 m the exponent ch/kλT ≈ 0.1438, exp(0.1438) - 1 ≈ 0.1547, so F_B_λ ≈ 2.42e5 W/m³ — deep Rayleigh-Jeans tail (the exponent is small enough that exp(x) - 1 ≈ x is valid). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 1.0e-4
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 241870.13631614365}
+                    ]
+                },
+                {
+                    "id": "nonneg_T5800K_lam100nm",
+                    "description": "Solar-source UV case in the upstream non-negativity grid. At T=5800 K, λ=100 nm the exponent ch/kλT ≈ 24.80, exp(24.80) ≈ 5.9e10, so F_B_λ ≈ 6.35e8 W/m³ — just short of the solar Wien peak (500 nm at 5800 K) but well into the rising Wien tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 1.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 634864376.6638219}
+                    ]
+                },
+                {
+                    "id": "nonneg_T5800K_lam1um",
+                    "description": "Solar-source near-IR case in the upstream non-negativity grid. At T=5800 K, λ=1 μm the exponent ch/kλT ≈ 2.480, exp(2.480) - 1 ≈ 10.94, so F_B_λ ≈ 3.42e13 W/m³ — past the solar peak (500 nm at 5800 K) into the falling near-IR side, still ~40% of the peak intensity due to the broad Planck distribution. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 34198810937501.55}
+                    ]
+                },
+                {
+                    "id": "nonneg_T5800K_lam10um",
+                    "description": "Solar-source mid-IR case in the upstream non-negativity grid. At T=5800 K, λ=10 μm the exponent ch/kλT ≈ 0.2480, exp(0.2480) - 1 ≈ 0.2815, so F_B_λ ≈ 1.33e10 W/m³ — far past the solar peak into the deep Rayleigh-Jeans tail (the exp(x) - 1 ≈ x linearization is valid here). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 13293961045.402838}
+                    ]
+                },
+                {
+                    "id": "nonneg_T5800K_lam100um",
+                    "description": "Solar-source far-IR case in the upstream non-negativity grid. At T=5800 K, λ=100 μm = 1e-4 m the exponent ch/kλT ≈ 0.0248, exp(0.0248) - 1 ≈ 0.0251, so F_B_λ ≈ 1.49e6 W/m³ — deep Rayleigh-Jeans tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 1.0e-4
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 1490123.8338062856}
+                    ]
+                },
+                {
+                    "id": "nonneg_T10000K_lam100nm",
+                    "description": "Hot-source UV case in the upstream non-negativity grid. At T=10000 K (cool-star photosphere or stellar corona), λ=100 nm the exponent ch/kλT ≈ 14.384, exp(14.384) ≈ 1.77e6, so F_B_λ ≈ 2.12e13 W/m³ — well into the Wien-tail decay short of the Wien peak (290 nm at T=10000 K). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 10000.0,
+                        "λ": 1.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 21195455170133.902}
+                    ]
+                },
+                {
+                    "id": "nonneg_T10000K_lam1um",
+                    "description": "Hot-source near-IR case in the upstream non-negativity grid. At T=10000 K, λ=1 μm the exponent ch/kλT ≈ 1.4384, exp(1.4384) - 1 ≈ 3.214, so F_B_λ ≈ 1.16e14 W/m³ — past the Wien peak (290 nm) deep in the Rayleigh-Jeans tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 10000.0,
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 116422182864128.4}
+                    ]
+                },
+                {
+                    "id": "nonneg_T10000K_lam10um",
+                    "description": "Hot-source mid-IR case in the upstream non-negativity grid. At T=10000 K, λ=10 μm the exponent ch/kλT ≈ 0.1438, exp(0.1438) - 1 ≈ 0.1547, so F_B_λ ≈ 2.42e10 W/m³ — deep Rayleigh-Jeans tail (the exp(x) - 1 ≈ x linearization holds). Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 10000.0,
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 24187013631.61436}
+                    ]
+                },
+                {
+                    "id": "nonneg_T10000K_lam100um",
+                    "description": "Hot-source far-IR case in the upstream non-negativity grid. At T=10000 K, λ=100 μm = 1e-4 m the exponent ch/kλT ≈ 0.01438, exp(0.01438) - 1 ≈ 0.01449, so F_B_λ ≈ 2.58e6 W/m³ — deep Rayleigh-Jeans tail. Pins the exact IEEE-754 value at rel=1e-9.",
+                    "parameter_overrides": {
+                        "T": 10000.0,
+                        "λ": 1.0e-4
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 2582637.9812996974}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T300K_at_peak",
+                    "description": "Wien-peak verification at T=300 K (Earth-surface): at λ_peak = b/T = 2.897e-3/300 = 9.656666666666667e-6 m, F_B_λ = 31308528.22939951 W/m³ — the maximum-emission spectral density per Wien's displacement law. Reproduces the upstream `Analytical: Planck spectrum peak matches Wien prediction` test (GasChem.jl test/radiation_fundamentals_test.jl:423-453) which asserts F_B_λ at λ_peak > F_B_λ at 0.9·λ_peak AND > F_B_λ at 1.1·λ_peak for each of T ∈ {300, 1000, 5800} K. The strict inequality F_peak > F_0.9 and F_peak > F_1.1 is exact by IEEE-754 since the Planck-function is strictly concave at its maximum.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 9.656666666666667e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 31308528.22939951}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T300K_below_peak_0p9",
+                    "description": "Wien-below-peak case at T=300 K, λ = 0.9·λ_peak = 0.9 · 9.6567e-6 = 8.691e-6 m, F_B_λ = 30448675.020165075 W/m³. By construction 30448675.02 < 31308528.23 (F_at_peak), so the upstream strict inequality F_peak > F_0.9 holds at IEEE-754 precision.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 8.691e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 30448675.020165075}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T300K_above_peak_1p1",
+                    "description": "Wien-above-peak case at T=300 K, λ = 1.1·λ_peak = 1.1 · 9.6567e-6 = 1.062e-5 m, F_B_λ = 30652893.404397808 W/m³. By construction 30652893.40 < 31308528.23 (F_at_peak), so the upstream strict inequality F_peak > F_1.1 holds at IEEE-754 precision.",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "λ": 1.0622333333333333e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 30652893.404397808}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T1000K_at_peak",
+                    "description": "Wien-peak verification at T=1000 K (incandescent metal): at λ_peak = b/T = 2.897e-3/1000 = 2.897e-6 m, F_B_λ = 12884167995.63766 W/m³ — the maximum emission for a 1000 K source.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 2.897e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 12884167995.63766}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T1000K_below_peak_0p9",
+                    "description": "Wien-below-peak case at T=1000 K, λ = 0.9·2.897e-6 = 2.6073e-6 m, F_B_λ = 12530318938.339539 W/m³. By construction 12530318938 < 12884167995 (F_at_peak) verifying Wien's law at T=1000 K.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 2.6073e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 12530318938.339539}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T1000K_above_peak_1p1",
+                    "description": "Wien-above-peak case at T=1000 K, λ = 1.1·2.897e-6 = 3.1867e-6 m, F_B_λ = 12614359425.6781 W/m³. By construction 12614359425 < 12884167995 (F_at_peak) verifying Wien's law at T=1000 K.",
+                    "parameter_overrides": {
+                        "T": 1000.0,
+                        "λ": 3.1867e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 12614359425.6781}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T5800K_at_peak",
+                    "description": "Wien-peak verification at T=5800 K (Sun's effective surface temperature): at λ_peak = b/T = 2.897e-3/5800 = 4.994827586206896e-7 m ≈ 499.5 nm visible-green, F_B_λ = 84566108639857.75 W/m³ — the maximum emission for the canonical solar source. Note this is very close to but distinct from `upstream_solar_peak_5800K_500nm` which uses λ = 5.0e-7 m (the round 500-nm value) giving F_B_λ = 84565887378394.64 W/m³; the difference (~2e8 W/m³, ~2.6e-6 relative) reflects the small shift between the exact Wien peak at 499.48 nm and the round 500 nm.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 4.994827586206896e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 84566108639857.75}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T5800K_below_peak_0p9",
+                    "description": "Wien-below-peak case at T=5800 K, λ = 0.9·λ_peak = 4.4953e-7 m (≈ violet/UV-A boundary). F_B_λ = 82243596403777.31 W/m³. By construction 82243596403777 < 84566108639857 (F_at_peak) verifying Wien's law at T=5800 K.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 4.495344827586207e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 82243596403777.31}
+                    ]
+                },
+                {
+                    "id": "wien_peak_match_T5800K_above_peak_1p1",
+                    "description": "Wien-above-peak case at T=5800 K, λ = 1.1·λ_peak = 5.494e-7 m (≈ yellow-green/orange boundary). F_B_λ = 82795201830284.12 W/m³. By construction 82795201830284 < 84566108639857 (F_at_peak) verifying Wien's law at T=5800 K.",
+                    "parameter_overrides": {
+                        "T": 5800.0,
+                        "λ": 5.494310344827586e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "F_B_λ", "time": 0.0, "expected": 82795201830284.12}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "planck_spectrum_solar_5800K",
+                    "description": "Planck spectrum F_B_λ vs λ for a 5800 K blackbody (Sun's effective surface temperature) — sweeps λ from 100 nm (UV-C) to 5 μm (mid-IR), spanning the full solar spectral range. Surfaces the canonical solar Planck distribution peaking near 500 nm visible-green with the asymmetric shape characteristic of all Planck spectra (steep rise on the short-wavelength Wien side, gradual decline on the long-wavelength Rayleigh-Jeans side). Integrating this curve gives the Stefan-Boltzmann total flux σT⁴ ≈ 6.42e7 W/m² (see stefan_boltzmann.esm at T=5800 K). Anchors the design observation that the Sun's emission concentrates 80% of its energy in the 0.3-3 μm range (visible + near-IR), with the visible band 380-780 nm carrying ~38% of total emission.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 1.0e-7, "stop": 5.0e-6, "count": 80, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_lambda_vs_lambda_5800K_loglog",
+                            "type": "line",
+                            "description": "Solar Planck spectrum F_B_λ(λ) at T=5800 K on log-log axes — peaks near 500 nm at ~8.5e13 W/m³ with sharp Wien-side rise (steep short-wavelength cutoff at <300 nm where exp(ch/kλT) dominates) and gradual Rayleigh-Jeans decline (λ⁻⁴ asymptotic slope visible at λ > 2 μm). The slope just below the peak is approximately -5 (Wien-tail) and just above the peak is approximately -4 (Rayleigh-Jeans tail) — anchoring the Planck function's two limiting regimes.",
+                            "x": {"variable": "λ", "label": "λ (m, log)"},
+                            "y": {"variable": "F_B_λ", "label": "F_B_λ (W/m³, log)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "planck_spectrum_earth_300K",
+                    "description": "Planck spectrum F_B_λ vs λ for a 300 K blackbody (Earth surface temperature) — sweeps λ from 3 μm (short thermal-IR) to 100 μm (far-IR) covering the Earth's longwave emission band. Surfaces the canonical Earth-thermal Planck distribution peaking near 10 μm with the asymmetric Planck shape. Integrating this curve gives the Stefan-Boltzmann flux σT⁴ ≈ 460 W/m² (see stefan_boltzmann.esm at T=300 K). The Wien-displacement λ_max ≈ 10 μm anchors the 'atmospheric window' (8-13 μm) where the Earth's longwave emission has its peak and where atmospheric CO2 / H2O absorption is relatively weak — the spectral region where greenhouse-effect modifications most efficiently trap thermal radiation.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {"T": 300.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 3.0e-6, "stop": 1.0e-4, "count": 80, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_lambda_vs_lambda_300K_loglog",
+                            "type": "line",
+                            "description": "Earth-thermal Planck spectrum F_B_λ(λ) at T=300 K on log-log axes — peaks near 9.7 μm at ~3.1e7 W/m³. The peak coincides with the 'atmospheric window' 8-13 μm where CO2 and H2O absorption is weak; the longwave decline (10-100 μm) overlaps the strong H2O rotation-band absorption and the long-wavelength CO2 vibrational mode. The shape is structurally identical to the 5800 K solar spectrum but shifted by Wien's displacement law to ~20× longer wavelengths.",
+                            "x": {"variable": "λ", "label": "λ (m, log)"},
+                            "y": {"variable": "F_B_λ", "label": "F_B_λ (W/m³, log)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "planck_spectrum_temperature_family",
+                    "description": "Family of Planck spectra at temperatures spanning T ∈ {300, 1000, 5800} K — three canonical regimes: Earth thermal (300 K, peak at 9.7 μm), incandescent metal (1000 K, peak at 2.9 μm), and Sun surface (5800 K, peak at 500 nm). Joint heatmap sweeps λ ∈ [100 nm, 100 μm] × T ∈ [300, 5800] K on a 2D grid (λ on log scale, T on linear scale), surfacing the canonical Wien-displacement diagonal where the peak F_B_λ traces the curve λ_peak = b/T (= 2.897e-3/T) across temperatures. Anchors the family-of-Planck-curves visualization used pedagogically in atmospheric-radiation courses to show how the spectral output of a thermal source shifts with temperature (S&P Ch. 4 Figure 4.1).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 1.0e-7, "stop": 1.0e-4, "count": 60, "scale": "log"}
+                            },
+                            {
+                                "parameter": "T",
+                                "values": [300.0, 1000.0, 5800.0]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_lambda_heatmap_lambda_T",
+                            "type": "heatmap",
+                            "description": "Joint Planck-function heatmap F_B_λ(λ, T) over λ ∈ [100 nm, 100 μm] (log) × T ∈ {300, 1000, 5800} K. The Wien-displacement diagonal λ_peak = b/T traces the path of maximum emission across temperatures (visible-green at 5800 K, mid-IR at 1000 K, thermal-IR at 300 K), and the spectral range over which a thermal source emits significantly broadens with temperature (FWHM scaling roughly as 1/T in log-λ). The heatmap range spans ~13 orders of magnitude in F_B_λ — log-color-scale recommended for visualization.",
+                            "x": {"variable": "λ", "label": "λ (m, log)"},
+                            "y": {"variable": "T", "label": "T (K)"},
+                            "value": {"variable": "F_B_λ", "reduce": "final"}
+                        }
+                    ]
+                },
+                {
+                    "id": "planck_intensity_temperature_sweep_at_500nm",
+                    "description": "Planck-function intensity F_B_λ as a function of temperature T at fixed λ = 500 nm (visible-green solar peak). Sweeps T from 1000 K (deep-red incandescent) to 6000 K (solar photosphere) on a log scale. At fixed λ=500 nm the function transitions from the Wien-tail regime (low T, F_B_λ ∝ exp(-ch/kλT)) at T<3000 K through the visible-peak regime around 5800 K, surfacing the canonical exponential-rise behavior that explains why incandescent bulbs at ~3000 K are warm-colored and inefficient (most emission in IR) while solar-temperature sources at ~5800 K are visible-rich. Anchors the temperature-resolved visible-emission curve used in incandescent-lamp design and solar-spectrum reproduction calculations.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {"λ": 5.0e-7},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 1000.0, "stop": 6000.0, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_B_lambda_vs_T_at_500nm_loglog",
+                            "type": "line",
+                            "description": "Planck-function intensity F_B_λ at λ=500 nm as a function of temperature T on log-log axes — exponential rise from ~3e2 W/m³ at T=1000 K (deep Wien-tail) through ~1e10 W/m³ at T=3000 K (incandescent) to ~8e13 W/m³ at T=5800 K (solar peak). The curve spans ~11 orders of magnitude over the 1000-6000 K range, surfacing the Wien-tail exp(-ch/kλT) exponential dependence at low T and the Rayleigh-Jeans T-linear dependence at high T.",
+                            "x": {"variable": "T", "label": "T (K, log)"},
+                            "y": {"variable": "F_B_λ", "label": "F_B_λ (W/m³, log)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
