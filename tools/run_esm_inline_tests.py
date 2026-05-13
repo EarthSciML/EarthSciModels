@@ -26,6 +26,25 @@ parallel evaluator. The cse=False knob is requested via the public
 ``cse: bool`` kwarg on ``simulate`` (esm-5gk, ESS audit follow-up
 mdl-167); the runner handles compile-cache population internally.
 
+CSE per-file override (esm-wqy1): cse=False is the default — the
+original audit concern (mdl-167, mirrored in
+``tools/render_example_plots.py`` near ``_RSS_HARD_ABORT_GB``) was
+defensive against ``sympy.lambdify(..., cse=True)``'s memory cliff
+on very large reaction systems. The cse=False path runs through
+``earthsci_toolkit.sympy_bridge._flat_to_sympy_rhs``'s topological
+algebraic-state substitution loop, which has the opposite cliff:
+models with many cross-referenced algebraic states explode in
+compile time (>30 min on a single file vs <30s under cse=True).
+``CSE_TRUE_OVERRIDE_FILENAMES`` below names .esm basenames that
+opt into cse=True to dodge the substitution-loop cliff. Numerical
+equivalence cse=True ↔ cse=False at IEEE-754 ULP scale was verified
+in esm-wqy1 across a sample of stratospheric / radical-pool .esm
+files (mismatches confined to numerically-zero values below the
+``atol=1e-12`` integrator floor; non-zero values match within the
+spec §6.6.4 default ``rel=1e-6`` tolerance). esm-kpo6 (upstream ESS
+sympy_bridge perf fix) is the long-term path that would let the
+override allowlist stay empty.
+
 OOM guardrails (per bead mdl-w1j scope):
   * Each .esm is processed in its own subprocess via
     ``--worker <path>`` so Python's per-process GC structurally
@@ -86,6 +105,32 @@ DENOM_SEED_PPB: Dict[str, float] = {
     "SALAAL": 1.0e-3,
     "SALCAL": 1.0e-3,
 }
+
+# Per-file CSE override (esm-wqy1). .esm basenames listed here will be
+# simulated with cse=True instead of the cse=False default. Entry
+# criteria: cse=False compile time exceeds ~10 min wall on a single
+# file (CI's 25-min walk-cap leaves no slack for one file to consume
+# the whole budget), AND cse=True correctness has been verified
+# against either a parallel forward evaluator or the file's existing
+# reference data within the spec §6.6.4 declared tolerances. See the
+# module docstring for the audit decision and esm-kpo6 for the
+# long-term substitution-loop perf fix.
+CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
+    # heat_momentum_fluxes.esm (esm-0ro4): 78 algebraic states with
+    # cross-referenced ψ_m/ψ_h piecewise calls feeding through
+    # r_ah/r_aw/T_ac/q_ac/dH_*_dT produce ~419K substituted ops
+    # post-flatten; cse=False compile >30 min, cse=True ~29s. ULP
+    # correctness verified against a parallel Python forward
+    # evaluator (rel ≤ 5e-15) before listing here.
+    "heat_momentum_fluxes.esm",
+})
+
+
+def _cse_for_file(file_path: str) -> bool:
+    """Return the ``cse`` kwarg value for ``simulate()`` on the given
+    .esm. cse=False is the default; basenames listed in
+    ``CSE_TRUE_OVERRIDE_FILENAMES`` opt into cse=True (see esm-wqy1)."""
+    return Path(file_path).name in CSE_TRUE_OVERRIDE_FILENAMES
 
 # Variables we may need to identify by their bare name in the simulate()
 # output where ``vars`` is dot-namespaced (e.g. ``"SuperFast.O3"``).
@@ -214,6 +259,7 @@ def _run_tests_for_container(
     import numpy as np
 
     sim_vars: List[str] = []
+    cse_flag = _cse_for_file(file_path)
     for t in tests:
         t_start = time.time()
         try:
@@ -227,7 +273,7 @@ def _run_tests_for_container(
                 initial_conditions=ic,
                 rtol=1e-10,
                 atol=1e-12,
-                cse=False,
+                cse=cse_flag,
             )
         except Exception as err:  # noqa: BLE001
             for i, a in enumerate(t.assertions):
