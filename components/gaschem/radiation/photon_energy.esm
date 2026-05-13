@@ -1,0 +1,310 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PhotonEnergy",
+        "description": "Photon energy equation (Seinfeld & Pandis 2006 Ch. 4, Eq. 4.1) — the energy Δε and frequency ν of a photon as a function of wavelength λ via Planck's constant h and the speed of light c: ν = c/λ and Δε = hν, equivalently the chained form Δε = hc/λ. The component is observed-only: two algebraic equations on two state variables (Δε the photon energy in J and ν the frequency in Hz) driven by one input parameter (λ the wavelength) and two constants (h Planck's constant and c the speed of light). No time derivatives, no PDE, no coupling. Migrated from GasChem.jl@8c12c048 src/radiation_fundamentals.jl:25 (`PhotonEnergy` @component). The photon energy equation is the foundational quantum-radiative bridge that maps continuous-wave radiation to the discrete photon picture: paired with the Planck spectral distribution (BlackbodyRadiation), Stefan-Boltzmann total flux (StefanBoltzmann), and Wien peak displacement (WienDisplacement), it lets a radiative-transfer model convert spectral irradiance to photon fluxes and back — the quantity needed for actinic-flux / photolysis-rate calculations that drive atmospheric photochemistry (e.g., O2 + hν → 2 O at ~242 nm and O3 + hν → O + O2 at ~310 nm, the two Chapman-cycle photolysis channels). The defaults (λ = 500 nm) give ν ≈ 600 THz and Δε ≈ 3.97e-19 J ≈ 2.48 eV — visible green light, the canonical solar-peak wavelength matching Wien's law applied to T_sun ≈ 5800 K.",
+        "tags": [
+            "gaschem",
+            "radiation",
+            "photon-energy",
+            "planck",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-12T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-om23)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 4 (The Earth's Climate System), §4.1 (Radiation), Eq. 4.1, p. 99 — photon energy Δε = hν = hc/λ relating wavelength, frequency, and quantum energy."
+            },
+            {
+                "citation": "Planck, M. (1901). Ueber das Gesetz der Energieverteilung im Normalspectrum. Annalen der Physik, 309(3), 553-563. The original derivation of the energy quantization Δε = hν that anchors the quantum theory of radiation."
+            }
+        ]
+    },
+    "models": {
+        "PhotonEnergy": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/radiation_fundamentals.jl:25\n\nUpstream `PhotonEnergy` is an MTK `@component` declaring two `@constants` (`h` = 6.626e-34 J·s, Planck's constant; `c` = 2.9979e8 m/s, speed of light), one `@parameters` (`λ` = 5.0e-7 m, the wavelength input — the upstream default is 500 nm giving the canonical visible-green photon), two time-indexed `@variables` (`Δε` photon energy in J and `ν` frequency in Hz — both algebraic with no derivative), and two algebraic equations (`ν ~ c / λ` for the frequency-wavelength relation Eq. 4.1b, and `Δε ~ h * ν` for the energy-frequency relation Eq. 4.1a). Identical structure preserved here. Upstream structural test (`Structural: PhotonEnergy system`, test/radiation_fundamentals_test.jl:30-39) asserts `length(equations(photon)) == 2` and `length(unknowns(photon)) == 2` and that the system compiles — matched here by the two entries in `equations` and the two state-typed variables (Δε, ν) plus the three input-typed parameters (h, c, λ).\n\nThe two upstream `@constants` (h, c) are encoded here as `type: parameter` with the upstream default values, matching the rig-wide convention used by sibling radiation migrations (wien.esm at components/gaschem/radiation/wien.esm encodes its `b` `@constants` the same way; stefan_boltzmann.esm at components/gaschem/radiation/stefan_boltzmann.esm encodes its `σ` `@constants` the same way; chapman.esm at components/gaschem/stratospheric/chapman.esm encodes its four `@constants` k2_A/k4_A/C_k4/T_ref the same way). This makes h and c overridable from a downstream consumer's `parameter_overrides` block — useful for unit-test variants (e.g., the CODATA-2019 exact value c = 2.99792458e8 m/s and h = 6.62607015e-34 J·s vs the upstream rounded 2.9979e8 m/s and 6.626e-34 J·s) and for sensitivity studies that probe the photon-energy prefactor. The upstream `@parameters` (λ) is `type: parameter` with its upstream default of 5.0e-7 m — already an MTK parameter upstream, so the parameter-vs-constant distinction collapses at the `.esm` schema level.\n\nObservability classification: this component is observed-only — both output variables are given by algebraic equations in the inputs (no time derivative, the `(t)` time index has no role since there is no `D(·)` operator in either equation). Test scenarios use `time_span: [0.0, 1.0]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (wien.esm at components/gaschem/radiation/wien.esm, climate_sensitivity.esm at components/gaschem/radiation/climate_sensitivity.esm, typical.esm at components/gaschem/combined/typical.esm, slip.esm at components/aerosol/particle_dyn/slip.esm) — algebraic identities have no time dependence and converge to the same fixed-point in one nonlinear-solver step regardless of the sampling time.\n\nPhysics structure: Eq. 4.1 is the canonical quantum-radiative bridge from continuous-wave radiation to the discrete photon picture. The two-step decomposition into `ν ~ c/λ` and `Δε ~ h·ν` mirrors the upstream pedagogical structure (frequency-wavelength relation first, then energy-frequency relation) — physically equivalent to the chained form Δε = hc/λ but exposing the intermediate ν as a separate observable that a downstream consumer can consume independently (e.g., for radio-frequency atmospheric remote-sensing applications where ν is the natural unit rather than λ or Δε). At the default λ = 500 nm (yellow-green visible — the solar-peak wavelength matching Wien's law applied to T_sun ≈ 5800 K), the relations give ν = 5.9958e14 Hz ≈ 600 THz and Δε = 3.97e-19 J ≈ 2.48 eV — the canonical visible photon energy that anchors the photoelectric-effect work-function and photosynthetic quantum-yield calculations.\n\nNumerical defaults (S&P Page 99, visible-green canonical):\n  h  = 6.626e-34 J·s    (Planck's constant, 4-digit-rounded CODATA value)\n  c  = 2.9979e8 m/s     (speed of light, 5-digit-rounded value)\n  λ  = 5.0e-7   m       (visible-green wavelength, ~500 nm)\nAt these defaults:\n  ν   = c / λ = 2.9979e8 / 5.0e-7 = 5.9958e14 Hz (exact in IEEE-754, division of two exact powers-of-ten-scaled values)\n  Δε = h · ν = 6.626e-34 · 5.9958e14 = 3.97281708e-19 J\nThis matches the upstream test `Equation: PhotonEnergy (Eq. 4.1)` at test/radiation_fundamentals_test.jl:101-119 which asserts ν ≈ 5.9958e14 Hz rtol=1e-4 and Δε ≈ 3.973e-19 J rtol=1e-3 at default λ=500 nm. The migration tightens both assertions to rel=1e-10 on the exact IEEE-754 results.\n\nUpstream test reproduction:\n- The upstream `Structural: PhotonEnergy system` test (test/radiation_fundamentals_test.jl:30-39) asserts the system has 2 equations and 2 unknowns and compiles — reproduced by the test-level shape (2 entries in `equations`, 2 state-typed variables Δε and ν).\n- The upstream `Equation: PhotonEnergy (Eq. 4.1)` test (test/radiation_fundamentals_test.jl:101-119) asserts at default λ=500 nm that ν ≈ 5.9958e14 rtol=1e-4 AND Δε ≈ 3.973e-19 rtol=1e-3, and at λ=300 nm that ν ≈ 9.993e14 rtol=1e-3 AND Δε ≈ 6.622e-19 rtol=1e-3. Reproduced and tightened by `default_visible_green_500nm` (pins ν=5.9958e14 Hz and Δε=3.97281708e-19 J at rel=1e-10) and `uv_300nm` (pins ν=9.993e14 Hz and Δε=6.6213618e-19 J at rel=1e-10).\n\nTolerance rationale (model-level rel=1e-10 / abs=1e-12): observed-only algebraic system with one division and one multiplication. Each equation is a single arithmetic operation on two IEEE-754 double parameters, so each output is correctly-rounded to within 0.5 ULP of the exact result — comfortably below the 1e-10 tolerance bound at all tested magnitudes (Δε ranges from ~2e-22 J at λ=1 mm radio waves to ~2e-16 J at λ=1 nm soft X-ray, so 0.5 ULP ≈ 5e-17 in relative terms across the full range). Matches the convention used by sibling closed-form algebraic ESM files in this rig (wien.esm at rel=1e-10 for its single division, stefan_boltzmann.esm at rel=1e-10/abs=1e-12 for its two-step σ·T^4). The `abs=1e-12` floor catches the zero-frequency limit (λ → ∞ gives ν → 0 and Δε → 0) and any other near-zero outputs without false-negative on the relative bound. The upstream Julia tests use rtol=1e-4 (default-λ ν) and rtol=1e-3 (Δε and UV-λ values) — re-asserted here at the uniform rel=1e-10 model-level.\n\nUnit balance (verified): both equations balance dimensionally. `ν ~ c / λ`: (m/s) / m = 1/s = Hz ✓. `Δε ~ h * ν`: (J·s) · (1/s) = J ✓. The migrated `.esm` preserves the upstream units verbatim — h in J·s, c in m/s, λ in m, ν in Hz, Δε in J. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "h": {
+                    "type": "parameter",
+                    "units": "J*s",
+                    "default": 6.626e-34,
+                    "description": "Planck's constant (S&P Page 99, 4-digit-rounded CODATA value). The fundamental quantum of action that links energy and frequency in the photon picture Δε = hν. The upstream default 6.626e-34 J·s is the historical 4-digit-rounded value; the modern CODATA-2019 exact definition is h = 6.62607015e-34 J·s (the SI redefinition of the kilogram fixes h to this value exactly). The two differ by ~1e-5 relative — within the rtol=1e-3 upstream test gate but resolvable at the rel=1e-10 .esm gate, which is why this constant is encoded as a parameter rather than a literal in the equation RHS (so downstream consumers can override h to the modern CODATA value for precision applications without forking the component)."
+                },
+                "c": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.9979e8,
+                    "description": "Speed of light in vacuum (S&P Page 99, 5-digit-rounded value). The fundamental electromagnetic propagation speed that links frequency and wavelength in the photon picture ν = c/λ. The upstream default 2.9979e8 m/s is the historical 5-digit-rounded value; the modern CODATA-1983 exact definition is c = 2.99792458e8 m/s (the SI redefinition of the meter fixes c to this value exactly via the meter being defined as the distance light travels in 1/299792458 s). The two differ by ~8e-7 relative — well within the rtol=1e-3 upstream test gate but resolvable at the rel=1e-10 .esm gate, encoded as a parameter to support CODATA-precision overrides without forking the component."
+                },
+                "λ": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5.0e-7,
+                    "description": "Wavelength of the photon (S&P Page 99, visible-green canonical default). The upstream default 5.0e-7 m = 500 nm is the yellow-green visible peak that matches Wien's law applied to T_sun ≈ 5800 K and anchors the solar-peak photon used in actinic-flux calculations. Other canonical wavelengths used in atmospheric radiative-transfer applications: 200-300 nm (UV-B/UV-C, the Hartley-Huggins ozone-photolysis bands O3 + hν → O + O2), 300-400 nm (UV-A, the O3 + hν → O(1D) + O2 channel and NO2-photolysis band), 400-700 nm (visible, solar-energy-balance photometric range), 700-1000 nm (near-IR, plant-photosynthesis quantum-yield cutoff), 1-10 μm (thermal-IR, the Earth-radiation longwave range), 1 mm (microwave, the cosmic-microwave-background Wien peak)."
+                },
+                "Δε": {
+                    "type": "state",
+                    "units": "J",
+                    "description": "Photon energy in joules (S&P Eq. 4.1a). Δε = hν is the quantum energy of a single photon at frequency ν — the discrete energy package that gets absorbed or emitted in a photon-matter interaction. The 500-nm visible-green default gives Δε ≈ 3.97e-19 J ≈ 2.48 eV, the canonical visible photon energy that anchors photoelectric-effect work-function and photosynthetic quantum-yield calculations. The full atmospheric photon-energy range spans ~12 orders of magnitude: from ~2e-31 J at the longest radio waves (~1 km) through ~2e-22 J at the microwave CMB peak (~1 mm), ~2e-20 J at the thermal-IR Earth-emission peak (~10 μm), ~4e-19 J at the visible solar peak (~500 nm), ~7e-19 J at the UV-B ozone-photolysis range (~300 nm), up to ~2e-16 J at the soft X-ray solar corona emission (~1 nm)."
+                },
+                "ν": {
+                    "type": "state",
+                    "units": "Hz",
+                    "description": "Photon frequency in hertz (S&P Eq. 4.1b). ν = c/λ is the electromagnetic wave frequency — the inverse-wavelength characterization of monochromatic light. The 500-nm visible-green default gives ν ≈ 600 THz, the canonical visible solar peak frequency. Frequency is the natural unit for radio-frequency atmospheric remote-sensing applications (passive microwave radiometry uses frequencies in GHz, e.g., the 22 GHz water-vapor line and 60 GHz oxygen complex used in the AMSU/ATMS sounders) and for spectroscopy (the rotational-line spacing in mm-wave spectra of atmospheric trace gases is the natural frequency-unit observable). The full atmospheric photon-frequency range spans ~12 orders of magnitude inversely correlated with the wavelength range: from ~3e5 Hz at the longest radio waves through ~3e11 Hz at the CMB peak, ~3e13 Hz at the thermal-IR peak, ~6e14 Hz at the visible peak, ~1e15 Hz at the UV-B range, up to ~3e17 Hz at the soft X-ray range."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "ν",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["c", "λ"]
+                    }
+                },
+                {
+                    "lhs": "Δε",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["h", "ν"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_visible_green_500nm",
+                    "description": "At default λ = 500 nm (visible green, the solar-peak wavelength matching Wien's law for T_sun ≈ 5800 K), ν = c/λ = 2.9979e8 / 5e-7 = 5.9958e14 Hz (exact in IEEE-754 — division of two power-of-ten-scaled values with no intermediate rounding), and Δε = h·ν = 6.626e-34 · 5.9958e14 = 3.97281708e-19 J ≈ 2.48 eV — the canonical visible photon energy that anchors photoelectric-effect and photosynthetic-quantum-yield calculations. Reproduces and tightens the upstream `Equation: PhotonEnergy (Eq. 4.1)` test (GasChem.jl test/radiation_fundamentals_test.jl:101-119) default case: upstream asserts ν ≈ 5.9958e14 at rtol=1e-4 and Δε ≈ 3.973e-19 at rtol=1e-3, this one pins both at the exact IEEE-754 results at rel=1e-10.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 5.9958e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 3.97281708e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "uv_300nm",
+                    "description": "At λ = 300 nm (UV-B / Hartley ozone-photolysis band), ν = 2.9979e8 / 3e-7 = 9.993e14 Hz (exact in IEEE-754) and Δε = 6.626e-34 · 9.993e14 = 6.6213618e-19 J ≈ 4.13 eV — the canonical UV-B photon energy that drives the O3 + hν → O + O2 photolysis channel anchoring the stratospheric Chapman cycle (S&P Ch. 5 §5.2; see also chapman.esm at components/gaschem/stratospheric/chapman.esm). Reproduces and tightens the upstream `Equation: PhotonEnergy (Eq. 4.1)` test (GasChem.jl test/radiation_fundamentals_test.jl:101-119) UV case: upstream asserts ν ≈ 9.993e14 at rtol=1e-3 and Δε ≈ 6.622e-19 at rtol=1e-3, this one pins both at the exact IEEE-754 results at rel=1e-10.",
+                    "parameter_overrides": {
+                        "λ": 3.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 9.993e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 6.6213618e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "thermal_ir_earth_emission_10um",
+                    "description": "At λ = 10 μm (thermal-IR, the Wien-displacement peak for Earth's surface emission at ~300 K), ν = 2.9979e8 / 1e-5 = 2.9978999999999996e13 Hz and Δε = 6.626e-34 · 2.9979e13 = 1.9864085399999996e-20 J ≈ 0.124 eV — the canonical Earth-emission photon energy that anchors the longwave radiative-transfer band (the atmospheric window 8-13 μm where Earth radiates to space, modulated by H2O/CO2 absorption). The Δε at thermal-IR is ~20× smaller than the visible Δε at 500 nm — the canonical Wien-displacement relationship between source temperature and per-photon energy (T_earth/T_sun ≈ 1/20 gives λ_earth/λ_sun ≈ 20 and Δε_earth/Δε_sun ≈ 1/20).",
+                    "parameter_overrides": {
+                        "λ": 1.0e-5
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 2.9978999999999996e13, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 1.9864085399999996e-20, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "near_ir_photosynthesis_cutoff_700nm",
+                    "description": "At λ = 700 nm (near-IR / red-visible boundary, the long-wavelength edge of the photosynthetically active radiation (PAR) band 400-700 nm), ν = c/λ = 2.9979e8 / 7e-7 = 4.2827142857142856e14 Hz and Δε = h·ν = 6.626e-34 · 4.2827142857142856e14 = 2.8377264857142858e-19 J ≈ 1.77 eV — the canonical red-photon energy at the PAR cutoff. Photons with Δε < this value (longer wavelengths) cannot drive chlorophyll-a photoexcitation; this anchors the red-edge of the PAR band that determines plant quantum-yield calculations.",
+                    "parameter_overrides": {
+                        "λ": 7.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 4.2827142857142856e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 2.8377264857142858e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "uv_blue_par_400nm",
+                    "description": "At λ = 400 nm (violet-blue / UV-A boundary, the short-wavelength edge of the photosynthetically active radiation (PAR) band 400-700 nm), ν = 2.9979e8 / 4e-7 = 7.49475e14 Hz (exact in IEEE-754) and Δε = 6.626e-34 · 7.49475e14 = 4.96602135e-19 J ≈ 3.10 eV — the canonical blue-photon energy at the PAR cutoff. Together with `near_ir_photosynthesis_cutoff_700nm` this anchors both edges of the PAR band (3.10 eV at the blue edge / 1.77 eV at the red edge → ratio 1.75 confirming the wavelength ratio 700/400 = 1.75).",
+                    "parameter_overrides": {
+                        "λ": 4.0e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 7.49475e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 4.96602135e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "halving_lambda_doubles_nu_and_de",
+                    "description": "Verifies the canonical inverse-λ scaling of both ν and Δε by halving the default λ = 500 nm to λ = 250 nm. Expected ratios ν(250)/ν(500) = 500/250 = 2 exactly and Δε(250)/Δε(500) = 2 exactly (both ν and Δε scale as 1/λ since Δε = hc/λ). At λ = 250 nm, ν = 2.9979e8 / 2.5e-7 = 1.19916e15 Hz and Δε = 6.626e-34 · 1.19916e15 = 7.94563416e-19 J — both exactly double the default values 5.9958e14 / 3.97281708e-19. Anchors the inverse-λ scaling that drives the high-energy ionizing-radiation regime (UV-B/UV-C/X-ray) where per-photon energies become large enough to drive photodissociation and ionization.",
+                    "parameter_overrides": {
+                        "λ": 2.5e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 1.19916e15, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 7.94563416e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "doubling_lambda_halves_nu_and_de",
+                    "description": "Verifies the canonical inverse-λ scaling at the opposite end by doubling the default λ = 500 nm to λ = 1 μm (near-IR, the photosynthesis-cutoff wavelength used in plant-radiation calculations). Expected ratios ν(1μm)/ν(500nm) = 0.5 exactly and Δε(1μm)/Δε(500nm) = 0.5 exactly. At λ = 1 μm, ν = 2.9979e8 / 1e-6 = 2.9979e14 Hz and Δε = 6.626e-34 · 2.9979e14 = 1.98640854e-19 J — both exactly half the default values. Together with `halving_lambda_doubles_nu_and_de` this anchors a factor-of-4 dynamic-range check (250 nm / 500 nm / 1 μm) confirming the strict 1/λ scaling holds across the visible-to-near-IR range.",
+                    "parameter_overrides": {
+                        "λ": 1.0e-6
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 2.9979e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 1.98640854e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "codata_c_override",
+                    "description": "Override the speed of light to c = 2.99792458e8 m/s (CODATA-1983 exact, the SI definition value vs the upstream rounded 2.9979e8) at the default λ = 500 nm. Confirms c behaves as a parameter (not a hardcoded constant) at the .esm boundary. ν shifts from the default 5.9958e14 Hz to 5.99584916e14 Hz (a relative change of +8.2e-6, matching the c relative change), and Δε shifts proportionally from 3.97281708e-19 J to 3.972849653416e-19 J. A downstream consumer can override the upstream-rounded value to the modern CODATA value without forking the component.",
+                    "parameter_overrides": {
+                        "c": 2.99792458e8
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 5.99584916e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 3.9728496534159999e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "codata_h_override",
+                    "description": "Override Planck's constant to h = 6.62607015e-34 J·s (CODATA-2019 exact, the SI definition value vs the upstream rounded 6.626e-34) at the default λ = 500 nm. Confirms h behaves as a parameter (not a hardcoded constant) at the .esm boundary. ν stays at the default 5.9958e14 Hz (h does not appear in the ν equation), but Δε shifts from 3.97281708e-19 J to 3.9728591405369999e-19 J (a relative change of +1.06e-5 matching the h relative change). Catches a stuck-at-default-h regression that would have left Δε unchanged from the default test, and exercises the SI-redefinition value that downstream precision applications need.",
+                    "parameter_overrides": {
+                        "h": 6.62607015e-34
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 5.9958e14, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 3.9728591405369999e-19, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "extreme_short_xray_1nm",
+                    "description": "Soft-X-ray limit at λ = 1 nm (~soft X-ray, just below the EUV/X-ray boundary). ν = 2.9979e8 / 1e-9 = 2.9979e17 Hz and Δε = 6.626e-34 · 2.9979e17 = 1.98640854e-16 J ≈ 1240 eV ≈ 1.24 keV — the canonical soft-X-ray photon energy that drives core-electron photoionization. The Δε at 1 nm is ~500× the 500-nm visible default (wavelength ratio 500), confirming the 1/λ scaling across 3 orders of magnitude. Anchors the high-energy end of the atmospheric-radiation regime.",
+                    "parameter_overrides": {
+                        "λ": 1.0e-9
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 2.9979e17, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 1.98640854e-16, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "extreme_long_microwave_1mm",
+                    "description": "Microwave / CMB-peak limit at λ = 1 mm (~cosmic-microwave-background peak wavelength, matching Wien's law for T ≈ 3 K). ν = 2.9979e8 / 1e-3 = 2.9979e11 Hz = 299.79 GHz and Δε = 6.626e-34 · 2.9979e11 = 1.98640854e-22 J ≈ 1.24 meV — the canonical CMB photon energy. The Δε at 1 mm is ~2e-3 of the 500-nm visible default (wavelength ratio 2000 = 1/2000), confirming the 1/λ scaling across 3 orders of magnitude in the opposite direction. Anchors the low-energy end of the atmospheric-radiation regime where photons are unable to drive chemical reactions but contribute to rotational-line spectroscopy.",
+                    "parameter_overrides": {
+                        "λ": 1.0e-3
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "ν", "time": 0.0, "expected": 2.9979e11, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Δε", "time": 0.0, "expected": 1.98640854e-22, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "photon_energy_wavelength_sweep_full_spectrum",
+                    "description": "Sweep λ from 10 nm (extreme UV / soft X-ray) to 1 mm (microwave / CMB peak) across 5 orders of magnitude on a log scale, plotting both ν(λ) and Δε(λ) — the canonical photon-energy curves spanning the atmospheric-radiation regime from soft X-ray (~120 eV) through UV-C (~12 eV), UV-B (~4 eV), visible (~2 eV at 500 nm), near-IR (~1 eV at 1 μm), thermal-IR (~0.1 eV at 10 μm), down to microwave (~1 meV at 1 mm). Both ν = c/λ and Δε = hc/λ scale strictly as 1/λ — on a log-log plot, ν vs λ is a straight line of slope -1 (intercept log(c) ≈ 8.48), and Δε vs λ is a straight line of slope -1 (intercept log(hc) ≈ -25.3). Anchors the design observation that hotter sources emit higher-energy photons (UV/X-ray) while colder sources emit lower-energy photons (IR/microwave) — the Wien-displacement relationship between source temperature and per-photon energy.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 1.0e-8, "stop": 1.0e-3, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "photon_energy_vs_lambda_loglog",
+                            "type": "line",
+                            "description": "Photon energy Δε as a function of wavelength λ on a log-log plot — exact straight line of slope -1 (because Δε = hc/λ means log(Δε) = log(hc) - log(λ)). At λ=10 nm, Δε ≈ 2e-17 J (extreme UV); at λ=300 nm, Δε ≈ 6.6e-19 J (UV-B); at λ=500 nm (visible), Δε ≈ 4e-19 J; at λ=10 μm (thermal-IR), Δε ≈ 2e-20 J; at λ=1 mm (microwave), Δε ≈ 2e-22 J. The shape verifies the canonical 1/λ inverse-wavelength scaling across 5 orders of magnitude.",
+                            "x": {"variable": "λ", "label": "λ (m)"},
+                            "y": {"variable": "Δε", "label": "Δε (J)"}
+                        },
+                        {
+                            "id": "frequency_vs_lambda_loglog",
+                            "type": "line",
+                            "description": "Photon frequency ν as a function of wavelength λ on a log-log plot — exact straight line of slope -1 (because ν = c/λ means log(ν) = log(c) - log(λ)). At λ=10 nm, ν ≈ 3e16 Hz; at λ=500 nm (visible), ν ≈ 6e14 Hz = 600 THz; at λ=10 μm, ν ≈ 3e13 Hz = 30 THz; at λ=1 mm, ν ≈ 3e11 Hz = 300 GHz. The shape verifies the canonical 1/λ inverse-wavelength scaling for frequency mirroring the energy curve (since Δε = hν).",
+                            "x": {"variable": "λ", "label": "λ (m)"},
+                            "y": {"variable": "ν", "label": "ν (Hz)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "photon_energy_visible_band_sweep",
+                    "description": "Sweep λ across the visible band 380-780 nm (the canonical human-visible-light range, equivalently the PAR-band-extended range) at fine resolution, surfacing the per-photon energy variation across the visible spectrum. At λ=380 nm (violet), Δε ≈ 5.23e-19 J ≈ 3.27 eV; at λ=500 nm (yellow-green, default), Δε ≈ 3.97e-19 J ≈ 2.48 eV; at λ=650 nm (red), Δε ≈ 3.06e-19 J ≈ 1.91 eV; at λ=780 nm (deep-red / near-IR boundary), Δε ≈ 2.55e-19 J ≈ 1.59 eV. The factor-of-2 variation across the visible band drives the wavelength-dependence of photochemical quantum yields in chlorophyll-a, retinal opsins, and other visible-active photoreceptor pigments. Anchors the visible-band radiative-transfer application where per-photon energy enters the quantum-yield calculation (photons absorbed per unit energy = energy absorbed / Δε).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 3.8e-7, "stop": 7.8e-7, "count": 40, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "photon_energy_vs_lambda_visible",
+                            "type": "line",
+                            "description": "Photon energy Δε as a function of wavelength λ across the visible band 380-780 nm on linear axes — strictly decreasing curve from violet (~5.2e-19 J at 380 nm) through yellow-green (~4e-19 J at 500 nm) and red (~3.1e-19 J at 650 nm) into near-IR (~2.6e-19 J at 780 nm). The visible range covers a factor-of-2 in per-photon energy, which is the canonical visible-band photon-energy range used in photometry, colorimetry, and photochemistry.",
+                            "x": {"variable": "λ", "label": "λ (m)"},
+                            "y": {"variable": "Δε", "label": "Δε (J)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "photon_energy_uv_photolysis_band_sweep",
+                    "description": "Sweep λ across the UV-photolysis band 180-400 nm (the wavelength range driving atmospheric photodissociation reactions) at fine resolution, surfacing the per-photon energy variation across the canonical Chapman-cycle / NOx-photolysis range. At λ=180 nm (Schumann-Runge band for O2 photolysis, see chapman.esm), Δε ≈ 1.10e-18 J ≈ 6.9 eV; at λ=242 nm (canonical O2 + hν → 2 O photolysis), Δε ≈ 8.21e-19 J ≈ 5.1 eV; at λ=310 nm (canonical O3 + hν → O + O2 photolysis), Δε ≈ 6.41e-19 J ≈ 4.0 eV; at λ=400 nm (NO2 photolysis cutoff), Δε ≈ 4.97e-19 J ≈ 3.1 eV. The variation across the UV band drives the wavelength-dependent photolysis-rate coefficient j(λ) that maps actinic flux to photodissociation rate (j = ∫ σ(λ) · Φ(λ) · F(λ) dλ where σ is the absorption cross-section, Φ is the quantum yield, and F is the actinic flux per photon). Anchors the UV-band radiative-transfer application driving stratospheric ozone chemistry (S&P Ch. 5).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "λ",
+                                "range": {"start": 1.8e-7, "stop": 4.0e-7, "count": 45, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "photon_energy_vs_lambda_uv_photolysis",
+                            "type": "line",
+                            "description": "Photon energy Δε as a function of wavelength λ across the UV-photolysis band 180-400 nm on linear axes — strictly decreasing curve from extreme-UV (~1.1e-18 J at 180 nm Schumann-Runge band) through UV-C (~8.2e-19 J at 242 nm O2 photolysis) and UV-B (~6.4e-19 J at 310 nm O3 photolysis) into UV-A / near-violet (~5e-19 J at 400 nm NO2 cutoff). The UV-photolysis range covers a factor-of-2.2 in per-photon energy, driving the wavelength-dependence of photolysis rates that anchor Chapman-cycle and NOx tropospheric photochemistry.",
+                            "x": {"variable": "λ", "label": "λ (m)"},
+                            "y": {"variable": "Δε", "label": "Δε (J)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
