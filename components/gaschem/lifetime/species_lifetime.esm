@@ -1,0 +1,378 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SpeciesLifetime",
+        "description": "Atmospheric-lifetime calculator for a trace species, from Seinfeld & Pandis (2006) Ch. 2 (Atmospheric Trace Constituents), Eqs. 2.3-2.6. The component is observed-only: four algebraic equations, no time derivative, expressing the four textbook definitions of atmospheric lifetime as functions of the species burden Q and the removal/production/outflow rates. tau_general = Q/(R_removal + F_out) is the general lifetime accounting for both chemical removal R_removal and outflow F_out to other reservoirs (Eq. 2.3); tau_removal = Q/R_removal is the global-atmosphere limit with no outflow (Eq. 2.4); tau_production = Q/P is the production-based lifetime, equal to tau_removal at steady state (Eq. 2.5); and tau_first_order = 1/lambda is the lifetime when removal follows first-order kinetics R_removal = lambda*Q (Eq. 2.6). The four definitions interlock: Eq. 2.3 reduces to Eq. 2.4 as F_out -> 0, Eqs. 2.4 and 2.5 coincide when production balances removal, and Eq. 2.6 coincides with Eq. 2.4 when lambda is the consistent first-order rate constant R_removal/Q. Migrated from GasChem.jl@280ee50f src/AtmosphericLifetime.jl:132 (`SpeciesLifetime` @component). Every equation is a closed-form algebraic expression in the parameters, so every inline-test expected value below is the exact arithmetic evaluation of the textbook formula.",
+        "tags": [
+            "gaschem",
+            "atmospheric-lifetime",
+            "species-lifetime",
+            "residence-time",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-jdla)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley, Hoboken, NJ. Chapter 2 (Atmospheric Trace Constituents), Eqs. 2.3-2.6 — the definitions of atmospheric lifetime (residence time): the general lifetime tau = Q/(R + F_out), the global-atmosphere removal lifetime tau = Q/R, the steady-state production lifetime tau = Q/P, and the first-order-kinetics lifetime tau = 1/lambda."
+            }
+        ]
+    },
+    "models": {
+        "SpeciesLifetime": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/AtmosphericLifetime.jl:132\n\nUpstream `SpeciesLifetime` is an MTK `@component` declaring one `@parameters` (`lambda`, the first-order removal rate constant in s^-1), eight time-indexed `@variables` (the four inputs Q, R, P, F_out and the four lifetime outputs tau_general, tau_removal, tau_production, tau_first_order), zero `@constants`, and four algebraic equations (Eqs. 2.3-2.6 of Seinfeld & Pandis 2006 Ch. 2). It implements the four textbook definitions of atmospheric lifetime. There is no `D(·)` time derivative anywhere in the component — every equation is algebraic, so the component is observed-only (the bead's `features` tag is `observed`, and there is no transient or timescale to integrate).\n\nVariable renamed — `R` -> `R_removal`: the upstream component names the chemical-removal-rate @variable simply `R`. It is renamed to `R_removal` throughout this `.esm`. The ESS schema validator (`_check_physical_constant_units` in earthsci_toolkit/parse.py) keeps a reserved registry of physical-constant names — {R, k_B, N_A} — and rejects any `type: parameter` named exactly `R` whose units are not dimensionally compatible with the ideal gas constant's J/(mol*K). The chemical removal rate here has units mol/s, so the upstream name `R` would fail structural validation outright (`SchemaValidationError: ... constant 'R' (ideal gas constant)`). `R_removal` carries the identical physical meaning, collides with nothing in the registry, and pairs transparently with the output it feeds, `tau_removal = Q / R_removal`. The other three input @variables (Q, P, F_out) keep their upstream names verbatim — none collides with the registry.\n\nVariable-classification convention: the four input @variables Q (species burden), R_removal (chemical removal rate), P (chemical production rate) and F_out (outflow rate) are encoded here as `type: parameter` because they have no defining equation within the SpeciesLifetime component itself — they are externally-supplied quantities. The sibling `AtmosphericBudget` compilation test confirms the rig-wide treatment directly: `4.1 AtmosphericBudget Compilation` (test/atmospheric_lifetime_test.jl:325-339) compiles with `mtkcompile(budget; inputs = [F_in, F_out, P, R])` — i.e. the rate/flux @variables are passed as `inputs`, which `mtkcompile` resolves into parameters. This mirrors the rig-wide convention applied by sibling oh_production.esm (input @variables O3/H2O/M encoded as `type: parameter`) and tropospheric_budget.esm (input @variables P_n/P_a/P_c encoded as `type: parameter`). The single declared @parameter lambda carries `type: parameter` directly.\n\nState vs. equation classification: the four output @variables tau_general, tau_removal, tau_production and tau_first_order are each defined by exactly one algebraic equation in the parameters. They are encoded as `type: state`, with their defining relation carried as an entry in the `equations` array. Because the relation is algebraic (not a derivative), each equation's `lhs` is the bare output-variable name rather than a `D(·)` node. This preserves the upstream pre-`mtkcompile` structure: the raw `System(eqs, t)` has the four tau's as unknowns and four equations — exactly the invariant the upstream structural test `1.2 SpeciesLifetime Structure` asserts (`length(equations(lifetime)) == 4`). The encoding matches the verified sibling algebraic migrations wien.esm (one `state` output + one `equations` entry, reproducing the upstream `length(equations) == 1`), ghg_forcing.esm (six `state` outputs + six `equations` entries) and oh_production.esm (three `state` outputs + three `equations` entries). No `equations` entry carries a time derivative, so the model is purely algebraic and the ESS runner evaluates each tau directly from the parameter values.\n\nAnalytic structure: all four equations are closed-form algebraic expressions in the parameters — there is no integration, no transient, no timescale. tau_general = Q/(R_removal + F_out) is Eq. 2.3, the general lifetime accounting for both chemical removal and outflow; tau_removal = Q/R_removal is Eq. 2.4, the global-atmosphere limit F_out -> 0 (no outflow to other reservoirs); tau_production = Q/P is Eq. 2.5, the steady-state production-based lifetime; tau_first_order = 1/lambda is Eq. 2.6, the first-order-kinetics lifetime valid when R_removal = lambda*Q. The four definitions interlock: Eq. 2.3 reduces to Eq. 2.4 as F_out -> 0; Eqs. 2.4 and 2.5 coincide at steady state (R_removal = P, production balances removal); and Eq. 2.6 coincides with Eq. 2.4 when lambda is the consistent first-order rate constant lambda = R_removal/Q. Every inline-test expected value below is the exact IEEE-754 evaluation of these expressions at the declared (or overridden) parameters — the migration is checkable against the textbook formula, not merely against a prior solver run.\n\nNumerical defaults: the upstream @variables and @parameter carry no defaults. The `.esm` defaults are a single self-consistent canonical scenario assembled from the upstream test values:\n  lambda    = 1.0e-6 s^-1   (first-order removal rate constant — upstream test `2.5 Eq. 2.6`)\n  Q         = 1.0e12 mol    (typical tropospheric burden — upstream test `2.3 Eq. 2.3` comment, atmospheric_lifetime_test.jl:182)\n  R_removal = 1.0e6  mol/s  (chemical removal rate — upstream tests `2.3`/`2.4`)\n  P         = 1.0e6  mol/s  (chemical production rate — upstream test `2.4`, set equal to R_removal so the default scenario is at steady state)\n  F_out     = 2.0e5  mol/s  (outflow rate — upstream test `2.3 Eq. 2.3`, atmospheric_lifetime_test.jl:184)\nThe scenario is physically self-consistent: lambda = R_removal/Q = 1.0e6/1.0e12 = 1.0e-6 s^-1 is exactly the first-order rate constant implied by the burden and removal rate (so Eq. 2.6 is consistent with Eq. 2.4), and P = R_removal places the species at steady state (so Eq. 2.5 is consistent with Eq. 2.4). At these defaults tau_removal = tau_production = tau_first_order = 1.0e6 s — the three coincide, exactly as the textbook relations require at steady state with first-order kinetics — and tau_general = Q/(R_removal + F_out) = 8.333333333333334e5 s, shorter than the other three because the outflow F_out adds a second loss channel alongside the chemical removal R_removal.\n\nUpstream test reproduction:\n- `1.2 SpeciesLifetime Structure` (test/atmospheric_lifetime_test.jl:42-64, asserts `lifetime isa System`, the variables Q/tau_general/tau_removal/tau_production/tau_first_order, the parameter lambda, and `length(equations(lifetime)) == 4`) — reproduced by the migrated structural shape: four entries in `equations`, the four state-typed tau outputs, the five parameter-typed inputs, and a successful load + compile through the ESS runner before any assertion below is evaluated.\n- `2.3 Eq. 2.3: General Lifetime` (test/atmospheric_lifetime_test.jl:180-189, Q=1.0e12, R=1.0e6, F_out=2.0e5 -> tau = Q/(R+F_out) ≈ 833333.33, upstream rtol=1e-5) — reproduced and tightened by `default_canonical_lifetimes`, which pins tau_general = 8.333333333333334e5 s at rel=1e-10.\n- `2.4 Eq. 2.4-2.5: Removal and Production Lifetimes` (test/atmospheric_lifetime_test.jl:191-203, Q=1.0e12, R=1.0e6, P=1.0e6 -> tau_removal == tau_production == 1.0e6) — reproduced by `default_canonical_lifetimes`, which pins tau_removal and tau_production at 1.0e6 s and so confirms their equality at steady state.\n- `2.5 Eq. 2.6: First-Order Lifetime` (test/atmospheric_lifetime_test.jl:205-218, lambda=1.0e-6 -> tau=1.0e6; lambda_fast=1.0e-4 -> 1.0e4; lambda_slow=1.0e-8 -> 1.0e8) — reproduced by `default_canonical_lifetimes` (lambda=1.0e-6), `eq26_fast_first_order` (lambda=1.0e-4) and `eq26_slow_first_order` (lambda=1.0e-8).\n- `3.1 Lifetime Positivity` (test/atmospheric_lifetime_test.jl:300-319, tau = 1/lambda is positive and finite for lambda in [1.0e-10, 1.0e-6, 1.0e-2, 1.0]) — reproduced by `eq26_positivity_extreme_slow` (lambda=1.0e-10 -> tau=1.0e10) and `eq26_positivity_extreme_fast` (lambda=1.0 -> tau=1.0), the two extremes of the upstream sweep.\nThe remaining tests extend coverage beyond the upstream suite: the Eq. 2.3 -> Eq. 2.4 reduction as F_out -> 0, the outflow-dominated and outflow-equals-removal regimes, fast and slow chemical removal, the linear-in-burden scaling of Eq. 2.4, the off-steady-state production lifetimes when sources exceed sinks and vice versa, and the real-species first-order lifetimes for methane and carbon monoxide computed from their OH effective first-order rate constants lambda = k_OH*[OH].\n\nTolerance rationale (model-level rel=1.0e-10): observed-only algebraic system. Each output is a closed-form expression in the parameters with at most two IEEE-754 floating-point operations — tau_general is one addition (R_removal + F_out) followed by one division, and the other three are a single division each. Every output is therefore correctly-rounded to within ~1 ULP ≈ 1e-16 in relative terms, leaving six orders of magnitude of headroom under the rel=1e-10 bound across the full tested magnitude range (tau from 1.0 s at lambda=1.0 up to 1.0e10 s at lambda=1.0e-10). The ESS runner evaluates the algebraic system directly — there is no time integration, hence no integration drift. rel=1e-10 matches the verified sibling observed-only migrations wien.esm (rel=1e-10), ghg_forcing.esm (rel=1e-10) and gwp.esm (rel=1e-10), and is far tighter than the upstream Julia tests' own rtol=1e-5. No assertion expects a zero or non-finite value — all four lifetimes are strictly positive and finite for the strictly-positive parameter values used in every test (no test divides by zero) — so no `abs` floor is required.\n\nUnit balance (verified): all four relations balance dimensionally with Q in mol, the rates R_removal/P/F_out in mol/s, the rate constant lambda in s^-1, and the lifetimes tau_* in s.\n  tau_general     `Q / (R_removal + F_out)`: mol / (mol/s + mol/s) = mol / (mol/s) = s\n  tau_removal     `Q / R_removal`:           mol / (mol/s) = s\n  tau_production  `Q / P`:                   mol / (mol/s) = s\n  tau_first_order `1 / lambda`:              1 / (s^-1) = s\nSI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10
+            },
+            "variables": {
+                "lambda": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-6,
+                    "description": "First-order removal rate constant [s^-1] (S&P Eq. 2.6): the fraction of the species burden removed per unit time when removal follows first-order kinetics, R_removal = lambda*Q. An externally-supplied quantity — the only declared upstream `@parameter`. The default 1.0e-6 s^-1 is the value used in the upstream test `2.5 Eq. 2.6` and equals R_removal/Q at the default burden and removal rate, so the default scenario satisfies the first-order-kinetics relation exactly (tau_first_order = 1/lambda = Q/R_removal = tau_removal). For an effective first-order rate constant set by OH oxidation, lambda = k_OH*[OH] (S&P Eq. 2.12)."
+                },
+                "Q": {
+                    "type": "parameter",
+                    "units": "mol",
+                    "default": 1.0e12,
+                    "description": "Total burden of the species in the reservoir [mol] — the amount of the species present. An externally-supplied quantity, encoded as `type: parameter` (not `type: state`) because SpeciesLifetime has no governing equation for Q: it is a lifetime calculator, not a budget integrator (the time evolution of Q lives in the sibling AtmosphericBudget and TroposphericBudget components). The default 1.0e12 mol is the typical tropospheric burden used in the upstream tests `2.3`/`2.4` (atmospheric_lifetime_test.jl:182,194). Q is the numerator of three of the four lifetimes (tau_general, tau_removal, tau_production), which are therefore all linear in the burden."
+                },
+                "R_removal": {
+                    "type": "parameter",
+                    "units": "mol/s",
+                    "default": 1.0e6,
+                    "description": "Rate of chemical removal of the species from the reservoir [mol/s] — loss by gas-phase reaction, photolysis, deposition, etc. (the upstream @variable named simply `R`; renamed here to avoid the ESS validator's reserved `R` = ideal gas constant — see the migration notes). An externally-supplied quantity, encoded as `type: parameter` for the same reason as Q. The default 1.0e6 mol/s is the value used in the upstream tests `2.3`/`2.4`. R_removal is the denominator of the removal-based lifetime tau_removal = Q/R_removal (Eq. 2.4) and contributes, together with F_out, to the total loss rate in the general lifetime tau_general = Q/(R_removal + F_out) (Eq. 2.3)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "mol/s",
+                    "default": 1.0e6,
+                    "description": "Rate of chemical production of the species within the reservoir [mol/s] — formation by chemistry (e.g. as an oxidation product). An externally-supplied quantity, encoded as `type: parameter` for the same reason as Q. The default 1.0e6 mol/s is the value used in the upstream test `2.4` and is set equal to R_removal so the default scenario is at steady state (production balances removal). P is the denominator of the production-based lifetime tau_production = Q/P (Eq. 2.5), which equals the removal-based lifetime tau_removal once the species reaches steady state."
+                },
+                "F_out": {
+                    "type": "parameter",
+                    "units": "mol/s",
+                    "default": 2.0e5,
+                    "description": "Rate of mass outflow of the species from the reservoir [mol/s] — physical transport out of the reservoir to another reservoir (as opposed to chemical removal R_removal, which destroys the species in place). An externally-supplied quantity, encoded as `type: parameter` for the same reason as Q. The default 2.0e5 mol/s is the value used in the upstream test `2.3`. F_out appears only in the general lifetime tau_general = Q/(R_removal + F_out) (Eq. 2.3); setting F_out = 0 collapses Eq. 2.3 to the global-atmosphere removal lifetime Eq. 2.4, since the global atmosphere has no outflow to another reservoir."
+                },
+                "tau_general": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "General atmospheric lifetime [s] (S&P Eq. 2.3): tau_general = Q/(R_removal + F_out), the burden divided by the total loss rate from both chemical removal and physical outflow. The most general of the four lifetime definitions — applicable to any reservoir that loses the species both by in-place destruction (R_removal) and by transport out (F_out). Because the two loss channels add in the denominator, tau_general is always shorter than either the removal-only lifetime Q/R_removal or the outflow-only lifetime Q/F_out. As F_out -> 0 it reduces to the removal lifetime tau_removal (Eq. 2.4)."
+                },
+                "tau_removal": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Removal-based atmospheric lifetime [s] (S&P Eq. 2.4): tau_removal = Q/R_removal, the burden divided by the chemical removal rate. This is the general lifetime in the global-atmosphere limit, where there is no outflow to other reservoirs (F_out = 0) so loss occurs solely by chemical removal. It is the e-folding time the burden would have if removal were its only sink."
+                },
+                "tau_production": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Production-based atmospheric lifetime [s] (S&P Eq. 2.5): tau_production = Q/P, the burden divided by the chemical production rate. At steady state, when production balances removal (P = R_removal), the production-based and removal-based lifetimes coincide — tau_production = tau_removal — so the lifetime can be evaluated from either the source or the sink. Away from steady state the two diverge: tau_production < tau_removal when production exceeds removal (the species is accumulating) and tau_production > tau_removal when removal exceeds production (the species is declining)."
+                },
+                "tau_first_order": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "First-order atmospheric lifetime [s] (S&P Eq. 2.6): tau_first_order = 1/lambda, the inverse of the first-order removal rate constant. When removal follows first-order kinetics — the removal rate is proportional to the burden, R_removal = lambda*Q — the lifetime is simply the reciprocal of the rate constant and is independent of the burden itself. This is the most widely used lifetime definition in atmospheric chemistry: for a species removed by reaction with OH, lambda = k_OH*[OH] is the effective first-order rate constant (S&P Eq. 2.12) and tau_first_order ranges from hours for highly reactive species to years for long-lived gases such as methane."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "tau_general",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["Q", {"op": "+", "args": ["R_removal", "F_out"]}]
+                    }
+                },
+                {
+                    "lhs": "tau_removal",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["Q", "R_removal"]
+                    }
+                },
+                {
+                    "lhs": "tau_production",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["Q", "P"]
+                    }
+                },
+                {
+                    "lhs": "tau_first_order",
+                    "rhs": {
+                        "op": "/",
+                        "args": [1.0, "lambda"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_canonical_lifetimes",
+                    "description": "All five parameters at their declared defaults (Q=1.0e12 mol, R_removal=1.0e6 mol/s, P=1.0e6 mol/s, F_out=2.0e5 mol/s, lambda=1.0e-6 s^-1) — the self-consistent canonical scenario in which lambda = R_removal/Q (first-order kinetics) and P = R_removal (steady state). This single test reproduces three upstream tests at once: `2.3 Eq. 2.3: General Lifetime` (tau_general = Q/(R_removal+F_out) = 1.0e12/1.2e6 ≈ 833333.33, upstream rtol=1e-5, tightened here to rel=1e-10), `2.4 Eq. 2.4-2.5` (tau_removal == tau_production == 1.0e6 s, confirming the removal/production equivalence at steady state), and the default case of `2.5 Eq. 2.6` (tau_first_order = 1/lambda = 1.0e6 s). Together with the model loading and compiling successfully it also reproduces the upstream structural test `1.2 SpeciesLifetime Structure` (four equations, the four tau outputs, the lambda parameter). At steady state with first-order kinetics tau_removal, tau_production and tau_first_order all coincide at 1.0e6 s; tau_general is shorter (8.333e5 s) because the outflow F_out adds a second loss channel.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_general", "time": 0.0, "expected": 833333.3333333334},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "tau_production", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq23_zero_outflow_reduces_to_removal",
+                    "description": "Eq. 2.3 -> Eq. 2.4 reduction: override the outflow rate F_out to 0 (no transport out of the reservoir) with all other parameters at their defaults. The general lifetime tau_general = Q/(R_removal + F_out) = Q/(R_removal + 0) = Q/R_removal then collapses exactly onto the removal-based lifetime tau_removal = Q/R_removal = 1.0e6 s. This reproduces the textbook global-atmosphere limit (S&P Eq. 2.4): the atmosphere as a whole has no outflow to another reservoir, so loss occurs solely by chemical removal and the general lifetime equals the removal lifetime. The two assertions pin tau_general and tau_removal at the same value, confirming the limit is reached exactly.",
+                    "parameter_overrides": {"F_out": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_general", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq23_outflow_dominated_regime",
+                    "description": "Outflow-dominated regime of Eq. 2.3: raise the outflow rate F_out to 9.0e6 mol/s (nine times the default chemical removal R_removal = 1.0e6 mol/s) with all other parameters at their defaults. The total loss rate is now R_removal + F_out = 1.0e7 mol/s, dominated by outflow, so the general lifetime tau_general = Q/(R_removal + F_out) = 1.0e12/1.0e7 = 1.0e5 s — ten times shorter than the removal-only lifetime. The removal-based lifetime tau_removal = Q/R_removal = 1.0e6 s is unchanged (it does not see F_out), so the test cross-checks that the outflow override affects only tau_general.",
+                    "parameter_overrides": {"F_out": 9.0e6},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_general", "time": 0.0, "expected": 100000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq23_outflow_equals_removal",
+                    "description": "Balanced-loss regime of Eq. 2.3: set the outflow rate F_out equal to the default chemical removal rate R_removal (both 1.0e6 mol/s). With the two loss channels contributing equally, the total loss rate doubles to R_removal + F_out = 2.0e6 mol/s and the general lifetime tau_general = Q/(R_removal + F_out) = 1.0e12/2.0e6 = 5.0e5 s is exactly half the removal-only lifetime tau_removal = Q/R_removal = 1.0e6 s. Demonstrates that two equal parallel loss channels halve the lifetime — the two-pathway case of the inverse-lifetime addition rule.",
+                    "parameter_overrides": {"F_out": 1.0e6},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_general", "time": 0.0, "expected": 500000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq24_fast_removal",
+                    "description": "Fast-removal regime of Eq. 2.4: raise the chemical removal rate R_removal to 1.0e7 mol/s (ten times its default) with all other parameters at their defaults. The removal-based lifetime tau_removal = Q/R_removal = 1.0e12/1.0e7 = 1.0e5 s shortens by a factor of ten, and the general lifetime tau_general = Q/(R_removal + F_out) = 1.0e12/(1.0e7 + 2.0e5) = 9.803921568627451e4 s shortens correspondingly (the outflow F_out = 2.0e5 is now only a 2% correction to the dominant removal term). Exercises the regime where chemical removal controls the lifetime.",
+                    "parameter_overrides": {"R_removal": 1.0e7},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_removal", "time": 0.0, "expected": 100000.0},
+                        {"variable": "tau_general", "time": 0.0, "expected": 98039.2156862745}
+                    ]
+                },
+                {
+                    "id": "eq24_slow_removal",
+                    "description": "Slow-removal regime of Eq. 2.4: drop the chemical removal rate R_removal to 1.0e5 mol/s (one tenth its default) with all other parameters at their defaults. The removal-based lifetime tau_removal = Q/R_removal = 1.0e12/1.0e5 = 1.0e7 s lengthens by a factor of ten. The general lifetime tau_general = Q/(R_removal + F_out) = 1.0e12/(1.0e5 + 2.0e5) = 3.333333333333333e6 s is now markedly shorter than tau_removal because the outflow F_out = 2.0e5 mol/s is twice the weakened removal rate and dominates the total loss. Exercises the regime where outflow, not chemical removal, controls the general lifetime.",
+                    "parameter_overrides": {"R_removal": 1.0e5},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_removal", "time": 0.0, "expected": 10000000.0},
+                        {"variable": "tau_general", "time": 0.0, "expected": 3333333.3333333335}
+                    ]
+                },
+                {
+                    "id": "eq24_linear_in_burden_scaling",
+                    "description": "Burden-scaling test: raise the species burden Q to 5.0e12 mol (five times its default) with all other parameters at their defaults. Three of the four lifetimes are linear in the burden and scale up by exactly five: tau_removal = Q/R_removal = 5.0e6 s, tau_production = Q/P = 5.0e6 s, and tau_general = Q/(R_removal + F_out) = 5.0e12/1.2e6 = 4.166666666666667e6 s. The first-order lifetime tau_first_order = 1/lambda = 1.0e6 s is unchanged — Eq. 2.6 depends only on the rate constant, not the burden. Confirms the burden-linearity of Eqs. 2.3-2.5 and the burden-independence of Eq. 2.6 in a single test.",
+                    "parameter_overrides": {"Q": 5.0e12},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_removal", "time": 0.0, "expected": 5000000.0},
+                        {"variable": "tau_production", "time": 0.0, "expected": 5000000.0},
+                        {"variable": "tau_general", "time": 0.0, "expected": 4166666.6666666665},
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq25_source_exceeds_sink",
+                    "description": "Off-steady-state Eq. 2.5, accumulating species: raise the chemical production rate P to 4.0e6 mol/s (four times the default removal rate R_removal) with all other parameters at their defaults. The production-based lifetime tau_production = Q/P = 1.0e12/4.0e6 = 2.5e5 s is now four times shorter than the removal-based lifetime tau_removal = Q/R_removal = 1.0e6 s. When production exceeds removal the species is accumulating and the production-based and removal-based lifetimes diverge — they coincide only at steady state (S&P Eq. 2.5 applies the production lifetime as a steady-state diagnostic).",
+                    "parameter_overrides": {"P": 4.0e6},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_production", "time": 0.0, "expected": 250000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq25_sink_exceeds_source",
+                    "description": "Off-steady-state Eq. 2.5, declining species: drop the chemical production rate P to 2.5e5 mol/s (one quarter of the default removal rate R_removal) with all other parameters at their defaults. The production-based lifetime tau_production = Q/P = 1.0e12/2.5e5 = 4.0e6 s is now four times longer than the removal-based lifetime tau_removal = Q/R_removal = 1.0e6 s. When removal exceeds production the species is declining; together with `eq25_source_exceeds_sink` this brackets the steady-state default scenario (where tau_production = tau_removal) from both sides.",
+                    "parameter_overrides": {"P": 2.5e5},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_production", "time": 0.0, "expected": 4000000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq26_fast_first_order",
+                    "description": "Fast first-order removal (S&P Eq. 2.6): override the rate constant lambda to 1.0e-4 s^-1, the `lambda_fast` value of the upstream test `2.5 Eq. 2.6` (atmospheric_lifetime_test.jl:214). The first-order lifetime tau_first_order = 1/lambda = 1.0e4 s (~2.8 hours) — a short-lived reactive species. The removal-based lifetime tau_removal = Q/R_removal = 1.0e6 s is unchanged, cross-checking that the lambda override affects only tau_first_order (lambda appears in no other equation).",
+                    "parameter_overrides": {"lambda": 1.0e-4},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 10000.0},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq26_slow_first_order",
+                    "description": "Slow first-order removal (S&P Eq. 2.6): override the rate constant lambda to 1.0e-8 s^-1, the `lambda_slow` value of the upstream test `2.5 Eq. 2.6` (atmospheric_lifetime_test.jl:215). The first-order lifetime tau_first_order = 1/lambda = 1.0e8 s (~3.2 years) — a long-lived gas. Asserts tau_first_order together with the unchanged tau_general = 8.333e5 s and tau_removal = 1.0e6 s, confirming the lambda override is isolated to Eq. 2.6.",
+                    "parameter_overrides": {"lambda": 1.0e-8},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 100000000.0},
+                        {"variable": "tau_general", "time": 0.0, "expected": 833333.3333333334},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq26_positivity_extreme_slow",
+                    "description": "Extreme-slow end of the upstream `3.1 Lifetime Positivity` sweep (atmospheric_lifetime_test.jl:300-319, lambda in [1.0e-10, 1.0e-6, 1.0e-2, 1.0]): override lambda to 1.0e-10 s^-1. The first-order lifetime tau_first_order = 1/lambda = 1.0e10 s (~317 years) is positive and finite, as the upstream test asserts. Anchors the long-lived extreme of Eq. 2.6 and catches a stuck-at-default-lambda regression that would leave tau_first_order at 1.0e6 s.",
+                    "parameter_overrides": {"lambda": 1.0e-10},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 10000000000.0}
+                    ]
+                },
+                {
+                    "id": "eq26_positivity_extreme_fast",
+                    "description": "Extreme-fast end of the upstream `3.1 Lifetime Positivity` sweep (atmospheric_lifetime_test.jl:300-319): override lambda to 1.0 s^-1. The first-order lifetime tau_first_order = 1/lambda = 1.0 s is positive and finite, as the upstream test asserts. Anchors the short-lived extreme of Eq. 2.6; together with `eq26_positivity_extreme_slow` it pins the two endpoints of the upstream positivity sweep, spanning ten orders of magnitude in lifetime.",
+                    "parameter_overrides": {"lambda": 1.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 1.0}
+                    ]
+                },
+                {
+                    "id": "eq26_methane_effective_oh_rate",
+                    "description": "Real-species anchor for Eq. 2.6: methane (CH4) removed by reaction with the tropospheric OH radical. The effective first-order rate constant is lambda = k_OH*[OH] = 6.3e-15 cm^3/(molec*s) * 1.0e6 molec/cm^3 = 6.3e-9 s^-1, using the JPL-evaluation rate constant and the global-mean OH concentration of the upstream test `2.9 Eq. 2.12` and the docs `OH Reaction Lifetimes` figure. The first-order lifetime tau_first_order = 1/lambda = 1.5873015873015872e8 s ≈ 5.0 years reproduces the canonical ~5-year OH-oxidation lifetime of methane (the upstream OHReactionLifetime test `2.9` asserts ~5 years at rtol=0.1). Demonstrates that Eq. 2.6 applied with an OH effective rate constant yields the OH-reaction lifetime of Eq. 2.12.",
+                    "parameter_overrides": {"lambda": 6.3e-9},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 158730158.73015872},
+                        {"variable": "tau_removal", "time": 0.0, "expected": 1000000.0}
+                    ]
+                },
+                {
+                    "id": "eq26_carbon_monoxide_effective_oh_rate",
+                    "description": "Real-species anchor for Eq. 2.6: carbon monoxide (CO) removed by reaction with the tropospheric OH radical. The effective first-order rate constant is lambda = k_OH*[OH] = 2.4e-13 cm^3/(molec*s) * 1.0e6 molec/cm^3 = 2.4e-7 s^-1, using the rate constant and global-mean OH concentration of the upstream test `2.9 Eq. 2.12`. The first-order lifetime tau_first_order = 1/lambda = 4166666.666666667 s ≈ 48 days reproduces the canonical ~48-day OH-oxidation lifetime of CO (the upstream test `2.9` asserts ~48 days at rtol=0.1). With CH4 (~5 years) and CO (~48 days) the two real-species tests span the long-lived to intermediate range of tropospheric OH-controlled lifetimes.",
+                    "parameter_overrides": {"lambda": 2.4e-7},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_first_order", "time": 0.0, "expected": 4166666.666666667}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "first_order_lifetime_spectrum",
+                    "description": "Sweep the first-order removal rate constant lambda across five orders of magnitude (1.0e-9 to 1.0e-4 s^-1, logarithmically) with all other parameters at their defaults, plotting the first-order atmospheric lifetime tau_first_order = 1/lambda (S&P Eq. 2.6). The canonical inverse relationship: on log-log axes an exact straight line of slope -1. The swept range spans the realistic atmospheric trace-species lifetime spectrum, from tau ≈ 1.0e9 s (~32 years, very-long-lived gases) at lambda=1.0e-9 down to tau ≈ 1.0e4 s (~2.8 hours, short-lived reactive species) at lambda=1.0e-4 — the full dynamic range over which Eq. 2.6 is applied in atmospheric chemistry.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "lambda",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-4, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_first_order_vs_lambda_loglog",
+                            "type": "line",
+                            "description": "First-order atmospheric lifetime tau_first_order as a function of the removal rate constant lambda, on log-log axes — an exact straight line of slope -1 because tau_first_order = 1/lambda means log(tau) = -log(lambda). At lambda=1.0e-9 s^-1, tau ≈ 32 years; at lambda=1.0e-6 s^-1 (the default), tau ≈ 11.6 days; at lambda=1.0e-4 s^-1, tau ≈ 2.8 hours. The shape verifies the canonical inverse-rate-constant scaling of S&P Eq. 2.6.",
+                            "x": {"variable": "lambda", "label": "first-order removal rate constant lambda (s^-1)"},
+                            "y": {"variable": "tau_first_order", "label": "first-order lifetime tau_first_order (s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "general_lifetime_vs_outflow",
+                    "description": "Sweep the outflow rate F_out from 0 (no transport out of the reservoir) to 1.0e7 mol/s (outflow ten times the default chemical removal rate R_removal) with all other parameters at their defaults, plotting the general atmospheric lifetime tau_general = Q/(R_removal + F_out) (S&P Eq. 2.3). At F_out=0 the general lifetime equals the removal-only lifetime tau_removal = Q/R_removal = 1.0e6 s (Eq. 2.4, the global-atmosphere limit); as F_out grows, the added loss channel monotonically shortens the lifetime, asymptoting to the outflow-dominated limit Q/F_out. Surfaces how physical transport out of a reservoir competes with in-place chemical removal.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "F_out",
+                                "range": {"start": 0.0, "stop": 1.0e7, "count": 50, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_general_vs_F_out",
+                            "type": "line",
+                            "description": "General atmospheric lifetime tau_general as a function of the outflow rate F_out, on linear axes. Strictly decreasing from tau_general = 1.0e6 s at F_out=0 (where it equals the removal-only lifetime tau_removal) toward the outflow-dominated limit Q/F_out as F_out grows large. The curve is the rectangular hyperbola tau_general = Q/(R_removal + F_out).",
+                            "x": {"variable": "F_out", "label": "outflow rate F_out (mol/s)"},
+                            "y": {"variable": "tau_general", "label": "general lifetime tau_general (s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "removal_lifetime_vs_burden",
+                    "description": "Sweep the species burden Q across four orders of magnitude (1.0e10 to 1.0e14 mol, logarithmically) with all other parameters at their defaults, plotting the removal-based lifetime tau_removal = Q/R_removal (S&P Eq. 2.4). The lifetime is exactly linear in the burden — on log-log axes a straight line of slope +1 — because for a fixed removal rate R_removal a larger reservoir takes proportionally longer to empty. Illustrates the burden-linearity shared by Eqs. 2.3-2.5, in contrast to the burden-independent first-order lifetime of Eq. 2.6.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Q",
+                                "range": {"start": 1.0e10, "stop": 1.0e14, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_removal_vs_Q_loglog",
+                            "type": "line",
+                            "description": "Removal-based atmospheric lifetime tau_removal as a function of the species burden Q, on log-log axes — an exact straight line of slope +1 because tau_removal = Q/R_removal is linear in Q at fixed R_removal. At Q=1.0e10 mol, tau_removal = 1.0e4 s; at Q=1.0e12 mol (the default), tau_removal = 1.0e6 s; at Q=1.0e14 mol, tau_removal = 1.0e8 s.",
+                            "x": {"variable": "Q", "label": "species burden Q (mol)"},
+                            "y": {"variable": "tau_removal", "label": "removal lifetime tau_removal (s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "general_lifetime_loss_partition_heatmap",
+                    "description": "Joint two-dimensional sweep of the chemical removal rate R_removal (1.0e5 to 1.0e7 mol/s, logarithmically) and the outflow rate F_out (1.0e4 to 1.0e6 mol/s, logarithmically) at the default burden Q=1.0e12 mol, surfacing the general atmospheric lifetime tau_general = Q/(R_removal + F_out) (S&P Eq. 2.3) as a function of its two competing loss channels. The lifetime is set by the total loss rate R_removal + F_out: longest in the low-R_removal / low-F_out corner (both channels weak), shortest in the high-R_removal / high-F_out corner (both strong). The iso-lifetime contours are lines of constant R_removal + F_out — the signature that chemical removal and physical outflow add as parallel sinks.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_removal",
+                                "range": {"start": 1.0e5, "stop": 1.0e7, "count": 25, "scale": "log"}
+                            },
+                            {
+                                "parameter": "F_out",
+                                "range": {"start": 1.0e4, "stop": 1.0e6, "count": 25, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_general_vs_R_removal_and_F_out",
+                            "type": "heatmap",
+                            "description": "General atmospheric lifetime tau_general over the (R_removal, F_out) plane on log-log axes. The color channel is tau_general = Q/(R_removal + F_out) at the default burden Q=1.0e12 mol; iso-lifetime contours are lines of constant total loss rate R_removal + F_out, running diagonally across the plane. The lifetime ranges from ~9.1e6 s in the weak-loss corner (R_removal=1.0e5, F_out=1.0e4) to ~9.1e4 s in the strong-loss corner (R_removal=1.0e7, F_out=1.0e6).",
+                            "x": {"variable": "R_removal", "label": "chemical removal rate R_removal (mol/s)"},
+                            "y": {"variable": "F_out", "label": "outflow rate F_out (mol/s)"},
+                            "value": {"variable": "tau_general", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
