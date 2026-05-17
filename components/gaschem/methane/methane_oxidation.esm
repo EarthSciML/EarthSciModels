@@ -1,0 +1,1312 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MethaneOxidation",
+        "description": "Methane oxidation reaction-rate diagnostics from Seinfeld & Pandis (2006) Ch. 6 §6.4, Table 6.1, pp. 219-227. Methane oxidation is the archetypal VOC oxidation mechanism in the troposphere, proceeding CH₄ → CH₃O₂ → CH₃O → HCHO → HCO → CO → CO₂. This observed-only algebraic component computes the 17 individual reaction rates R1-R17 of the complete Table 6.1 mechanism (10 bimolecular, 3 termolecular, 4 photolysis reactions) plus three diagnostic aggregates: the gross ozone production rate P_O3_gross = R15 + R3 (the two peroxy-radical + NO channels), the formaldehyde production rate P_HCHO = R6 + R8, and the methane loss rate L_CH4 = R1. Each reaction rate is the product of a 298 K rate constant and the reactant concentrations (R = k·[A]·[B] bimolecular, k·[M]·[A]·[B] termolecular, j·[A] photolysis). The fate of the methylperoxy radical CH₃O₂ — the O₃-producing NO channel R3 versus the chain-terminating HO₂ channel R4 — sets the ozone yield per CH₄ oxidized and is the central NOx-regime diagnostic of the mechanism. Purely algebraic (no time derivatives): 52 variables (15 input species and 17 rate constants encoded as parameters, 20 output diagnostics as state) and 20 equations. Migrated from GasChem.jl@8c12c048 src/methane_oxidation.jl:77 (`MethaneOxidation` @component).",
+        "tags": [
+            "gaschem",
+            "methane-oxidation",
+            "methane",
+            "voc-oxidation",
+            "tropospheric-chemistry",
+            "ozone-production",
+            "reaction-rates",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-xw55)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 6 §6.4, Table 6.1, pp. 219-227. The complete methane oxidation mechanism — 17 reactions carrying CH₄ through CH₃O₂, CH₃O, HCHO, HCO and CO — with rate constants at 298 K. Rate constants from Table 6.1; HCHO + OH and HCHO photolysis values from p. 221."
+            }
+        ]
+    },
+    "models": {
+        "MethaneOxidation": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/methane_oxidation.jl:77\n\nUpstream `MethaneOxidation` is an MTK `@component` implementing the reaction-rate diagnostics of the complete methane oxidation mechanism — Table 6.1 of Seinfeld & Pandis (2006) Chapter 6 §6.4, pp. 219-227. It declares 15 input-species `@variables` (CH4, CH3, CH3O2, CH3O, CH3OOH, HCHO, HCO, OH, HO2, H, NO, NO2, O, O2, M), 20 output-diagnostic `@variables` (the 17 reaction rates R1-R17 plus the three diagnostic aggregates P_O3_gross, P_HCHO, L_CH4), 17 rate-constant `@parameters`, and 20 algebraic equations, returning `System(eqs, t; name)`. The upstream tests compile it with `compile_with_inputs(sys, ch4_inputs)` (= `mtkcompile` with the 15 species as `inputs`) and solve the result as a `NonlinearProblem` with the inputs pinned to user-supplied concentrations. The companion `MethaneOxidationODE` `@component` at src/methane_oxidation.jl:213 is a separate Catalyst reaction-network ODE system and is migrated under its own bead (methane_ode.esm) — it is not part of this file.\n\nVariable-classification convention: the 15 input @variables are encoded here as `type: parameter` because they have no defining equation within the MethaneOxidation component itself — they are externally-supplied inputs that the upstream compile treats via `compile_with_inputs(...)`. The 17 rate constants are `type: parameter` as well. The 20 output @variables are `type: state` because each is the LHS of exactly one algebraic equation. This mirrors the rig-wide convention applied by the sibling gaschem diagnostic components ope.esm (5 input @variables encoded as parameters, 3 outputs as state) and oh_production.esm. The .esm therefore declares 52 variables = 32 `type: parameter` (15 species + 17 rate constants) + 20 `type: state`, and 20 entries in `equations`.\n\nStructural-test reproduction: the upstream `MethaneOxidation: Structural Verification` testitem (test/test_methane_oxidation.jl:4-35) asserts `length(unknowns(sys)) == 35`, `length(equations(sys)) == 20`, and `length(parameters(sys)) == 17`. The .esm preserves this exactly — the 35 upstream unknowns are the 20 `type: state` outputs plus the 15 input species (which upstream are unknowns, here `type: parameter`); the 17 upstream parameters are the 17 rate-constant `type: parameter` entries; and the 20 upstream equations are the 20 `equations` entries.\n\nRate-constant CGS→SI translation: Table 6.1 lists rate constants in CGS. The upstream Julia @parameters block converts them to SI — bimolecular rate coefficients are multiplied by 1e-6 (cm³/molec/s → m³/s) and termolecular ones by 1e-12 (cm⁶/molec²/s → m⁶/s) — and the .esm encodes the exact float64 each upstream expression produces:\n  k1   = 2.45e-12*exp(-1775/298)*1e-6 = 6.3437334324972315e-21 m^3/s\n  k3   = 7.7e-12*1e-6  = 7.699999999999999e-18 m^3/s\n  k4   = 5.2e-12*1e-6  = 5.199999999999999e-18 m^3/s\n  k5   = 3.5e-13*1e-6  = 3.5e-19 m^3/s\n  k6   = 1.9e-15*1e-6  = 1.9e-21 m^3/s\n  k7   = 3.6e-12*exp(200/298)*1e-6 = 7.043285735348479e-18 m^3/s\n  k8   = 1.9e-12*1e-6  = 1.9e-18 m^3/s\n  k10  = 9.0e-12*1e-6  = 9.0e-18 m^3/s\n  k13  = 5.2e-12*1e-6  = 5.199999999999999e-18 m^3/s\n  k15  = 8.1e-12*1e-6  = 8.1e-18 m^3/s\n  k2_0  = 1.0e-30*1e-12 = 1.0e-42 m^6/s\n  k14_0 = 5.7e-32*1e-12 = 5.7e-44 m^6/s\n  k17_0 = 6.0e-34*1e-12 = 6.0e-46 m^6/s\n  j9 = 5.0e-6, j11 = 3.0e-5, j12 = 4.0e-5, j16 = 8.0e-3 s^-1\nk1 and k7 carry an Arrhenius `exp` factor; MethaneOxidation has no temperature variable, so T is fixed at the 298 K reference and the two parameters reduce to compile-time constants — encoded as the exact float64 the upstream MTK @parameters block evaluates them to (computed in Julia 1.12 to bit-match upstream). The products k3, k4, k13 = X*1e-6 land exactly one ULP below the clean SI literals 7.7e-18 / 5.2e-18 / 5.2e-18 (the standard cm^3*1e-6 rounding artefact also noted in sibling ope.esm); they are encoded verbatim as the upstream product so the file's rate constants are bit-identical to upstream MTK. Every inline-test expected value below is computed from the .esm's own declared rate-constant and species literals, so the file is internally exact at rel=1e-10 regardless of the ULP-level CGS-product choice.\n\nObservability classification: this component is purely algebraic — every output is the LHS of one algebraic equation in the inputs, the rate constants, and (for L_CH4, P_HCHO, P_O3_gross) other outputs. No equation contains a `D(.)` operator, so the `(t)` index has no role and the trajectory is constant in time. Test and example scenarios use `time_span: [0.0, 1.0]` and sample at t=0, mirroring the convention of the sibling observed-only gaschem .esm files (ope.esm, oh_production.esm, gwp.esm).\n\nEquation cascade: the 20 equations form a topologically-ordered cascade — R1-R17 depend only on inputs and rate constants, while the three diagnostic aggregates depend on the R-states: L_CH4 ~ R1, P_HCHO ~ R6 + R8, P_O3_gross ~ R15 + R3. These three are written referencing the R-states rather than fully inlined, preserving the upstream symbolic structure (the diagnostic-sum identities the upstream tests assert) and mirroring the ope.esm / oh_production.esm cascade convention.\n\nNumerical defaults: the 15 input species carry no defaults upstream — the .esm defaults are the canonical upstream test scenario, the `input_vals` Dict reused across the MethaneOxidation testitems in test/test_methane_oxidation.jl (CH4=4.5e19, CH3=1e10, CH3O2=1e14, CH3O=1e10, CH3OOH=1e15, HCHO=1e16, HCO=1e10, OH=1e12, HO2=1e14, H=1e8, NO=2.5e15, NO2=2.5e16, O=1e8, O2=5.25e24, M=2.5e25, all in SI m^-3). At these defaults the methane-loss rate L_CH4 = R1 = 285468004462.3754 m^-3*s^-1 gives a CH4 chemical lifetime CH4/L_CH4 ~ 5.0 years, the gross ozone production rate P_O3_gross = 3.95e12 m^-3*s^-1, and the formaldehyde production rate P_HCHO ~ 9.98e13 m^-3*s^-1.\n\nTolerance rationale (model-level rel=1e-10 / abs=1e-12): every equation is a small expression tree — the reaction rates are products of a rate constant and 2-3 concentrations (2-3 IEEE-754 multiplications), the diagnostics are one or two additions. Each output is correctly-rounded to within ~1-3 ULP ~ 1e-15 relative, leaving ~5 orders of magnitude of headroom under rel=1e-10 — far tighter than the upstream tests' own rtol bounds (0.01-0.1). The abs=1e-12 floor gates the boundary-case assertions (NO=0, OH=0, O2=0) where outputs collapse to exact IEEE-754 zero and the relative check is undefined. Matches sibling observed-only gaschem .esm tolerance: ope.esm rel=1e-10/abs=1e-12, oh_production.esm rel=1e-10/abs=1e-12.\n\nTests: 14 inline tests / 68 assertions. `upstream_default_scenario_all_reaction_rates` pins all 20 outputs at the canonical scenario and alone reproduces eight upstream testitems (Table 6.1 Rate Constants, R1, R3, P_HCHO=R6+R8, L_CH4=R1, P_O3_gross=R15+R3, Oxidation Chain Relative Rates, HCHO as Key Intermediate) plus All Reaction Rates Positive and CH4 Lifetime. `upstream_low_nox_regime` reproduces the Low NOx Regime testitem (R4 > R3); `upstream_r1_doubles_when_oh_doubled` reproduces R1 Scales Linearly with OH. Coverage beyond the upstream suite: per-input linearity tests (R1 in CH4, the peroxy+NO channels in NO, the termolecular rates in M, the CH3OOH reactions in CH3OOH), the quadratic CH3O2 self-reaction scaling, the high-NOx and pristine-low-OH regime endpoints, the docs formaldehyde-branching scenario, and three boundary-collapse tests (NO=0, OH=0, O2=0) that also verify the additive wiring of the P_HCHO and P_O3_gross diagnostic sums.\n\nExamples: 4 parameter-sweep examples with 7 plots — `ch3o2_radical_fate_vs_no` (NO log-sweep, the CH3O2 fate competition and gross O3 production, reproducing the docs `CH3O2 Fate` figure), `methane_sink_vs_oh` (OH log-sweep, the methane-loss / lifetime story), `formaldehyde_loss_pathways_vs_oh` (OH log-sweep, the HCHO branching analysis from the docs), and `gross_o3_production_no_ho2_heatmap` (joint 2-D NO*HO2 sweep of gross ozone production).\n\nUnit balance (verified): bimolecular rates R = k[m^3/s]*[m^-3]*[m^-3] = m^-3*s^-1; termolecular rates R = k[m^6/s]*[m^-3]*[m^-3]*[m^-3] = m^-3*s^-1; photolysis rates R = j[s^-1]*[m^-3] = m^-3*s^-1; the three diagnostic aggregates are sums of m^-3*s^-1 terms. All concentrations in SI m^-3, rate constants in SI m^3/s or m^6/s, photolysis frequencies in s^-1, all reaction rates and diagnostics in m^-3*s^-1. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1e-10,
+                "abs": 1e-12
+            },
+            "variables": {
+                "k1": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.3437334324972315e-21,
+                    "description": "CH₄ + OH → CH₃ + H₂O rate constant (Table 6.1 reaction 1, S&P §6.4). The methane-initiation step and the rate-limiting step of the entire oxidation chain — also the dominant tropospheric CH₄ sink. The upstream Julia default is the Arrhenius form 2.45e-12·exp(-1775/T)·1e-6 m³/s; because MethaneOxidation carries no temperature variable, T is fixed at the 298 K reference and the parameter evaluates to the constant 6.3437334324972315e-21 m³/s (encoded as the exact float64 the upstream @parameters block produces). The large activation energy of H-abstraction from the strong C-H bond makes this the slowest bimolecular rate constant in the mechanism."
+                },
+                "k3": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 7.699999999999999e-18,
+                    "description": "CH₃O₂ + NO → CH₃O + NO₂ rate constant (Table 6.1 reaction 3). Upstream 7.7e-12 cm³/molec/s × 1e-6 = 7.699999999999999e-18 m³/s (the CGS×1e-6 product lands one ULP below the clean literal 7.7e-18; encoded verbatim to bit-match upstream MTK). This is the O₃-producing fate of the methylperoxy radical — it converts NO to NO₂, whose photolysis yields O₃ — and is the high-NOx branch of the CH₃O₂ fate competition with reaction 4."
+                },
+                "k4": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5.199999999999999e-18,
+                    "description": "CH₃O₂ + HO₂ → CH₃OOH + O₂ rate constant (Table 6.1 reaction 4). Upstream 5.2e-12 cm³/molec/s × 1e-6 = 5.199999999999999e-18 m³/s (one ULP below the clean literal 5.2e-18; encoded verbatim). This is the chain-terminating fate of CH₃O₂ — it forms the relatively stable hydroperoxide CH₃OOH — and is the low-NOx branch of the CH₃O₂ fate competition with reaction 3."
+                },
+                "k5": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3.5e-19,
+                    "description": "CH₃O₂ + CH₃O₂ → products rate constant (Table 6.1 reaction 5). Upstream 3.5e-13 cm³/molec/s × 1e-6 = 3.5e-19 m³/s. The methylperoxy self-reaction; R5 = k5·[CH₃O₂]² is the only reaction rate quadratic in a single species. Negligible at moderate NOx but a radical sink when the CH₃O₂ pool is large and NO is scarce."
+                },
+                "k6": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.9e-21,
+                    "description": "CH₃O + O₂ → HCHO + HO₂ rate constant (Table 6.1 reaction 6). Upstream 1.9e-15 cm³/molec/s × 1e-6 = 1.9e-21 m³/s. Converts the methoxy radical to formaldehyde while regenerating HO₂; one of the two HCHO production channels (the other is reaction 8)."
+                },
+                "k7": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 7.043285735348479e-18,
+                    "description": "CH₃OOH + OH → CH₃O₂ + H₂O rate constant (Table 6.1 reaction 5a). The upstream Julia default is the Arrhenius form 3.6e-12·exp(200/T)·1e-6 m³/s evaluated at the fixed 298 K reference, giving the constant 7.043285735348479e-18 m³/s (encoded as the exact upstream float64). The positive 200/T exponent gives a mild negative temperature dependence; this channel recycles the hydroperoxide back to methylperoxy."
+                },
+                "k8": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.9e-18,
+                    "description": "CH₃OOH + OH → HCHO + OH + H₂O rate constant (Table 6.1 reaction 5b). Upstream 1.9e-12 cm³/molec/s × 1e-6 = 1.9e-18 m³/s. The OH-conserving branch of CH₃OOH + OH — OH is regenerated, so the net effect is CH₃OOH → HCHO; one of the two HCHO production channels."
+                },
+                "k10": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 9e-18,
+                    "description": "HCHO + OH → HCO + H₂O rate constant (Table 6.1 reaction 10, S&P p. 221). Upstream 9.0e-12 cm³/molec/s × 1e-6 = 9.0e-18 m³/s. The OH-driven formaldehyde-loss channel; competes with the two HCHO photolysis channels (reactions 11 and 12)."
+                },
+                "k13": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5.199999999999999e-18,
+                    "description": "HCO + O₂ → CO + HO₂ rate constant (Table 6.1 reaction 13). Upstream 5.2e-12 cm³/molec/s × 1e-6 = 5.199999999999999e-18 m³/s (one ULP below the clean literal 5.2e-18; encoded verbatim). Converts the formyl radical to carbon monoxide — the penultimate carbon product of the chain CH₄ → … → CO → CO₂ — while regenerating HO₂."
+                },
+                "k15": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8.1e-18,
+                    "description": "HO₂ + NO → OH + NO₂ rate constant (Table 6.1 reaction 15). Upstream 8.1e-12 cm³/molec/s × 1e-6 = 8.1e-18 m³/s. The central HOx-cycle propagation step: it regenerates OH (sustaining the catalytic oxidation chain) and converts NO to NO₂, the second of the two peroxy+NO channels that feed gross O₃ production."
+                },
+                "k2_0": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 1e-42,
+                    "description": "CH₃ + O₂ + M → CH₃O₂ + M termolecular rate constant (Table 6.1 reaction 2). Upstream 1.0e-30 cm⁶/molec²/s × 1e-12 (the cm⁶ → m⁶ conversion factor for termolecular rate coefficients) = 1.0e-42 m⁶/s. The third body M carries away the excess energy of the nascent CH₃O₂ adduct."
+                },
+                "k14_0": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 5.7e-44,
+                    "description": "H + O₂ + M → HO₂ + M termolecular rate constant (Table 6.1 reaction 14). Upstream 5.7e-32 cm⁶/molec²/s × 1e-12 = 5.7e-44 m⁶/s. Converts the hydrogen atom released by HCHO photolysis (reaction 11) into HO₂."
+                },
+                "k17_0": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 6e-46,
+                    "description": "O + O₂ + M → O₃ + M termolecular rate constant (Table 6.1 reaction 17). Upstream 6.0e-34 cm⁶/molec²/s × 1e-12 = 6.0e-46 m⁶/s. The ozone-forming step — the O atom liberated by NO₂ photolysis (reaction 16) recombines with O₂."
+                },
+                "j9": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 5e-06,
+                    "description": "CH₃OOH + hν → CH₃O + OH photolysis frequency (Table 6.1 reaction 9). Upstream default 5.0e-6 s⁻¹, a representative clear-sky daytime value. The photolytic loss channel of methyl hydroperoxide."
+                },
+                "j11": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 3e-05,
+                    "description": "HCHO + hν → HCO + H photolysis frequency (Table 6.1 reaction 11). Upstream default 3.0e-5 s⁻¹. The radical (H-atom-producing) channel of formaldehyde photolysis — a net HOx source after H + O₂ + M → HO₂."
+                },
+                "j12": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 4e-05,
+                    "description": "HCHO + hν → H₂ + CO photolysis frequency (Table 6.1 reaction 12, S&P p. 221). Upstream default 4.0e-5 s⁻¹. The molecular (radical-free) channel of formaldehyde photolysis; j12 > j11 so the molecular channel slightly outpaces the radical channel at the reference photolysis rates."
+                },
+                "j16": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.008,
+                    "description": "NO₂ + hν → NO + O photolysis frequency (Table 6.1 reaction 16). Upstream default 8.0e-3 s⁻¹, the fastest photolysis in the mechanism. Liberates the O atom that reaction 17 converts to O₃ — the photolytic engine of tropospheric ozone formation."
+                },
+                "CH4": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4.5e+19,
+                    "description": "Methane (CH₄) number density [m⁻³]. The chain-initiating species; the most abundant atmospheric hydrocarbon (~1.8 ppm). Default 4.5e19 m⁻³ (~1800 ppb at STP) is the canonical upstream test scenario value. Appears only in reaction 1 (R1 = k1·CH₄·OH) and hence sets the CH₄-loss rate L_CH4."
+                },
+                "CH3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 10000000000.0,
+                    "description": "Methyl radical (CH₃) number density [m⁻³]. The first chain intermediate, produced by R1 and consumed by R2 (CH₃ + O₂ + M). Default 1.0e10 m⁻³ — a short-lived radical, present only in trace amounts."
+                },
+                "CH3O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000000000.0,
+                    "description": "Methylperoxy radical (CH₃O₂) number density [m⁻³]. The pivotal branch-point intermediate: its fate splits between the O₃-producing NO channel (R3), the chain-terminating HO₂ channel (R4), and self-reaction (R5). Default 1.0e14 m⁻³."
+                },
+                "CH3O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 10000000000.0,
+                    "description": "Methoxy radical (CH₃O) number density [m⁻³]. Produced by R3 and R9; consumed by R6 (CH₃O + O₂ → HCHO + HO₂). Default 1.0e10 m⁻³."
+                },
+                "CH3OOH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1000000000000000.0,
+                    "description": "Methyl hydroperoxide (CH₃OOH) number density [m⁻³]. The chain-terminating product of R4; reprocessed by R7, R8 and photolysis R9. Default 1.0e15 m⁻³."
+                },
+                "HCHO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1e+16,
+                    "description": "Formaldehyde (HCHO) number density [m⁻³]. The key carbon intermediate of the chain, with three loss channels: R10 (OH), R11 (radical photolysis) and R12 (molecular photolysis). Default 1.0e16 m⁻³."
+                },
+                "HCO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 10000000000.0,
+                    "description": "Formyl radical (HCO) number density [m⁻³]. Produced by R10 and R11; consumed by R13 (HCO + O₂ → CO + HO₂). Default 1.0e10 m⁻³."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Hydroxyl radical (OH) number density [m⁻³]. The primary atmospheric oxidant; drives R1, R7, R8 and R10. Default 1.0e12 m⁻³ (~1e6 molec/cm³), the canonical daytime tropospheric value. R1, R7, R8, R10 and the diagnostic L_CH4 are all exactly linear in OH."
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000000000.0,
+                    "description": "Hydroperoxyl radical (HO₂) number density [m⁻³]. Drives the chain-terminating R4 and the O₃-producing R15 (HO₂ + NO). Default 1.0e14 m⁻³ (~1e8 molec/cm³)."
+                },
+                "H": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000.0,
+                    "description": "Hydrogen atom (H) number density [m⁻³]. Released by HCHO radical photolysis (R11); consumed by R14 (H + O₂ + M → HO₂). Default 1.0e8 m⁻³ — an extremely short-lived radical."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2500000000000000.0,
+                    "description": "Nitric oxide (NO) number density [m⁻³]. The NOx species that switches the chain between its O₃-producing and chain-terminating regimes. Drives R3 and R15, so both peroxy+NO channels — and hence P_O3_gross — are exactly linear in NO. Default 2.5e15 m⁻³ (~0.1 ppb at STP)."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e+16,
+                    "description": "Nitrogen dioxide (NO₂) number density [m⁻³]. Appears only in reaction 16 (R16 = j16·NO₂, NO₂ photolysis). Default 2.5e16 m⁻³ (~1 ppb at STP)."
+                },
+                "O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000.0,
+                    "description": "Oxygen atom (O) number density [m⁻³]. Liberated by NO₂ photolysis (R16); consumed by R17 (O + O₂ + M → O₃). Default 1.0e8 m⁻³."
+                },
+                "O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.25e+24,
+                    "description": "Molecular oxygen (O₂) number density [m⁻³]. The bath-gas oxidant; a factor in R2, R6, R13, R14 and R17. Default 5.25e24 m⁻³ (the ~21% O₂ fraction of STP air number density)."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e+25,
+                    "description": "Total air number density (M) [m⁻³]. The third body in the three termolecular reactions R2, R14 and R17, each of which is exactly linear in M. Default 2.5e25 m⁻³ (STP)."
+                },
+                "R1": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 1, CH₄ + OH → CH₃ + H₂O [m⁻³·s⁻¹]: R1 = k1·CH₄·OH. The methane-initiation rate; equals the CH₄-loss rate L_CH4. At the default scenario R1 ≈ 2.85e11 m⁻³·s⁻¹."
+                },
+                "R2": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 2, CH₃ + O₂ + M → CH₃O₂ + M [m⁻³·s⁻¹]: R2 = k2_0·M·CH₃·O₂. Termolecular — exactly linear in the air density M."
+                },
+                "R3": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 3, CH₃O₂ + NO → CH₃O + NO₂ [m⁻³·s⁻¹]: R3 = k3·CH₃O₂·NO. The O₃-producing fate of methylperoxy; at the default scenario R3 = 1.925e12 m⁻³·s⁻¹ and dominates R4 by a factor ~37 (the moderate-to-high-NOx regime)."
+                },
+                "R4": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 4, CH₃O₂ + HO₂ → CH₃OOH + O₂ [m⁻³·s⁻¹]: R4 = k4·CH₃O₂·HO₂. The chain-terminating fate of methylperoxy; overtakes R3 only in the low-NOx regime."
+                },
+                "R5": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 5, CH₃O₂ + CH₃O₂ → products [m⁻³·s⁻¹]: R5 = k5·CH₃O₂·CH₃O₂. The methylperoxy self-reaction — the only rate quadratic in a single species, so R5 scales as CH₃O₂²."
+                },
+                "R6": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 6, CH₃O + O₂ → HCHO + HO₂ [m⁻³·s⁻¹]: R6 = k6·CH₃O·O₂. Converts the methoxy radical to formaldehyde; one of the two formaldehyde-production channels summed into P_HCHO."
+                },
+                "R7": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 7, CH₃OOH + OH → CH₃O₂ + H₂O [m⁻³·s⁻¹]: R7 = k7·CH₃OOH·OH. Recycles the hydroperoxide back to methylperoxy."
+                },
+                "R8": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 8, CH₃OOH + OH → HCHO + OH + H₂O [m⁻³·s⁻¹]: R8 = k8·CH₃OOH·OH. The OH-conserving branch of CH₃OOH + OH; the second formaldehyde-production channel summed into P_HCHO."
+                },
+                "R9": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 9, CH₃OOH + hν → CH₃O + OH [m⁻³·s⁻¹]: R9 = j9·CH₃OOH. Photolytic loss of methyl hydroperoxide."
+                },
+                "R10": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 10, HCHO + OH → HCO + H₂O [m⁻³·s⁻¹]: R10 = k10·HCHO·OH. The OH-driven formaldehyde-loss channel — the only HCHO-loss channel that depends on OH."
+                },
+                "R11": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 11, HCHO + hν → HCO + H [m⁻³·s⁻¹]: R11 = j11·HCHO. The radical (H-atom-producing) channel of formaldehyde photolysis."
+                },
+                "R12": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 12, HCHO + hν → H₂ + CO [m⁻³·s⁻¹]: R12 = j12·HCHO. The molecular (radical-free) channel of formaldehyde photolysis; R12 > R11 at the reference photolysis rates since j12 > j11."
+                },
+                "R13": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 13, HCO + O₂ → CO + HO₂ [m⁻³·s⁻¹]: R13 = k13·HCO·O₂. Converts the formyl radical to carbon monoxide."
+                },
+                "R14": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 14, H + O₂ + M → HO₂ + M [m⁻³·s⁻¹]: R14 = k14_0·M·H·O₂. Termolecular — exactly linear in M."
+                },
+                "R15": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 15, HO₂ + NO → OH + NO₂ [m⁻³·s⁻¹]: R15 = k15·HO₂·NO. The HOx-cycle propagation step; the second peroxy+NO channel summed into P_O3_gross."
+                },
+                "R16": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 16, NO₂ + hν → NO + O [m⁻³·s⁻¹]: R16 = j16·NO₂. NO₂ photolysis — liberates the O atom that R17 converts to ozone."
+                },
+                "R17": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Rate of reaction 17, O + O₂ + M → O₃ + M [m⁻³·s⁻¹]: R17 = k17_0·M·O·O₂. Termolecular — exactly linear in M; the ozone-forming step."
+                },
+                "P_O3_gross": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Gross ozone production rate [m⁻³·s⁻¹] (S&P Eq. 6.9 analog): P_O3_gross = R15 + R3, the sum of the two peroxy-radical + NO channels. Each HO₂ + NO and CH₃O₂ + NO reaction converts an NO to an NO₂ whose photolysis yields one O₃, so this is the gross rate at which the methane mechanism makes ozone. Exactly linear in NO."
+                },
+                "P_HCHO": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Formaldehyde production rate [m⁻³·s⁻¹]: P_HCHO = R6 + R8, the sum of the CH₃O + O₂ channel (R6) and the OH-conserving CH₃OOH + OH channel (R8)."
+                },
+                "L_CH4": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Methane loss rate [m⁻³·s⁻¹]: L_CH4 = R1. The only CH₄ sink in the mechanism is reaction with OH, so the methane loss rate equals R1 exactly. The CH₄ chemical lifetime is CH₄ / L_CH4; at the default scenario this is ~5.0 years, consistent with the observed tropospheric methane lifetime."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "R1",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k1",
+                            "CH4",
+                            "OH"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k2_0",
+                            "M",
+                            "CH3",
+                            "O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k3",
+                            "CH3O2",
+                            "NO"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R4",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k4",
+                            "CH3O2",
+                            "HO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R5",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k5",
+                            "CH3O2",
+                            "CH3O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R6",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k6",
+                            "CH3O",
+                            "O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R7",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k7",
+                            "CH3OOH",
+                            "OH"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R8",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k8",
+                            "CH3OOH",
+                            "OH"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R9",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "j9",
+                            "CH3OOH"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R10",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k10",
+                            "HCHO",
+                            "OH"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R11",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "j11",
+                            "HCHO"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R12",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "j12",
+                            "HCHO"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R13",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k13",
+                            "HCO",
+                            "O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R14",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k14_0",
+                            "M",
+                            "H",
+                            "O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R15",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k15",
+                            "HO2",
+                            "NO"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R16",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "j16",
+                            "NO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R17",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k17_0",
+                            "M",
+                            "O",
+                            "O2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_CH4",
+                    "rhs": "R1"
+                },
+                {
+                    "lhs": "P_HCHO",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "R6",
+                            "R8"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "P_O3_gross",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "R15",
+                            "R3"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_default_scenario_all_reaction_rates",
+                    "description": "Pins all 20 output diagnostics (R1-R17, L_CH4, P_HCHO, P_O3_gross) at the canonical upstream test scenario — every input species and rate constant at its declared default (CH₄=4.5e19, OH=1e12, CH₃O₂=1e14, NO=2.5e15, NO₂=2.5e16, O₂=5.25e24, M=2.5e25, …; the input_vals Dict reused across GasChem.jl test/test_methane_oxidation.jl). This single test reproduces and tightens eight upstream MethaneOxidation testitems at rel=1e-10: `Table 6.1 Rate Constants` (test_methane_oxidation.jl:66-96 — implicit: every R is a rate constant × concentrations, so a wrong rate-constant default shifts a pinned R off its value), `Reaction Rate R1 (CH4+OH)` (lines 124-150, upstream R1≈2.874e11 rtol=0.02 — the exact-Arrhenius value pinned here, 285468004462.3754, agrees to 0.67%), `Reaction Rate R3 (CH3O2+NO)` (lines 152-177, upstream R3≈1.925e12 rtol=0.01 — reproduced exactly at 1.925e12), `HCHO Production (P_HCHO = R6 + R8)` (lines 179-209 — P_HCHO, R6, R8 all pinned: 99751899999999.98 = 99749999999999.98 + 1900000000.0), `CH4 Loss Equals R1` (lines 211-233 — L_CH4 and R1 both pinned to the same value 285468004462.3754), `Net O3 Production (P_O3_gross = R15 + R3)` (lines 235-261 — P_O3_gross, R15, R3 pinned: 3950000000000.0 = 2025000000000.0 + 1925000000000.0), `Oxidation Chain Relative Rates` (lines 266-290, upstream R3>R4>R5 and R3/R4>10 — reproduced structurally: pinned R3=1.925e12 > R4=5.2e10 > R5=3.5e9, R3/R4≈37.0), and `HCHO as Key Intermediate` (lines 292-318, upstream R10,R11,R12>0 and R12>R11 — reproduced: pinned R12=4e11 > R11=3e11). Also reproduces the upstream `All Reaction Rates Positive` testitem (lines 376-409) since every one of the 20 pinned values is positive, and the `CH4 Lifetime` testitem (lines 347-374, upstream ≈4.96 yr rtol=0.1) since the pinned L_CH4 gives CH₄/L_CH4 = 4.5e19/285468004462.3754 ≈ 5.00 yr.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R1",
+                            "time": 0.0,
+                            "expected": 285468004462.3754
+                        },
+                        {
+                            "variable": "R2",
+                            "time": 0.0,
+                            "expected": 1.3125000000000003e+18
+                        },
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 1925000000000.0
+                        },
+                        {
+                            "variable": "R4",
+                            "time": 0.0,
+                            "expected": 51999999999.99999
+                        },
+                        {
+                            "variable": "R5",
+                            "time": 0.0,
+                            "expected": 3500000000.0000005
+                        },
+                        {
+                            "variable": "R6",
+                            "time": 0.0,
+                            "expected": 99749999999999.98
+                        },
+                        {
+                            "variable": "R7",
+                            "time": 0.0,
+                            "expected": 7043285735.348479
+                        },
+                        {
+                            "variable": "R8",
+                            "time": 0.0,
+                            "expected": 1900000000.0
+                        },
+                        {
+                            "variable": "R9",
+                            "time": 0.0,
+                            "expected": 5000000000.0
+                        },
+                        {
+                            "variable": "R10",
+                            "time": 0.0,
+                            "expected": 90000000000.0
+                        },
+                        {
+                            "variable": "R11",
+                            "time": 0.0,
+                            "expected": 300000000000.0
+                        },
+                        {
+                            "variable": "R12",
+                            "time": 0.0,
+                            "expected": 400000000000.00006
+                        },
+                        {
+                            "variable": "R13",
+                            "time": 0.0,
+                            "expected": 2.7299999999999997e+17
+                        },
+                        {
+                            "variable": "R14",
+                            "time": 0.0,
+                            "expected": 748125000000000.1
+                        },
+                        {
+                            "variable": "R15",
+                            "time": 0.0,
+                            "expected": 2025000000000.0
+                        },
+                        {
+                            "variable": "R16",
+                            "time": 0.0,
+                            "expected": 200000000000000.0
+                        },
+                        {
+                            "variable": "R17",
+                            "time": 0.0,
+                            "expected": 7875000000000.0
+                        },
+                        {
+                            "variable": "L_CH4",
+                            "time": 0.0,
+                            "expected": 285468004462.3754
+                        },
+                        {
+                            "variable": "P_HCHO",
+                            "time": 0.0,
+                            "expected": 99751899999999.98
+                        },
+                        {
+                            "variable": "P_O3_gross",
+                            "time": 0.0,
+                            "expected": 3950000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_low_nox_regime",
+                    "description": "Reproduces the upstream `MethaneOxidation: Low NOx Regime` testitem (test_methane_oxidation.jl:323-345). With HO₂ raised to 2.0e14 and NOx cut to NO=1.0e13, NO₂=1.0e14, the methylperoxy radical's chain-terminating fate R4 (CH₃O₂ + HO₂) overtakes its O₃-producing fate R3 (CH₃O₂ + NO) — upstream asserts R4 > R3. Reproduced structurally by pinning R4=103999999999.99998 > R3=7700000000.0 at rel=1e-10. R15 (the HO₂ + NO channel) and P_O3_gross are also pinned: in this low-NOx air mass gross ozone production collapses to 23900000000.0 m⁻³·s⁻¹, ~165× below the default-scenario value.",
+                    "parameter_overrides": {
+                        "HO2": 200000000000000.0,
+                        "NO": 10000000000000.0,
+                        "NO2": 100000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 7700000000.0
+                        },
+                        {
+                            "variable": "R4",
+                            "time": 0.0,
+                            "expected": 103999999999.99998
+                        },
+                        {
+                            "variable": "R15",
+                            "time": 0.0,
+                            "expected": 16200000000.0
+                        },
+                        {
+                            "variable": "P_O3_gross",
+                            "time": 0.0,
+                            "expected": 23900000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_r1_doubles_when_oh_doubled",
+                    "description": "Reproduces the upstream `MethaneOxidation: R1 Scales Linearly with OH` testitem (test_methane_oxidation.jl:414-439), which doubles OH via `remake` and asserts R1 doubles (ratio ≈ 2.0 at rtol=1e-6). With OH=2.0e12 (2× default) this test pins R1=570936008924.7509 — twice the default-scenario R1=285468004462.3754 to within one ULP. The OH-linearity is verified across all four OH-dependent reaction rates by also pinning R7, R8, R10 (each = k·CH₃OOH or HCHO·OH) and the diagnostic L_CH4 = R1 at their doubled values.",
+                    "parameter_overrides": {
+                        "OH": 2000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R1",
+                            "time": 0.0,
+                            "expected": 570936008924.7509
+                        },
+                        {
+                            "variable": "R7",
+                            "time": 0.0,
+                            "expected": 14086571470.696959
+                        },
+                        {
+                            "variable": "R8",
+                            "time": 0.0,
+                            "expected": 3800000000.0
+                        },
+                        {
+                            "variable": "R10",
+                            "time": 0.0,
+                            "expected": 180000000000.0
+                        },
+                        {
+                            "variable": "L_CH4",
+                            "time": 0.0,
+                            "expected": 570936008924.7509
+                        }
+                    ]
+                },
+                {
+                    "id": "r1_linear_in_methane",
+                    "description": "Coverage beyond the upstream suite: R1 = k1·CH₄·OH is exactly linear in the methane concentration. With CH₄ doubled to 9.0e19, R1 and the methane-loss diagnostic L_CH4 both double to 570936008924.7509. Together with `upstream_r1_doubles_when_oh_doubled` this confirms R1 is bilinear in (CH₄, OH) and pins the L_CH4 = R1 identity under a CH₄ perturbation.",
+                    "parameter_overrides": {
+                        "CH4": 9e+19
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R1",
+                            "time": 0.0,
+                            "expected": 570936008924.7509
+                        },
+                        {
+                            "variable": "L_CH4",
+                            "time": 0.0,
+                            "expected": 570936008924.7509
+                        }
+                    ]
+                },
+                {
+                    "id": "peroxy_no_channels_linear_in_no",
+                    "description": "Coverage beyond the upstream suite: both peroxy-radical + NO channels (R3 = k3·CH₃O₂·NO and R15 = k15·HO₂·NO) are exactly linear in NO, so the gross ozone production rate P_O3_gross = R15 + R3 is also linear in NO. With NO doubled to 5.0e15, R3, R15 and P_O3_gross all double (R3=3850000000000.0, R15=4050000000000.0, P_O3_gross=7900000000000.0). Establishes the NO-linearity that the `ch3o2_radical_fate_vs_no` example sweeps.",
+                    "parameter_overrides": {
+                        "NO": 5000000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 3850000000000.0
+                        },
+                        {
+                            "variable": "R15",
+                            "time": 0.0,
+                            "expected": 4050000000000.0
+                        },
+                        {
+                            "variable": "P_O3_gross",
+                            "time": 0.0,
+                            "expected": 7900000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "methylperoxy_rates_scale_with_ch3o2",
+                    "description": "Coverage beyond the upstream suite: the three methylperoxy-radical reaction rates scale differently with CH₃O₂ — R3 = k3·CH₃O₂·NO and R4 = k4·CH₃O₂·HO₂ are linear, while R5 = k5·CH₃O₂·CH₃O₂ is quadratic. With CH₃O₂ doubled to 2.0e14, R3 and R4 double (3850000000000.0 and 103999999999.99998) but R5 quadruples to 14000000000.000002. This pins the only quadratic-in-a-single-species rate in the mechanism and would catch a regression that linearized the CH₃O₂ self-reaction. P_O3_gross also moves (it inherits R3's CH₃O₂ dependence).",
+                    "parameter_overrides": {
+                        "CH3O2": 200000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 3850000000000.0
+                        },
+                        {
+                            "variable": "R4",
+                            "time": 0.0,
+                            "expected": 103999999999.99998
+                        },
+                        {
+                            "variable": "R5",
+                            "time": 0.0,
+                            "expected": 14000000000.000002
+                        },
+                        {
+                            "variable": "P_O3_gross",
+                            "time": 0.0,
+                            "expected": 5875000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "termolecular_rates_linear_in_air_density",
+                    "description": "Coverage beyond the upstream suite: the three termolecular reactions R2 (CH₃ + O₂ + M), R14 (H + O₂ + M) and R17 (O + O₂ + M) each carry the third-body factor M and are exactly linear in the air number density. With M doubled to 5.0e25, R2, R14 and R17 all double (R2=2.6250000000000005e18, R14=1496250000000000.2, R17=15750000000000.0). Confirms the cm⁶ → m⁶ termolecular rate-constant conversion and the M-linearity that distinguishes termolecular from bimolecular rates.",
+                    "parameter_overrides": {
+                        "M": 5e+25
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R2",
+                            "time": 0.0,
+                            "expected": 2.6250000000000005e+18
+                        },
+                        {
+                            "variable": "R14",
+                            "time": 0.0,
+                            "expected": 1496250000000000.2
+                        },
+                        {
+                            "variable": "R17",
+                            "time": 0.0,
+                            "expected": 15750000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "hydroperoxide_rates_linear_in_ch3ooh",
+                    "description": "Coverage beyond the upstream suite: all three methyl-hydroperoxide reactions — the photolysis R9 = j9·CH₃OOH and the two OH reactions R7 = k7·CH₃OOH·OH, R8 = k8·CH₃OOH·OH — are exactly linear in CH₃OOH. With CH₃OOH doubled to 2.0e15, R9, R7 and R8 all double (R9=10000000000.0, R7=14086571470.696959, R8=3800000000.0). Pins the photolysis-rate channel R9 against a regression that drops the j9 frequency or the CH₃OOH factor.",
+                    "parameter_overrides": {
+                        "CH3OOH": 2000000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R7",
+                            "time": 0.0,
+                            "expected": 14086571470.696959
+                        },
+                        {
+                            "variable": "R8",
+                            "time": 0.0,
+                            "expected": 3800000000.0
+                        },
+                        {
+                            "variable": "R9",
+                            "time": 0.0,
+                            "expected": 10000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_no_collapses_o3_production",
+                    "description": "Boundary case NO=0: with no nitric oxide, neither peroxy+NO channel fires — R3 (CH₃O₂ + NO) and R15 (HO₂ + NO) collapse to exact zero, and so does the gross ozone production rate P_O3_gross = R15 + R3. The zero-valued assertions use a per-assertion abs=1e-12 gate (the relative tolerance is undefined at expected=0) to catch the stuck-at-non-zero regression of an NO-independent bias term. R16 (NO₂ photolysis) is pinned at its unchanged default 2e14 to confirm the collapse is confined to the NO-dependent rates. Physically this is the fully NO-titrated nighttime / fresh-plume-edge limit.",
+                    "parameter_overrides": {
+                        "NO": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R15",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "P_O3_gross",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R16",
+                            "time": 0.0,
+                            "expected": 200000000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_oh_collapses_oxidation_chain",
+                    "description": "Boundary case OH=0: with no hydroxyl radical the four OH-driven reactions collapse to exact zero — R1 (CH₄ + OH), R7 and R8 (CH₃OOH + OH), R10 (HCHO + OH) — and so does the methane-loss diagnostic L_CH4 = R1. The zero assertions use a per-assertion abs=1e-12 gate. P_HCHO is pinned at 99749999999999.98: with R8=0 the formaldehyde-production diagnostic P_HCHO = R6 + R8 correctly collapses to its R6-only term, verifying the two-term sum is wired additively rather than hard-coded.",
+                    "parameter_overrides": {
+                        "OH": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R7",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R8",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R10",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "L_CH4",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "P_HCHO",
+                            "time": 0.0,
+                            "expected": 99749999999999.98
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_o2_collapses_oxygen_channels",
+                    "description": "Boundary case O₂=0: with no molecular oxygen the five O₂-dependent reactions collapse to exact zero — R2 (CH₃ + O₂ + M), R6 (CH₃O + O₂), R13 (HCO + O₂), R14 (H + O₂ + M) and R17 (O + O₂ + M). The zero assertions use a per-assertion abs=1e-12 gate. P_HCHO is pinned at 1900000000.0: with R6=0 the formaldehyde-production diagnostic P_HCHO = R6 + R8 collapses to its R8-only term — the complementary channel-isolation check to `zero_oh_collapses_oxidation_chain` (which zeroes R8 and leaves R6).",
+                    "parameter_overrides": {
+                        "O2": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R2",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R6",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R13",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R14",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R17",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "P_HCHO",
+                            "time": 0.0,
+                            "expected": 1900000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "high_nox_no_channel_strongly_dominates",
+                    "description": "Coverage beyond the upstream suite: the high-NOx end of the CH₃O₂ fate competition. With NO and NO₂ both raised to 2.5e17 m⁻³ (~10 ppb at STP) the O₃-producing channel R3 = k3·CH₃O₂·NO (192500000000000.0) dominates the chain-terminating channel R4 = k4·CH₃O₂·HO₂ (51999999999.99999) by a factor ~3702 — nearly all methylperoxy now goes down the ozone-producing path. R15 is also pinned. Bookends the `upstream_low_nox_regime` test (where R4 > R3) at the opposite NOx extreme.",
+                    "parameter_overrides": {
+                        "NO": 2.5e+17,
+                        "NO2": 2.5e+17
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R3",
+                            "time": 0.0,
+                            "expected": 192500000000000.0
+                        },
+                        {
+                            "variable": "R4",
+                            "time": 0.0,
+                            "expected": 51999999999.99999
+                        },
+                        {
+                            "variable": "R15",
+                            "time": 0.0,
+                            "expected": 202500000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "hcho_loss_branching_typical_daytime",
+                    "description": "Reproduces the formaldehyde-loss branching analysis from the GasChem docs (docs/src/methane_oxidation.md, `Formaldehyde Branching Pathways`). At HCHO=1.0e15 m⁻³ and OH=1.0e12 m⁻³ (typical daytime), the three HCHO loss rates are pinned: R10 (HCHO + OH) = 9000000000.0, R11 (HCHO + hν → HCO + H) = 30000000000.0, R12 (HCHO + hν → H₂ + CO) = 40000000000.0. The molecular photolysis channel R12 is the single largest HCHO sink (j12 > j11 > k10·OH at these conditions), reproducing the headline finding of the docs figure.",
+                    "parameter_overrides": {
+                        "HCHO": 1000000000000000.0,
+                        "OH": 1000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R10",
+                            "time": 0.0,
+                            "expected": 9000000000.0
+                        },
+                        {
+                            "variable": "R11",
+                            "time": 0.0,
+                            "expected": 30000000000.0
+                        },
+                        {
+                            "variable": "R12",
+                            "time": 0.0,
+                            "expected": 40000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "ch4_lifetime_pristine_low_oh",
+                    "description": "Coverage beyond the upstream suite: the methane chemical lifetime CH₄ / L_CH4 in a low-oxidant (pristine) air mass. With OH halved to 5.0e11 m⁻³, the methane-loss rate L_CH4 = R1 = k1·CH₄·OH halves to 142734002231.1877 and the CH₄ lifetime correspondingly doubles to CH₄/L_CH4 = 4.5e19/142734002231.1877 ≈ 9.99 years. Confirms the inverse-OH scaling of the methane lifetime that underlies the sensitivity of atmospheric CH₄ to the tropospheric oxidizing capacity. R1 and L_CH4 are pinned to the same value (the L_CH4 = R1 identity under an OH perturbation).",
+                    "parameter_overrides": {
+                        "OH": 500000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R1",
+                            "time": 0.0,
+                            "expected": 142734002231.1877
+                        },
+                        {
+                            "variable": "L_CH4",
+                            "time": 0.0,
+                            "expected": 142734002231.1877
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ch3o2_radical_fate_vs_no",
+                    "description": "The central NOx-regime story of methane oxidation: how the fate of the methylperoxy radical CH₃O₂ — and hence the gross ozone production rate — depends on the nitric oxide concentration. NO is swept logarithmically from 2.5e14 to 2.5e18 m⁻³ (~10 ppt to ~100 ppb at STP), spanning the pristine-to-polluted range, with all other inputs at their defaults. R3 (the O₃-producing CH₃O₂ + NO channel) rises linearly with NO while R4 (the chain-terminating CH₃O₂ + HO₂ channel) stays flat — so the radical's fate crosses over from termination at low NO to ozone production at high NO. Reproduces the `CH₃O₂ Fate: NO vs HO₂` analysis of docs/src/methane_oxidation.md.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {
+                                    "start": 250000000000000.0,
+                                    "stop": 2.5e+18,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "r3_ch3o2_no_vs_no",
+                            "type": "line",
+                            "description": "R3 (CH₃O₂ + NO → CH₃O + NO₂) vs NO number density on a log x axis. A straight line through the origin — R3 = k3·CH₃O₂·NO is exactly linear in NO — the O₃-producing fate of the methylperoxy radical.",
+                            "x": {
+                                "variable": "NO",
+                                "label": "NO number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "R3",
+                                "label": "R3, CH3O2+NO rate (m^-3 s^-1)"
+                            }
+                        },
+                        {
+                            "id": "r4_ch3o2_ho2_vs_no",
+                            "type": "line",
+                            "description": "R4 (CH₃O₂ + HO₂ → CH₃OOH + O₂) vs NO. A horizontal line — R4 = k4·CH₃O₂·HO₂ has no NO dependence — the chain-terminating fate of methylperoxy, which R3 overtakes as NO rises.",
+                            "x": {
+                                "variable": "NO",
+                                "label": "NO number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "R4",
+                                "label": "R4, CH3O2+HO2 rate (m^-3 s^-1)"
+                            }
+                        },
+                        {
+                            "id": "p_o3_gross_vs_no",
+                            "type": "line",
+                            "description": "Gross ozone production rate P_O3_gross = R15 + R3 vs NO. Linear in NO — each added NO molecule drives one more peroxy+NO → NO₂ reaction and hence (after NO₂ photolysis) one more O₃.",
+                            "x": {
+                                "variable": "NO",
+                                "label": "NO number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "P_O3_gross",
+                                "label": "Gross O3 production (m^-3 s^-1)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "methane_sink_vs_oh",
+                    "description": "The methane-loss rate as a function of the hydroxyl radical concentration. OH is swept logarithmically from 5.0e10 to 5.0e12 m⁻³, spanning two orders of magnitude of tropospheric oxidizing capacity, with all other inputs at their defaults. Because reaction with OH is the only methane sink in the mechanism, L_CH4 = R1 = k1·CH₄·OH is exactly linear in OH, and the methane chemical lifetime CH₄/L_CH4 is correspondingly inversely proportional to OH — the basis of methane's sensitivity to changes in the tropospheric oxidizing capacity.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH",
+                                "range": {
+                                    "start": 50000000000.0,
+                                    "stop": 5000000000000.0,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "l_ch4_vs_oh",
+                            "type": "line",
+                            "description": "Methane loss rate L_CH4 vs OH number density on a log x axis. A straight line through the origin (L_CH4 = R1 = k1·CH₄·OH is exactly linear in OH) — the rising methane sink that shortens the CH₄ lifetime as the atmosphere becomes more oxidizing.",
+                            "x": {
+                                "variable": "OH",
+                                "label": "OH number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "L_CH4",
+                                "label": "CH4 loss rate L_CH4 (m^-3 s^-1)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "formaldehyde_loss_pathways_vs_oh",
+                    "description": "How the branching of formaldehyde loss shifts with the hydroxyl radical concentration. OH is swept logarithmically from 1e11 to 1e13 m⁻³ with all other inputs at their defaults. HCHO has three loss channels: R10 (HCHO + OH) is the only one that depends on OH, while R11 and R12 (the radical and molecular photolysis channels) are fixed by the photolysis frequencies. As OH rises, R10 climbs linearly and the OH channel takes an increasing share of total HCHO loss — the branching-ratio behaviour discussed in the GasChem docs `Formaldehyde Branching Pathways` analysis.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH",
+                                "range": {
+                                    "start": 100000000000.0,
+                                    "stop": 10000000000000.0,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "r10_hcho_oh_vs_oh",
+                            "type": "line",
+                            "description": "R10 (HCHO + OH → HCO + H₂O) vs OH number density on a log x axis. The OH-driven formaldehyde-loss channel — linear in OH — the only one of the three HCHO sinks that responds to the oxidizing capacity.",
+                            "x": {
+                                "variable": "OH",
+                                "label": "OH number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "R10",
+                                "label": "R10, HCHO+OH rate (m^-3 s^-1)"
+                            }
+                        },
+                        {
+                            "id": "r11_hcho_photolysis_vs_oh",
+                            "type": "line",
+                            "description": "R11 (HCHO + hν → HCO + H) vs OH. A horizontal line — the radical photolysis channel has no OH dependence — shown alongside R10 to make the branching crossover explicit.",
+                            "x": {
+                                "variable": "OH",
+                                "label": "OH number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "R11",
+                                "label": "R11, HCHO photolysis rate (m^-3 s^-1)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "gross_o3_production_no_ho2_heatmap",
+                    "description": "Gross ozone production rate P_O3_gross = R15 + R3 as a joint function of NO and HO₂ (a 2-D log-log sweep). NO is swept from 2.5e14 to 2.5e17 m⁻³ and HO₂ from 1e13 to 1e15 m⁻³, with the other inputs at their defaults. P_O3_gross = NO·(k15·HO₂ + k3·CH₃O₂) is linear in NO and linear in HO₂ through the R15 channel: the heatmap surfaces how both the NOx supply and the HO₂ radical pool govern the methane mechanism's ozone output, with the high-NO / high-HO₂ corner the most productive.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {
+                                    "start": 250000000000000.0,
+                                    "stop": 2.5e+17,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "HO2",
+                                "range": {
+                                    "start": 10000000000000.0,
+                                    "stop": 1000000000000000.0,
+                                    "count": 20,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "p_o3_gross_heatmap_no_ho2",
+                            "type": "heatmap",
+                            "description": "Gross O₃ production rate P_O3_gross over the (NO, HO₂) plane on log-log axes. Rises monotonically toward the high-NO / high-HO₂ corner; the iso-production contours reflect the P_O3_gross = NO·(k15·HO₂ + k3·CH₃O₂) bilinear structure.",
+                            "x": {
+                                "variable": "NO",
+                                "label": "NO number density (m^-3)"
+                            },
+                            "y": {
+                                "variable": "HO2",
+                                "label": "HO2 number density (m^-3)"
+                            },
+                            "value": {
+                                "variable": "P_O3_gross",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
