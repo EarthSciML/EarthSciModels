@@ -1,0 +1,500 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ReversibleGasScavenging",
+        "description": "Below-cloud scavenging of a reversibly-absorbed (Henry's-law) trace gas by falling raindrops, from Chapter 20 (Wet Deposition) of Seinfeld & Pandis (2006). Unlike the irreversible-uptake parameterizations used for highly soluble species such as HNO3, this component retains the equilibrium (Henry's law) ceiling: a raindrop falling through polluted air relaxes toward -- but cannot exceed -- the aqueous concentration in equilibrium with the local gas phase, and a drop entering the layer already overloaded (C_aq0 above equilibrium) instead desorbs gas back to the air. Two algebraic outputs: C_aq_ground (Eq. 20.33, which is Eq. 20.28 evaluated at the cloud-base fall distance h) is the aqueous-phase concentration in a drop arriving at the ground; F_bc (Eq. 20.35) is the total below-cloud scavenging flux. Both are governed by the single dimensionless exponent alpha = 6*K_c*h/(D_p*U_t*HRT): the drop relaxes from its initial aqueous concentration C_aq0 toward the Henry's-law equilibrium C_eq = C_g*HRT, and (1 - exp(-alpha)) is the fraction of that equilibrium uptake realised over the fall. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_2006_ch20.jl:194 (`ReversibleGasScavenging` @component). The upstream component is a flat MTK System whose two equations call the module helper functions reversible_drop_conc (Eq. 20.28) and reversible_scavenging_flux (Eq. 20.35); both helpers are inlined into the equation ASTs here. The eight upstream @parameters (C_g, HRT, K_c, D_p, U_t, h, C_aq0, p0) map directly to type:parameter and the two upstream @variables(t) (C_aq_ground, F_bc) to type:state, each fixed by one explicit algebraic equation. HRT is the dimensionless product H* x R x T x 1000 (effective Henry's law coefficient x gas constant x temperature x unit conversion); for HNO3 at 298 K, HRT = 2.1e5 x 8.206e-5 x 298 x 1000 is approximately 5.14e6 (the declared default). Observed-only algebraic system: both equations are algebraic (no D operator), so the two outputs are the algebraic solution while the gas-phase, drop, and precipitation inputs are parameters; system_kind is left unset.",
+        "tags": [
+            "atmospheric_deposition",
+            "sp06_ch20",
+            "wet-scavenging",
+            "gas-scavenging",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-0jvy)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J.H. and Pandis, S.N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed., Chapter 20: Wet Deposition, pp. 932-979. John Wiley & Sons, Inc."
+            }
+        ]
+    },
+    "models": {
+        "ReversibleGasScavenging": {
+            "reference": {
+                "citation": "Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 20, Eqs. 20.28, 20.33, 20.35.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79:src/seinfeld_pandis_2006_ch20.jl:194\nUpstream `ReversibleGasScavenging` is an MTK `@component` that declares C_g, HRT, K_c, D_p, U_t, h, C_aq0, p0 as `@parameters` and C_aq_ground, F_bc as `@variables`, so the parameter/state split maps directly with no re-typing (matching the sibling observed-only migrations air_refreshing.esm / cloud_ice_uptake.esm). The two upstream helper functions are inlined into the equation ASTs: `reversible_drop_conc` (Eq. 20.28: C_eq - (C_eq - C_aq0)*exp(-alpha) with C_eq = C_g*HRT) is the body of the C_aq_ground equation, and `reversible_scavenging_flux` (Eq. 20.35) the body of the F_bc equation. Both share the dimensionless exponent alpha = 6*K_c*h/(D_p*U_t*HRT); it is written out independently in each equation because the AST has no shared-subexpression binding. The leading factor 6 is kept as an integer literal, mirroring the upstream Int. This component references none of the seinfeld_pandis_2006_ch20.jl module `@constants` (mu_air_sp, rho_air_sp, g_sp, etc. are used only by the particle-scavenging components). `system_kind` is left unset (zero differential states -- no D operator), consistent with the observed-only siblings air_refreshing.esm / cloud_ice_uptake.esm.\n\nThe parameter p0 keeps the upstream Unicode subscript-zero identifier verbatim (matches air_refreshing.esm preserving the Greek/subscript identifiers Ki, tau_A, Delta_x).\n\nTolerance rationale (model-level rel=1e-9, abs=1e-20): observed-only algebraic system (no ODE integration). Each equation is a closed-form expression -- a handful of multiplications, one subtraction, one division, and one `exp` -- evaluated once by topological substitution; rel=1e-9 sits comfortably above float64 ULP roundoff (~1e-16) and absorbs any libm `exp` difference between the reference calculation and the ESS runner. abs=1e-20 gates the two physically-zero F_bc cases: F_bc at the cloud base (h=0, fall distance zero -> 1-exp(0)=0) and F_bc at Henry's-law equilibrium (C_aq0 = C_g*HRT -> the concentration difference vanishes), where the relative check is undefined."
+            },
+            "tolerance": {
+                "rel": 1.0e-9,
+                "abs": 1.0e-20
+            },
+            "variables": {
+                "C_g": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-6,
+                    "description": "Gas-phase concentration"
+                },
+                "HRT": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 5.14e6,
+                    "description": "H* x R x T x 1000 (dimensionless effective Henry's law coefficient)"
+                },
+                "K_c": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.13,
+                    "description": "Mass transfer coefficient"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-3,
+                    "description": "Raindrop diameter"
+                },
+                "U_t": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 4.0,
+                    "description": "Terminal velocity of raindrop"
+                },
+                "h": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Cloud base height / fall distance"
+                },
+                "C_aq0": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0,
+                    "description": "Initial aqueous-phase concentration"
+                },
+                "p₀": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.778e-7,
+                    "description": "Precipitation rate"
+                },
+                "C_aq_ground": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Ground-level drop concentration (Eq. 20.33)"
+                },
+                "F_bc": {
+                    "type": "state",
+                    "units": "mol/m^2/s",
+                    "description": "Below-cloud scavenging flux (Eq. 20.35)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 20.33 (Eq. 20.28 evaluated at fall distance h) -- ground-level aqueous concentration in a reversibly-absorbing raindrop: C_aq_ground = C_g*HRT - (C_g*HRT - C_aq0)*exp(-alpha), alpha = 6*K_c*h/(D_p*U_t*HRT). C_g*HRT is the Henry's-law equilibrium aqueous concentration C_eq; the drop relaxes from C_aq0 toward C_eq with dimensionless e-folding exponent alpha over the fall distance h. Inlines the upstream helper reversible_drop_conc.",
+                    "lhs": "C_aq_ground",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            { "op": "*", "args": ["C_g", "HRT"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            { "op": "*", "args": ["C_g", "HRT"] },
+                                            "C_aq0"
+                                        ]
+                                    },
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            { "op": "*", "args": [6, "K_c", "h"] },
+                                                            { "op": "*", "args": ["D_p", "U_t", "HRT"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 20.35 -- total below-cloud scavenging flux for a reversibly-absorbed gas: F_bc = p0*(C_g*HRT - C_aq0)*(1 - exp(-alpha)), same alpha as Eq. 20.33. The factor (1 - exp(-alpha)) is the fraction of the equilibrium uptake realised over the fall; p0 converts per-drop uptake to a mol/m^2/s areal flux. F_bc > 0 is net scavenging (gas -> drop); F_bc < 0 is net desorption when C_aq0 exceeds the equilibrium C_g*HRT. Inlines the upstream helper reversible_scavenging_flux.",
+                    "lhs": "F_bc",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "p₀",
+                            {
+                                "op": "-",
+                                "args": [
+                                    { "op": "*", "args": ["C_g", "HRT"] },
+                                    "C_aq0"
+                                ]
+                            },
+                            {
+                                "op": "-",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            { "op": "*", "args": [6, "K_c", "h"] },
+                                                            { "op": "*", "args": ["D_p", "U_t", "HRT"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "component_defaults",
+                    "description": "All eight parameters at their declared defaults -- the HNO3-at-298-K case (HRT = 5.14e6). alpha = 6*0.13*1000/(1e-3*4*5.14e6) = 0.0379, so the drop realises only ~3.7% of its (large) equilibrium uptake over a 1 km fall: C_aq_ground = 0.1913 mol/m^3, F_bc = 5.316e-8 mol/m^2/s. Implicitly verifies every serialized default value.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 5.14e6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 0.1913474060882807 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 5.31563094113243e-08 }
+                    ]
+                },
+                {
+                    "id": "drop_conc_huge_henry",
+                    "description": "Mass-transfer-limited regime (upstream Eq. 20.28 test `C_aq_huge_H`): an enormous effective Henry's law coefficient HRT = 1e12 makes alpha = 1.95e-7 tiny, so the drop barely fills despite an enormous equilibrium C_eq = 1e6. C_aq_ground approaches the mass-transfer ceiling C_g*6*K_c*h/(D_p*U_t) = 0.195 mol/m^3 (the upstream test asserts C_aq_ground is approx 0 to within atol 1.0).",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 1.0e12,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 0.1949999809730798 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 5.417099470521602e-08 }
+                    ]
+                },
+                {
+                    "id": "drop_conc_full_equilibration",
+                    "description": "Full-equilibration regime (upstream Eq. 20.28 test `C_aq_equil`): a large mass transfer coefficient K_c = 10, small drop D_p = 1e-4, slow fall U_t = 0.1, and long fall distance h = 1e4 drive alpha to ~6e10, so exp(-alpha) underflows to 0 and the drop reaches the Henry's-law equilibrium exactly: C_aq_ground = C_g*HRT = 1e-6 mol/m^3.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 1.0,
+                        "K_c": 10.0,
+                        "D_p": 1.0e-4,
+                        "U_t": 0.1,
+                        "h": 10000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 1.0e-6 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 2.778e-13 }
+                    ]
+                },
+                {
+                    "id": "drop_conc_at_cloud_base",
+                    "description": "Cloud-base boundary (upstream Eq. 20.28 test `C_aq_z0`): with fall distance h = 0 the exponent alpha = 0 and exp(-alpha) = 1, so the drop has had no chance to exchange and C_aq_ground equals the initial aqueous concentration C_aq0 = 5e-4 exactly. The scavenging flux F_bc is identically zero because the realised-uptake fraction (1 - exp(0)) = 0.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 100.0,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 0.0,
+                        "C_aq0": 5.0e-4,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 5.0e-4 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "flux_positive",
+                    "description": "Net scavenging (upstream Eq. 20.35 test `F_pos`): clean initial drops (C_aq0 = 0) below a gas reservoir, alpha = 1950 so the realised-uptake fraction is essentially 1. F_bc = p0*C_g*HRT = 2.778e-11 mol/m^2/s is strictly positive -- gas is removed from the air into the rain.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 100.0,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 9.999999999999999e-05 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 2.778e-11 }
+                    ]
+                },
+                {
+                    "id": "flux_equilibrium_zero",
+                    "description": "Henry's-law equilibrium (upstream Eq. 20.35 test `F_equil`): the incoming drops are already in equilibrium with the gas (C_aq0 = C_g*HRT = 1e-4), so the concentration difference C_g*HRT - C_aq0 vanishes and there is no net flux -- F_bc = 0 (the upstream test asserts |F_bc| < 1e-20). C_aq_ground stays pinned at the equilibrium 1e-4 mol/m^3.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 100.0,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 1.0e-4,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 9.999999999999999e-05 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "flux_desorption_negative",
+                    "description": "Net desorption -- the reversible regime the irreversible parameterizations cannot capture. Incoming drops are overloaded (C_aq0 = 5e-4 above the equilibrium C_g*HRT = 1e-4), so the concentration difference is negative and F_bc = -1.111e-10 mol/m^2/s: gas is released from the rain back into the air. With alpha = 1950 the drop fully relaxes to equilibrium, so C_aq_ground returns to C_g*HRT = 1e-4.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 100.0,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 5.0e-4,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 9.999999999999999e-05 },
+                        { "variable": "F_bc", "time": 0.0, "expected": -1.1112000000000001e-10 }
+                    ]
+                },
+                {
+                    "id": "drop_conc_nonzero_initial",
+                    "description": "Partial fill from a non-zero initial aqueous load: defaults except C_aq0 = 0.05 mol/m^3 (between 0 and the equilibrium C_eq = 5.14). Exercises the full relaxation form C_eq - (C_eq - C_aq0)*exp(-alpha) with both a non-zero C_aq0 and a non-trivial alpha = 0.0379. C_aq_ground = 0.2395 (above the C_aq0=0 default result of 0.1913 because the drop started already loaded); F_bc = 5.264e-8 is slightly below the default because the smaller concentration difference scavenges marginally less.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 5.14e6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.05,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 0.239486049997927 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 5.263922468942426e-08 }
+                    ]
+                },
+                {
+                    "id": "flux_scales_with_precipitation",
+                    "description": "Precipitation-rate wiring sentinel: defaults except p0 doubled to 5.556e-7 m/s. F_bc enters linearly through p0, so the flux doubles to 1.0631e-7 mol/m^2/s (exactly 2x the component_defaults F_bc). C_aq_ground does not depend on p0 and is unchanged at 0.1913 -- catching any equation that wrongly couples the precipitation rate into the in-drop concentration.",
+                    "parameter_overrides": {
+                        "C_g": 1.0e-6,
+                        "HRT": 5.14e6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 5.556e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "C_aq_ground", "time": 0.0, "expected": 0.1913474060882807 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 1.063126188226486e-07 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "c_aq_vs_henry",
+                    "description": "Ground-level drop concentration C_aq_ground (Eq. 20.33) as a function of the dimensionless effective Henry's law coefficient HRT, swept log-spaced over ten decades at the component defaults. The curve traces the transition between two regimes: at low HRT the drop fully equilibrates and C_aq_ground = C_g*HRT rises linearly with solubility; at high HRT the exponent alpha = 6*K_c*h/(D_p*U_t*HRT) becomes small and C_aq_ground saturates at the mass-transfer-limited ceiling C_g*6*K_c*h/(D_p*U_t) = 0.195 mol/m^3, independent of HRT.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_g": 1.0e-6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HRT",
+                                "range": { "start": 100.0, "stop": 1.0e12, "count": 28, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "c_aq_vs_hrt",
+                            "type": "line",
+                            "description": "C_aq_ground as a function of the effective Henry's law coefficient HRT (log-spaced).",
+                            "x": { "variable": "HRT", "label": "Effective Henry's law coefficient HRT (dimensionless)" },
+                            "y": { "variable": "C_aq_ground", "label": "Ground-level drop concentration (mol/m^3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "c_aq_vs_fall_distance",
+                    "description": "Build-up of the in-drop aqueous concentration along the fall, from cloud base to the ground (Eq. 20.33). Sweeping the fall distance h from 0 to 50 km at the component defaults (HRT = 5.14e6, the HNO3 case): at h = 0 the drop carries only its initial load C_aq0 = 0, and as it falls C_aq_ground climbs monotonically toward the Henry's-law equilibrium C_eq = C_g*HRT = 5.14 mol/m^3.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_g": 1.0e-6,
+                        "HRT": 5.14e6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "h",
+                                "range": { "start": 0.0, "stop": 50000.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "c_aq_vs_h",
+                            "type": "line",
+                            "description": "C_aq_ground as a function of fall distance h.",
+                            "x": { "variable": "h", "label": "Fall distance / cloud base height (m)" },
+                            "y": { "variable": "C_aq_ground", "label": "In-drop aqueous concentration (mol/m^3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "flux_vs_henry",
+                    "description": "Below-cloud scavenging flux F_bc (Eq. 20.35) as a function of the effective Henry's law coefficient HRT, swept log-spaced over ten decades at the component defaults. F_bc rises with solubility and saturates at the mass-transfer-limited flux p0*C_g*6*K_c*h/(D_p*U_t) = 5.42e-8 mol/m^2/s -- once the drop is mass-transfer limited, adding solubility no longer increases the removal rate.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_g": 1.0e-6,
+                        "K_c": 0.13,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "h": 1000.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HRT",
+                                "range": { "start": 100.0, "stop": 1.0e12, "count": 28, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_bc_vs_hrt",
+                            "type": "line",
+                            "description": "F_bc as a function of the effective Henry's law coefficient HRT (log-spaced).",
+                            "x": { "variable": "HRT", "label": "Effective Henry's law coefficient HRT (dimensionless)" },
+                            "y": { "variable": "F_bc", "label": "Below-cloud scavenging flux (mol/m^2/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "flux_heatmap_transfer_falldistance",
+                    "description": "Two-dimensional sweep of the below-cloud scavenging flux F_bc over the raindrop mass transfer coefficient K_c and the fall distance h, at the component defaults (HRT = 5.14e6, the HNO3 case). Both parameters enter only through the e-folding exponent alpha = 6*K_c*h/(D_p*U_t*HRT), so F_bc rises smoothly with each -- from zero along the h = 0 cloud-base edge (no fall, no exchange) toward the precipitation-limited ceiling p0*C_g*HRT = 1.43e-6 mol/m^2/s in the fast-transfer, long-fall corner. The iso-flux contours follow lines of constant K_c*h.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_g": 1.0e-6,
+                        "HRT": 5.14e6,
+                        "D_p": 1.0e-3,
+                        "U_t": 4.0,
+                        "C_aq0": 0.0,
+                        "p₀": 2.778e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "K_c",
+                                "range": { "start": 0.02, "stop": 0.5, "count": 12, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "h",
+                                "range": { "start": 0.0, "stop": 20000.0, "count": 12, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_bc_heatmap",
+                            "type": "heatmap",
+                            "description": "F_bc as a function of the mass transfer coefficient K_c and the fall distance h.",
+                            "x": { "variable": "K_c", "label": "Mass transfer coefficient (m/s)" },
+                            "y": { "variable": "h", "label": "Fall distance / cloud base height (m)" },
+                            "value": { "variable": "F_bc", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
