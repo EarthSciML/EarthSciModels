@@ -1,0 +1,1923 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "Clark1977AnelasticSystem",
+        "description": "Complete 3D anelastic atmospheric dynamics system in terrain-following coordinates from Clark (1977), 'A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation', Journal of Computational Physics 24, 186-215. The full nonlinear Clark (1977) model assembled as a hierarchical composition of eight subsystems: the isentropic base state (Eqs. 2.6-2.9), Witch-of-Agnesi mountain topography (Eq. 7.1), the terrain-following coordinate transformation (Eqs. 2.20-2.27), the Smagorinsky turbulence closure (Eqs. 2.15-2.19), the anelastic momentum residuals (Eqs. 2.1-2.3), anelastic mass continuity (Eq. 2.4), anelastic thermodynamics with turbulent heat flux (Eq. 2.14) and the diagnostic pressure equation (Section 4). Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:582 (`Clark1977AnelasticSystem` @component) — a pure subsystem composition (`System(Equation[], t; systems=[...])`, no coupling equations): the eight subsystems are inlined verbatim under `subsystems` (ESS spec §4.7) and remain dynamically independent. Purely algebraic — every subsystem is a diagnostic (observed-only) system with no time derivative. SI units throughout.",
+        "tags": [
+            "atmospheric_dynamics",
+            "mountain-wave",
+            "anelastic",
+            "clark-1977",
+            "terrain-following",
+            "coupled-subsystems",
+            "algebraic-system"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-36nh)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215."
+            }
+        ]
+    },
+    "models": {
+        "Clark1977AnelasticSystem": {
+            "reference": {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215 — the complete anelastic system, Sections 2-4.",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/clark1977.jl:582\n\nUpstream `Clark1977AnelasticSystem` is an MTK `@component` that composes the eight Clark (1977) subsystems into one hierarchical model via `System(Equation[], t; systems = [base_state, topography, transform, turbulence, momentum, mass_continuity, thermodynamics, pressure_diag], name, checks = false)`. The equation list is empty (`eqs = Equation[]`) — the upstream docstring states 'No additional equations needed - this is a composition of subsystems'. The eight subsystems are assembled under one parent but left dynamically independent: there are no coupling equations, no `connect`s and no shared variables (base_state's ρ̄ output is not wired into momentum's ρ̄ input, topography's z_s is not wired into transform's z_s input, etc.). The composition is purely structural.\n\nMigration approach (ESS spec §4.7 subsystem composition): each of the eight subsystems is inlined under `subsystems`, keyed by its upstream `@named` name — base_state, topography, transform, turbulence, momentum, mass_continuity, thermodynamics, pressure_diag. Seven are copied verbatim (variables + equations) from their already-migrated standalone `.esm` files in this same directory: topography ← witch_of_agnesi.esm, transform ← terrain_following.esm, turbulence ← smagorinsky.esm, momentum ← anelastic_momentum.esm, mass_continuity ← anelastic_mass.esm, thermodynamics ← anelastic_thermo.esm, pressure_diag ← diagnostic_pressure.esm. The eighth, base_state, is migrated here directly from src/clark1977.jl:49 (`IsentropicBaseState` @component) because its standalone target isentropic_base_state.esm is not yet present on `main`; the inline copy is self-contained and faithful to the upstream @component.\n\nNo input re-typing: because the parent declares no coupling equations, every subsystem input keeps the `parameter` type it carries in its standalone `.esm` file. (Contrast the sibling subsystem-composed migration components/gaschem/combined/tropospheric_chemistry.esm, where subsystem inputs are re-typed `parameter`→`state` because the parent's coupling equations `<sub>.<input> ~ <input>` govern them and a `parameter` cannot be an equation LHS. Clark1977AnelasticSystem has no such equations, so no re-typing is needed — the precedent here is components/gaschem/radiation/radiation_fundamentals.esm, which likewise composes subsystems with empty top-level `variables`/`equations`.) The top-level model therefore has `variables: {}` and `equations: []`.\n\nbase_state derived constants: IsentropicBaseState declares five MTK `@constants` (g, R_d, c_p, inv_kappa, inv_kappa_m1). The .esm schema has no constant variable type, so each is carried as a fixed-default `parameter`. inv_kappa and inv_kappa_m1 are derived constants — their upstream defaults are expressions of the others (inv_kappa = c_p/R_d, inv_kappa_m1 = c_p/R_d − 1) — and the `default` field carries the evaluated IEEE-754 double (1004/287 = 3.4982578397212545 and 3.4982578397212545 − 1 = 2.4982578397212545); the derived constant is kept as a named symbol in the p_bar / ρ_bar equations rather than inlined, matching the upstream `System(eqs,t)`. base_state's three `@parameters` (Θ, P_0, z) become `parameter` and its four `@variables` (T_bar, p_bar, ρ_bar, H_s) become `state`; each state is the LHS of one non-differential equation. base_state is dimensionally consistent and is constructed without `checks=false` upstream.\n\nchecks=false: the upstream `Clark1977AnelasticSystem` (and its DiagnosticPressure subsystem) pass `checks=false` to `System` due to unit complexities in the diagnostic-pressure formulation. The .esm schema has no `checks` field and the ESS runners perform no dimensional analysis, so `checks=false` carries over with nothing to encode — the pressure_diag subsystem is copied verbatim from the gate-passing diagnostic_pressure.esm.\n\nsystem_kind: every one of the eight subsystems is purely algebraic (every equation is an `~` relation; there is no `D(·)` time derivative anywhere), so the flattened composed model is a fully-algebraic diagnostic system. `system_kind` is left unset, matching all eight standalone subsystem files and the sibling subsystem-composed radiation_fundamentals.esm.\n\nExamples: this file declares no `examples` block. The example-plot renderer (tools/render_example_plots.py) resolves algebraic (non-dynamic) models with an equation-resolution plan that operates on the top-level model alone and does not descend into `subsystems`; a subsystem-composed algebraic model is therefore not plottable by the renderer. This mirrors the two sibling subsystem-composed migrations radiation_fundamentals.esm and tropospheric_chemistry.esm, which likewise declare no examples. The inline `tests` block provides the full numeric verification.\n\nTolerance (model-level rel=1e-6, abs=1e-9): the flattened system is eight independent algebraic blocks of small closed-form expression trees; the canonical runner resolves each without iterative error accumulation. rel=1e-6 covers float64 round-off and any sub-ULP difference between the Julia walker and the Python gate; abs=1e-9 gates the many intended exact zeros — the residual-type outputs of turbulence, momentum, mass_continuity, thermodynamics and pressure_diag vanish identically under the quiescent default state. This rel/abs pair is the one used by the standalone anelastic_momentum.esm / diagnostic_pressure.esm / smagorinsky.esm / terrain_following.esm / witch_of_agnesi.esm subsystem files.\n\nTest reproduction: the upstream Julia suite (test/clark1977_test.jl:246-260) contains a single Clark1977AnelasticSystem testitem — `Clark1977AnelasticSystem Structure` — which asserts only that the composed object is a `System` and that all eight subsystems are present by name; it makes no numerical assertion. The ten inline tests reproduce that structural intent through the dot-namespaced flattened system and add full numeric coverage: `composed_default_canonical_all_subsystems` exercises every output of all eight subsystems at default parameters (proving all eight are present and computing); eight per-subsystem tests (base_state_elevated_z1000, topography_half_width, transform_full, turbulence_full_deformation, momentum_full_residual, mass_continuity_all_outputs, thermodynamics_all_heat_flux, pressure_diag_full) drive each subsystem with a non-trivial parameter set routed through the composition via dot-namespaced `parameter_overrides`, with expected values taken from the corresponding standalone file's gate-verified tests (base_state's from the closed-form Clark 1977 Eqs. 2.6-2.9); and `namespace_isolation_independent_subsystems` overrides parameters in two subsystems at once and asserts a third, un-overridden subsystem stays at its default — confirming the subsystems are dynamically independent, as the upstream empty-coupling composition requires. All expected values are the canonical ESS Python runner output of the composed model (tools/run_esm_inline_tests.py). SI units throughout."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-09
+            },
+            "variables": {},
+            "equations": [],
+            "subsystems": {
+                "base_state": {
+                    "variables": {
+                        "g": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 9.81,
+                            "description": "Gravitational acceleration. Upstream MTK `@constants`; enters the isentropic scale height H_s = c_p·Θ/g."
+                        },
+                        "R_d": {
+                            "type": "parameter",
+                            "units": "J/(kg*K)",
+                            "default": 287.0,
+                            "description": "Dry-air gas constant. Upstream MTK `@constants`; enters the base-state density ρ̄ = P_0/(R_d·Θ)·(1 − z/H_s)^(C_p/R_d − 1) (Eq. 2.9)."
+                        },
+                        "c_p": {
+                            "type": "parameter",
+                            "units": "J/(kg*K)",
+                            "default": 1004.0,
+                            "description": "Specific heat of dry air at constant pressure. Upstream MTK `@constants`; enters the isentropic scale height H_s = c_p·Θ/g."
+                        },
+                        "inv_kappa": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 3.4982578397212545,
+                            "description": "Pressure-profile exponent C_p/R_d = 1/κ (dimensionless). A derived upstream MTK `@constants` (inv_kappa = c_p/R_d); carried as a parameter with the evaluated default 1004/287 = 3.4982578397212545. Exponent of the base-state pressure profile (Eq. 2.8)."
+                        },
+                        "inv_kappa_m1": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 2.4982578397212545,
+                            "description": "Density-profile exponent C_p/R_d − 1 (dimensionless). A derived upstream MTK `@constants` (inv_kappa_m1 = c_p/R_d − 1); carried as a parameter with the evaluated default 1004/287 − 1 = 2.4982578397212545. Exponent of the base-state density profile (Eq. 2.9)."
+                        },
+                        "Θ": {
+                            "type": "parameter",
+                            "units": "K",
+                            "default": 300.0,
+                            "description": "Reference (constant) potential temperature of the isentropic base state — Clark (1977) Eq. 2.6 assumes θ̄(z) = Θ throughout the column."
+                        },
+                        "P_0": {
+                            "type": "parameter",
+                            "units": "Pa",
+                            "default": 100000.0,
+                            "description": "Surface pressure — the base-state pressure p̄ at z = 0."
+                        },
+                        "z": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.0,
+                            "description": "Height above the surface at which the base-state temperature, pressure and density profiles are evaluated."
+                        },
+                        "T_bar": {
+                            "type": "state",
+                            "units": "K",
+                            "description": "Base-state temperature T̄(z) = Θ·(1 − z/H_s) (Eq. 2.7) — linear in height, reaching absolute zero at z = H_s."
+                        },
+                        "p_bar": {
+                            "type": "state",
+                            "units": "Pa",
+                            "description": "Base-state pressure p̄(z) = P_0·(1 − z/H_s)^(C_p/R_d) (Eq. 2.8), the hydrostatically balanced profile of the isentropic atmosphere."
+                        },
+                        "ρ_bar": {
+                            "type": "state",
+                            "units": "kg/m^3",
+                            "description": "Base-state density ρ̄(z) = P_0/(R_d·Θ)·(1 − z/H_s)^(C_p/R_d − 1) (Eq. 2.9), from the ideal-gas law applied to the isentropic profile."
+                        },
+                        "H_s": {
+                            "type": "state",
+                            "units": "m",
+                            "description": "Isentropic scale height H_s = c_p·Θ/g — the depth over which the linear base-state temperature profile would fall to absolute zero."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Isentropic scale height H_s = c_p·Θ/g — Clark (1977) Section 2; the linear depth scale of the isentropic base state.",
+                            "lhs": "H_s",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "c_p",
+                                            "Θ"
+                                        ]
+                                    },
+                                    "g"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.7 — base-state temperature T̄(z) = Θ·(1 − z/H_s), linear in height above the surface.",
+                            "lhs": "T_bar",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "Θ",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "H_s"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.8 — base-state pressure p̄(z) = P_0·(1 − z/H_s)^(C_p/R_d).",
+                            "lhs": "p_bar",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "P_0",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "H_s"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "inv_kappa"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.9 — base-state density ρ̄(z) = P_0/(R_d·Θ)·(1 − z/H_s)^(C_p/R_d − 1).",
+                            "lhs": "ρ_bar",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "P_0",
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "R_d",
+                                                    "Θ"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "H_s"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "inv_kappa_m1"
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "topography": {
+                    "variables": {
+                        "a": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 3000.0,
+                            "description": "Mountain half-width"
+                        },
+                        "h_mtn": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 100.0,
+                            "description": "Mountain peak height"
+                        },
+                        "x": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.0,
+                            "description": "Horizontal position relative to the mountain center"
+                        },
+                        "z_s": {
+                            "type": "state",
+                            "units": "m",
+                            "description": "Terrain surface height (Eq. 7.1)"
+                        },
+                        "dz_s_dx": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Terrain slope d(z_s)/dx (dimensionless)"
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "z_s",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "a",
+                                                    2
+                                                ]
+                                            },
+                                            "h_mtn"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "a",
+                                                    2
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "x",
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "dz_s_dx",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -2,
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "a",
+                                                    2
+                                                ]
+                                            },
+                                            "h_mtn",
+                                            "x"
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "a",
+                                                            2
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "x",
+                                                            2
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            2
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "transform": {
+                    "variables": {
+                        "z_s": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.0,
+                            "description": "Terrain surface height z_s(x,y)"
+                        },
+                        "H": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 8000.0,
+                            "description": "Domain height (rigid-lid altitude)"
+                        },
+                        "z_bar": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.0,
+                            "description": "Transformed (terrain-following) vertical coordinate"
+                        },
+                        "dz_s_dx": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.0,
+                            "description": "Terrain slope d(z_s)/dx in the x direction (dimensionless)"
+                        },
+                        "dz_s_dy": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.0,
+                            "description": "Terrain slope d(z_s)/dy in the y direction (dimensionless)"
+                        },
+                        "G_sqrt": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Coordinate-transformation Jacobian G^(1/2) = 1 - z_s/H (Eq. 2.21)"
+                        },
+                        "G_sqrt_G13": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Metric coefficient G^(1/2)G^13 carrying the x terrain slope into the transformed equations (Eq. 2.22)"
+                        },
+                        "G_sqrt_G23": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Metric coefficient G^(1/2)G^23 carrying the y terrain slope into the transformed equations (Eq. 2.23)"
+                        },
+                        "z_phys": {
+                            "type": "state",
+                            "units": "m",
+                            "description": "Physical height z recovered from the transformed coordinate z_bar (inverse of Eq. 2.20)"
+                        },
+                        "ω_diag": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Diagnostic Jacobian factor for the contravariant vertical velocity ω (Eq. 2.27); equals G^(1/2)"
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "G_sqrt",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z_s",
+                                                    "H"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "G_sqrt_G13",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z_bar",
+                                                    "H"
+                                                ]
+                                            },
+                                            -1
+                                        ]
+                                    },
+                                    "dz_s_dx"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "G_sqrt_G23",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z_bar",
+                                                    "H"
+                                                ]
+                                            },
+                                            -1
+                                        ]
+                                    },
+                                    "dz_s_dy"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "z_phys",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "z_bar",
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            "H",
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -1,
+                                                                    "z_s"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "H"
+                                        ]
+                                    },
+                                    "z_s"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "ω_diag",
+                            "rhs": "G_sqrt"
+                        }
+                    ]
+                },
+                "turbulence": {
+                    "variables": {
+                        "k_smag": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.25,
+                            "description": "Smagorinsky constant (dimensionless), Eq. 2.17. Upstream MTK `@constants`; sets the eddy viscosity through K_M = (k·Δ)²·|Def|. Clark (1977) uses k = 0.25."
+                        },
+                        "Def_ref": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 1.0,
+                            "description": "Reference deformation rate (1 s⁻¹). Upstream MTK `@constants`; a dimensional-consistency device — the squared deformation is divided by Def_ref² before the square root in Eq. 2.18 and the result multiplied by Def_ref, so the `sqrt` acts on a dimensionless argument. Numerically the identity (Def_ref = 1), so it does not change any computed value."
+                        },
+                        "Δ_grid": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 600.0,
+                            "description": "Grid resolution — the subgrid-scale filter width Δ in the Smagorinsky eddy viscosity (Eq. 2.17). K_M scales with Δ²."
+                        },
+                        "D11": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₁₁ (Eq. 2.16), the normal-strain rate along x. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                        },
+                        "D22": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₂₂ (Eq. 2.16), the normal-strain rate along y. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                        },
+                        "D33": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₃₃ (Eq. 2.16), the normal-strain rate along z. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                        },
+                        "D12": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₁₂ (Eq. 2.16), the x-y shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₁₂²."
+                        },
+                        "D13": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₁₃ (Eq. 2.16), the x-z shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₁₃²."
+                        },
+                        "D23": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Deformation tensor component D₂₃ (Eq. 2.16), the y-z shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₂₃²."
+                        },
+                        "Def": {
+                            "type": "state",
+                            "units": "1/s",
+                            "description": "Total deformation magnitude |Def| (Eq. 2.18): |Def| = sqrt[½(D₁₁²+D₂₂²+D₃₃²) + D₁₂²+D₁₃²+D₂₃²]. The scalar strain-rate invariant that drives the Smagorinsky eddy viscosity."
+                        },
+                        "K_M": {
+                            "type": "state",
+                            "units": "m^2/s",
+                            "description": "Eddy viscosity coefficient (Eq. 2.17): K_M = (k_smag·Δ_grid)²·|Def|. The subgrid-scale turbulent momentum diffusivity; grows with the resolved deformation rate and the square of the grid filter width."
+                        },
+                        "K_H": {
+                            "type": "state",
+                            "units": "m^2/s",
+                            "description": "Turbulent heat diffusivity (Eq. 2.19): K_H = K_M. Clark (1977) assumes the turbulent Prandtl number is unity, so the eddy heat diffusivity equals the eddy viscosity."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 2.18 — total deformation magnitude |Def| = Def_ref·sqrt[(½(D11²+D22²+D33²) + D12²+D13²+D23²)/Def_ref²]. The dimensionless squared deformation is the upstream Julia local `Def_sq_dimless`, inlined here. Def_ref = 1 s⁻¹ makes the /Def_ref² and ·Def_ref numerically the identity; they only keep the sqrt argument dimensionless.",
+                            "lhs": "Def",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "Def_ref",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    0.5,
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    "D11",
+                                                                                    2.0
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    "D22",
+                                                                                    2.0
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    "D33",
+                                                                                    2.0
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    "D12",
+                                                                    2.0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    "D13",
+                                                                    2.0
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    "D23",
+                                                                    2.0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "Def_ref",
+                                                            2.0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.17 — Smagorinsky eddy viscosity coefficient K_M = (k·Δ)²·|Def|, with k the Smagorinsky constant and Δ the grid filter width.",
+                            "lhs": "K_M",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k_smag",
+                                                    "Δ_grid"
+                                                ]
+                                            },
+                                            2.0
+                                        ]
+                                    },
+                                    "Def"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.19 — turbulent heat diffusivity, set equal to the eddy viscosity (unit turbulent Prandtl number).",
+                            "lhs": "K_H",
+                            "rhs": "K_M"
+                        }
+                    ]
+                },
+                "momentum": {
+                    "variables": {
+                        "g": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 9.81,
+                            "description": "Gravitational acceleration. Upstream MTK `@constants`; appears in the buoyancy term ρ'·g of the w-momentum equation (Eq. 2.3)."
+                        },
+                        "u": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "x-velocity (zonal) component. Enters the Coriolis term ρ̄·u·f and the Rayleigh-friction sink ρ̄·u/τ_R of the u-momentum equation (Eq. 2.1)."
+                        },
+                        "v": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "y-velocity (meridional) component. Enters the Coriolis term ρ̄·v·f and the Rayleigh-friction sink ρ̄·v/τ_R of the v-momentum equation (Eq. 2.2)."
+                        },
+                        "w": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "z-velocity (vertical) component. Enters the Rayleigh-friction sink ρ̄·w/τ_R of the w-momentum equation (Eq. 2.3)."
+                        },
+                        "du_dt": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 0.0,
+                            "description": "Material derivative of the x-velocity, du/dt. The inertial term ρ̄·(du/dt) of the u-momentum equation (Eq. 2.1)."
+                        },
+                        "dv_dt": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 0.0,
+                            "description": "Material derivative of the y-velocity, dv/dt. The inertial term ρ̄·(dv/dt) of the v-momentum equation (Eq. 2.2)."
+                        },
+                        "dw_dt": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 0.0,
+                            "description": "Material derivative of the z-velocity, dw/dt. The inertial term ρ̄·(dw/dt) of the w-momentum equation (Eq. 2.3)."
+                        },
+                        "dp_dx": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Perturbation-pressure gradient ∂p'/∂x — the x-component of the pressure-gradient force in the u-momentum equation (Eq. 2.1)."
+                        },
+                        "dp_dy": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Perturbation-pressure gradient ∂p'/∂y — the y-component of the pressure-gradient force in the v-momentum equation (Eq. 2.2)."
+                        },
+                        "dp_dz": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Perturbation-pressure gradient ∂p'/∂z — the z-component of the pressure-gradient force in the w-momentum equation (Eq. 2.3)."
+                        },
+                        "ρ_bar": {
+                            "type": "parameter",
+                            "units": "kg/m^3",
+                            "default": 1.225,
+                            "description": "Base-state (reference) air density ρ̄. Multiplies the inertial, Coriolis and Rayleigh-friction terms of all three momentum equations; the anelastic approximation uses the base-state density consistently."
+                        },
+                        "ρ_prime": {
+                            "type": "parameter",
+                            "units": "kg/m^3",
+                            "default": 0.0,
+                            "description": "Density perturbation ρ' from the base state. Drives the buoyancy term ρ'·g of the w-momentum equation (Eq. 2.3); a positive perturbation (air denser than the base state) contributes a positive residual."
+                        },
+                        "div_τ1": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Reynolds-stress divergence (∇·τ)₁ = ∂τ₁₁/∂x + ∂τ₁₂/∂y + ∂τ₁₃/∂z — the turbulent (subgrid) momentum flux entering the u-momentum equation (Eq. 2.1, stresses from Eq. 2.15)."
+                        },
+                        "div_τ2": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Reynolds-stress divergence (∇·τ)₂ = ∂τ₂₁/∂x + ∂τ₂₂/∂y + ∂τ₂₃/∂z — the turbulent (subgrid) momentum flux entering the v-momentum equation (Eq. 2.2, stresses from Eq. 2.15)."
+                        },
+                        "div_τ3": {
+                            "type": "parameter",
+                            "units": "Pa/m",
+                            "default": 0.0,
+                            "description": "Reynolds-stress divergence (∇·τ)₃ = ∂τ₃₁/∂x + ∂τ₃₂/∂y + ∂τ₃₃/∂z — the turbulent (subgrid) momentum flux entering the w-momentum equation (Eq. 2.3, stresses from Eq. 2.15)."
+                        },
+                        "f_coriolis": {
+                            "type": "parameter",
+                            "units": "1/s",
+                            "default": 0.0,
+                            "description": "Coriolis parameter f. Sets the magnitude of the Coriolis term ρ̄·V·f in the two horizontal momentum equations (Eqs. 2.1-2.2); there is no Coriolis term in the vertical."
+                        },
+                        "τ_R": {
+                            "type": "parameter",
+                            "units": "s",
+                            "default": 1000.0,
+                            "description": "Rayleigh-friction time scale. The momentum sink −ρ̄·V/τ_R in all three equations damps the velocity on the τ_R time scale (an absorbing-layer / large-scale-drag parameterization)."
+                        },
+                        "mom_u": {
+                            "type": "state",
+                            "units": "Pa/m",
+                            "description": "u-momentum equation residual (Eq. 2.1): ρ̄·(du/dt) + ρ̄·u·f + ∂p'/∂x − (∇·τ)₁ − ρ̄·u/τ_R. Zero when the u-momentum balance is exactly satisfied."
+                        },
+                        "mom_v": {
+                            "type": "state",
+                            "units": "Pa/m",
+                            "description": "v-momentum equation residual (Eq. 2.2): ρ̄·(dv/dt) + ρ̄·v·f + ∂p'/∂y − (∇·τ)₂ − ρ̄·v/τ_R. Zero when the v-momentum balance is exactly satisfied."
+                        },
+                        "mom_w": {
+                            "type": "state",
+                            "units": "Pa/m",
+                            "description": "w-momentum equation residual (Eq. 2.3): ρ̄·(dw/dt) + ∂p'/∂z + ρ'·g − (∇·τ)₃ − ρ̄·w/τ_R. Zero when the w-momentum balance is exactly satisfied."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 2.1 — u-momentum equation residual: ρ̄·(du/dt) + ρ̄·u·f + ∂p'/∂x − (∇·τ)₁ − ρ̄·u/τ_R. Inertia + Coriolis + pressure-gradient force − Reynolds-stress divergence − Rayleigh friction; zero for an exact solution. The Coriolis term uses the base-state density ρ̄ consistently. Each subtraction is encoded as a term scaled by −1.0.",
+                            "lhs": "mom_u",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "du_dt"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "u",
+                                            "f_coriolis"
+                                        ]
+                                    },
+                                    "dp_dx",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            "div_τ1"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "ρ_bar",
+                                                            "u"
+                                                        ]
+                                                    },
+                                                    "τ_R"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.2 — v-momentum equation residual: ρ̄·(dv/dt) + ρ̄·v·f + ∂p'/∂y − (∇·τ)₂ − ρ̄·v/τ_R. Identical structure to Eq. 2.1 with the y-direction inputs.",
+                            "lhs": "mom_v",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "dv_dt"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "v",
+                                            "f_coriolis"
+                                        ]
+                                    },
+                                    "dp_dy",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            "div_τ2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "ρ_bar",
+                                                            "v"
+                                                        ]
+                                                    },
+                                                    "τ_R"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 2.3 — w-momentum equation residual: ρ̄·(dw/dt) + ∂p'/∂z + ρ'·g − (∇·τ)₃ − ρ̄·w/τ_R. No Coriolis term in the vertical; the buoyancy term ρ'·g uses the density perturbation ρ'.",
+                            "lhs": "mom_w",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "dw_dt"
+                                        ]
+                                    },
+                                    "dp_dz",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_prime",
+                                            "g"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            "div_τ3"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1.0,
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "ρ_bar",
+                                                            "w"
+                                                        ]
+                                                    },
+                                                    "τ_R"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "mass_continuity": {
+                    "variables": {
+                        "ρ_bar": {
+                            "type": "parameter",
+                            "units": "kg/m^3",
+                            "default": 1.225,
+                            "description": "Base-state (reference) air density ρ̄ [kg/m^3] — the horizontally-uniform, time-independent density of the anelastic reference atmosphere against which the dynamics are linearized (Clark 1977, Sec. 2). Multiplies each velocity component to form the density-weighted velocities rho_u, rho_v, rho_w. Upstream an MTK `@parameter`; default 1.225 kg/m^3, the U.S. Standard Atmosphere sea-level air density."
+                        },
+                        "u": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "x-velocity component u [m/s] of the air motion. An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_u = ρ̄u. Default 0 m/s (a quiescent base state)."
+                        },
+                        "v": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "y-velocity component v [m/s] of the air motion. An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_v = ρ̄v. Default 0 m/s (a quiescent base state)."
+                        },
+                        "w": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.0,
+                            "description": "z-velocity component w [m/s] of the air motion (vertical velocity). An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_w = ρ̄w. Default 0 m/s (a quiescent base state)."
+                        },
+                        "d_dx_rho_u": {
+                            "type": "parameter",
+                            "units": "kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Density-weighted velocity divergence term ∂(ρ̄u)/∂x [kg/(m^3*s)] — the x-derivative of the density-weighted u-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the y- and z-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                        },
+                        "d_dy_rho_v": {
+                            "type": "parameter",
+                            "units": "kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Density-weighted velocity divergence term ∂(ρ̄v)/∂y [kg/(m^3*s)] — the y-derivative of the density-weighted v-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the x- and z-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                        },
+                        "d_dz_rho_w": {
+                            "type": "parameter",
+                            "units": "kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Density-weighted velocity divergence term ∂(ρ̄w)/∂z [kg/(m^3*s)] — the z-derivative of the density-weighted w-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the x- and y-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                        },
+                        "mass_continuity": {
+                            "type": "state",
+                            "units": "kg/(m^3*s)",
+                            "description": "Anelastic mass continuity residual [kg/(m^3*s)] (Clark 1977, Eq. 2.4): the density-weighted velocity divergence ∂(ρ̄u)/∂x + ∂(ρ̄v)/∂y + ∂(ρ̄w)/∂z. The anelastic approximation constrains this residual to zero — a flow with mass_continuity = 0 is divergence-free in the density-weighted sense and contains no acoustic modes. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation, with no time derivative and hence no initial condition."
+                        },
+                        "rho_u": {
+                            "type": "state",
+                            "units": "kg/(m^2*s)",
+                            "description": "Density-weighted u-velocity ρ̄u [kg/(m^2*s)] — the base-state density times the x-velocity component, i.e. the x-component of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_u ~ ρ_bar*u, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                        },
+                        "rho_v": {
+                            "type": "state",
+                            "units": "kg/(m^2*s)",
+                            "description": "Density-weighted v-velocity ρ̄v [kg/(m^2*s)] — the base-state density times the y-velocity component, i.e. the y-component of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_v ~ ρ_bar*v, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                        },
+                        "rho_w": {
+                            "type": "state",
+                            "units": "kg/(m^2*s)",
+                            "description": "Density-weighted w-velocity ρ̄w [kg/(m^2*s)] — the base-state density times the z-velocity component, i.e. the z-component (vertical) of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_w ~ ρ_bar*w, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "rho_u",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "u"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "rho_v",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "v"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "rho_w",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "w"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "mass_continuity",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    "d_dx_rho_u",
+                                    "d_dy_rho_v",
+                                    "d_dz_rho_w"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "thermodynamics": {
+                    "variables": {
+                        "ρ_bar": {
+                            "type": "parameter",
+                            "units": "kg/m^3",
+                            "default": 1.225,
+                            "description": "Base-state (anelastic reference) air density. Default 1.225 kg/m^3 (sea-level standard atmosphere); lower aloft. The anelastic approximation density-weights the heat fluxes and the thermodynamic tendency."
+                        },
+                        "dθ_dt": {
+                            "type": "parameter",
+                            "units": "K/s",
+                            "default": 0.0,
+                            "description": "Material derivative of potential temperature, dtheta/dt — the local potential-temperature tendency. Default 0 (steady state)."
+                        },
+                        "dθ_dx": {
+                            "type": "parameter",
+                            "units": "K/m",
+                            "default": 0.0,
+                            "description": "Potential-temperature gradient in the x (zonal) direction, ∂theta/∂x. Drives the x-component turbulent heat flux H1. Default 0."
+                        },
+                        "dθ_dy": {
+                            "type": "parameter",
+                            "units": "K/m",
+                            "default": 0.0,
+                            "description": "Potential-temperature gradient in the y (meridional) direction, ∂theta/∂y. Drives the y-component turbulent heat flux H2. Default 0."
+                        },
+                        "dθ_dz": {
+                            "type": "parameter",
+                            "units": "K/m",
+                            "default": 0.0,
+                            "description": "Potential-temperature gradient in the z (vertical) direction, ∂theta/∂z — the static-stability lapse rate (positive = stable). Drives the z-component turbulent heat flux H3. Default 0."
+                        },
+                        "K_H": {
+                            "type": "parameter",
+                            "units": "m^2/s",
+                            "default": 20.0,
+                            "description": "Eddy heat diffusivity from the Smagorinsky subgrid-scale closure (Clark 1977 Eq. 2.19, K_H = K_M). Default 20 m^2/s (upstream @parameter default)."
+                        },
+                        "dH1_dx": {
+                            "type": "parameter",
+                            "units": "K*kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Divergence component ∂H1/∂x of the x turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                        },
+                        "dH2_dy": {
+                            "type": "parameter",
+                            "units": "K*kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Divergence component ∂H2/∂y of the y turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                        },
+                        "dH3_dz": {
+                            "type": "parameter",
+                            "units": "K*kg/(m^3*s)",
+                            "default": 0.0,
+                            "description": "Divergence component ∂H3/∂z of the z turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                        },
+                        "H1": {
+                            "type": "state",
+                            "units": "K*kg/(m^2*s)",
+                            "description": "x-component turbulent heat flux, H1 = rho_bar*K_H*(∂theta/∂x) (Clark 1977 Eq. 2.19). An observed (algebraic) output — the LHS of exactly one purely-algebraic equation, with no time derivative and hence no initial condition. Downgradient: positive for a positive zonal potential-temperature gradient."
+                        },
+                        "H2": {
+                            "type": "state",
+                            "units": "K*kg/(m^2*s)",
+                            "description": "y-component turbulent heat flux, H2 = rho_bar*K_H*(∂theta/∂y) (Eq. 2.19). An observed (algebraic) output; no time derivative, no initial condition."
+                        },
+                        "H3": {
+                            "type": "state",
+                            "units": "K*kg/(m^2*s)",
+                            "description": "z-component turbulent heat flux, H3 = rho_bar*K_H*(∂theta/∂z) (Eq. 2.19). An observed (algebraic) output; no time derivative, no initial condition. The vertical turbulent heat flux down the static-stability gradient."
+                        },
+                        "div_H": {
+                            "type": "state",
+                            "units": "K*kg/(m^3*s)",
+                            "description": "Heat-flux divergence term, div_H = -div(H) = -(∂H1/∂x + ∂H2/∂y + ∂H3/∂z) (Clark 1977 Eq. 2.14). An observed (algebraic) output; the convergence of the turbulent heat flux that heats a fluid parcel. No time derivative, no initial condition."
+                        },
+                        "thermo_residual": {
+                            "type": "state",
+                            "units": "K*kg/(m^3*s)",
+                            "description": "Residual of the anelastic thermodynamic equation (Clark 1977 Eq. 2.14), thermo_residual = rho_bar*(dtheta/dt) - div_H. An observed (algebraic) output that is zero for an exact, energy-conserving solution of the first law; a nonzero value measures the imbalance between the potential-temperature tendency and the turbulent heat-flux convergence. No time derivative, no initial condition."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Clark 1977 Eq. 2.19 — x-component turbulent heat flux, H1 = rho_bar*K_H*(d(theta)/dx).",
+                            "lhs": "H1",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "K_H",
+                                    "dθ_dx"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Clark 1977 Eq. 2.19 — y-component turbulent heat flux, H2 = rho_bar*K_H*(d(theta)/dy).",
+                            "lhs": "H2",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "K_H",
+                                    "dθ_dy"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Clark 1977 Eq. 2.19 — z-component turbulent heat flux, H3 = rho_bar*K_H*(d(theta)/dz).",
+                            "lhs": "H3",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "ρ_bar",
+                                    "K_H",
+                                    "dθ_dz"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Heat-flux divergence term div_H = -div(H) = -(dH1/dx + dH2/dy + dH3/dz).",
+                            "lhs": "div_H",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "dH1_dx",
+                                            "dH2_dy",
+                                            "dH3_dz"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Clark 1977 Eq. 2.14 — first-law residual rho_bar*(d(theta)/dt) - div_H; zero for an exact energy-conserving solution.",
+                            "lhs": "thermo_residual",
+                            "rhs": {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ρ_bar",
+                                            "dθ_dt"
+                                        ]
+                                    },
+                                    "div_H"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "pressure_diag": {
+                    "variables": {
+                        "g": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 9.81,
+                            "description": "Gravitational acceleration"
+                        },
+                        "C_a": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 50.0,
+                            "description": "Pseudo-compressible acoustic speed (numerical parameter)"
+                        },
+                        "G_sqrt": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 1.0,
+                            "description": "G^(1/2) Jacobian factor of the terrain-following coordinates (dimensionless)"
+                        },
+                        "p_prime": {
+                            "type": "parameter",
+                            "units": "Pa",
+                            "default": 0.0,
+                            "description": "Pressure perturbation"
+                        },
+                        "d2p_dx2": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Second derivative of the pressure perturbation in x"
+                        },
+                        "d2p_dy2": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Second derivative of the pressure perturbation in y"
+                        },
+                        "d2p_dz2": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Second derivative of the pressure perturbation in z (terrain-following coordinate)"
+                        },
+                        "F_source": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Pressure equation source F(x) from the momentum-equation divergences (Eq. 4.1)"
+                        },
+                        "dPFX_dx": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Divergence of the x-pressure gradient force term, d(PFX)/dx"
+                        },
+                        "dPFY_dy": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Divergence of the y-pressure gradient force term, d(PFY)/dy"
+                        },
+                        "dPFZ_dz": {
+                            "type": "parameter",
+                            "units": "Pa/m^2",
+                            "default": 0.0,
+                            "description": "Divergence of the z-pressure gradient force term, d(PFZ)/dz (terrain-following coordinate)"
+                        },
+                        "laplacian_p": {
+                            "type": "state",
+                            "units": "Pa/m^2",
+                            "description": "Pressure-perturbation Laplacian in terrain-following coordinates"
+                        },
+                        "pressure_residual": {
+                            "type": "state",
+                            "units": "Pa/m^2",
+                            "description": "Diagnostic pressure equation residual (Eq. 4.2); zero when the anelastic constraint is satisfied"
+                        },
+                        "div_PF": {
+                            "type": "state",
+                            "units": "Pa/m^2",
+                            "description": "Divergence of the pressure gradient forces"
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "div_PF",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    "dPFX_dx",
+                                    "dPFY_dy",
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "dPFZ_dz",
+                                            "G_sqrt"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "laplacian_p",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    "d2p_dx2",
+                                    "d2p_dy2",
+                                    "d2p_dz2"
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "pressure_residual",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    "laplacian_p",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "g",
+                                                            "p_prime"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "C_a",
+                                                            2
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            "F_source"
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "tests": [
+                {
+                    "id": "composed_default_canonical_all_subsystems",
+                    "description": "Canonical default-parameter run of the composed system. Reproduces the intent of the upstream `Clark1977AnelasticSystem Structure` test (test/clark1977_test.jl:246-260, which asserts the composed object is a System carrying the 8 named subsystems base_state/topography/transform/turbulence/momentum/mass_continuity/thermodynamics/pressure_diag) by exercising every output of every one of the 8 subsystems through the dot-namespaced flattened system at default parameters. base_state returns the isentropic profile at z=0 (T_bar=Θ=300 K, p_bar=P_0=1e5 Pa, ρ_bar=1.1614 kg/m^3, H_s=c_p·Θ/g); topography the Witch-of-Agnesi peak (z_s=h_mtn=100 m at x=0); transform the flat-surface metrics (G_sqrt=ω_diag=1); the four diagnostic-residual subsystems (turbulence, momentum, mass_continuity, thermodynamics, pressure_diag) all vanish identically under the quiescent default state.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.T_bar",
+                            "time": 0.0,
+                            "expected": 300.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.p_bar",
+                            "time": 0.0,
+                            "expected": 100000.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.ρ_bar",
+                            "time": 0.0,
+                            "expected": 1.1614401858304297
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.H_s",
+                            "time": 0.0,
+                            "expected": 30703.363914373087
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.topography.z_s",
+                            "time": 0.0,
+                            "expected": 100.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.topography.dz_s_dx",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt_G13",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt_G23",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.z_phys",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.ω_diag",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.Def",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.K_M",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.K_H",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_u",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_v",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_w",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_u",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_v",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_w",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.mass_continuity",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H1",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H2",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H3",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.div_H",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.thermo_residual",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.div_PF",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.laplacian_p",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.pressure_residual",
+                            "time": 0.0,
+                            "expected": 0.0
+                        }
+                    ]
+                },
+                {
+                    "id": "base_state_elevated_z1000",
+                    "description": "Isentropic base state evaluated 1000 m above the surface (base_state.z = 1000 m, Θ and P_0 at defaults). The scale height H_s = c_p·Θ/g is height-independent; the temperature falls linearly (T_bar = Θ·(1 − z/H_s)) and the pressure and density fall as the (1 − z/H_s) power laws of Clark (1977) Eqs. 2.8-2.9. Expected values are the closed-form evaluation of Eqs. 2.6-2.9.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.base_state.z": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.H_s",
+                            "time": 0.0,
+                            "expected": 30703.363914373087
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.T_bar",
+                            "time": 0.0,
+                            "expected": 290.22908366533864
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.p_bar",
+                            "time": 0.0,
+                            "expected": 89062.30249029941
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.ρ_bar",
+                            "time": 0.0,
+                            "expected": 1.0692298909033104
+                        }
+                    ]
+                },
+                {
+                    "id": "topography_half_width",
+                    "description": "Witch-of-Agnesi topography sampled one half-width downstream of the peak (topography.x = a = 3000 m). z_s = a^2·h/(a^2 + x^2) = h/2 = 50 m and the terrain slope dz_s/dx = −2a^2·h·x/(a^2 + x^2)^2 = −h/(2a). Mirrors the standalone witch_of_agnesi.esm `half_width` test, routed through the composition.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.topography.x": 3000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.topography.z_s",
+                            "time": 0.0,
+                            "expected": 50.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.topography.dz_s_dx",
+                            "time": 0.0,
+                            "expected": -0.016666666666666666
+                        }
+                    ]
+                },
+                {
+                    "id": "transform_full",
+                    "description": "Terrain-following coordinate transform with terrain, height and slopes all non-trivial (transform z_s=500 m, z_bar=6000 m, H=10000 m, dz_s_dx=−0.08, dz_s_dy=0.04): the Jacobian G_sqrt = 1 − z_s/H, the metric coefficients G_sqrt·G13 and G_sqrt·G23, the physical height z_phys and the ω diagnostic factor. Mirrors the standalone terrain_following.esm `full_transform` test.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.transform.z_s": 500.0,
+                        "Clark1977AnelasticSystem.transform.z_bar": 6000.0,
+                        "Clark1977AnelasticSystem.transform.H": 10000.0,
+                        "Clark1977AnelasticSystem.transform.dz_s_dx": -0.08,
+                        "Clark1977AnelasticSystem.transform.dz_s_dy": 0.04
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt",
+                            "time": 0.0,
+                            "expected": 0.95
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt_G13",
+                            "time": 0.0,
+                            "expected": 0.032
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.G_sqrt_G23",
+                            "time": 0.0,
+                            "expected": -0.016
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.z_phys",
+                            "time": 0.0,
+                            "expected": 6200.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.transform.ω_diag",
+                            "time": 0.0,
+                            "expected": 0.95
+                        }
+                    ]
+                },
+                {
+                    "id": "turbulence_full_deformation",
+                    "description": "Smagorinsky turbulence closure driven by a full deformation tensor (turbulence D11=0.001, D22=−0.001, D33=0, D12=0.005, D13=0.003, D23=0.002 s^-1, Δ_grid=600 m): the total deformation |Def| (Eq. 2.18), the eddy viscosity K_M = (k·Δ)^2·|Def| (Eq. 2.17) and the turbulent heat diffusivity K_H = K_M (Eq. 2.19). Mirrors the standalone smagorinsky.esm `full_deformation` test.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.turbulence.D11": 0.001,
+                        "Clark1977AnelasticSystem.turbulence.D22": -0.001,
+                        "Clark1977AnelasticSystem.turbulence.D33": 0.0,
+                        "Clark1977AnelasticSystem.turbulence.D12": 0.005,
+                        "Clark1977AnelasticSystem.turbulence.D13": 0.003,
+                        "Clark1977AnelasticSystem.turbulence.D23": 0.002,
+                        "Clark1977AnelasticSystem.turbulence.Δ_grid": 600.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.Def",
+                            "time": 0.0,
+                            "expected": 0.006244997998398399
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.K_M",
+                            "time": 0.0,
+                            "expected": 140.512454963964
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.turbulence.K_H",
+                            "time": 0.0,
+                            "expected": 140.512454963964
+                        }
+                    ]
+                },
+                {
+                    "id": "momentum_full_residual",
+                    "description": "Anelastic momentum equations (Eqs. 2.1-2.3) with every term active — inertia, Coriolis, pressure-gradient force, Reynolds-stress divergence, buoyancy and Rayleigh friction simultaneously. Mirrors the standalone anelastic_momentum.esm `full_momentum_residual` test, routed through the composition via dot-namespaced overrides.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.momentum.ρ_bar": 1.0,
+                        "Clark1977AnelasticSystem.momentum.ρ_prime": 0.1,
+                        "Clark1977AnelasticSystem.momentum.u": 10.0,
+                        "Clark1977AnelasticSystem.momentum.v": -6.0,
+                        "Clark1977AnelasticSystem.momentum.w": 1.0,
+                        "Clark1977AnelasticSystem.momentum.du_dt": 0.4,
+                        "Clark1977AnelasticSystem.momentum.dv_dt": -0.2,
+                        "Clark1977AnelasticSystem.momentum.dw_dt": 0.05,
+                        "Clark1977AnelasticSystem.momentum.dp_dx": 1.0,
+                        "Clark1977AnelasticSystem.momentum.dp_dy": -0.5,
+                        "Clark1977AnelasticSystem.momentum.dp_dz": -9.0,
+                        "Clark1977AnelasticSystem.momentum.div_τ1": 0.2,
+                        "Clark1977AnelasticSystem.momentum.div_τ2": -0.3,
+                        "Clark1977AnelasticSystem.momentum.div_τ3": 0.5,
+                        "Clark1977AnelasticSystem.momentum.f_coriolis": 0.0001,
+                        "Clark1977AnelasticSystem.momentum.τ_R": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_u",
+                            "time": 0.0,
+                            "expected": 1.191
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_v",
+                            "time": 0.0,
+                            "expected": -0.3946
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_w",
+                            "time": 0.0,
+                            "expected": -8.469999999999999
+                        }
+                    ]
+                },
+                {
+                    "id": "mass_continuity_all_outputs",
+                    "description": "Anelastic mass continuity (Eq. 2.4) with the base-state density, all three velocity components and all three density-weighted-divergence inputs non-zero: the density-weighted velocities ρ̄u, ρ̄v, ρ̄w and the mass-continuity residual. Mirrors the standalone anelastic_mass.esm `all_outputs_nonzero` test.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.mass_continuity.ρ_bar": 2.0,
+                        "Clark1977AnelasticSystem.mass_continuity.u": 4.0,
+                        "Clark1977AnelasticSystem.mass_continuity.v": -3.0,
+                        "Clark1977AnelasticSystem.mass_continuity.w": 0.5,
+                        "Clark1977AnelasticSystem.mass_continuity.d_dx_rho_u": 0.5,
+                        "Clark1977AnelasticSystem.mass_continuity.d_dy_rho_v": 0.25,
+                        "Clark1977AnelasticSystem.mass_continuity.d_dz_rho_w": -0.125
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_u",
+                            "time": 0.0,
+                            "expected": 8.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_v",
+                            "time": 0.0,
+                            "expected": -6.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_w",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.mass_continuity",
+                            "time": 0.0,
+                            "expected": 0.625
+                        }
+                    ]
+                },
+                {
+                    "id": "thermodynamics_all_heat_flux",
+                    "description": "Anelastic thermodynamics (Eqs. 2.14, 2.19) with non-zero potential-temperature gradients in all three directions (thermodynamics dθ_dx=1e-4, dθ_dy=5e-5, dθ_dz=3e-3 K/m): the turbulent heat-flux components H1, H2, H3 = ρ̄·K_H·∇θ. With no heat-flux-divergence inputs the divergence div_H and the first-law residual thermo_residual stay zero. Mirrors the standalone anelastic_thermo.esm `all_heat_flux_components` test.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.thermodynamics.dθ_dx": 0.0001,
+                        "Clark1977AnelasticSystem.thermodynamics.dθ_dy": 5e-05,
+                        "Clark1977AnelasticSystem.thermodynamics.dθ_dz": 0.003
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H1",
+                            "time": 0.0,
+                            "expected": 0.0024500000000000004
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H2",
+                            "time": 0.0,
+                            "expected": 0.0012250000000000002
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H3",
+                            "time": 0.0,
+                            "expected": 0.07350000000000001
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.div_H",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.thermo_residual",
+                            "time": 0.0,
+                            "expected": 0.0
+                        }
+                    ]
+                },
+                {
+                    "id": "pressure_diag_full",
+                    "description": "Diagnostic pressure equation (Clark 1977 Section 4) with the acoustic speed, Jacobian factor, pressure perturbation, second derivatives, source term and pressure-gradient-force divergences all non-trivial: the pressure-gradient-force divergence div_PF, the Laplacian laplacian_p and the diagnostic-pressure residual. Mirrors the standalone diagnostic_pressure.esm `full_diagnostic` test.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.pressure_diag.C_a": 60.0,
+                        "Clark1977AnelasticSystem.pressure_diag.G_sqrt": 1.5,
+                        "Clark1977AnelasticSystem.pressure_diag.p_prime": 150.0,
+                        "Clark1977AnelasticSystem.pressure_diag.d2p_dx2": 0.6,
+                        "Clark1977AnelasticSystem.pressure_diag.d2p_dy2": 0.25,
+                        "Clark1977AnelasticSystem.pressure_diag.d2p_dz2": -0.15,
+                        "Clark1977AnelasticSystem.pressure_diag.F_source": 0.05,
+                        "Clark1977AnelasticSystem.pressure_diag.dPFX_dx": 0.12,
+                        "Clark1977AnelasticSystem.pressure_diag.dPFY_dy": 0.08,
+                        "Clark1977AnelasticSystem.pressure_diag.dPFZ_dz": 0.3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.div_PF",
+                            "time": 0.0,
+                            "expected": 0.4
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.laplacian_p",
+                            "time": 0.0,
+                            "expected": 0.7
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.pressure_diag.pressure_residual",
+                            "time": 0.0,
+                            "expected": 0.24125
+                        }
+                    ]
+                },
+                {
+                    "id": "namespace_isolation_independent_subsystems",
+                    "description": "Confirms the eight subsystems are dynamically independent — the upstream composition declares no coupling equations (`eqs = Equation[]`), so a parameter override in one subsystem must not perturb any other. Two subsystems are driven off their defaults at once: momentum gets a density perturbation (momentum.ρ_prime=0.05 → buoyancy term mom_w=ρ'·g, horizontal residuals still zero) and thermodynamics gets a vertical θ-gradient (thermodynamics.dθ_dz=3e-3 → vertical heat flux H3, H1=H2=0). The un-overridden mass_continuity and base_state subsystems are asserted to stay at their defaults (mass_continuity residual and ρ̄u zero; base_state.T_bar still Θ=300 K), proving the dot-namespaced flattening keeps the subsystems isolated.",
+                    "parameter_overrides": {
+                        "Clark1977AnelasticSystem.momentum.ρ_prime": 0.05,
+                        "Clark1977AnelasticSystem.thermodynamics.dθ_dz": 0.003
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_w",
+                            "time": 0.0,
+                            "expected": 0.49050000000000005
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_u",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.momentum.mom_v",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H3",
+                            "time": 0.0,
+                            "expected": 0.07350000000000001
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H1",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.thermodynamics.H2",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.mass_continuity",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.mass_continuity.rho_u",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "Clark1977AnelasticSystem.base_state.T_bar",
+                            "time": 0.0,
+                            "expected": 300.0
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
