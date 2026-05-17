@@ -1,0 +1,271 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AnelasticMassContinuity",
+        "description": "Anelastic mass continuity equation from Clark (1977), Eq. 2.4. The component forms the three density-weighted velocity components rho_u = ρ̄u, rho_v = ρ̄v, rho_w = ρ̄w from the base-state density ρ̄ and the velocity field (u, v, w), and computes the anelastic mass-continuity residual mass_continuity as the sum of the three externally-supplied density-weighted divergence terms ∂(ρ̄u)/∂x + ∂(ρ̄v)/∂y + ∂(ρ̄w)/∂z. The anelastic approximation constrains this residual to zero, filtering acoustic (sound) waves from the dynamics by replacing the geometric velocity divergence with the density-weighted one. Four purely-algebraic equations, no time integration. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:369 (`AnelasticMassContinuity` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "clark1977",
+            "anelastic",
+            "mass-continuity",
+            "mountain-wave",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-ixn2)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215. Equation 2.4 — the anelastic mass continuity equation, which filters acoustic waves by setting the density-weighted velocity divergence to zero."
+            }
+        ]
+    },
+    "models": {
+        "AnelasticMassContinuity": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/clark1977.jl:369\n\nUpstream `AnelasticMassContinuity` is an MTK `@component` implementing Equation 2.4 of Clark (1977) — the anelastic mass continuity equation for a small-scale terrain-following atmospheric model. It declares 7 `@parameters` (ρ_bar, u, v, w, d_dx_rho_u, d_dy_rho_v, d_dz_rho_w), 4 time-indexed `@variables` (mass_continuity, rho_u, rho_v, rho_w) and 4 equations, returning `System(eqs, t; name)`. The upstream test (test/clark1977_test.jl, `AnelasticMassContinuity Structure` testset) builds the component with `@named` and asserts `length(unknowns(mass)) == 4` and `length(equations(mass)) == 4` — a structural check only; there is no upstream numerical test for this component.\n\nSystem kind: all 4 upstream equations are explicit algebraic assignments (rho_u ~ ρ_bar*u, rho_v ~ ρ_bar*v, rho_w ~ ρ_bar*w, mass_continuity ~ d_dx_rho_u + d_dy_rho_v + d_dz_rho_w) with no `D(.)` operator — each LHS variable is given directly as a closed-form expression of the `@parameters`, and no variable appears on the RHS of another equation, so the system is fully explicit (triangular, not coupled). The migration therefore leaves `system_kind` unset (default 'ode'): the 4 equations resolve to observed quantities and the compiled system has zero differential states, exactly as for the sibling explicit-algebraic components ideal_gas.esm and atmospheric_diffusion.esm. This is deliberately NOT the blocked `system_kind: nonlinear` class — there is no implicit Newton solve and no initial guesses are required, which is why docs/migration-tracker.md marks it `blocking_gap: none`.\n\nVariable classification. (1) The 7 `@parameters` — the base-state density ρ_bar, the velocity components u/v/w, and the three density-weighted divergence terms d_dx_rho_u/d_dy_rho_v/d_dz_rho_w — are encoded `type: parameter` with their upstream defaults, overridable per scenario via `parameter_overrides` / `parameter_sweep`. (2) The 4 `@variables` (mass_continuity, rho_u, rho_v, rho_w) are encoded `type: state` (no `default`) — each is the LHS of exactly one purely-algebraic equation, an observed quantity with no time derivative and hence no initial condition (the convention sibling ideal_gas.esm applies to `rho` and atmospheric_diffusion.esm applies to `u_wind`/`K_zz`/`K_yy`). Keeping them as `state` preserves the upstream structural invariant `unknowns == 4`, which is what the upstream `AnelasticMassContinuity Structure` testset checks.\n\nIdentifier names are carried over verbatim from the upstream component: the base-state density parameter keeps its Greek symbol `ρ_bar` (Greek base letters are retained in this rig — see the convention recorded in surface_layer_profile.esm and nonlocal_abl.esm, which keep `ρ`, `φ`, `ζ`, `κ` etc.), while the density-weighted velocity variables keep their ASCII upstream names `rho_u`, `rho_v`, `rho_w`. The upstream itself mixes the two (Greek `ρ_bar` parameter, ASCII `rho_*` variables); the migration does not normalise this, preserving the source identifiers exactly.\n\nEquation faithfulness. The 4 upstream equations (src/clark1977.jl:398-403) are preserved verbatim and in upstream order: the three density-weighted-velocity definitions rho_u ~ ρ_bar*u, rho_v ~ ρ_bar*v, rho_w ~ ρ_bar*w (binary `*` nodes), and the mass-continuity residual mass_continuity ~ d_dx_rho_u + d_dy_rho_v + d_dz_rho_w (a flat n-ary `+` node). Note that Eq. 2.4 sums the three externally-supplied divergence *parameters* d_dx_rho_u/d_dy_rho_v/d_dz_rho_w — NOT the rho_u/rho_v/rho_w state variables: in the upstream the spatial derivatives ∂(ρ̄u)/∂x etc. are computed by the surrounding discretization / coordinate-transform stage and fed in as inputs, so the standalone component takes them as parameters. The rho_u/rho_v/rho_w variables are diagnostic mass-flux outputs that do not feed back into the residual. The migration mirrors this exactly.\n\nUnits. The upstream declares ρ_bar in u\"kg/m^3\"; u/v/w in u\"m/s\"; d_dx_rho_u/d_dy_rho_v/d_dz_rho_w and mass_continuity in u\"kg/(m^3*s)\"; rho_u/rho_v/rho_w in u\"kg/(m^2*s)\". All are SI-coherent and carried verbatim into the .esm; no unit conversion is applied at migration time. Unit balance (verified): rho_u ~ ρ_bar*u is (kg/m^3)*(m/s) = kg/(m^2*s); mass_continuity ~ d_dx_rho_u + d_dy_rho_v + d_dz_rho_w sums three kg/(m^3*s) terms to kg/(m^3*s).\n\nTolerance rationale (model-level rel=1.0e-6). The system is a closed-form algebraic evaluation — no ODE integration, no implicit solve — so there is no integrator error to bound; rel=1.0e-6 covers float64 round-off in the multiply / add chains and the associativity difference between the migration's operand order and sympy's canonical Mul/Add ordering (a few ULP). This matches the sibling explicit-algebraic components ideal_gas.esm and atmospheric_diffusion.esm (both rel=1.0e-6). Assertions whose expected value is an exact zero (the quiescent base state, the divergence-free flow, and the zero-residual case) carry a per-assertion absolute tolerance abs=1.0e-12, since a relative tolerance cannot gate a true zero.\n\nTest reproduction. The upstream `AnelasticMassContinuity` has only the structural `AnelasticMassContinuity Structure` testset (4 unknowns, 4 equations) — no numerical assertions. The 7 inline tests added here exercise the component's numerical behaviour, with expected values computed as the exact float64 results of the upstream formulas: `at_rest_base_state` (all defaults — a quiescent atmosphere, every output zero), `density_weighted_velocity_default_density` (the density-weighting rho_x = ρ̄·velocity at the declared default ρ_bar = 1.225 kg/m^3), `unit_density_three_dimensional_flow` (density-weighting at ρ_bar = 1 with three nonzero velocity components), `divergence_free_flow_zero_residual` (three divergence terms summing exactly to zero — the anelastic constraint satisfied, mass_continuity = 0), `mass_continuity_residual_positive` / `mass_continuity_residual_negative` (a nonzero net divergence — a non-anelastic flow with a positive / negative residual), and `all_outputs_nonzero` (all 7 parameters nonzero, pinning all 4 outputs at once — the .esm analogue of the upstream structural testset, confirming every unknown is present and solved by its equation)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "ρ_bar": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Base-state (reference) air density ρ̄ [kg/m^3] — the horizontally-uniform, time-independent density of the anelastic reference atmosphere against which the dynamics are linearized (Clark 1977, Sec. 2). Multiplies each velocity component to form the density-weighted velocities rho_u, rho_v, rho_w. Upstream an MTK `@parameter`; default 1.225 kg/m^3, the U.S. Standard Atmosphere sea-level air density."
+                },
+                "u": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "x-velocity component u [m/s] of the air motion. An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_u = ρ̄u. Default 0 m/s (a quiescent base state)."
+                },
+                "v": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "y-velocity component v [m/s] of the air motion. An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_v = ρ̄v. Default 0 m/s (a quiescent base state)."
+                },
+                "w": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "z-velocity component w [m/s] of the air motion (vertical velocity). An externally-supplied input of the standalone component (upstream an MTK `@parameter`); combined with the base-state density to form the density-weighted velocity rho_w = ρ̄w. Default 0 m/s (a quiescent base state)."
+                },
+                "d_dx_rho_u": {
+                    "type": "parameter",
+                    "units": "kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Density-weighted velocity divergence term ∂(ρ̄u)/∂x [kg/(m^3*s)] — the x-derivative of the density-weighted u-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the y- and z-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                },
+                "d_dy_rho_v": {
+                    "type": "parameter",
+                    "units": "kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Density-weighted velocity divergence term ∂(ρ̄v)/∂y [kg/(m^3*s)] — the y-derivative of the density-weighted v-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the x- and z-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                },
+                "d_dz_rho_w": {
+                    "type": "parameter",
+                    "units": "kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Density-weighted velocity divergence term ∂(ρ̄w)/∂z [kg/(m^3*s)] — the z-derivative of the density-weighted w-velocity. Supplied externally (upstream an MTK `@parameter`): in a coupled solve this spatial derivative is produced by the surrounding discretization / terrain-following coordinate-transform stage, so the standalone component takes it as an input. Summed with the x- and y-terms to form the anelastic mass-continuity residual (Eq. 2.4). Default 0."
+                },
+                "mass_continuity": {
+                    "type": "state",
+                    "units": "kg/(m^3*s)",
+                    "description": "Anelastic mass continuity residual [kg/(m^3*s)] (Clark 1977, Eq. 2.4): the density-weighted velocity divergence ∂(ρ̄u)/∂x + ∂(ρ̄v)/∂y + ∂(ρ̄w)/∂z. The anelastic approximation constrains this residual to zero — a flow with mass_continuity = 0 is divergence-free in the density-weighted sense and contains no acoustic modes. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation, with no time derivative and hence no initial condition."
+                },
+                "rho_u": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Density-weighted u-velocity ρ̄u [kg/(m^2*s)] — the base-state density times the x-velocity component, i.e. the x-component of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_u ~ ρ_bar*u, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                },
+                "rho_v": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Density-weighted v-velocity ρ̄v [kg/(m^2*s)] — the base-state density times the y-velocity component, i.e. the y-component of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_v ~ ρ_bar*v, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                },
+                "rho_w": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Density-weighted w-velocity ρ̄w [kg/(m^2*s)] — the base-state density times the z-velocity component, i.e. the z-component (vertical) of the air mass flux. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation rho_w ~ ρ_bar*w, with no time derivative and hence no initial condition. Keeps its ASCII upstream name."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "rho_u",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "u"]
+                    }
+                },
+                {
+                    "lhs": "rho_v",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "v"]
+                    }
+                },
+                {
+                    "lhs": "rho_w",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "w"]
+                    }
+                },
+                {
+                    "lhs": "mass_continuity",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["d_dx_rho_u", "d_dy_rho_v", "d_dz_rho_w"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "at_rest_base_state",
+                    "description": "Quiescent anelastic base state at the declared defaults: ρ_bar = 1.225 kg/m^3 and a zero velocity field (u = v = w = 0) with zero density-weighted divergences. Every density-weighted velocity is zero and the mass-continuity residual is exactly zero — the at-rest atmosphere trivially satisfies the anelastic constraint. Pins all four outputs; all expected values are exact zeros gated with an absolute tolerance.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_u", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "rho_v", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "rho_w", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "density_weighted_velocity_default_density",
+                    "description": "Density-weighting at the declared default base-state density ρ_bar = 1.225 kg/m^3 with a nonzero velocity field u = 10, v = 5, w = 2 m/s. Each density-weighted velocity is rho_x = ρ̄·velocity: rho_u = 1.225*10 = 12.25, rho_v = 1.225*5 = 6.125, rho_w = 1.225*2 = 2.45 kg/(m^2*s). The density-weighted divergence terms remain at their zero defaults, so the mass-continuity residual is exactly zero.",
+                    "parameter_overrides": { "u": 10.0, "v": 5.0, "w": 2.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_u", "time": 0.0, "expected": 12.25 },
+                        { "variable": "rho_v", "time": 0.0, "expected": 6.125 },
+                        { "variable": "rho_w", "time": 0.0, "expected": 2.45 },
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "unit_density_three_dimensional_flow",
+                    "description": "Density-weighting at unit base-state density ρ_bar = 1 kg/m^3 with a fully three-dimensional velocity field u = 3, v = -4, w = 2.5 m/s. With ρ̄ = 1 the density-weighted velocities equal the velocity components exactly: rho_u = 3.0, rho_v = -4.0, rho_w = 2.5 kg/(m^2*s). The mass-continuity residual stays zero (divergence terms at default).",
+                    "parameter_overrides": { "ρ_bar": 1.0, "u": 3.0, "v": -4.0, "w": 2.5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_u", "time": 0.0, "expected": 3.0 },
+                        { "variable": "rho_v", "time": 0.0, "expected": -4.0 },
+                        { "variable": "rho_w", "time": 0.0, "expected": 2.5 },
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "divergence_free_flow_zero_residual",
+                    "description": "The anelastic constraint satisfied: the three density-weighted divergence terms d_dx_rho_u = 0.5, d_dy_rho_v = -0.125, d_dz_rho_w = -0.375 kg/(m^3*s) sum exactly to zero, so the mass-continuity residual is zero (Eq. 2.4). This is the defining property of an anelastic flow — the density-weighted velocity field is divergence-free. Expected value is an exact zero gated with an absolute tolerance.",
+                    "parameter_overrides": { "d_dx_rho_u": 0.5, "d_dy_rho_v": -0.125, "d_dz_rho_w": -0.375 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "mass_continuity_residual_positive",
+                    "description": "A non-anelastic flow with a positive net divergence: d_dx_rho_u = 0.6, d_dy_rho_v = 0.25, d_dz_rho_w = 0.15 kg/(m^3*s) sum to a mass-continuity residual of 1.0 kg/(m^3*s) (Eq. 2.4). A nonzero residual measures the degree to which a candidate velocity field violates the anelastic mass-continuity constraint.",
+                    "parameter_overrides": { "d_dx_rho_u": 0.6, "d_dy_rho_v": 0.25, "d_dz_rho_w": 0.15 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "mass_continuity_residual_negative",
+                    "description": "A non-anelastic flow with a negative net divergence: d_dx_rho_u = -0.5, d_dy_rho_v = 0.125, d_dz_rho_w = -0.25 kg/(m^3*s) sum to a mass-continuity residual of -0.625 kg/(m^3*s) (Eq. 2.4). Confirms the residual carries the sign of the net density-weighted velocity divergence.",
+                    "parameter_overrides": { "d_dx_rho_u": -0.5, "d_dy_rho_v": 0.125, "d_dz_rho_w": -0.25 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "mass_continuity", "time": 0.0, "expected": -0.625 }
+                    ]
+                },
+                {
+                    "id": "all_outputs_nonzero",
+                    "description": "All seven parameters nonzero, pinning all four outputs at once: ρ_bar = 2, u = 4, v = -3, w = 0.5 m/s give rho_u = 8.0, rho_v = -6.0, rho_w = 1.0 kg/(m^2*s); d_dx_rho_u = 0.5, d_dy_rho_v = 0.25, d_dz_rho_w = -0.125 kg/(m^3*s) give a mass-continuity residual of 0.625 kg/(m^3*s). The .esm analogue of the upstream `AnelasticMassContinuity Structure` testset — it confirms every unknown is present and solved by its own equation.",
+                    "parameter_overrides": {
+                        "ρ_bar": 2.0,
+                        "u": 4.0,
+                        "v": -3.0,
+                        "w": 0.5,
+                        "d_dx_rho_u": 0.5,
+                        "d_dy_rho_v": 0.25,
+                        "d_dz_rho_w": -0.125
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "rho_u", "time": 0.0, "expected": 8.0 },
+                        { "variable": "rho_v", "time": 0.0, "expected": -6.0 },
+                        { "variable": "rho_w", "time": 0.0, "expected": 1.0 },
+                        { "variable": "mass_continuity", "time": 0.0, "expected": 0.625 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "density_weighted_velocity_vs_u",
+                    "description": "Density-weighted x-velocity rho_u = ρ̄u as a function of the x-velocity component u, swept from -20 to 20 m/s at the default base-state density ρ_bar = 1.225 kg/m^3. Illustrates the density-weighting step of Clark (1977) Eq. 2.4 — a straight line through the origin with slope ρ̄, converting a velocity into the corresponding x-component of the air mass flux.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u",
+                                "range": { "start": -20.0, "stop": 20.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rho_u_vs_u",
+                            "type": "line",
+                            "description": "Density-weighted x-velocity rho_u as a function of the x-velocity component u at ρ_bar = 1.225 kg/m^3.",
+                            "x": { "variable": "u", "label": "x-velocity u (m/s)" },
+                            "y": { "variable": "rho_u", "label": "Density-weighted x-velocity rho_u (kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "mass_continuity_vs_x_divergence",
+                    "description": "Anelastic mass-continuity residual mass_continuity as a function of the x-direction density-weighted divergence d_dx_rho_u, swept from -1 to 1 kg/(m^3*s) with the y- and z-divergence terms held at zero. The residual tracks the single nonzero divergence component one-for-one (slope 1, Eq. 2.4); the flow is anelastically divergence-free only where the swept term passes through zero.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "d_dx_rho_u",
+                                "range": { "start": -1.0, "stop": 1.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "mass_continuity_vs_d_dx_rho_u",
+                            "type": "line",
+                            "description": "Mass-continuity residual mass_continuity as a function of the x-direction density-weighted divergence d_dx_rho_u (y- and z-terms zero).",
+                            "x": { "variable": "d_dx_rho_u", "label": "x-divergence d(ρ̄u)/dx (kg/(m^3*s))" },
+                            "y": { "variable": "mass_continuity", "label": "Mass-continuity residual (kg/(m^3*s))" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
