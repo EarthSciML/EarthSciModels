@@ -1,0 +1,386 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "WaterVaporThermodynamics",
+        "description": "Composite water-vapor thermodynamics system from Seinfeld & Pandis (2006) Chapter 1: given air temperature and water-vapor partial pressure it computes the saturation vapor pressure of water over liquid water (Eq. 1.10) and the relative humidity (Eq. 1.9). Migrated from AtmosphericDynamics.jl@816cc391 src/seinfeld_pandis_ch1.jl:433 (`WaterVaporThermodynamics` @component), which composes two MTK subsystems via `System(eqs, t; systems=[sat, rh])`. Represented here as a subsystem-composed ESS model (spec §4.7): the `sat` subsystem inlines the already-migrated SaturationVaporPressure component (sat_vapor_pressure.esm, esm-zuku) and the `rh` subsystem inlines RelativeHumidity (relative_humidity.esm, esm-vann), wired together by five top-level coupling equations. Algebraic (observed-only): T and p_H2O are input parameters; p_sat and RH are algebraic state outputs. The flattened chain T -> sat.a -> sat.p_sat -> rh.p_sat -> rh.RH is fully explicit and triangular.",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "observed-only",
+            "ch1",
+            "water-vapor",
+            "humidity",
+            "composed"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-tfh2)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 1, Equations 1.9 (relative humidity, RH = 100 * p_H2O / p_H2O_sat) and 1.10 (saturation vapor pressure of water over liquid water). ISBN 978-0-471-72018-8."
+            }
+        ]
+    },
+    "models": {
+        "WaterVaporThermodynamics": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/seinfeld_pandis_ch1.jl:433\nUpstream `WaterVaporThermodynamics` is an MTK `@component` that composes two subsystems — `@named sat = SaturationVaporPressure()` and `@named rh = RelativeHumidity()` — via `System(eqs, t; systems=[sat, rh])`, with its own `@variables` T, p_H2O, RH, p_sat and five coupling equations. Migrated as a subsystem-composed model (ESS spec §4.7): the `sat` and `rh` subsystems inline the `variables` + `equations` of the already-migrated standalone components sat_vapor_pressure.esm (esm-zuku) and relative_humidity.esm (esm-vann). The five upstream coupling equations are carried as the model's top-level `equations`; subsystem variables are referenced by full dotted path from the model name (spec §4.6), bare names resolve to the top-level system.\n\nRe-typing: in the standalone `.esm` files a component's inputs are typed `parameter` (no governing equation within the component). In the composed model the parent coupling equations govern three of those inputs — `sat.T` (by `sat.T ~ T`), `rh.p_sat` (by `rh.p_sat ~ sat.p_sat`) and `rh.p_H2O` (by `rh.p_H2O ~ p_H2O`) — so those three are re-typed `parameter` -> `state` here, because a `parameter` cannot be an equation LHS. The remaining subsystem parameters (sat.T_boil, sat.p_std, sat.c1-c4, rh.percent_factor) keep their `parameter` type and upstream constant values. T and p_H2O are the model's input `parameter`s; p_sat and RH are its algebraic `state` outputs.\n\nThe flattened system is 8 algebraic equations in 8 states (sat.T, sat.a, sat.p_sat, rh.p_H2O, rh.p_sat, rh.RH, p_sat, RH), fully explicit and triangular. `system_kind` is left unset (zero differential states), consistent with the siblings ideal_gas.esm / sat_vapor_pressure.esm / relative_humidity.esm. No `examples` block: `tools/render_example_plots.py` resolves algebraic models on the top-level model only and does not descend into `subsystems`, so combined-diagnostic plots cannot be rendered — matching the composed siblings radiation_fundamentals.esm / tropospheric_chemistry.esm; verification is via the inline-test gate, which flattens subsystems.\n\nTolerance rationale (model-level rel=1e-6): observed-only triangular algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the exp-of-quartic-polynomial saturation-pressure expression and the subsequent percent_factor*p_H2O/p_sat ratio across the liquid-water temperature range (273-373 K). The boiling-point assertion sat.a = 0 uses a per-assertion abs=1e-9 bound because a relative bound is undefined at expected zero."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Air temperature — input to the composite system, fed to the saturation-vapor-pressure subsystem by the coupling equation sat.T ~ T. Default 298.15 K (room-temperature reference)."
+                },
+                "p_H2O": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 1585.0,
+                    "description": "Partial pressure of water vapor — input to the composite system, fed to the relative-humidity subsystem by the coupling equation rh.p_H2O ~ p_H2O. Default 1585 Pa (~50% RH at 298 K, matching the relative_humidity.esm reference case)."
+                },
+                "RH": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Relative humidity (0-100 for subsaturated air, dimensionless) — composite output, mirrors rh.RH via Eq. 1.9."
+                },
+                "p_sat": {
+                    "type": "state",
+                    "units": "Pa",
+                    "description": "Saturation vapor pressure of water over liquid water — composite output, mirrors sat.p_sat via Eq. 1.10."
+                }
+            },
+            "subsystems": {
+                "sat": {
+                    "variables": {
+                        "T": {
+                            "type": "state",
+                            "units": "K",
+                            "default": 298.15,
+                            "description": "Temperature — coupled input, driven by the parent coupling equation sat.T ~ T (re-typed parameter -> state for the composed model)."
+                        },
+                        "T_boil": {
+                            "type": "parameter",
+                            "units": "K",
+                            "default": 373.15,
+                            "description": "Boiling point of water (upstream constant T_BOIL)"
+                        },
+                        "p_std": {
+                            "type": "parameter",
+                            "units": "Pa",
+                            "default": 101325.0,
+                            "description": "Standard pressure (upstream constant P_0; 101325 Pa = 1013.25 mbar)"
+                        },
+                        "c1": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 13.3185,
+                            "description": "Empirical coefficient 1 (dimensionless)"
+                        },
+                        "c2": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 1.976,
+                            "description": "Empirical coefficient 2 (dimensionless)"
+                        },
+                        "c3": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.6445,
+                            "description": "Empirical coefficient 3 (dimensionless)"
+                        },
+                        "c4": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.1299,
+                            "description": "Empirical coefficient 4 (dimensionless)"
+                        },
+                        "a": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Dimensionless temperature parameter a = 1 - T_boil/T"
+                        },
+                        "p_sat": {
+                            "type": "state",
+                            "units": "Pa",
+                            "description": "Saturation vapor pressure of water over liquid water"
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 1.10 - dimensionless temperature parameter a = 1 - T_boil/T",
+                            "lhs": "a",
+                            "rhs": {
+                                "op": "-",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "/",
+                                        "args": ["T_boil", "T"]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 1.10 - saturation vapor pressure p_sat = p_std * exp(c1*a - c2*a^2 - c3*a^3 - c4*a^4)",
+                            "lhs": "p_sat",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "p_std",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            {
+                                                                "op": "-",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": ["c1", "a"]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "c2",
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": ["a", 2]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "c3",
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": ["a", 3]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "c4",
+                                                            {
+                                                                "op": "^",
+                                                                "args": ["a", 4]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "rh": {
+                    "variables": {
+                        "p_H2O": {
+                            "type": "state",
+                            "units": "Pa",
+                            "default": 1585.0,
+                            "description": "Partial pressure of water vapor — coupled input, driven by the parent coupling equation rh.p_H2O ~ p_H2O (re-typed parameter -> state for the composed model)."
+                        },
+                        "p_sat": {
+                            "type": "state",
+                            "units": "Pa",
+                            "default": 3170.0,
+                            "description": "Saturation vapor pressure of water — coupled input, driven by the parent coupling equation rh.p_sat ~ sat.p_sat (re-typed parameter -> state for the composed model)."
+                        },
+                        "percent_factor": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 100.0,
+                            "description": "Conversion of the dimensionless p_H2O/p_sat ratio to a percentage"
+                        },
+                        "RH": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Relative humidity (0-100 for subsaturated air, dimensionless)"
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 1.9 - relative humidity RH = percent_factor * p_H2O / p_sat",
+                            "lhs": "RH",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": ["percent_factor", "p_H2O"]
+                                    },
+                                    "p_sat"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Couple the input temperature into the saturation-vapor-pressure subsystem (upstream: sat.T ~ T)",
+                    "lhs": "WaterVaporThermodynamics.sat.T",
+                    "rhs": "T"
+                },
+                {
+                    "_comment": "Feed the subsystem saturation vapor pressure into the relative-humidity subsystem (upstream: rh.p_sat ~ sat.p_sat)",
+                    "lhs": "WaterVaporThermodynamics.rh.p_sat",
+                    "rhs": "WaterVaporThermodynamics.sat.p_sat"
+                },
+                {
+                    "_comment": "Couple the input water-vapor partial pressure into the relative-humidity subsystem (upstream: rh.p_H2O ~ p_H2O)",
+                    "lhs": "WaterVaporThermodynamics.rh.p_H2O",
+                    "rhs": "p_H2O"
+                },
+                {
+                    "_comment": "Expose the saturation vapor pressure as a top-level output (upstream: p_sat ~ sat.p_sat)",
+                    "lhs": "p_sat",
+                    "rhs": "WaterVaporThermodynamics.sat.p_sat"
+                },
+                {
+                    "_comment": "Expose the relative humidity as a top-level output (upstream: RH ~ rh.RH)",
+                    "lhs": "RH",
+                    "rhs": "WaterVaporThermodynamics.rh.RH"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "room_temp_default_canonical",
+                    "description": "Canonical default-parameter run (T = 298.15 K, p_H2O = 1585 Pa). Verifies the full coupling chain: the input temperature reaches the sat subsystem (sat.T = T), produces sat.p_sat via Eq. 1.10, that pressure is fed to the rh subsystem (rh.p_sat = sat.p_sat), and rh produces RH via Eq. 1.9. Top-level p_sat and RH mirror the subsystem outputs. The system is algebraic, so p_sat and RH are also checked at t = 1.0 to confirm time-invariance.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 298.15,
+                        "WaterVaporThermodynamics.p_H2O": 1585.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.sat.T", "time": 0.0, "expected": 298.15 },
+                        { "variable": "WaterVaporThermodynamics.sat.a", "time": 0.0, "expected": -0.25155123260103984 },
+                        { "variable": "WaterVaporThermodynamics.sat.p_sat", "time": 0.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.rh.p_H2O", "time": 0.0, "expected": 1585.0 },
+                        { "variable": "WaterVaporThermodynamics.rh.p_sat", "time": 0.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.rh.RH", "time": 0.0, "expected": 50.04912803467701 },
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 50.04912803467701 },
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 1.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 1.0, "expected": 50.04912803467701 }
+                    ]
+                },
+                {
+                    "id": "half_saturation_298K",
+                    "description": "Air at exactly 50% relative humidity: p_H2O is set to half the 298.15 K saturation pressure (p_H2O = 1583.444... Pa = 0.5 * p_sat). Confirms the composite produces RH = 50% from the coupled p_sat. Mirrors the upstream `2.8 Eq. 1.9` 50%-RH test case.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 298.15,
+                        "WaterVaporThermodynamics.p_H2O": 1583.4441699981444
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 50.0 }
+                    ]
+                },
+                {
+                    "id": "freezing_point_273K",
+                    "description": "Freezing-point reference (T = 273.15 K). Exercises the cold end of the liquid-water validity range: the temperature parameter sat.a = 1 - T_boil/T is most negative here and the saturation pressure p_sat ~ 611 Pa. With p_H2O = 305.5 Pa the composite gives RH ~ 50%.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 273.15,
+                        "WaterVaporThermodynamics.p_H2O": 305.5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.sat.a", "time": 0.0, "expected": -0.3660992128866922 },
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 610.7246516599952 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 50.02254275631878 }
+                    ]
+                },
+                {
+                    "id": "dry_air_10pct_288K",
+                    "description": "Very dry air (10% RH) at the U.S. Standard Atmosphere sea-level temperature (T = 288.15 K, p_sat ~ 1704 Pa). p_H2O = 170.436... Pa = 0.10 * p_sat. Exercises the low-RH end of the composite range.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 288.15,
+                        "WaterVaporThermodynamics.p_H2O": 170.43566155920152
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 1704.356615592015 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 10.0 }
+                    ]
+                },
+                {
+                    "id": "warm_subsaturated_310K",
+                    "description": "Warm subsaturated air (T = 310.15 K, ~37 C). The saturation pressure p_sat ~ 6275 Pa; with p_H2O = 3000 Pa the composite RH ~ 47.8%. Round p_H2O input with a non-round RH output exercises the full saturation-pressure -> ratio chain.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 310.15,
+                        "WaterVaporThermodynamics.p_H2O": 3000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.sat.a", "time": 0.0, "expected": -0.2031275189424473 },
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 6275.345406686616 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 47.80613345686737 }
+                    ]
+                },
+                {
+                    "id": "hot_strongly_curved_343K",
+                    "description": "Hot reference (T = 343.15 K, ~70 C) — an upper-mid point on the strongly-curved p_sat(T) rise (p_sat ~ 31164 Pa). With p_H2O = 9000 Pa the composite RH ~ 28.9%.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 343.15,
+                        "WaterVaporThermodynamics.p_H2O": 9000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 31164.484389870606 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 28.879027444860505 }
+                    ]
+                },
+                {
+                    "id": "boiling_calibration_373K",
+                    "description": "Boiling-point calibration anchor (T = T_boil = 373.15 K). At T = T_boil the temperature parameter sat.a vanishes exactly, so sat.p_sat = p_std * exp(0) = 101325 Pa — the defining calibration point of the empirical Eq. 1.10. With p_H2O = 101325 Pa (= p_sat) the composite gives RH = 100% (saturation). Also checks that the coupled rh.p_sat equals sat.p_sat.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 373.15,
+                        "WaterVaporThermodynamics.p_H2O": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.sat.a", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-9 } },
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 101325.0 },
+                        { "variable": "WaterVaporThermodynamics.rh.p_sat", "time": 0.0, "expected": 101325.0 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 100.0 }
+                    ]
+                },
+                {
+                    "id": "supersaturation_298K",
+                    "description": "Transient supersaturation: at 298.15 K (p_sat ~ 3167 Pa) the water-vapor partial pressure p_H2O = 3500 Pa exceeds saturation, giving RH ~ 110.5%. Confirms the composite does not clamp RH at 100% — values above saturation pass through, as in the upstream Eq. 1.9.",
+                    "parameter_overrides": {
+                        "WaterVaporThermodynamics.T": 298.15,
+                        "WaterVaporThermodynamics.p_H2O": 3500.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "WaterVaporThermodynamics.p_sat", "time": 0.0, "expected": 3166.888339996289 },
+                        { "variable": "WaterVaporThermodynamics.RH", "time": 0.0, "expected": 110.51857925638457 }
+                    ]
+                }
+            ]
+        }
+    }
+}
