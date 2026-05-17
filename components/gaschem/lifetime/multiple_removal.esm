@@ -1,0 +1,288 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MultipleRemovalLifetime",
+        "description": "Combined atmospheric lifetime from parallel removal pathways — Seinfeld & Pandis (2006) Ch. 2 (Atmospheric Trace Constituents), Eqs. 2.7-2.9. When a trace species is removed by two independent first-order processes acting simultaneously (rate constants k_1 and k_2), the removal rates add: the inverse lifetimes (1/τ) sum while the lifetimes themselves combine harmonically. This observed-only algebraic component implements four relations: the two individual pathway lifetimes tau_1 = 1/k_1 and tau_2 = 1/k_2 (Eq. 2.6 applied per pathway), the summed inverse lifetime inverse_tau = k_1 + k_2 = 1/tau_1 + 1/tau_2 (Eqs. 2.7-2.8), and the combined lifetime tau_combined = (tau_1·tau_2)/(tau_1+tau_2) = 1/(k_1+k_2) (Eq. 2.9). The combined lifetime is always shorter than either individual pathway lifetime, and the faster (shorter-lifetime) pathway dominates: a fast removal process sets the overall atmospheric lifetime even when a slow pathway is also present; when the two pathways are equal the combined lifetime is exactly half of either. Observed-only algebraic system (no time derivatives): four state variables (tau_1, tau_2, tau_combined in s; inverse_tau in s⁻¹) computed from two rate-constant parameters (k_1, k_2 in s⁻¹) by four algebraic equations. Migrated from GasChem.jl@280ee50f src/AtmosphericLifetime.jl:204 (`MultipleRemovalLifetime` @component).",
+        "tags": [
+            "gaschem",
+            "atmospheric-lifetime",
+            "removal-pathways",
+            "first-order-kinetics",
+            "tropospheric-chemistry",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-iymw)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 2 (Atmospheric Trace Constituents), Eqs. 2.7-2.9 — combined atmospheric lifetime for a species removed by multiple parallel first-order pathways: tau = 1/(k_1+k_2) (Eq. 2.7, two first-order processes), 1/tau = 1/tau_1 + 1/tau_2 (Eq. 2.8, inverse lifetimes are additive), tau = tau_1·tau_2/(tau_1+tau_2) (Eq. 2.9, combined lifetime from individual pathway lifetimes). Generalizes to N pathways as 1/tau = Σ 1/tau_i."
+            }
+        ]
+    },
+    "models": {
+        "MultipleRemovalLifetime": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/AtmosphericLifetime.jl:204\n\nUpstream `MultipleRemovalLifetime` is an MTK `@component` with 2 `@parameters` (k_1, k_2 — first-order removal rate constants, units s⁻¹), 4 `@variables` (tau_1, tau_2, tau_combined in s; inverse_tau in s⁻¹), 0 `@constants`, and 4 algebraic equations from Seinfeld & Pandis (2006) Ch. 2 Eqs. 2.6-2.9. It models a trace species removed by two independent first-order pathways operating in parallel. The component has no input @variables and no time derivatives — every @variable is an output bound by exactly one algebraic equation.\n\nVariable-classification convention: k_1 and k_2 are encoded as `type: parameter` (they are the upstream `@parameters`). The four output @variables (tau_1, tau_2, inverse_tau, tau_combined) are encoded as `type: state` because each is the LHS of exactly one defining algebraic equation within the component. This mirrors the sibling convention in ope.esm (its 3 output @variables P_O3/L_NOx/OPE are `type: state`). The upstream structural test `1.3 MultipleRemovalLifetime Structure` (test/atmospheric_lifetime_test.jl:66-87) asserts the system carries the four unknowns {tau_1, tau_2, tau_combined, inverse_tau}, the two parameters {k_1, k_2}, and `length(equations) == 4` — the .esm preserves this with 4 `type: state` variables, 2 `type: parameter` variables, and 4 entries in `equations`.\n\nNumerical defaults: the upstream @parameters k_1, k_2 carry no defaults. The .esm defaults are taken from the canonical upstream test scenario `2.6 Eq. 2.7: Two First-Order Processes` (test/atmospheric_lifetime_test.jl:220-234), which exercises the combined-lifetime formula with explicit rate constants:\n  k_1 = 1.0e-6 s⁻¹  (removal pathway 1; tau_1 = 1/k_1 = 1.0e6 s ≈ 11.6 days)\n  k_2 = 2.0e-6 s⁻¹  (removal pathway 2; tau_2 = 1/k_2 = 5.0e5 s ≈ 5.8 days)\nAt these defaults: tau_1 = 1.0e6 s, tau_2 = 5.0e5 s, inverse_tau = 3.0e-6 s⁻¹, tau_combined = 333333.3333333333 s ≈ 3.9 days. The same (k_1, k_2) pair also reproduces the upstream tests `2.7 Eq. 2.8: Inverse Lifetime Sum` and `2.8 Eq. 2.9: Combined Lifetime Formula`, which state the identical scenario in terms of the equivalent lifetimes tau_1 = 1.0e6 s, tau_2 = 5.0e5 s.\n\nEquation cascade: the four equations form a topologically-ordered cascade — tau_1, tau_2, and inverse_tau depend only on the parameters k_1, k_2; tau_combined depends on tau_1 and tau_2. tau_combined's equation is written `tau_combined ~ (tau_1·tau_2)/(tau_1+tau_2)` (referencing the two state variables) rather than the fully-inlined algebraic equivalent `tau_combined ~ 1/(k_1+k_2)` — this preserves the upstream symbolic structure (S&P Eq. 2.9 written in terms of the individual-pathway lifetimes), mirroring the cascade convention of sibling ope.esm (`OPE ~ P_O3 / L_NOx`). The two forms are mathematically identical: (tau_1·tau_2)/(tau_1+tau_2) = ((1/k_1)(1/k_2))/((1/k_1)+(1/k_2)) = 1/(k_1+k_2); at the default scenario both evaluate bit-for-bit to 333333.3333333333.\n\nObservability classification: this component is purely algebraic — every output variable is the LHS of one algebraic equation in the parameters (and, for tau_combined, two other outputs). No equation contains a `D(·)` operator, so the `(t)` time index has no role and the trajectory is constant in time. Test and example scenarios use `time_span: [0.0, 1.0]` and sample at t=0, mirroring the convention used by sibling observed-only ESM files (ope.esm, oh_production.esm, gwp.esm).\n\nUpstream test reproduction:\n- `1.3 MultipleRemovalLifetime Structure` (atmospheric_lifetime_test.jl:66-87) — reproduced by the .esm structural shape (4 `type: state` variables, 2 `type: parameter` variables, 4 equations).\n- `2.5 Eq. 2.6: First-Order Lifetime` (atmospheric_lifetime_test.jl:205-218, tests tau = 1/λ for λ ∈ {1e-6, 1e-4, 1e-8}) — reproduced by `upstream_two_first_order_processes_defaults` (k_1=1e-6), `upstream_first_order_lifetime_eq26_fast` (k_1=1e-4), and `upstream_first_order_lifetime_eq26_slow` (k_1=1e-8), each pinning tau_1 = 1/k_1.\n- `2.6 Eq. 2.7: Two First-Order Processes` (atmospheric_lifetime_test.jl:220-234, upstream rtol=1e-10 and 1e-5 on tau_combined ≈ 1/(k_1+k_2) ≈ 333333.33) — reproduced and tightened by `upstream_two_first_order_processes_defaults` at rel=1e-10.\n- `2.7 Eq. 2.8: Inverse Lifetime Sum` and `2.8 Eq. 2.9: Combined Lifetime Formula` (atmospheric_lifetime_test.jl:236-258, tau_1=1e6 s, tau_2=5e5 s) — the same component scenario as the defaults (k_1 = 1/tau_1 = 1e-6, k_2 = 1/tau_2 = 2e-6); reproduced by `upstream_two_first_order_processes_defaults`.\n- `3.1 Lifetime Positivity` (atmospheric_lifetime_test.jl:300-319, tau = 1/λ > 0 and finite for λ ∈ {1e-10, 1e-6, 1e-2, 1.0}; tau_combined < tau_1, tau_2) — reproduced by `lifetime_positivity_very_slow_pathway` (k_1=1e-10), the defaults (k_1=1e-6), `lifetime_positivity_fast_pathway` (k_1=1e-2), and `lifetime_positivity_unit_rate_pathway` (k_1=1.0); the tau_combined < individual relation is visible in every test's pinned values (tau_combined is always less than min(tau_1, tau_2)).\nThe remaining tests extend coverage beyond the upstream suite: `equal_pathways_halve_combined_lifetime` (the tau_1=tau_2 ⟹ tau_combined = tau_1/2 special case from the GasChem.jl docs `Effect of Multiple Removal Pathways` analysis), `fast_pathway_dominates_combined` (k_1 ≫ k_2 ⟹ tau_combined → tau_1, the docs' fast-pathway-dominance result), and `inverse_lifetime_additivity` (k_1 and k_2 both overridden, verifying inverse_tau = k_1 + k_2 with both pathways perturbed).\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the four algebraic equations are tiny expression trees — tau_1 and tau_2 are a single division each, inverse_tau a single addition, tau_combined one multiply + one add + one divide (3 IEEE-754 ops). Each output is correctly-rounded to within ~1-2 ULP ≈ 1e-16 relative; rel=1e-10 leaves ~6 orders of magnitude of headroom and is far tighter than the upstream tests' own rtol=1e-10/1e-5. It also absorbs the ~1-ULP ambiguity between the cascade form `(tau_1·tau_2)/(tau_1+tau_2)` and the inlined form `1/(k_1+k_2)` (e.g. in `inverse_lifetime_additivity` the cascade form gives tau_combined = 100000.0 exactly while 1/(k_1+k_2) would give 100000.00000000001). The abs=1.0e-12 floor is carried for consistency with the observed-only sibling convention (ope.esm, oh_production.esm, stefan_boltzmann.esm all rel=1e-10/abs=1e-12); it gates no assertion here because every output is strictly positive for the strictly-positive rate constants the component is defined on (the smallest pinned value is inverse_tau = 3.0e-6 s⁻¹ at the defaults, ~6 orders of magnitude above the floor).\n\nUnit balance (verified): all four equations balance dimensionally.\n  tau_1        `1 / k_1`:                        1/(s⁻¹) = s ✓\n  tau_2        `1 / k_2`:                        1/(s⁻¹) = s ✓\n  inverse_tau  `k_1 + k_2`:                      s⁻¹ + s⁻¹ = s⁻¹ ✓\n  tau_combined `(tau_1·tau_2)/(tau_1+tau_2)`:    (s·s)/(s) = s ✓\nAll rate constants in SI s⁻¹, all lifetimes in SI s. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "k_1": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0e-6,
+                    "description": "First-order rate constant for removal pathway 1 [s⁻¹]. One of the two independent parallel removal processes a trace species is subject to (e.g. dry deposition, wet deposition, chemical loss, or cross-tropopause transport — Seinfeld & Pandis Ch. 2). The default 1.0e-6 s⁻¹ corresponds to an individual-pathway lifetime tau_1 = 1/k_1 = 1.0e6 s ≈ 11.6 days and matches the upstream test scenario `2.6 Eq. 2.7: Two First-Order Processes` (test/atmospheric_lifetime_test.jl:221). Encoded as `type: parameter` — it is the upstream `@parameters` declaration and is set via `parameter_overrides` in tests and `parameter_sweep` in examples."
+                },
+                "k_2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.0e-6,
+                    "description": "First-order rate constant for removal pathway 2 [s⁻¹]. The second of the two independent parallel removal processes. The default 2.0e-6 s⁻¹ corresponds to an individual-pathway lifetime tau_2 = 1/k_2 = 5.0e5 s ≈ 5.8 days and matches the upstream test scenario `2.6 Eq. 2.7: Two First-Order Processes` (test/atmospheric_lifetime_test.jl:222). Encoded as `type: parameter` — it is the upstream `@parameters` declaration."
+                },
+                "tau_1": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Lifetime for removal pathway 1 [s] — Seinfeld & Pandis Eq. 2.6 applied to pathway 1: tau_1 = 1/k_1. The e-folding time the species would have if pathway 1 were its only sink. At the default k_1 = 1.0e-6 s⁻¹, tau_1 = 1.0e6 s ≈ 11.6 days. Exactly reciprocal in k_1 (a fast removal process — large k_1 — gives a short pathway lifetime)."
+                },
+                "tau_2": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Lifetime for removal pathway 2 [s] — Seinfeld & Pandis Eq. 2.6 applied to pathway 2: tau_2 = 1/k_2. The e-folding time the species would have if pathway 2 were its only sink. At the default k_2 = 2.0e-6 s⁻¹, tau_2 = 5.0e5 s ≈ 5.8 days. Exactly reciprocal in k_2."
+                },
+                "tau_combined": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Combined atmospheric lifetime from both removal pathways [s] — Seinfeld & Pandis Eq. 2.9: tau_combined = (tau_1·tau_2)/(tau_1+tau_2), algebraically equal to 1/(k_1+k_2). The overall e-folding time when both pathways act simultaneously. It is always shorter than either individual pathway lifetime and is dominated by the faster (shorter-lifetime) pathway; when the two pathways are equal it is exactly half of either. At the defaults tau_combined = 333333.3333333333 s ≈ 3.9 days."
+                },
+                "inverse_tau": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Sum of the inverse pathway lifetimes [s⁻¹] — Seinfeld & Pandis Eqs. 2.7-2.8: inverse_tau = k_1 + k_2 = 1/tau_1 + 1/tau_2. Because removal rates (inverse lifetimes) are additive for independent parallel first-order processes, inverse_tau is the total first-order removal rate constant; its reciprocal is the combined lifetime tau_combined. At the defaults inverse_tau = 3.0e-6 s⁻¹."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "tau_1",
+                    "rhs": {"op": "/", "args": [1, "k_1"]}
+                },
+                {
+                    "lhs": "tau_2",
+                    "rhs": {"op": "/", "args": [1, "k_2"]}
+                },
+                {
+                    "lhs": "inverse_tau",
+                    "rhs": {"op": "+", "args": ["k_1", "k_2"]}
+                },
+                {
+                    "lhs": "tau_combined",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["tau_1", "tau_2"]},
+                            {"op": "+", "args": ["tau_1", "tau_2"]}
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_two_first_order_processes_defaults",
+                    "description": "Reproduces and tightens the upstream `2.6 Eq. 2.7: Two First-Order Processes` test (GasChem.jl test/atmospheric_lifetime_test.jl:220-234). At the canonical scenario k_1=1.0e-6 s⁻¹, k_2=2.0e-6 s⁻¹ — both parameters at their declared defaults — the upstream asserts tau_combined ≈ 1/(k_1+k_2) ≈ 333333.33 (at rtol 1e-10 and 1e-5) and tau_combined < tau_1, tau_2. This test pins the exact IEEE-754 values tau_1=1.0e6, tau_2=5.0e5, inverse_tau=3.0e-6, tau_combined=333333.3333333333 at rel=1e-10. The same (k_1, k_2) pair also reproduces the upstream tests `2.7 Eq. 2.8: Inverse Lifetime Sum` and `2.8 Eq. 2.9: Combined Lifetime Formula`, which state this scenario as the equivalent lifetimes tau_1=1.0e6 s, tau_2=5.0e5 s. The pinned values show tau_combined (333333.33) < tau_2 (5.0e5) < tau_1 (1.0e6) — the combined lifetime is shorter than either pathway.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 3.0e-6},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 333333.3333333333}
+                    ]
+                },
+                {
+                    "id": "upstream_first_order_lifetime_eq26_fast",
+                    "description": "Reproduces the fast-removal case of the upstream `2.5 Eq. 2.6: First-Order Lifetime` test (GasChem.jl test/atmospheric_lifetime_test.jl:205-218, `lambda_fast = 1.0e-4`). Pathway 1's rate constant is raised to k_1=1.0e-4 s⁻¹ (100× the default), so tau_1 = 1/k_1 = 1.0e4 s — Eq. 2.6 applied to pathway 1. Pathway 2 stays at its default k_2=2.0e-6 s⁻¹ (tau_2 = 5.0e5 s). Because pathway 1 is now much faster, the combined lifetime tau_combined=9803.921568627451 s collapses close to tau_1: the fast pathway dominates the overall lifetime.",
+                    "parameter_overrides": {"k_1": 1.0e-4},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 10000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 0.000102},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 9803.921568627451}
+                    ]
+                },
+                {
+                    "id": "upstream_first_order_lifetime_eq26_slow",
+                    "description": "Reproduces the slow-removal case of the upstream `2.5 Eq. 2.6: First-Order Lifetime` test (GasChem.jl test/atmospheric_lifetime_test.jl:205-218, `lambda_slow = 1.0e-8`). Pathway 1's rate constant is lowered to k_1=1.0e-8 s⁻¹ (100× slower than the default), so tau_1 = 1/k_1 = 1.0e8 s — Eq. 2.6 applied to pathway 1. Pathway 2 stays at its default k_2=2.0e-6 s⁻¹ (tau_2 = 5.0e5 s). Pathway 1 is now far slower than pathway 2, so the combined lifetime tau_combined=497512.43781094527 s is close to tau_2 = 5.0e5 s: the (faster) pathway 2 controls the overall lifetime.",
+                    "parameter_overrides": {"k_1": 1.0e-8},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 100000000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 2.01e-6},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 497512.43781094527}
+                    ]
+                },
+                {
+                    "id": "lifetime_positivity_very_slow_pathway",
+                    "description": "Slow-rate-constant endpoint of the upstream `3.1 Lifetime Positivity` test (GasChem.jl test/atmospheric_lifetime_test.jl:300-319, which iterates λ ∈ {1e-10, 1e-6, 1e-2, 1.0} and asserts tau = 1/λ is positive and finite). With k_1=1.0e-10 s⁻¹ — an extremely slow removal pathway — tau_1 = 1/k_1 = 1.0e10 s (~317 years), confirming the 1/k reciprocal holds across 10 orders of magnitude of rate constant. Pathway 2 at its default k_2=2.0e-6 s⁻¹ entirely controls the combined lifetime: tau_combined=499975.0012499375 s ≈ tau_2 = 5.0e5 s.",
+                    "parameter_overrides": {"k_1": 1.0e-10},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 10000000000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 2.0000999999999997e-6},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 499975.0012499375}
+                    ]
+                },
+                {
+                    "id": "lifetime_positivity_fast_pathway",
+                    "description": "Mid-fast case of the upstream `3.1 Lifetime Positivity` test (GasChem.jl test/atmospheric_lifetime_test.jl:300-319, λ = 1.0e-2). With k_1=1.0e-2 s⁻¹ — a fast removal pathway — tau_1 = 1/k_1 = 100.0 s, positive and finite. Pathway 2 (default k_2=2.0e-6 s⁻¹, tau_2=5.0e5 s) is now ~5000× slower, so the combined lifetime tau_combined=99.98000399920016 s is essentially set by the fast pathway 1.",
+                    "parameter_overrides": {"k_1": 1.0e-2},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 100.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 0.010002},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 99.98000399920016}
+                    ]
+                },
+                {
+                    "id": "lifetime_positivity_unit_rate_pathway",
+                    "description": "Fast-rate-constant endpoint of the upstream `3.1 Lifetime Positivity` test (GasChem.jl test/atmospheric_lifetime_test.jl:300-319, λ = 1.0). With k_1=1.0 s⁻¹ — a unit (very fast) removal rate — tau_1 = 1/k_1 = 1.0 s, positive and finite, confirming the 1/k reciprocal at the top of the upstream rate-constant range. Pathway 2 (default, tau_2=5.0e5 s) is negligible by comparison, so tau_combined=0.999998000004 s ≈ tau_1: the much faster pathway 1 dominates the combined lifetime.",
+                    "parameter_overrides": {"k_1": 1.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 1.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 500000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 1.000002},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 0.999998000004}
+                    ]
+                },
+                {
+                    "id": "equal_pathways_halve_combined_lifetime",
+                    "description": "Equal-pathway special case from the GasChem.jl AtmosphericLifetime documentation (`Effect of Multiple Removal Pathways` analysis: \"When tau_1 = tau_2, the combined lifetime is exactly half of either individual lifetime\"). Both rate constants are set equal at k_1=k_2=1.0e-6 s⁻¹, so tau_1 = tau_2 = 1.0e6 s; the combined lifetime tau_combined = (tau·tau)/(2·tau) = tau/2 = 5.0e5 s exactly, and inverse_tau = 2·k = 2.0e-6 s⁻¹. Verifies the symmetric case of S&P Eq. 2.9 — two equally-fast pathways together remove the species twice as fast.",
+                    "parameter_overrides": {"k_1": 1.0e-6, "k_2": 1.0e-6},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 1000000.0},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 2.0e-6},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 500000.0}
+                    ]
+                },
+                {
+                    "id": "fast_pathway_dominates_combined",
+                    "description": "Fast-pathway-dominance case from the GasChem.jl AtmosphericLifetime documentation (`Effect of Multiple Removal Pathways` analysis: \"A fast removal pathway dominates the total lifetime even if a slow pathway exists\"). Pathway 1 is fast (k_1=1.0e-3 s⁻¹, tau_1=1.0e3 s) and pathway 2 is six orders of magnitude slower (k_2=1.0e-9 s⁻¹, tau_2≈1.0e9 s). The combined lifetime tau_combined=999.999000001 s sits within 0.0001% of tau_1 — the slow pathway 2 contributes negligibly. Confirms that the limit k_1 ≫ k_2 drives tau_combined → 1/k_1 = tau_1.",
+                    "parameter_overrides": {"k_1": 1.0e-3, "k_2": 1.0e-9},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 1000.0},
+                        {"variable": "tau_2", "time": 0.0, "expected": 999999999.9999999},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 0.001000001},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 999.999000001}
+                    ]
+                },
+                {
+                    "id": "inverse_lifetime_additivity",
+                    "description": "Verifies the additivity of removal rates (S&P Eqs. 2.7-2.8: 1/tau = 1/tau_1 + 1/tau_2) with both pathways perturbed away from their defaults. With k_1=3.0e-6 s⁻¹ and k_2=7.0e-6 s⁻¹, the total inverse lifetime inverse_tau = k_1 + k_2 = 9.999999999999999e-6 s⁻¹ (the IEEE-754 sum, ≈ 1.0e-5) and the combined lifetime tau_combined = (tau_1·tau_2)/(tau_1+tau_2) = 100000.0 s exactly. The individual pathway lifetimes tau_1 = 1/3.0e-6 = 333333.33 s and tau_2 = 1/7.0e-6 = 142857.14 s combine to a lifetime far shorter than either — overriding both parameters at once also guards against k_1/k_2 cross-wiring in the equation set.",
+                    "parameter_overrides": {"k_1": 3.0e-6, "k_2": 7.0e-6},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_1", "time": 0.0, "expected": 333333.3333333333},
+                        {"variable": "tau_2", "time": 0.0, "expected": 142857.14285714287},
+                        {"variable": "inverse_tau", "time": 0.0, "expected": 9.999999999999999e-6},
+                        {"variable": "tau_combined", "time": 0.0, "expected": 100000.0}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "combined_lifetime_vs_pathway1_rate",
+                    "description": "Reproduces the `Effect of Multiple Removal Pathways` analysis from the GasChem.jl AtmosphericLifetime documentation. The first-order rate constant of pathway 1 is swept logarithmically over k_1 ∈ [1.0e-9, 1.0e-3] s⁻¹ while pathway 2 is held at its default k_2 = 2.0e-6 s⁻¹ (tau_2 = 5.0e5 s). As k_1 rises, pathway 1 becomes the faster sink: the combined lifetime tau_combined falls from the slow-k_1 plateau (≈ tau_2 = 5.0e5 s, pathway 2 limiting) through the equal-rate crossover toward the fast-k_1 asymptote tau_combined ≈ 1/k_1 = tau_1 (pathway 1 dominating). This is the Seinfeld & Pandis Ch. 2 result that the faster removal pathway controls the overall atmospheric lifetime.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_1",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-3, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_combined_vs_k1",
+                            "type": "line",
+                            "description": "Combined lifetime tau_combined vs the pathway-1 rate constant k_1 (log-log axes). Saturates at tau_2 ≈ 5.0e5 s when k_1 is small (pathway 2 limits) and falls as 1/k_1 when k_1 is large (pathway 1 dominates) — the combined lifetime always tracks the faster of the two pathways.",
+                            "x": {"variable": "k_1", "label": "Pathway-1 rate constant k_1 (s⁻¹, log)"},
+                            "y": {"variable": "tau_combined", "label": "Combined lifetime tau_combined (s)"}
+                        },
+                        {
+                            "id": "tau_1_vs_k1",
+                            "type": "line",
+                            "description": "Individual pathway-1 lifetime tau_1 = 1/k_1 vs k_1 (log-log axes) — the reciprocal first-order-decay relationship of S&P Eq. 2.6, a straight line of slope −1 on log-log axes.",
+                            "x": {"variable": "k_1", "label": "Pathway-1 rate constant k_1 (s⁻¹, log)"},
+                            "y": {"variable": "tau_1", "label": "Pathway-1 lifetime tau_1 (s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "inverse_lifetime_additivity_sweep",
+                    "description": "Demonstrates the additivity of first-order removal rates (Seinfeld & Pandis Eqs. 2.7-2.8): for independent parallel pathways the inverse lifetimes (removal rate constants) add. Pathway 1's rate constant is swept linearly over k_1 ∈ [1.0e-7, 1.0e-5] s⁻¹ with pathway 2 fixed at its default k_2 = 2.0e-6 s⁻¹. The total inverse lifetime inverse_tau = k_1 + k_2 traces a straight line of unit slope and intercept k_2 — each pathway contributes its rate constant linearly and independently to the total removal rate.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_1",
+                                "range": {"start": 1.0e-7, "stop": 1.0e-5, "count": 50, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "inverse_tau_vs_k1",
+                            "type": "line",
+                            "description": "Total inverse lifetime inverse_tau = k_1 + k_2 vs the pathway-1 rate constant k_1 (linear axes). A straight line of slope 1 and intercept k_2 = 2.0e-6 s⁻¹ — the signature of additive parallel first-order removal rates (S&P Eq. 2.8).",
+                            "x": {"variable": "k_1", "label": "Pathway-1 rate constant k_1 (s⁻¹)"},
+                            "y": {"variable": "inverse_tau", "label": "Total inverse lifetime inverse_tau (s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "combined_lifetime_regime_heatmap",
+                    "description": "Combined atmospheric lifetime tau_combined as a joint function of the two pathway rate constants (2-D log-log sweep), k_1 ∈ [1.0e-8, 1.0e-4] s⁻¹ × k_2 ∈ [1.0e-8, 1.0e-4] s⁻¹. Because tau_combined = 1/(k_1 + k_2), the iso-lifetime contours are straight lines of constant k_1 + k_2: the long-lifetime corner (both rate constants small, slow removal) lies at lower-left and the short-lifetime corner (both large, fast removal) at upper-right. The surface also shows fast-pathway dominance — near either axis edge, whichever rate constant is larger sets tau_combined.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_1",
+                                "range": {"start": 1.0e-8, "stop": 1.0e-4, "count": 30, "scale": "log"}
+                            },
+                            {
+                                "parameter": "k_2",
+                                "range": {"start": 1.0e-8, "stop": 1.0e-4, "count": 30, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_combined_heatmap",
+                            "type": "heatmap",
+                            "description": "Combined lifetime tau_combined as a function of (k_1, k_2) on log-log axes. The iso-tau_combined contours run diagonally as lines of constant k_1 + k_2: the lower-left region (both rate constants small) is the long-lifetime regime, the upper-right region (both large) the short-lifetime regime.",
+                            "x": {"variable": "k_1", "label": "Pathway-1 rate constant k_1 (s⁻¹, log)"},
+                            "y": {"variable": "k_2", "label": "Pathway-2 rate constant k_2 (s⁻¹, log)"},
+                            "value": {"variable": "tau_combined", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
