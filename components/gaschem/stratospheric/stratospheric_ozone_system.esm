@@ -1,0 +1,3221 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "StratosphericOzoneSystem",
+        "description": "Comprehensive stratospheric ozone chemistry (Seinfeld & Pandis 2006, Chapter 5) \u2014 a monolithic 15-state ODE plus 5 algebraic family sums combining the Chapman mechanism, O(1D) photochemistry, the N2O NOx source, and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles. Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:497. SI units throughout.",
+        "tags": [
+            "gaschem",
+            "stratospheric",
+            "ozone",
+            "photochemistry",
+            "catalytic-cycles",
+            "seinfeld-pandis",
+            "ode"
+        ],
+        "created": "2026-05-16T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-nuug)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 5 (Chemistry of the Stratosphere), pp. 138-203 \u2014 Chapman mechanism (5.2), NOx cycles (5.3), HOx cycles (5.4), ClOx and BrOx cycles (5.5), reservoir species (5.6)."
+            }
+        ]
+    },
+    "models": {
+        "StratosphericOzoneSystem": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:497\n\nUpstream `StratosphericOzoneSystem` is the comprehensive stratospheric ozone-chemistry component from Seinfeld & Pandis (2006) Chapter 5 \u2014 it combines the Chapman mechanism, O(1D) photochemistry, the N2O NOx source (Section 5.3.1), and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles into one model. Despite the upstream docstring phrase 'combining all cycles', the `@component` is a *monolithic* MTK `System`: it re-declares every constant, parameter and variable and writes all 20 equations inline, then returns `System(eqs, t; name)` \u2014 there is no `couple()` call and no sub-system composition. It therefore migrates as a single `models.StratosphericOzoneSystem` entry, the same file shape as the sibling single-cycle migrations (chapman.esm, nox_cycle.esm, hox_cycle.esm, clox_cycle.esm, brox_cycle.esm).\n\nStructure: 40 upstream `@constants` and 14 upstream `@parameters` are all encoded as `type: parameter` with their upstream defaults (the rig-wide convention for `@constants` migration, matching the sibling stratospheric files). 15 ODE state variables (O, O1D, O3, N2O, NO, NO2, OH, HO2, Cl, ClO, HCl, ClONO2, Br, BrO, HOBr) and 5 algebraic family variables (Ox, NOx, HOx, ClOx, BrOx) are encoded as `type: state`. The 20 `equations` (15 ODEs + 5 algebraic family sums) reproduce the upstream structural invariant `length(equations(sys)) == 20` asserted by the upstream 'Comprehensive System Structure' test (StratosphericChemistry_test.jl:94-130).\n\nRate-coefficient handling: the upstream rate coefficients (k2 power-law (T_ref/T)^2.4, k4 and the Arrhenius coefficients k_NO_O3 ... k_Br_O3, the termolecular k_ClO_NO2_M power-law (T_ref/T)^3.4, the weighted O(1D) quenching k_O1D_M, and the temperature-independent rate constants k_O1D_H2O_c / k_O1D_CH4_c / k_N2O_O1D_NO_c / k_N2O_O1D_N2_c / k_BrO_O_c / k_BrO_ClO_c / k_BrO_HO2_c) and the derived concentrations O2_conc = O2_mix*M, CH4_conc = CH4_mix*M, H2O_conc = H2O_mix*M are local Julia bindings, not MTK state. They are inlined verbatim into each equation right-hand side \u2014 bit-equivalent to writing the equations with the helper bindings, and keeping them out of the symbolic state preserves the upstream `length(unknowns(sys))` count. This is the same inlining convention used by chapman.esm.\n\nThe parameter `N2O_mix` (3.0e-7) is declared in the upstream `@parameters` block but is not referenced by any equation or rate coefficient \u2014 it is vestigial (the N2O state default 9.3e16 m^-3, which equals N2O_mix*M at the default M=3.1e23, is set directly on the state rather than derived from this parameter). It is preserved here as a `type: parameter` for fidelity to the upstream parameter block.\n\nChemistry: odd oxygen (Ox = O + O3) is produced by O2 photolysis and destroyed by the O + O3 reaction and by the four catalytic cycles (NO/NO2, OH/HO2, Cl/ClO, Br/BrO), each of which cycles a radical pair without net consumption of the catalyst. O(1D), produced by the O3 -> O(1D) photolysis sub-channel and by N2O photolysis, is quenched by air (M) back to O(3P) and reacts with H2O and CH4 to make the OH that seeds HOx. N2O is the sole NOx source via N2O + O(1D) -> 2 NO (Section 5.3.1) and has no source term, so it decays monotonically. The HCl and ClONO2 reservoirs sequester reactive chlorine; HOBr buffers reactive bromine.\n\nUnits: SI throughout (number densities in m^-3, rate coefficients in m^3/s or m^6/s, photolysis rates in s^-1, temperature in K), converted from the Seinfeld & Pandis CGS values via cm^3/molec/s x 1e-6 -> m^3/s for bimolecular coefficients and cm^6/molec^2/s x 1e-12 -> m^6/s for the three-body coefficients. No CGS<->SI conversion at parse or runtime.\n\nTolerance rationale (model-level rel=1e-6): the expected values pinned in the tests below are references from the canonical ESS Python runner `earthsci_toolkit.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` \u2014 the exact settings the inline-test gate uses \u2014 so reference/gate cross-integrator drift is zero by construction; rel=1e-6 is the spec section 6.6.4 default and matches the sibling stratospheric files. The `initial_conditions_t0` test overrides to rel=1e-10 / abs=1e-14 (t=0 has no integration drift). The `nighttime_photolysis_off` test adds an abs=1e-6 floor for radical species that decay below the integrator's atol=1e-12 floor once their photochemical sources are switched off.\n\nUpstream test reproduction: the upstream comprehensive-system tests are 'Comprehensive System Structure' (20-equation / state-name structural check, reproduced by the shape of the variables and equations blocks), 'Comprehensive System Integration' (1-hour positivity, reproduced and tightened by `comprehensive_integration_1hour`), 'N2O Destruction in Comprehensive System' (reproduced and tightened by `n2o_destruction_1day`), and 'N2O as NOx Source' (reproduced and tightened by `n2o_as_nox_source`). The remaining tests (short-term transients, chemical-family tracking, temperature and density perturbations, dark chemistry) extend coverage beyond the upstream suite."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Reference temperature for power-law rate coefficients."
+                },
+                "k2_A": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 6e-46,
+                    "description": "Pre-factor: O + O2 + M -> O3 + M (6e-34 cm^6/molec^2/s x 1e-12, Table B.2)."
+                },
+                "k4_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8e-18,
+                    "description": "Pre-factor: O + O3 -> 2O2 (8e-12 cm^3/molec/s x 1e-6, Table B.1)."
+                },
+                "C_k4": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -2060.0,
+                    "description": "exp(C/T) activation temperature: O + O3."
+                },
+                "k_O1D_O2_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3.2e-17,
+                    "description": "Pre-factor: O(1D) + O2 quenching (3.2e-11 cm^3/molec/s x 1e-6, Page 143)."
+                },
+                "C_O1D_O2": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 70.0,
+                    "description": "exp(C/T) activation temperature: O(1D) + O2."
+                },
+                "k_O1D_N2_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.8e-17,
+                    "description": "Pre-factor: O(1D) + N2 quenching (1.8e-11 cm^3/molec/s x 1e-6, Page 143)."
+                },
+                "C_O1D_N2": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 110.0,
+                    "description": "exp(C/T) activation temperature: O(1D) + N2."
+                },
+                "k_O1D_H2O_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.2e-16,
+                    "description": "O(1D) + H2O -> 2OH rate (2.2e-10 cm^3/molec/s x 1e-6, Page 156)."
+                },
+                "k_O1D_CH4_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.5e-16,
+                    "description": "O(1D) + CH4 -> OH + CH3 rate (1.5e-10 cm^3/molec/s x 1e-6, Page 156)."
+                },
+                "k_N2O_O1D_NO_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.7e-17,
+                    "description": "N2O + O(1D) -> NO + NO rate (6.7e-11 cm^3/molec/s x 1e-6, Page 151)."
+                },
+                "k_N2O_O1D_N2_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 4.9e-17,
+                    "description": "N2O + O(1D) -> N2 + O2 rate (4.9e-11 cm^3/molec/s x 1e-6, Page 151)."
+                },
+                "k_NO_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3e-18,
+                    "description": "Pre-factor: NO + O3 (3e-12 cm^3/molec/s x 1e-6, Page 154)."
+                },
+                "C_NO_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -1500.0,
+                    "description": "exp(C/T) activation temperature: NO + O3."
+                },
+                "k_NO2_O_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5.6e-18,
+                    "description": "Pre-factor: NO2 + O (5.6e-12 cm^3/molec/s x 1e-6, Page 154)."
+                },
+                "C_NO2_O": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 180.0,
+                    "description": "exp(C/T) activation temperature: NO2 + O."
+                },
+                "k_OH_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.7e-18,
+                    "description": "Pre-factor: OH + O3 (1.7e-12 cm^3/molec/s x 1e-6, Page 161)."
+                },
+                "C_OH_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -940.0,
+                    "description": "exp(C/T) activation temperature: OH + O3."
+                },
+                "k_HO2_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1e-20,
+                    "description": "Pre-factor: HO2 + O3 (1e-14 cm^3/molec/s x 1e-6, Table B.1)."
+                },
+                "C_HO2_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -490.0,
+                    "description": "exp(C/T) activation temperature: HO2 + O3."
+                },
+                "k_HO2_O_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3e-17,
+                    "description": "Pre-factor: HO2 + O (3e-11 cm^3/molec/s x 1e-6, Page 161)."
+                },
+                "C_HO2_O": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 200.0,
+                    "description": "exp(C/T) activation temperature: HO2 + O."
+                },
+                "k_HO2_NO_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3.5e-18,
+                    "description": "Pre-factor: HO2 + NO (3.5e-12 cm^3/molec/s x 1e-6, Page 158)."
+                },
+                "C_HO2_NO": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 250.0,
+                    "description": "exp(C/T) activation temperature: HO2 + NO."
+                },
+                "k_Cl_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.3e-17,
+                    "description": "Pre-factor: Cl + O3 (2.3e-11 cm^3/molec/s x 1e-6, Page 162)."
+                },
+                "C_Cl_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -200.0,
+                    "description": "exp(C/T) activation temperature: Cl + O3."
+                },
+                "k_ClO_O_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 3e-17,
+                    "description": "Pre-factor: ClO + O (3e-11 cm^3/molec/s x 1e-6, Page 162)."
+                },
+                "C_ClO_O": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 70.0,
+                    "description": "exp(C/T) activation temperature: ClO + O."
+                },
+                "k_ClO_NO_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.4e-18,
+                    "description": "Pre-factor: ClO + NO (6.4e-12 cm^3/molec/s x 1e-6, Page 163)."
+                },
+                "C_ClO_NO": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 290.0,
+                    "description": "exp(C/T) activation temperature: ClO + NO."
+                },
+                "k_Cl_CH4_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 9.6e-18,
+                    "description": "Pre-factor: Cl + CH4 (9.6e-12 cm^3/molec/s x 1e-6, Table B.1)."
+                },
+                "C_Cl_CH4": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -1360.0,
+                    "description": "exp(C/T) activation temperature: Cl + CH4."
+                },
+                "k_OH_HCl_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.6e-18,
+                    "description": "Pre-factor: OH + HCl (2.6e-12 cm^3/molec/s x 1e-6, Page 168)."
+                },
+                "C_OH_HCl": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -350.0,
+                    "description": "exp(C/T) activation temperature: OH + HCl."
+                },
+                "k_ClO_NO2_M_A": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 1.8e-43,
+                    "description": "Pre-factor: ClO + NO2 + M -> ClONO2 (1.8e-31 cm^6/molec^2/s x 1e-12, Page 165)."
+                },
+                "k_Br_O3_A": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.7e-17,
+                    "description": "Pre-factor: Br + O3 (1.7e-11 cm^3/molec/s x 1e-6, Table B.1)."
+                },
+                "C_Br_O3": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -800.0,
+                    "description": "exp(C/T) activation temperature: Br + O3."
+                },
+                "k_BrO_O_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 5e-17,
+                    "description": "BrO + O -> Br + O2 rate (5e-11 cm^3/molec/s x 1e-6)."
+                },
+                "k_BrO_ClO_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2e-18,
+                    "description": "BrO + ClO -> Br + Cl + O2 rate (2e-12 cm^3/molec/s x 1e-6)."
+                },
+                "k_BrO_HO2_c": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 4e-17,
+                    "description": "BrO + HO2 -> HOBr + O2 rate (4e-11 cm^3/molec/s x 1e-6)."
+                },
+                "j_O2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1e-10,
+                    "description": "O2 photolysis rate."
+                },
+                "j_O3": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.001,
+                    "description": "O3 photolysis rate (total, both O(3P) and O(1D) channels)."
+                },
+                "j_O3_O1D": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.0005,
+                    "description": "O3 -> O(1D) photolysis rate (the O(1D)-producing sub-channel)."
+                },
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.01,
+                    "description": "NO2 photolysis rate."
+                },
+                "j_ClONO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.0001,
+                    "description": "ClONO2 photolysis rate."
+                },
+                "j_HOBr": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 0.001,
+                    "description": "HOBr photolysis rate."
+                },
+                "j_N2O": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 5e-08,
+                    "description": "N2O photolysis rate (Section 5.3.1)."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 227.0,
+                    "description": "Temperature (Page 145 mid-stratosphere reference, ~30 km)."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 3.1e+23,
+                    "description": "Air number density at 30 km (3.1e17 molec/cm^3 x 1e6)."
+                },
+                "O2_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.21,
+                    "description": "O2 mixing ratio in air (dimensionless)."
+                },
+                "N2_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.79,
+                    "description": "N2 mixing ratio in air (dimensionless)."
+                },
+                "CH4_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.6e-06,
+                    "description": "CH4 mixing ratio in air (dimensionless)."
+                },
+                "H2O_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 5e-06,
+                    "description": "H2O mixing ratio in air (dimensionless)."
+                },
+                "N2O_mix": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3e-07,
+                    "description": "N2O mixing ratio (~300 ppb, Section 5.3.1, dimensionless). Declared upstream; vestigial \u2014 the N2O state default 9.3e16 m^-3 (= N2O_mix x M) is set directly rather than derived from this parameter at runtime."
+                },
+                "O": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 10000000000000.0,
+                    "description": "Atomic oxygen O(3P) number density (1e7 molec/cm^3 x 1e6)."
+                },
+                "O1D": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 50000000.0,
+                    "description": "Excited oxygen O(1D) number density (50 molec/cm^3 x 1e6)."
+                },
+                "O3": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 3e+18,
+                    "description": "Ozone number density (3e12 molec/cm^3 x 1e6)."
+                },
+                "NO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000000.0,
+                    "description": "Nitric oxide number density (1e9 molec/cm^3 x 1e6)."
+                },
+                "NO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000000.0,
+                    "description": "Nitrogen dioxide number density (1e9 molec/cm^3 x 1e6)."
+                },
+                "OH": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Hydroxyl radical number density (1e6 molec/cm^3 x 1e6)."
+                },
+                "HO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 10000000000000.0,
+                    "description": "Hydroperoxyl radical number density (1e7 molec/cm^3 x 1e6)."
+                },
+                "Cl": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 10000000000.0,
+                    "description": "Chlorine atom number density (1e4 molec/cm^3 x 1e6)."
+                },
+                "ClO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 10000000000000.0,
+                    "description": "Chlorine monoxide number density (1e7 molec/cm^3 x 1e6)."
+                },
+                "HCl": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000000.0,
+                    "description": "Hydrogen chloride reservoir number density (1e9 molec/cm^3 x 1e6)."
+                },
+                "ClONO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000000.0,
+                    "description": "Chlorine nitrate reservoir number density (1e9 molec/cm^3 x 1e6)."
+                },
+                "Br": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 100000000000.0,
+                    "description": "Bromine atom number density (1e5 molec/cm^3 x 1e6)."
+                },
+                "BrO": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Bromine monoxide number density (1e6 molec/cm^3 x 1e6)."
+                },
+                "HOBr": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Hypobromous acid number density (1e6 molec/cm^3 x 1e6)."
+                },
+                "N2O": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "default": 9.3e+16,
+                    "description": "Nitrous oxide number density (~300 ppb at 30 km)."
+                },
+                "Ox": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Odd oxygen family: algebraic sum Ox ~ O + O3."
+                },
+                "NOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Reactive nitrogen family: algebraic sum NOx ~ NO + NO2."
+                },
+                "HOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Hydrogen radical family: algebraic sum HOx ~ OH + HO2."
+                },
+                "ClOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Reactive chlorine family: algebraic sum ClOx ~ Cl + ClO."
+                },
+                "BrOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Reactive bromine family: algebraic sum BrOx ~ Br + BrO."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "O"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2.0,
+                                    "j_O2",
+                                    "O2_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "j_O3",
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1.0,
+                                                    "j_O3_O1D"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "O2_mix",
+                                                    "k_O1D_O2_A",
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "C_O1D_O2",
+                                                                    "T"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "N2_mix",
+                                                    "k_O1D_N2_A",
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "C_O1D_N2",
+                                                                    "T"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O1D",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_NO2",
+                                    "NO2"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k2_A",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T_ref",
+                                                    "T"
+                                                ]
+                                            },
+                                            2.4
+                                        ]
+                                    },
+                                    "O",
+                                    "O2_mix",
+                                    "M",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k4_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_k4",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_O_c",
+                                    "BrO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "O1D"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_O3_O1D",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_N2O",
+                                    "N2O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "O2_mix",
+                                                    "k_O1D_O2_A",
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "C_O1D_O2",
+                                                                    "T"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "N2_mix",
+                                                    "k_O1D_N2_A",
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "C_O1D_N2",
+                                                                    "T"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O1D",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_O1D_H2O_c",
+                                    "O1D",
+                                    "H2O_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_O1D_CH4_c",
+                                    "O1D",
+                                    "CH4_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_N2O_O1D_NO_c",
+                                    "O1D",
+                                    "N2O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_N2O_O1D_N2_c",
+                                    "O1D",
+                                    "N2O"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "O3"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k2_A",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T_ref",
+                                                    "T"
+                                                ]
+                                            },
+                                            2.4
+                                        ]
+                                    },
+                                    "O",
+                                    "O2_mix",
+                                    "M",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_O3",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k4_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_k4",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_OH_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_Cl_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Cl_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Cl",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_Br_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Br_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Br",
+                                    "O3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "N2O"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_N2O",
+                                    "N2O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_N2O_O1D_NO_c",
+                                    "O1D",
+                                    "N2O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_N2O_O1D_N2_c",
+                                    "O1D",
+                                    "N2O"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "NO"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2.0,
+                                    "k_N2O_O1D_NO_c",
+                                    "O1D",
+                                    "N2O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_NO2",
+                                    "NO2"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_NO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "NO"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "NO2"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_NO_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_HO2_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_ClO_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_NO2",
+                                    "NO2"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_NO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_NO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "NO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_NO2_M_A",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T_ref",
+                                                    "T"
+                                                ]
+                                            },
+                                            3.4
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO2",
+                                    "M"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "OH"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2.0,
+                                    "k_O1D_H2O_c",
+                                    "O1D",
+                                    "H2O_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_O1D_CH4_c",
+                                    "O1D",
+                                    "CH4_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_HO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_HO2_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_HO2_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_HOBr",
+                                    "HOBr"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_OH_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_OH_HCl_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_HCl",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "HCl"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "HO2"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_OH_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_HO2_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_HO2_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HO2",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_HO2_c",
+                                    "BrO",
+                                    "HO2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "Cl"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_ClO_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_ClO_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_OH_HCl_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_HCl",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "HCl"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_ClONO2",
+                                    "ClONO2"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_BrO_ClO_c",
+                                    "BrO",
+                                    "ClO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_Cl_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Cl_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Cl",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_Cl_CH4_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Cl_CH4",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Cl",
+                                    "CH4_mix",
+                                    "M"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "ClO"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_Cl_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Cl_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Cl",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_O_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_O",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_NO_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_ClO_NO",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_ClO_c",
+                                    "BrO",
+                                    "ClO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_ClO_NO2_M_A",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T_ref",
+                                                    "T"
+                                                ]
+                                            },
+                                            3.4
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO2",
+                                    "M"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "HCl"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_Cl_CH4_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Cl_CH4",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Cl",
+                                    "CH4_mix",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_OH_HCl_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_OH_HCl",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "OH",
+                                    "HCl"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "ClONO2"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_ClO_NO2_M_A",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T_ref",
+                                                    "T"
+                                                ]
+                                            },
+                                            3.4
+                                        ]
+                                    },
+                                    "ClO",
+                                    "NO2",
+                                    "M"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_ClONO2",
+                                    "ClONO2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "Br"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_BrO_O_c",
+                                    "BrO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_BrO_ClO_c",
+                                    "BrO",
+                                    "ClO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "j_HOBr",
+                                    "HOBr"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_Br_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Br_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Br",
+                                    "O3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "BrO"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_Br_O3_A",
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "C_Br_O3",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "Br",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_O_c",
+                                    "BrO",
+                                    "O"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_ClO_c",
+                                    "BrO",
+                                    "ClO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "k_BrO_HO2_c",
+                                    "BrO",
+                                    "HO2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "HOBr"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_BrO_HO2_c",
+                                    "BrO",
+                                    "HO2"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1.0,
+                                    "j_HOBr",
+                                    "HOBr"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Ox",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "O",
+                            "O3"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "NOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "NO",
+                            "NO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "HOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "OH",
+                            "HO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ClOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "Cl",
+                            "ClO"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "BrOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "Br",
+                            "BrO"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "initial_conditions_t0",
+                    "description": "At t=0 the solver must return the declared species defaults exactly, and each algebraic family must equal the sum of its two members. Tolerance tightened to rel=1e-10 / abs=1e-14: t=0 carries no integration drift, only parser->Float64 conversion and the first-step identity evaluation of the initial state.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "tolerance": {
+                        "rel": 1e-10,
+                        "abs": 1e-14
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 0.0,
+                            "expected": 9999999999999.998
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 0.0,
+                            "expected": 49999999.99999999
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 0.0,
+                            "expected": 3e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 0.0,
+                            "expected": 1000000000000000.0
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 0.0,
+                            "expected": 1000000000000000.0
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 0.0,
+                            "expected": 1000000000000.0
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 0.0,
+                            "expected": 10000000000000.0
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 0.0,
+                            "expected": 10000000000.0
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 0.0,
+                            "expected": 10000000000000.0
+                        },
+                        {
+                            "variable": "HCl",
+                            "time": 0.0,
+                            "expected": 1000000000000000.0
+                        },
+                        {
+                            "variable": "ClONO2",
+                            "time": 0.0,
+                            "expected": 1000000000000000.0
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 0.0,
+                            "expected": 100000000000.0
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 0.0,
+                            "expected": 1000000000000.0
+                        },
+                        {
+                            "variable": "HOBr",
+                            "time": 0.0,
+                            "expected": 1000000000000.0
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 0.0,
+                            "expected": 9.3e+16
+                        },
+                        {
+                            "variable": "Ox",
+                            "time": 0.0,
+                            "expected": 3.00001e+18
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 2000000000000000.0
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 11000000000000.0
+                        },
+                        {
+                            "variable": "ClOx",
+                            "time": 0.0,
+                            "expected": 10010000000000.0
+                        },
+                        {
+                            "variable": "BrOx",
+                            "time": 0.0,
+                            "expected": 1100000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "comprehensive_integration_1hour",
+                    "description": "Headline 1-hour integration under the S&P Chapter 5 mid-stratosphere defaults (T=227 K, M=3.1e23 m^-3, ~30 km). Reproduces and tightens the upstream 'Comprehensive System Integration' test (StratosphericChemistry_test.jl:529-544) \u2014 that test asserts only retcode=Success and positivity of O/O3/NO/NO2/N2O, this one pins the full multi-species trajectory at three times across the window.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 600.0,
+                            "expected": 127947404705428.3
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 600.0,
+                            "expected": 150320646.88713777
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 600.0,
+                            "expected": 3.0042330587316127e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 600.0,
+                            "expected": 896973206846427.0
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 600.0,
+                            "expected": 1100503668192925.9
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 600.0,
+                            "expected": 17011401343985.533
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 600.0,
+                            "expected": 58529374818868.016
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 600.0,
+                            "expected": 64709393914.47645
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 600.0,
+                            "expected": 67751036044948.46
+                        },
+                        {
+                            "variable": "HCl",
+                            "time": 600.0,
+                            "expected": 996863616124983.4
+                        },
+                        {
+                            "variable": "ClONO2",
+                            "time": 600.0,
+                            "expected": 945330638436152.5
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 600.0,
+                            "expected": 4639173791.942083
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 600.0,
+                            "expected": 882916816388.9995
+                        },
+                        {
+                            "variable": "HOBr",
+                            "time": 600.0,
+                            "expected": 1212444009819.0583
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 600.0,
+                            "expected": 9.299623775470997e+16
+                        },
+                        {
+                            "variable": "O",
+                            "time": 1800.0,
+                            "expected": 128141427624250.33
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 1800.0,
+                            "expected": 150582383.4130125
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 1800.0,
+                            "expected": 3.009464010351473e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 1800.0,
+                            "expected": 785055499999053.6
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 1800.0,
+                            "expected": 1190671189682184.5
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 1800.0,
+                            "expected": 40238958460539.49
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 1800.0,
+                            "expected": 152175467327890.62
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 1800.0,
+                            "expected": 141076805461.2867
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 1800.0,
+                            "expected": 169381390755409.5
+                        },
+                        {
+                            "variable": "HCl",
+                            "time": 1800.0,
+                            "expected": 979230999972653.2
+                        },
+                        {
+                            "variable": "ClONO2",
+                            "time": 1800.0,
+                            "expected": 861256532466474.6
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 1800.0,
+                            "expected": 2607394237.2913184
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 1800.0,
+                            "expected": 319155620168.79767
+                        },
+                        {
+                            "variable": "HOBr",
+                            "time": 1800.0,
+                            "expected": 1778236985593.909
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 1800.0,
+                            "expected": 9.298871043861064e+16
+                        },
+                        {
+                            "variable": "O",
+                            "time": 3600.0,
+                            "expected": 128096798396110.62
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 3600.0,
+                            "expected": 150597695.0282939
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 3600.0,
+                            "expected": 3.0097700222967506e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 3600.0,
+                            "expected": 663047103541114.2
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 3600.0,
+                            "expected": 1242043226116215.5
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 3600.0,
+                            "expected": 67989618176724.91
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 3600.0,
+                            "expected": 277061490944765.4
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 3600.0,
+                            "expected": 211652822841.55942
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 3600.0,
+                            "expected": 291325977712109.1
+                        },
+                        {
+                            "variable": "HCl",
+                            "time": 3600.0,
+                            "expected": 930785261919155.0
+                        },
+                        {
+                            "variable": "ClONO2",
+                            "time": 3600.0,
+                            "expected": 787687107545892.2
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 3600.0,
+                            "expected": 2093687173.9980724
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 3600.0,
+                            "expected": 176940785148.10303
+                        },
+                        {
+                            "variable": "HOBr",
+                            "time": 3600.0,
+                            "expected": 1920965527677.8967
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 3600.0,
+                            "expected": 9.297741760945958e+16
+                        }
+                    ]
+                },
+                {
+                    "id": "default_short_term_100s",
+                    "description": "Short-window (100 s) integration capturing the fast radical transients. Atomic O, O(1D) and the halogen radicals Cl/Br relax toward their photochemical quasi-equilibria on sub-second to tens-of-seconds timescales set by the bimolecular and three-body sink reactions; this test pins those fast modes before the slow Ox / reservoir drift.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 1.0,
+                            "expected": 127760180700922.36
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 1.0,
+                            "expected": 150103344.08720452
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 1.0,
+                            "expected": 2.999890140267367e+18
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 1.0,
+                            "expected": 1249811986320.8782
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 1.0,
+                            "expected": 9863684280678.129
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 1.0,
+                            "expected": 13456888905.317953
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 1.0,
+                            "expected": 10095559422159.525
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 1.0,
+                            "expected": 26196334555.6556
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 1.0,
+                            "expected": 1074387776724.4255
+                        },
+                        {
+                            "variable": "O",
+                            "time": 10.0,
+                            "expected": 127765699118443.81
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 10.0,
+                            "expected": 150106886.30410048
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 10.0,
+                            "expected": 2.9999609334696873e+18
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 10.0,
+                            "expected": 2734047988946.098
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 10.0,
+                            "expected": 9396047801066.252
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 10.0,
+                            "expected": 14299575519.460087
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 10.0,
+                            "expected": 10989480884611.773
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 10.0,
+                            "expected": 5352733856.786856
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 10.0,
+                            "expected": 1100440842405.1965
+                        },
+                        {
+                            "variable": "O",
+                            "time": 50.0,
+                            "expected": 127784360496347.89
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 50.0,
+                            "expected": 150122775.30648118
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 50.0,
+                            "expected": 3.0002784840984433e+18
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 50.0,
+                            "expected": 4494401818328.883
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 50.0,
+                            "expected": 12112823195313.895
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 50.0,
+                            "expected": 17977497917.23895
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 50.0,
+                            "expected": 14975407231536.244
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 50.0,
+                            "expected": 5432901288.746634
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 50.0,
+                            "expected": 1120953402312.4824
+                        },
+                        {
+                            "variable": "O",
+                            "time": 100.0,
+                            "expected": 127802984366098.75
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 100.0,
+                            "expected": 150142722.5580793
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 100.0,
+                            "expected": 3.000677141113466e+18
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 100.0,
+                            "expected": 5704377039938.06
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 100.0,
+                            "expected": 16454857006132.604
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 100.0,
+                            "expected": 22548335278.15812
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 100.0,
+                            "expected": 19933969988511.91
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 100.0,
+                            "expected": 5498120783.866939
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 100.0,
+                            "expected": 1136838526765.2346
+                        }
+                    ]
+                },
+                {
+                    "id": "n2o_destruction_1day",
+                    "description": "24-hour integration tracking N2O loss. Reproduces and tightens the upstream 'N2O Destruction in Comprehensive System' test (StratosphericChemistry_test.jl:550-563) \u2014 that test asserts only N2O[end] <= N2O[1], this one pins the monotone N2O decay (photolysis j_N2O plus the two O(1D) channels, with no replenishment source) at four times spanning the day, alongside the co-evolving O3 and NOx.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 86400.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "N2O",
+                            "time": 0.0,
+                            "expected": 9.3e+16
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 3600.0,
+                            "expected": 9.29774176094677e+16
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 21600.0,
+                            "expected": 9.286563482290912e+16
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 86400.0,
+                            "expected": 9.25115321242791e+16
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 86400.0,
+                            "expected": 6.425674328948479e+17
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 86400.0,
+                            "expected": 175939893693.65253
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 86400.0,
+                            "expected": 1536830334668.8367
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 86400.0,
+                            "expected": 1712770228362.4893
+                        },
+                        {
+                            "variable": "Ox",
+                            "time": 86400.0,
+                            "expected": 6.425947143808854e+17
+                        }
+                    ]
+                },
+                {
+                    "id": "n2o_as_nox_source",
+                    "description": "NOx-source test: start with NO=0 and NO2=0 but nonzero N2O and O(1D). Reproduces and tightens the upstream 'N2O as NOx Source (Section 5.3.1)' test (StratosphericChemistry_test.jl:565-588) \u2014 that test asserts only NO[end] > 0, this one pins the NO and NO2 produced from the N2O + O(1D) -> 2 NO channel over the first 100 s.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "initial_conditions": {
+                        "NO": 0.0,
+                        "NO2": 0.0,
+                        "N2O": 9.3e+16,
+                        "O1D": 50000000.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "NO",
+                            "time": 10.0,
+                            "expected": 17625779901.016895
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 10.0,
+                            "expected": 1080410131.5393243
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 10.0,
+                            "expected": 18706190032.55622
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 50.0,
+                            "expected": 73093961878.30247
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 50.0,
+                            "expected": 20443427981.822216
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 50.0,
+                            "expected": 93537389860.1247
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 100.0,
+                            "expected": 125893660649.20647
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 100.0,
+                            "expected": 61194364081.84326
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 100.0,
+                            "expected": 187088024731.04974
+                        }
+                    ]
+                },
+                {
+                    "id": "chemical_families_evolution",
+                    "description": "Tracks the five algebraic chemical families (Ox, NOx, HOx, ClOx, BrOx) under default conditions over one hour. The families are diagnostic sums that name the partitioning of odd oxygen and the catalytic radical pools; pinning them is a regression target on the algebraic-equation machinery distinct from the 15 ODE states.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Ox",
+                            "time": 0.0,
+                            "expected": 3.00001e+18
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 2000000000000000.0
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 11000000000000.0
+                        },
+                        {
+                            "variable": "ClOx",
+                            "time": 0.0,
+                            "expected": 10010000000000.0
+                        },
+                        {
+                            "variable": "BrOx",
+                            "time": 0.0,
+                            "expected": 1100000000000.0
+                        },
+                        {
+                            "variable": "Ox",
+                            "time": 600.0,
+                            "expected": 3.0043610061363174e+18
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 600.0,
+                            "expected": 1997476875039353.0
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 600.0,
+                            "expected": 75540776162853.55
+                        },
+                        {
+                            "variable": "ClOx",
+                            "time": 600.0,
+                            "expected": 67815745438862.94
+                        },
+                        {
+                            "variable": "BrOx",
+                            "time": 600.0,
+                            "expected": 887555990180.9417
+                        },
+                        {
+                            "variable": "Ox",
+                            "time": 3600.0,
+                            "expected": 3.0098981190951465e+18
+                        },
+                        {
+                            "variable": "NOx",
+                            "time": 3600.0,
+                            "expected": 1905090329657329.8
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 3600.0,
+                            "expected": 345051109121490.3
+                        },
+                        {
+                            "variable": "ClOx",
+                            "time": 3600.0,
+                            "expected": 291537630534950.7
+                        },
+                        {
+                            "variable": "BrOx",
+                            "time": 3600.0,
+                            "expected": 179034472322.1011
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_temperature_perturbation",
+                    "description": "Cold-stratosphere case: T lowered from 227 K to 200 K (polar-vortex regime). Every Arrhenius rate coefficient k = A*exp(C/T) and the two power-law coefficients k2 and k_ClO_NO2_M shift; the joint response of the coupled O / NOx / HOx / ClOx / BrOx pools is pinned at t=3600 s.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_overrides": {
+                        "T": 200.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 3600.0,
+                            "expected": 94956100243302.08
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 3600.0,
+                            "expected": 3.02309440641961e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 3600.0,
+                            "expected": 800626244953650.1
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 3600.0,
+                            "expected": 1078043926479622.4
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 3600.0,
+                            "expected": 94351205599270.73
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 3600.0,
+                            "expected": 216395572546115.3
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 3600.0,
+                            "expected": 289537975122.5762
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 3600.0,
+                            "expected": 281509217887617.0
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 3600.0,
+                            "expected": 3246201737.850831
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 3600.0,
+                            "expected": 222382092549.44464
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 3600.0,
+                            "expected": 9.297773992203994e+16
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature_perturbation",
+                    "description": "Warm-stratosphere case: T raised from 227 K to 270 K. Together with cold_temperature_perturbation this brackets the dynamic range of the temperature-dependent rate coefficients across the stratospheric temperature range; species pinned at t=3600 s.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_overrides": {
+                        "T": 270.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 3600.0,
+                            "expected": 191841595728349.4
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 3600.0,
+                            "expected": 2.974917375090135e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 3600.0,
+                            "expected": 424047559793705.2
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 3600.0,
+                            "expected": 1510960851664036.8
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 3600.0,
+                            "expected": 45548119085312.375
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 3600.0,
+                            "expected": 338977645433418.9
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 3600.0,
+                            "expected": 145436033482.69016
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 3600.0,
+                            "expected": 301366395931698.2
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 3600.0,
+                            "expected": 1318573778.4632356
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 3600.0,
+                            "expected": 146444965204.73782
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 3600.0,
+                            "expected": 9.297703299971918e+16
+                        }
+                    ]
+                },
+                {
+                    "id": "dense_air_perturbation",
+                    "description": "Lower-altitude (denser air) case: M raised from 3.1e23 to 1.0e24 m^-3. The three-body channels (O+O2+M, ClO+NO2+M) scale super-linearly with M while the bimolecular catalytic sinks scale linearly, shifting the ozone balance; species pinned at t=3600 s.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_overrides": {
+                        "M": 1e+24
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 3600.0,
+                            "expected": 12987361839561.111
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 3600.0,
+                            "expected": 48739974.99013316
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 3600.0,
+                            "expected": 3.142232590195239e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 3600.0,
+                            "expected": 603237053940819.8
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 3600.0,
+                            "expected": 1182259921294448.2
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 3600.0,
+                            "expected": 164213638576476.38
+                        },
+                        {
+                            "variable": "ClONO2",
+                            "time": 3600.0,
+                            "expected": 886855327335839.4
+                        },
+                        {
+                            "variable": "Ox",
+                            "time": 3600.0,
+                            "expected": 3.1422455775570785e+18
+                        }
+                    ]
+                },
+                {
+                    "id": "nighttime_photolysis_off",
+                    "description": "Polar-night / dark-chemistry case: all seven photolysis rates (j_O2, j_O3, j_O3_O1D, j_NO2, j_ClONO2, j_HOBr, j_N2O) set to 0. With no photochemical sources the odd-oxygen production shuts off and the system relaxes purely through its catalytic and reservoir-forming sinks; species pinned at t=3600 s. The abs floor accommodates radicals decaying below the atol=1e-12 integrator floor.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "tolerance": {
+                        "rel": 1e-06,
+                        "abs": 1e-06
+                    },
+                    "parameter_overrides": {
+                        "j_O2": 0.0,
+                        "j_O3": 0.0,
+                        "j_O3_O1D": 0.0,
+                        "j_NO2": 0.0,
+                        "j_ClONO2": 0.0,
+                        "j_HOBr": 0.0,
+                        "j_N2O": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "O",
+                            "time": 3600.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "O1D",
+                            "time": 3600.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "O3",
+                            "time": 3600.0,
+                            "expected": 2.998770432902956e+18
+                        },
+                        {
+                            "variable": "NO",
+                            "time": 3600.0,
+                            "expected": 4.1705393178305094e-05
+                        },
+                        {
+                            "variable": "NO2",
+                            "time": 3600.0,
+                            "expected": 1993241748110059.2
+                        },
+                        {
+                            "variable": "OH",
+                            "time": 3600.0,
+                            "expected": 378680023761.4681
+                        },
+                        {
+                            "variable": "HO2",
+                            "time": 3600.0,
+                            "expected": 8924312035631.322
+                        },
+                        {
+                            "variable": "Cl",
+                            "time": 3600.0,
+                            "expected": 7442552.435161241
+                        },
+                        {
+                            "variable": "ClO",
+                            "time": 3600.0,
+                            "expected": 4117871570316.1436
+                        },
+                        {
+                            "variable": "Br",
+                            "time": 3600.0,
+                            "expected": 1519250.2617148836
+                        },
+                        {
+                            "variable": "BrO",
+                            "time": 3600.0,
+                            "expected": 277072887067.7773
+                        },
+                        {
+                            "variable": "N2O",
+                            "time": 3600.0,
+                            "expected": 9.3e+16
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "default_run_1hour",
+                    "description": "One-hour integration under the S&P Chapter 5 mid-stratosphere defaults (T=227 K, M=3.1e23 m^-3, ~30 km). Shows the coupled evolution of the ozone reservoir and the NOx / HOx / ClOx / BrOx catalytic radical pools that destroy it.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "plots": [
+                        {
+                            "id": "o3_vs_time",
+                            "type": "line",
+                            "description": "Ozone O3 over one hour.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "O3",
+                                "label": "O3 (m^-3)"
+                            }
+                        },
+                        {
+                            "id": "clo_vs_time",
+                            "type": "line",
+                            "description": "Chlorine monoxide ClO over one hour.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "ClO",
+                                "label": "ClO (m^-3)"
+                            }
+                        },
+                        {
+                            "id": "no2_vs_time",
+                            "type": "line",
+                            "description": "Nitrogen dioxide NO2 over one hour.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "NO2",
+                                "label": "NO2 (m^-3)"
+                            }
+                        },
+                        {
+                            "id": "oh_vs_time",
+                            "type": "line",
+                            "description": "Hydroxyl radical OH over one hour.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "OH",
+                                "label": "OH (m^-3)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_sensitivity_sweep",
+                    "description": "Stratospheric temperature sweep over 200-280 K (cold polar vortex to warm sub-tropical mid-stratosphere). Each temperature drives an independent one-hour integration; the plots show the t=3600 s ozone and ClO against T, surfacing the net effect of the temperature-dependent rate coefficients on the catalytic balance.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "values": [
+                                    200.0,
+                                    210.0,
+                                    220.0,
+                                    230.0,
+                                    240.0,
+                                    250.0,
+                                    260.0,
+                                    270.0,
+                                    280.0
+                                ]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "o3_vs_T",
+                            "type": "line",
+                            "description": "Ozone at t=3600 s vs temperature.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature (K)"
+                            },
+                            "y": {
+                                "variable": "O3",
+                                "label": "O3 (m^-3)"
+                            }
+                        },
+                        {
+                            "id": "clo_vs_T",
+                            "type": "line",
+                            "description": "Chlorine monoxide at t=3600 s vs temperature.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature (K)"
+                            },
+                            "y": {
+                                "variable": "ClO",
+                                "label": "ClO (m^-3)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "altitude_density_sweep",
+                    "description": "Air-density sweep across the stratospheric range, mimicking altitude: M from 1e22 m^-3 (~60 km) to 3e24 m^-3 (~20 km). Each density drives an independent one-hour integration; the plot shows the t=3600 s ozone against M, illustrating how the M-dependent three-body production competes with the bimolecular catalytic sinks.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "M",
+                                "values": [
+                                    1e+22,
+                                    3e+22,
+                                    1e+23,
+                                    3e+23,
+                                    1e+24,
+                                    3e+24
+                                ]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "o3_vs_M",
+                            "type": "line",
+                            "description": "Ozone at t=3600 s vs air number density.",
+                            "x": {
+                                "variable": "M",
+                                "label": "M (m^-3)"
+                            },
+                            "y": {
+                                "variable": "O3",
+                                "label": "O3 (m^-3)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
