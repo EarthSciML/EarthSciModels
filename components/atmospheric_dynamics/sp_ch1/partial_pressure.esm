@@ -1,0 +1,243 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PartialPressureMixingRatio",
+        "description": "Relates the volume mixing ratio of an atmospheric species to its partial pressure: xi = p_i / p (Seinfeld & Pandis, Atmospheric Chemistry and Physics, Ch. 1, Eq. 1.8). The mixing ratio equals the ratio of the species' partial pressure to the total atmospheric pressure. Migrated from AtmosphericDynamics.jl@816cc391 src/seinfeld_pandis_ch1.jl:308 (`PartialPressureMixingRatio` @component). Parameterized as observed-only: the partial pressure p_i and total pressure p are inputs (parameters in standalone form), xi is the algebraic output. Upstream the Julia @component declares p_i, p, and xi as @variables for composition into a parent system; for standalone serialization (3 unknowns vs 1 equation otherwise), p_i and p are declared as parameters here, mirroring the IdealGasLaw / ScaleHeight serialization pattern in the same module.",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "observed-only",
+            "ch1",
+            "mixing-ratio"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-30vj)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 1, Equation 1.8 (volume mixing ratio as the ratio of a species' partial pressure to the total atmospheric pressure). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "PartialPressureMixingRatio": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/seinfeld_pandis_ch1.jl:308\nUpstream `PartialPressureMixingRatio` is an MTK `@component` where p_i, p, and xi are `@variables` driven by a parent system. For standalone serialization — and to make the component well-posed in isolation (3 unknowns would be under-determined by the single equation otherwise) — the input partial pressure p_i and total pressure p are declared as parameters here; xi remains the algebraic state. This matches the (S, observed-only) classification in docs/migration-tracker.md and the IdealGasLaw / ScaleHeight pattern in the same module. The single algebraic equation xi = p_i / p (Seinfeld & Pandis Eq. 1.8) is unchanged from upstream.\n\nTolerance rationale (model-level rel=1e-6): observed-only single-equation algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the single p_i / p division across the atmospheric mixing-ratio range (~4e-4 for CO2 up to 1.0 for a pure single-component gas)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "p_i": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 21227.5875,
+                    "description": "Partial pressure of species i (default: oxygen partial pressure at standard sea-level pressure, dry-air mole fraction 0.2095)"
+                },
+                "p": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Total atmospheric pressure (default: standard sea-level pressure)"
+                },
+                "xi": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Volume mixing ratio of species i (dimensionless ratio of partial pressure to total pressure)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "xi",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["p_i", "p"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "nitrogen_sea_level",
+                    "description": "Molecular nitrogen, the dominant constituent of dry air (mole fraction 0.7808). At standard sea-level pressure (p = 101325 Pa) its partial pressure is p_i = 79114.56 Pa, recovering the mixing ratio xi ~ 0.7808 (Seinfeld & Pandis Ch 1, dry-air composition).",
+                    "parameter_overrides": {
+                        "p_i": 79114.56,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.7807999999999999 }
+                    ]
+                },
+                {
+                    "id": "oxygen_sea_level",
+                    "description": "Molecular oxygen at standard sea-level pressure (mole fraction 0.2095). Partial pressure p_i = 21227.5875 Pa with p = 101325 Pa gives xi ~ 0.2095 — the second-most-abundant component of dry air.",
+                    "parameter_overrides": {
+                        "p_i": 21227.5875,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.20950000000000002 }
+                    ]
+                },
+                {
+                    "id": "water_vapor_humid_surface",
+                    "description": "Water vapor at saturation over liquid water near 20 degC: saturation vapor pressure p_i ~ 2339 Pa at total pressure p = 101325 Pa yields a mixing ratio xi ~ 0.0231 — humid surface air is roughly 2.3% water vapor by volume.",
+                    "parameter_overrides": {
+                        "p_i": 2339.0,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.02308413520848754 }
+                    ]
+                },
+                {
+                    "id": "argon_sea_level",
+                    "description": "Argon, the most abundant trace gas in dry air (mole fraction 0.0093). Partial pressure p_i = 942.3225 Pa at p = 101325 Pa gives xi = 0.0093 — exercises the sub-1% mixing-ratio regime.",
+                    "parameter_overrides": {
+                        "p_i": 942.3225,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.0093 }
+                    ]
+                },
+                {
+                    "id": "co2_present_day",
+                    "description": "Carbon dioxide at a representative recent global mean abundance (~421 ppm). Partial pressure p_i = 42.657825 Pa at p = 101325 Pa yields xi ~ 4.21e-4 — exercises the trace-gas (parts-per-million) mixing-ratio regime.",
+                    "parameter_overrides": {
+                        "p_i": 42.657825,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.00042100000000000004 }
+                    ]
+                },
+                {
+                    "id": "unit_ratio_pure_component",
+                    "description": "Boundary case: a single-component gas whose partial pressure equals the total pressure (p_i = p = 101325 Pa). The mixing ratio saturates at xi = 1.0 — the species accounts for the entire gas mixture.",
+                    "parameter_overrides": {
+                        "p_i": 101325.0,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "oxygen_tropopause",
+                    "description": "Oxygen at the U.S. Standard Atmosphere tropopause (~11 km, p = 22632 Pa). With O2 retaining its dry-air mole fraction 0.2095, the partial pressure scales to p_i = 4741.404 Pa and xi ~ 0.2095 — identical to the sea-level case, confirming that the mixing ratio is a pure pressure ratio independent of the absolute pressure level.",
+                    "parameter_overrides": {
+                        "p_i": 4741.404,
+                        "p": 22632.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "xi", "time": 0.0, "expected": 0.20950000000000002 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "xi_vs_partial_pressure",
+                    "description": "Volume mixing ratio as a function of partial pressure at fixed total pressure (p = 101325 Pa, standard sea level). xi rises linearly from 0 to 1 as the species' partial pressure increases from 0 to the total pressure (Seinfeld & Pandis Eq. 1.8).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p_i",
+                                "range": { "start": 0.0, "stop": 101325.0, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "xi_vs_pi",
+                            "type": "line",
+                            "description": "Volume mixing ratio xi as a function of partial pressure p_i at p = 101325 Pa.",
+                            "x": { "variable": "p_i", "label": "Partial pressure p_i (Pa)" },
+                            "y": { "variable": "xi",  "label": "Volume mixing ratio xi (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "xi_vs_total_pressure",
+                    "description": "Volume mixing ratio as a function of total atmospheric pressure at fixed partial pressure (p_i = 21227.5875 Pa, the oxygen partial pressure at sea level). Holding p_i fixed, xi follows the inverse relation xi proportional to 1/p across the tropospheric pressure range (22.6-110 kPa) — an illustrative mathematical sweep rather than a physical altitude profile, since a species' partial pressure normally falls together with the total pressure.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "p_i": 21227.5875
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p",
+                                "range": { "start": 22632.0, "stop": 110000.0, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "xi_vs_p",
+                            "type": "line",
+                            "description": "Volume mixing ratio xi as a function of total pressure p at fixed p_i = 21227.5875 Pa.",
+                            "x": { "variable": "p",  "label": "Total pressure p (Pa)" },
+                            "y": { "variable": "xi", "label": "Volume mixing ratio xi (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "mixing_ratio_heatmap",
+                    "description": "Two-dimensional sweep of the volume mixing ratio over partial pressure p_i and total pressure p. Surfaces the full xi = p_i / p relation across the physical regime p_i <= p (so xi <= 1); xi approaches 1 only where the partial pressure approaches the smallest total pressure in the sweep.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p_i",
+                                "range": { "start": 0.0, "stop": 22632.0, "count": 12, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "p",
+                                "range": { "start": 22632.0, "stop": 110000.0, "count": 12, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "xi_heatmap",
+                            "type": "heatmap",
+                            "description": "Volume mixing ratio xi as a function of partial pressure p_i and total pressure p.",
+                            "x": { "variable": "p_i", "label": "Partial pressure p_i (Pa)" },
+                            "y": { "variable": "p",   "label": "Total pressure p (Pa)" },
+                            "value": { "variable": "xi", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
