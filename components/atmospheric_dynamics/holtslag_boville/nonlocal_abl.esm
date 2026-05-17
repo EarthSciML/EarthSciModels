@@ -1,0 +1,2346 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HoltslagBovilleNonlocalABL",
+        "description": "Nonlocal atmospheric boundary-layer diffusion scheme of Holtslag & Boville (1993). Given the height z, boundary-layer depth h, friction velocity u_star, surface virtual heat flux wθ_v0, surface scalar flux wC_0, surface virtual potential temperature θ_v0 and Obukhov length L, it computes the convective velocity scale w_star, the φ_m/φ_h Monin-Obukhov similarity profiles, the momentum and scalar velocity scales w_m/w_t, the turbulent Prandtl number Pr, the eddy-diffusivity profile Kc = κ·w_t·z·(1−z/h)² and the countergradient nonlocal transport term γc. The nonlocal scheme represents transport by large convective eddies that the local scheme cannot. Migrated from AtmosphericDynamics.jl@816cc391 src/holtslag_boville_1993.jl:290 (`HoltslagBovilleNonlocalABL` @component); algebraic (observed-only) — the 7 inputs are parameters, the 14 turbulence quantities are algebraic state variables, no ODE integration.",
+        "tags": [
+            "atmospheric_dynamics",
+            "holtslag-boville",
+            "boundary-layer",
+            "turbulence",
+            "eddy-diffusivity",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-4dgr)"
+        ],
+        "references": [
+            {
+                "citation": "Holtslag, A. A. M., & Boville, B. A. (1993). Local Versus Nonlocal Boundary-Layer Diffusion in a Global Climate Model. Journal of Climate, 6(10), 1825-1842.",
+                "doi": "10.1175/1520-0442(1993)006<1825:LVNBLD>2.0.CO;2"
+            }
+        ]
+    },
+    "models": {
+        "HoltslagBovilleNonlocalABL": {
+            "reference": {
+                "doi": "10.1175/1520-0442(1993)006<1825:LVNBLD>2.0.CO;2",
+                "citation": "Holtslag & Boville, 1993",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/holtslag_boville_1993.jl:290\nUpstream `HoltslagBovilleNonlocalABL` is an MTK `@component` that returns `System(eqs, t)` with 14 time-indexed `@variables`, each fixed by one algebraic equation (no time derivative appears), and 7 `@parameters` of inputs. It is migrated as an algebraic (observed-only) model: the 7 inputs are `parameter`s, the 14 turbulence quantities are `state` variables defined by the algebraic `equations` — the same serialization pattern as components/atmospheric_dynamics/sp_ch1/ideal_gas.esm and components/wildland_fire/rothermel/wind_limit.esm. No ODE integration occurs; tests assert the closed-form solution at t=0.\nThe 11 upstream `@constants` (g, κ, a_coeff, c_1, ε_sl, w_ref, zero_heat_flux, zero_length, γc_zero, zero_velocity, L_min) are preserved as `parameter` declarations with their upstream defaults, matching the MTK-`@constants`-to-ESM-`parameter` convention used in wind_limit.esm. The `zero_heat_flux`/`zero_length`/`zero_velocity`/`γc_zero` constants are kept rather than inlined as `0.0` literals so the `ifelse` comparison operands and stable-branch values carry units matching the quantities they are compared with (K*m/s, m, m/s, 1/m).\nVariable names: Unicode subscripts in the upstream identifiers are transliterated to ASCII (φₕ→φ_h, φₘ→φ_m, φₕ_local→φ_h_local, φₘ_local→φ_m_local, wₘ→w_m, wₘ_outer→w_m_outer, wₜ→w_t, wθᵥ₀→wθ_v0, wC₀→wC_0, θᵥ₀→θ_v0, c₁→c_1); Greek base letters (φ, ζ, η, κ, ε, γ, θ) are retained, following the convention in components/urban_canopy/urban_radiation.esm.\nRegularization: ζ = z/L and ζ_ε = ε_sl·h/L are guarded for small |L| — when abs(L) ≤ L_min the denominator L is replaced by a value of magnitude L_min carrying L's sign. Upstream encodes this branchlessly as L_min·sign(L) + L_min·(1−abs(sign(L))); it is re-expressed here as the mathematically identical ifelse(L < 0, −L_min, L_min) because the ESS Julia MTK binding (EarthSciSerializationMTKExt.jl) does not implement the `sign` operator that esm-spec §4.2 lists — the two forms agree exactly for L>0 (+L_min), L<0 (−L_min) and L=0 (+L_min). The regularized branch is never selected by the inline tests (all use |L| ≥ 50 m); it only needs to compile and stay finite.\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); every output is a closed-form composition of arithmetic, sqrt, cube-root (^1/3) and ifelse selections in float64. 1e-6 is far above float64 round-off accumulated over the ~10-deep expression chains (w_t depends on w_m and Pr, which depend on the φ profiles and w_star) and below any physical-discrimination scale on the m/s, m^2/s and 1/m output quantities. Exact-zero expectations (w_star and γc in stable conditions, where the `ifelse` selects the zero-velocity / γc_zero constant) carry a per-assertion abs=1e-12 tolerance."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 100.0,
+                    "description": "Height above surface"
+                },
+                "h": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Boundary layer height"
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.3,
+                    "description": "Friction velocity"
+                },
+                "wθ_v0": {
+                    "type": "parameter",
+                    "units": "K*m/s",
+                    "default": 0.05,
+                    "description": "Surface virtual heat flux (w'θ_v')_0"
+                },
+                "wC_0": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1e-05,
+                    "description": "Surface kinematic flux of scalar C (e.g. mixing ratio)"
+                },
+                "θ_v0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Virtual potential temperature at surface"
+                },
+                "L": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -100.0,
+                    "description": "Obukhov length (negative for unstable, positive for stable)"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration"
+                },
+                "κ": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "von Karman constant"
+                },
+                "a_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 7.2,
+                    "description": "Nonlocal transport constant (Eq. A14: a ≈ 7.2)"
+                },
+                "c_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.6,
+                    "description": "Velocity scale constant (Eq. A11)"
+                },
+                "ε_sl": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.1,
+                    "description": "Surface layer fraction of boundary layer height"
+                },
+                "w_ref": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "Reference velocity scale for non-dimensionalizing the cube-root arguments"
+                },
+                "zero_heat_flux": {
+                    "type": "parameter",
+                    "units": "K*m/s",
+                    "default": 0.0,
+                    "description": "Zero heat flux, comparison constant for the unstable/stable branch"
+                },
+                "zero_length": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Zero length, comparison constant for the L sign branch"
+                },
+                "γc_zero": {
+                    "type": "parameter",
+                    "units": "1/m",
+                    "default": 0.0,
+                    "description": "Zero nonlocal transport term (stable-branch value of γc)"
+                },
+                "zero_velocity": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Zero velocity (stable-branch value of w_star)"
+                },
+                "L_min": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Minimum absolute Obukhov length for regularization of z/L"
+                },
+                "ζ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stability parameter z/L at local height"
+                },
+                "η": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Relative height z/h"
+                },
+                "ζ_ε": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stability parameter ε_sl·h/L at the surface layer top"
+                },
+                "w_star": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Convective velocity scale (Eq. A12)"
+                },
+                "φ_m": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless wind shear at the surface layer top (Eq. A2/A4/A8)"
+                },
+                "φ_h": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless temperature gradient at the surface layer top (Eq. A3/A5/A6)"
+                },
+                "φ_h_local": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless temperature gradient at local height z (Eq. A3/A5/A6)"
+                },
+                "φ_m_local": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless wind shear at local height z (Eq. A2/A4/A8)"
+                },
+                "w_m_outer": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Outer-layer momentum velocity scale (Eq. A11)"
+                },
+                "w_m": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Velocity scale for momentum, height-dependent (Eq. A7/A11)"
+                },
+                "Pr": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Turbulent Prandtl number (Eq. A13)"
+                },
+                "w_t": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Velocity scale for scalars, height-dependent (Eq. A1/A10)"
+                },
+                "Kc": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Eddy diffusivity profile (Eq. 3.9)"
+                },
+                "γc": {
+                    "type": "state",
+                    "units": "1/m",
+                    "description": "Nonlocal countergradient transport term (Eq. 3.10)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "ζ",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    {
+                                        "op": "abs",
+                                        "args": [
+                                            "L"
+                                        ]
+                                    },
+                                    "L_min"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "z",
+                                    "L"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "z",
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<",
+                                                "args": [
+                                                    "L",
+                                                    "zero_length"
+                                                ]
+                                            },
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "L_min"
+                                                ]
+                                            },
+                                            "L_min"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "η",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "z",
+                            "h"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ζ_ε",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    {
+                                        "op": "abs",
+                                        "args": [
+                                            "L"
+                                        ]
+                                    },
+                                    "L_min"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ε_sl",
+                                            "h"
+                                        ]
+                                    },
+                                    "L"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ε_sl",
+                                            "h"
+                                        ]
+                                    },
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<",
+                                                "args": [
+                                                    "L",
+                                                    "zero_length"
+                                                ]
+                                            },
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "L_min"
+                                                ]
+                                            },
+                                            "L_min"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_star",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wθ_v0",
+                                    "zero_heat_flux"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "g",
+                                                                    "θ_v0"
+                                                                ]
+                                                            },
+                                                            "wθ_v0",
+                                                            "h"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "w_ref",
+                                                            3
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    1.0,
+                                                    3.0
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "w_ref"
+                                ]
+                            },
+                            "zero_velocity"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_m",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "L",
+                                    "zero_length"
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<=",
+                                        "args": [
+                                            "ζ_ε",
+                                            1
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    5,
+                                                    "ζ_ε"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            5,
+                                            "ζ_ε"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            "L",
+                                            "zero_length"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    15,
+                                                                    "ζ_ε"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            1.0,
+                                                            3.0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    1.0
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_h",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "L",
+                                    "zero_length"
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<=",
+                                        "args": [
+                                            "ζ_ε",
+                                            1
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    5,
+                                                    "ζ_ε"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            5,
+                                            "ζ_ε"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            "L",
+                                            "zero_length"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    15,
+                                                                    "ζ_ε"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    1.0
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_h_local",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "L",
+                                    "zero_length"
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<=",
+                                        "args": [
+                                            "ζ",
+                                            1
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    5,
+                                                    "ζ"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            5,
+                                            "ζ"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            "L",
+                                            "zero_length"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    15,
+                                                                    "ζ"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    1.0
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_m_local",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "L",
+                                    "zero_length"
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<=",
+                                        "args": [
+                                            "ζ",
+                                            1
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    5,
+                                                    "ζ"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            5,
+                                            "ζ"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            "L",
+                                            "zero_length"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    15,
+                                                                    "ζ"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            1.0,
+                                                            3.0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    1.0
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_m_outer",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "u_star",
+                                                            "w_ref"
+                                                        ]
+                                                    },
+                                                    3
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "c_1",
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "w_star",
+                                                                    "w_ref"
+                                                                ]
+                                                            },
+                                                            3
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1.0,
+                                            3.0
+                                        ]
+                                    }
+                                ]
+                            },
+                            "w_ref"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_m",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<=",
+                                "args": [
+                                    "η",
+                                    "ε_sl"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "u_star",
+                                    "φ_m_local"
+                                ]
+                            },
+                            "w_m_outer"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Pr",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "φ_h",
+                                    "φ_m"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "a_coeff",
+                                    "κ",
+                                    "ε_sl",
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_star",
+                                            "w_m_outer"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_t",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<=",
+                                "args": [
+                                    "η",
+                                    "ε_sl"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "u_star",
+                                    "φ_h_local"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "w_m",
+                                    "Pr"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Kc",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "κ",
+                            "w_t",
+                            "z",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            1,
+                                            "η"
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "γc",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wθ_v0",
+                                    "zero_heat_flux"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "a_coeff",
+                                            "w_star",
+                                            "wC_0"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "w_m_outer",
+                                                    2
+                                                ]
+                                            },
+                                            "h"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "γc_zero"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "All seven inputs at the upstream component defaults (z=100 m, h=1000 m, u_star=0.3 m/s, wθ_v0=0.05 K·m/s, wC_0=1e-5 m/s, θ_v0=300 K, L=-100 m). z/h = 0.1 lands exactly on the surface-layer/outer-layer boundary η = ε_sl, exercising the `η ≤ ε_sl` branch of w_m and w_t.",
+                    "parameter_overrides": {
+                        "z": 100.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.05,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.1780740391008697
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.002659586992917
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.7559526299369239
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9683458829118514
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 38.88
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 8.437194496371112e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_outer_z500_Lm100",
+                    "description": "Canonical unstable convective boundary layer sampled in the outer layer (z=500 m, η=0.5 > ε_sl, L=-100 m). Reproduces the upstream `convective velocity scale Eq. A12`, `momentum velocity scale Eq. A11`, `Prandtl number Eq. A13` and `outer layer wₜ Eq. A10` test points: w_star ≈ 1.48 m/s, and w_m equals w_m_outer in the outer layer.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -5.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.11470786693528087
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.2360815978543417
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2966755720281316
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 64.83377860140659
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "kc_profile_surface_z50",
+                    "description": "Eddy-diffusivity profile, near-surface sample (z=50 m, η=0.05, surface layer) under unstable conditions. Upstream `eddy diffusivity profile Eq. 3.9` low point — Kc is small near the surface.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.5
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.34299717028501764
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.4899973050296446
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.6122482652876022
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.8746427842267951
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 15.78730225529365
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "kc_profile_mid_z333",
+                    "description": "Eddy-diffusivity profile, mid-boundary-layer sample (z=333 m ≈ h/3, outer layer) where the Kc = κ·wₜ·z·(1−z/h)² profile peaks. Upstream `eddy diffusivity profile Eq. 3.9` mid point.",
+                    "parameter_overrides": {
+                        "z": 333.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -3.33
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.333
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.14009670009611716
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.26974408938034933
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2966755720281316
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 76.83997624872794
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "kc_profile_top_z900",
+                    "description": "Eddy-diffusivity profile, near-BL-top sample (z=900 m, η=0.9). The (1−η)² factor drives Kc back toward zero approaching the boundary-layer top. Upstream `eddy diffusivity profile Eq. 3.9` high point.",
+                    "parameter_overrides": {
+                        "z": 900.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -9.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.9
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.08574929257125441
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.19445555936641015
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2966755720281316
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 4.668032059301272
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "kc_verify_z400",
+                    "description": "Numerical verification of the eddy-diffusivity profile Kc = κ·wₜ·z·(1−z/h)² at z=400 m, h=1000 m. Upstream `Kc numerical verification Eq. 3.9`.",
+                    "parameter_overrides": {
+                        "z": 400.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -4.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.4
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.12803687993289598
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.2540329520093663
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2966755720281316
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 74.68851294882037
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "near_neutral_large_L",
+                    "description": "Near-neutral limit: very large |L| (L=-10000 m), tiny surface heat flux (wθ_v0=0.001 K·m/s) and strong wind (u_star=1 m/s). The convective scale w_star is small and the turbulent Prandtl number Pr ≈ 1. Upstream `Prandtl number Eq. A13` near-neutral point.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "h": 1000.0,
+                        "u_star": 1.0,
+                        "wθ_v0": 0.001,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -10000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.05
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -0.01
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 0.31977849253885177
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9544812172391357
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9325048082403138
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.7559289460184544
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.8298265333662433
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.006497688598828
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.006497688598828
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0684772024561595
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.9419926660907165
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 47.09963330453583
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 2.2727736391485038e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "gamma_c_unstable",
+                    "description": "Nonlocal countergradient transport in unstable conditions with an order-of-magnitude larger scalar surface flux (wC_0=1e-4 m/s): γc > 0. Upstream `nonlocal transport term Eq. 3.10` unstable point.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 0.0001,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -5.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.11470786693528087
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.2360815978543417
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 1.2966755720281316
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 64.83377860140659
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590977e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "gamma_c_stable",
+                    "description": "Stable conditions (L=+100 m, wθ_v0=-0.05 K·m/s): the convective scale w_star and the nonlocal term γc both collapse to zero — the nonlocal scheme adds no countergradient transport. Upstream `nonlocal transport term Eq. 3.10` stable point.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": -0.05,
+                        "wC_0": 0.0001,
+                        "θ_v0": 300.0,
+                        "L": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 5.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 15.0
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "phi_stable_L100_z50",
+                    "description": "Stable surface layer, L=+100 m ⇒ ζ_ε = ε_sl·h/L = 1.0, so φ_m = φ_h = 1 + 5·1 = 6 (Eq. A2/A3 stable branch). Upstream `phi_h and phi_m Eq. A2-A6` stable case.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": -0.05,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 3.5
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 3.5
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.08571428571428572
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.08571428571428572
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 1.5471428571428572
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "phi_very_stable_L50_z50",
+                    "description": "Very stable surface layer, L=+50 m ⇒ ζ_ε = 2.0 > 1, so φ_m = φ_h = 5 + 2 = 7 (Eq. A4/A5 very-stable branch, ζ_ε > 1). Upstream `phi_h and phi_m Eq. A2-A6` very-stable case.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": -0.05,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": 50.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": 2.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 7.0
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 7.0
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.049999999999999996
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.049999999999999996
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 0.9025
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "phi_unstable_Lm100_z50",
+                    "description": "Unstable surface layer, L=-100 m ⇒ ζ_ε = -1.0, so φ_h = (1−15·ζ_ε)^(−1/2) = 16^(−1/2) = 0.25 (Eq. A6) and φ_m = 16^(−1/3) (Eq. A8). Upstream `phi_h and phi_m Eq. A2-A6` unstable case.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.5
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.39685026299204984
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.34299717028501764
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.4899973050296446
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.6122482652876022
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 0.9698701618539511
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.8746427842267951
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 15.78730225529365
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "surface_layer_Lm200_z50",
+                    "description": "Surface layer (z=50 m, η=0.05 ≤ ε_sl) with L=-200 m. Exercises the local-height profiles φ_h_local, φ_m_local evaluated at ζ = z/L and the surface-layer velocity scales w_m = u_star/φ_m_local (Eq. A7) and w_t = u_star/φ_h_local (Eq. A1). Upstream `phi_h_local and phi_m_local Eq. A1/A7`, `surface layer w_m Eq. A7`, `surface layer wₜ Eq. A1`.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -200.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.25
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.05
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": -0.5
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 1.4842802801978616
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.4899973050296446
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.34299717028501764
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 0.4588314677411235
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 0.5948883492590029
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 1.2576069469149886
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.5042963110198445
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0399077119250424
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.653834841531101
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 11.801718889636374
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 6.757072186590978e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "stable_outer_z500_L100",
+                    "description": "Stable outer layer (z=500 m, η=0.5, L=+100 m): w_star=0, γc=0, and the outer-layer momentum scale collapses to w_m_outer = (u_star³)^(1/3) = u_star = 0.3 m/s, with w_m = w_m_outer. Upstream `stable conditions` test.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": -0.05,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 5.0
+                        },
+                        {
+                            "variable": "η",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "ζ_ε",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_star",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 6.0
+                        },
+                        {
+                            "variable": "φ_h_local",
+                            "time": 0.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "φ_m_local",
+                            "time": 0.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "w_m_outer",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "w_m",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "Pr",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "w_t",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "Kc",
+                            "time": 0.0,
+                            "expected": 15.0
+                        },
+                        {
+                            "variable": "γc",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "eddy_diffusivity_profile",
+                    "description": "Nonlocal-scheme eddy-diffusivity profile Kc(z) through an unstable convective boundary layer of depth h=1000 m (L=-100 m, wθ_v0=0.1 K·m/s). Reproduces the 'Eddy Diffusivity Profile (Eq. 3.9)' figure of the AtmosphericDynamics.jl holtslag_boville docs page: Kc = κ·wₜ·z·(1−z/h)² vanishes at the surface and the BL top with a maximum near z ≈ h/3.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "h": 1000.0,
+                        "u_star": 0.3,
+                        "wθ_v0": 0.1,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": {
+                                    "start": 50.0,
+                                    "stop": 950.0,
+                                    "count": 19,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "kc_vs_height",
+                            "type": "line",
+                            "description": "Eddy diffusivity Kc as a function of height z (h=1000 m, unstable).",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "Kc",
+                                "label": "Eddy diffusivity Kc (m^2/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "convective_velocity_scale",
+                    "description": "Convective velocity scale w_star as a function of surface virtual heat flux and boundary-layer depth, w_star = ((g/θ_v0)·wθ_v0·h)^(1/3) (Eq. A12). Reproduces the 'Convective Velocity Scale Dependence (Eq. A12)' figure of the AtmosphericDynamics.jl holtslag_boville docs page as a two-dimensional sweep over (wθ_v0, h): w_star grows with both the surface heat flux and the boundary-layer depth.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z": 500.0,
+                        "u_star": 0.3,
+                        "wC_0": 1e-05,
+                        "θ_v0": 300.0,
+                        "L": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "wθ_v0",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.2,
+                                    "count": 20,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "h",
+                                "range": {
+                                    "start": 500.0,
+                                    "stop": 2000.0,
+                                    "count": 16,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w_star_heatmap",
+                            "type": "heatmap",
+                            "description": "Convective velocity scale w_star over surface heat flux wθ_v0 and BL depth h.",
+                            "x": {
+                                "variable": "wθ_v0",
+                                "label": "Surface virtual heat flux wθ_v0 (K*m/s)"
+                            },
+                            "y": {
+                                "variable": "h",
+                                "label": "Boundary layer height h (m)"
+                            },
+                            "value": {
+                                "variable": "w_star",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
