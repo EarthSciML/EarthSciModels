@@ -1,0 +1,1006 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ParticleScavengingCoeff",
+        "description": "Below-cloud scavenging coefficient Λ_particle for an aerosol particle collected by monodisperse raindrops (Seinfeld & Pandis 2006, Chapter 20, Eq. 20.57): Λ_particle = (3/2)·E·p₀/D_p, where E is the Slinn (1983) raindrop-aerosol collision (collection) efficiency of Eqs. 20.53-20.54, p₀ the precipitation rate and D_p the raindrop diameter. E sums three collection mechanisms — Brownian diffusion, interception, and inertial impaction (switched on only when the Stokes number exceeds the critical Stokes number S*) — and is clamped to a maximum of 1; their competition produces the Greenfield gap, a scavenging minimum at accumulation-mode (~0.1-1 µm) particle sizes. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_2006_ch20.jl:414 (`ParticleScavengingCoeff` @component). The upstream slinn_collection_efficiency helper and its diffusivity / relaxation-time / settling-velocity sub-helpers are decomposed into 18 named intermediate algebraic states (Re, D_diff, Sc, τ, St, S_star, E_diff, E_int, E_imp, ...) — identical to the sibling component particle_collection_eff.esm — and a 19th equation applies Eq. 20.57. The five raindrop/aerosol/thermodynamic inputs, the precipitation rate, and six physical constants are parameters; Re through E and Λ_particle are the algebraic outputs.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "wet-scavenging",
+            "below-cloud-scavenging",
+            "ch20",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-n6u2)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed., Chapter 20: Wet Deposition, pp. 932-979. John Wiley & Sons, Inc. Eqs. 20.53-20.54 define the Slinn (1983) particle-drop collection efficiency; Eq. 20.57 the monodisperse-raindrop particle scavenging coefficient. ISBN 978-0-471-72018-8."
+            },
+            {
+                "citation": "Slinn, W. G. N. (1983). Precipitation scavenging. In Atmospheric Sciences and Power Production (D. Randerson, ed.), Ch. 11, pp. 466-532. U.S. Department of Energy, DOE/TIC-27601. Original source of the semi-empirical collision-efficiency parameterization adopted as Eqs. 20.53-20.54 by Seinfeld & Pandis (2006)."
+            }
+        ]
+    },
+    "models": {
+        "ParticleScavengingCoeff": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_2006_ch20.jl:414\nUpstream `ParticleScavengingCoeff` is an MTK `@component` with six input `@parameters` (D_p, U_t, d_p, ρ_p, T, p₀) and two output `@variables` E(t) and Λ_particle(t), related by two algebraic equations: E ~ slinn_collection_efficiency(D_p, U_t, d_p, ρ_p, T) — the Slinn (1983) raindrop-aerosol collision (collection) efficiency, Seinfeld & Pandis (2006) Eqs. 20.53-20.54 — and Λ_particle ~ particle_scavenging_coeff(E, p₀, D_p), the monodisperse-raindrop scavenging coefficient Λ = (3/2)·E·p₀/D_p of Eq. 20.57. It returns `System(eqs, t, vars, params; name)` with no subsystems, so it is a flat algebraic model; the upstream `ParticleScavengingCoeff Component` test (test/seinfeld_pandis_2006_ch20_test.jl:284) checks equations(sys) == 2 and unknowns(sys) == 2.\n\nThe collection efficiency E is computed by the same module-level helper `slinn_collection_efficiency` used by the sibling component ParticleCollectionEfficiency. That helper's named local variables (Reynolds number, Schmidt number, relaxation time, Stokes number, the critical Stokes number S*, and the Brownian/interception/impaction efficiency terms) are migrated as 18 intermediate algebraic states — one equation each, in the helper's evaluation order, so every .esm equation maps to one source line — exactly as in components/atmospheric_deposition/sp06_ch20/particle_collection_eff.esm (esm-dbc5). The 18 slinn equations and their state variables here are identical to that sibling file. Inlining the helper into a single equation AST would instead duplicate the Re / Sc / St / stokes_diff subexpressions many times over (a several-hundred-node tree); after `mtkcompile` the 18 intermediates reduce to observed quantities and E is the same function of the five inputs as upstream. A 19th equation, Λ_particle = (3/2)·E·p₀/D_p (Eq. 20.57; the upstream `particle_scavenging_coeff` helper at src line 404), closes the component over its second output.\n\nThe three sub-helpers `particle_diffusivity` (Stokes-Einstein, src line 291), `particle_relaxation_time` (src line 269) and `particle_terminal_velocity` (src line 280) are inlined into the D_diff, τ and u_t_particle equations. The six module-level `@constants` (μ_air_sp, ρ_air_sp, μ_w_sp, ρ_w_sp, g_sp, kB_sp) migrate as fixed-default `type: parameter` entries holding their upstream numeric values (Seinfeld & Pandis 2006; μ_air from Table A.7), per the rig convention for MTK `@constants`. The upstream `cbrt(Sc)` cube root in the Brownian term is re-expressed as Sc^(1/3) with the `^` op (the spec §4.2 elementary-function set has no `cbrt`; Sc, a Schmidt number, is always strictly positive so the two are numerically equivalent). Julia's `pi` is inlined as the float64 literal 3.141592653589793, and the upstream `1//12`, `2//3` and `3//2` exact rationals are kept as integer-literal `/` nodes. The component has no `ifelse` nodes: the upstream final clamp ifelse(E_total > 1, 1, E_total) is migrated as min(1, E_total) — the identical upper clamp — and the upstream impaction term ifelse(stokes_diff <= 0, 0, safe_ratio*sqrt(safe_ratio)) is migrated as safe_ratio*sqrt(safe_ratio) directly, because safe_ratio = max(0, stokes_diff)/(max(0, stokes_diff) + 2/3) is already exactly 0 whenever stokes_diff <= 0, so both ifelse branches are bit-identical and the conditional is provably dead code. Eliding it keeps the model free of `Piecewise`, which avoids a sympy lambdify-printer path that substitutes every free symbol with 0 and trips on the resulting 0/0 NaN. The max(0, ·) in safe_ratio is retained — it keeps the sqrt argument non-negative, the upstream author's stated reason for the max. `system_kind` is left unset (zero differential states — no D operator).\n\nUpstream provides only structural and qualitative-bound tests for this component (the component test checks equations==2 / unknowns==2; the helper-level `Particle Scavenging Coefficient` test pins (3/2)·E·p₀/D_p ≈ 4.167e-5 at E=0.1). The inline `tests` here pin full-precision values: default_parameters uses the component defaults; aitken_mode_aerosol, accumulation_mode_aerosol and coarse_mode_aerosol reproduce the three particle-size regimes of the upstream `Slinn Collection Efficiency` test (D_p = 2e-3 m, U_t = 6.5 m/s, d_p in {1e-8, 1e-6, 1e-5} m) and confirm E_small > E_medium and the Greenfield-gap minimum; dense_coarse_aerosol exercises the sqrt(ρ_w/ρ_p) density correction; efficiency_clamp drives E_total > 1 so the Eq. 20.53 maximum-of-1 clamp fires (E pinned to 1.0); and heavy_precipitation raises p₀ tenfold, confirming E is independent of p₀ while Λ_particle scales linearly with it (Eq. 20.57). The E and slinn-intermediate expectations match the corresponding scenarios in particle_collection_eff.esm.\n\nTolerance rationale (model-level rel=1e-6, abs=1e-12): observed-only algebraic system (no ODE integration). The 19 equations form a triangular chain of +, -, *, /, ^, sqrt, log, max and min on float64; round-off is ~1e-16 per op, so rel=1e-6 leaves ample headroom across the tested ranges (Re ~ 1e2, Sc ~ 1e5 to 3e7, E ~ 1e-4 to 1, Λ_particle ~ 1e-8 to 1e-3 s^-1). abs=1e-12 gates the exact-zero intermediates (safe_ratio, E_imp_unscaled, E_imp) in the no-impaction cases, where a pure relative tolerance would be degenerate."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-12
+            },
+            "variables": {
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.001,
+                    "description": "Raindrop diameter"
+                },
+                "U_t": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 4.0,
+                    "description": "Terminal velocity of the raindrop"
+                },
+                "d_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1e-06,
+                    "description": "Aerosol particle diameter"
+                },
+                "ρ_p": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Aerosol particle density"
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Temperature"
+                },
+                "p₀": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.778e-07,
+                    "description": "Precipitation rate (1 mm/h = 2.778e-7 m/s)"
+                },
+                "μ_air_sp": {
+                    "type": "parameter",
+                    "units": "kg/(m*s)",
+                    "default": 1.72e-05,
+                    "description": "Dynamic viscosity of air (Table A.7, Seinfeld & Pandis 2006)"
+                },
+                "ρ_air_sp": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Air density at standard conditions (Seinfeld & Pandis 2006)"
+                },
+                "μ_w_sp": {
+                    "type": "parameter",
+                    "units": "kg/(m*s)",
+                    "default": 0.001,
+                    "description": "Dynamic viscosity of water"
+                },
+                "ρ_w_sp": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Water density"
+                },
+                "g_sp": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration"
+                },
+                "kB_sp": {
+                    "type": "parameter",
+                    "units": "kg*m^2/(s^2*K)",
+                    "default": 1.3806488e-23,
+                    "description": "Boltzmann constant"
+                },
+                "Re": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Raindrop Reynolds number based on drop radius, Re = D_p*U_t*ρ_air/(2*μ_air) (dimensionless)"
+                },
+                "D_diff": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Brownian diffusivity of the aerosol particle (Stokes-Einstein relation)"
+                },
+                "Sc": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Particle Schmidt number, Sc = μ_air/(ρ_air*D_diff) (dimensionless)"
+                },
+                "τ": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Particle relaxation time in the Stokes drag regime, τ = ρ_p*d_p^2/(18*μ_air)"
+                },
+                "u_t_particle": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Particle Stokes settling (terminal) velocity, u_t = τ*g"
+                },
+                "St": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stokes number of the aerosol particle relative to the raindrop, St = 2*τ*(U_t - u_t)/D_p (dimensionless)"
+                },
+                "φ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Aerosol-to-raindrop diameter ratio, φ = d_p/D_p (dimensionless)"
+                },
+                "ω": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Water-to-air dynamic viscosity ratio, ω = μ_w/μ_air (dimensionless)"
+                },
+                "S_star": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Critical Stokes number (Eq. 20.54) (dimensionless)"
+                },
+                "E_diff": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Brownian diffusion term of the collection efficiency (Eq. 20.53, first line) (dimensionless)"
+                },
+                "E_int": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Interception term of the collection efficiency (Eq. 20.53, second line) (dimensionless)"
+                },
+                "stokes_diff": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stokes-number excess over the critical Stokes number, St - S* (dimensionless)"
+                },
+                "safe_ratio": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Clamped impaction ratio max(0, St-S*)/(max(0, St-S*) + 2/3) (dimensionless)"
+                },
+                "density_scaling": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Particle-density correction factor sqrt(ρ_w/ρ_p) for the impaction term (dimensionless)"
+                },
+                "E_imp_unscaled": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Inertial impaction term before the density correction; zero when St ≤ S* (dimensionless)"
+                },
+                "E_imp": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Inertial impaction term of the collection efficiency (Eq. 20.53, third line) (dimensionless)"
+                },
+                "E_total": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Sum of the three collection-efficiency terms before clamping (dimensionless)"
+                },
+                "E": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Collection efficiency between a raindrop and an aerosol particle (Eq. 20.53), clamped to a maximum of 1 (dimensionless)"
+                },
+                "Λ_particle": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Below-cloud scavenging coefficient for an aerosol particle collected by monodisperse raindrops (Eq. 20.57)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Reynolds number based on drop radius (slinn_collection_efficiency, src line 310): Re = D_p*U_t*ρ_air/(2*μ_air)",
+                    "lhs": "Re",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "D_p",
+                                    "U_t",
+                                    "ρ_air_sp"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    "μ_air_sp"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Brownian diffusivity of the aerosol particle via Stokes-Einstein (particle_diffusivity, src line 291): D_diff = k_B*T/(3*pi*μ_air*d_p)",
+                    "lhs": "D_diff",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "kB_sp",
+                                    "T"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    3.141592653589793,
+                                    "μ_air_sp",
+                                    "d_p"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Particle Schmidt number (slinn_collection_efficiency, src line 314): Sc = μ_air/(ρ_air*D_diff)",
+                    "lhs": "Sc",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "μ_air_sp",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "ρ_air_sp",
+                                    "D_diff"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Particle relaxation time in the Stokes drag regime (particle_relaxation_time, src line 269): τ = ρ_p*d_p^2/(18*μ_air)",
+                    "lhs": "τ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "ρ_p",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "d_p",
+                                            2
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    18,
+                                    "μ_air_sp"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Particle Stokes settling velocity (particle_terminal_velocity, src line 280): u_t = τ*g",
+                    "lhs": "u_t_particle",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "τ",
+                            "g_sp"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Stokes number of the aerosol particle relative to the raindrop (slinn_collection_efficiency, src line 319): St = 2*τ*(U_t - u_t)/D_p",
+                    "lhs": "St",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    "τ",
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "U_t",
+                                            "u_t_particle"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "D_p"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Aerosol-to-raindrop diameter ratio (slinn_collection_efficiency, src line 322): φ = d_p/D_p",
+                    "lhs": "φ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "d_p",
+                            "D_p"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Water-to-air dynamic viscosity ratio (slinn_collection_efficiency, src line 325): ω = μ_w/μ_air",
+                    "lhs": "ω",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "μ_w_sp",
+                            "μ_air_sp"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Critical Stokes number (Eq. 20.54; slinn_collection_efficiency, src line 328): S* = (1.2 + (1/12)*log(1+Re))/(1 + log(1+Re))",
+                    "lhs": "S_star",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.2,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    1,
+                                                    12
+                                                ]
+                                            },
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1,
+                                                            "Re"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    "Re"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Brownian diffusion term of the collection efficiency (Eq. 20.53, first line; slinn_collection_efficiency, src line 331): E_diff = (4/(Re*Sc))*(1 + 0.4*sqrt(Re)*Sc^(1/3) + 0.16*sqrt(Re)*sqrt(Sc)). The upstream cbrt(Sc) is re-expressed as Sc^(1/3) (no cbrt op in spec §4.2); Sc > 0 always, so the two are equivalent.",
+                    "lhs": "E_diff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    4,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "Re",
+                                            "Sc"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            0.4,
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    "Re"
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "Sc",
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            1,
+                                                            3
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            0.16,
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    "Re"
+                                                ]
+                                            },
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    "Sc"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Interception term of the collection efficiency (Eq. 20.53, second line; slinn_collection_efficiency, src line 334): E_int = 4*φ*(1/ω + (1 + 2*sqrt(Re))*φ)",
+                    "lhs": "E_int",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            4,
+                            "φ",
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            "ω"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            2,
+                                                            {
+                                                                "op": "sqrt",
+                                                                "args": [
+                                                                    "Re"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "φ"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Stokes-number excess over the critical Stokes number (slinn_collection_efficiency, src line 342): stokes_diff = St - S*",
+                    "lhs": "stokes_diff",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            "St",
+                            "S_star"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Clamped impaction ratio (slinn_collection_efficiency, src line 344): max(0, St-S*)/(max(0, St-S*) + 2/3). The max(0, ·) keeps safe_ratio non-negative so the downstream sqrt(safe_ratio) in E_imp_unscaled is real-valued, and makes safe_ratio exactly 0 when St ≤ S*.",
+                    "lhs": "safe_ratio",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "max",
+                                "args": [
+                                    0,
+                                    "stokes_diff"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "max",
+                                        "args": [
+                                            0,
+                                            "stokes_diff"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            2,
+                                            3
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Particle-density correction factor for the impaction term (slinn_collection_efficiency, src line 345; Seinfeld & Pandis p. 950): density_scaling = sqrt(ρ_w/ρ_p)",
+                    "lhs": "density_scaling",
+                    "rhs": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "ρ_w_sp",
+                                    "ρ_p"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Inertial impaction term before the density correction (slinn_collection_efficiency, src line 347): safe_ratio*sqrt(safe_ratio) = safe_ratio^(3/2). Upstream wraps this in ifelse(St-S* ≤ 0, 0, safe_ratio*sqrt(safe_ratio)) so the term is zero when St ≤ S* (impaction requires sufficient inertia; Seinfeld & Pandis p. 950); the ifelse is omitted because safe_ratio = max(0, St-S*)/(max(0, St-S*) + 2/3) is already exactly 0 when St-S* ≤ 0, so both ifelse branches are bit-identical.",
+                    "lhs": "E_imp_unscaled",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "safe_ratio",
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    "safe_ratio"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Inertial impaction term of the collection efficiency (Eq. 20.53, third line; slinn_collection_efficiency, src line 351): E_imp = E_imp_unscaled*density_scaling",
+                    "lhs": "E_imp",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "E_imp_unscaled",
+                            "density_scaling"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Sum of the three collection-efficiency mechanisms before clamping (slinn_collection_efficiency, src line 353): E_total = E_diff + E_int + E_imp",
+                    "lhs": "E_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "E_diff",
+                            "E_int",
+                            "E_imp"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Collection efficiency clamped to a maximum of 1 (Eq. 20.53; slinn_collection_efficiency, src line 355): E = min(1, E_total). Upstream writes ifelse(E_total > 1, 1, E_total); min(1, E_total) is the identical upper clamp and the spec §4.2-preferred AST encoding of a clamp/limiter.",
+                    "lhs": "E",
+                    "rhs": {
+                        "op": "min",
+                        "args": [
+                            1,
+                            "E_total"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Particle scavenging coefficient for monodisperse raindrops (Eq. 20.57; particle_scavenging_coeff, src line 404): Λ_particle = (3/2)*E*p₀/D_p",
+                    "lhs": "Λ_particle",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            3,
+                                            2
+                                        ]
+                                    },
+                                    "E",
+                                    "p₀"
+                                ]
+                            },
+                            "D_p"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Component defaults: a 1 mm raindrop (D_p = 1e-3 m) falling at U_t = 4 m/s scavenging a 1 µm accumulation-mode aerosol (d_p = 1e-6 m, ρ_p = 1000 kg/m^3) at T = 298 K under a 1 mm/h precipitation rate (p₀ = 2.778e-7 m/s). The Stokes number St ≈ 0.026 is below the critical S* ≈ 0.27, so the impaction term is off and the collection efficiency E (~2.6e-4) is the small Brownian + interception sum — a Greenfield-gap value. Λ_particle follows from Eq. 20.57. The system is algebraic, so Λ_particle is re-asserted at t = 1 to confirm time-invariance; Re and S_star anchor the slinn intermediate chain. E matches particle_collection_eff.esm's default_parameters case.",
+                    "parameter_overrides": {
+                        "D_p": 0.001,
+                        "U_t": 4.0,
+                        "d_p": 1e-06,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Re",
+                            "time": 0.0,
+                            "expected": 142.4418604651163
+                        },
+                        {
+                            "variable": "S_star",
+                            "time": 0.0,
+                            "expected": 0.2705072867967095
+                        },
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.0002603198637924316
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 1.0847528724230623e-07
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 1.0,
+                            "expected": 1.0847528724230623e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "aitken_mode_aerosol",
+                    "description": "Small Aitken-mode aerosol (d_p = 10 nm) collected by a 2 mm raindrop falling at 6.5 m/s — the upstream `Slinn Collection Efficiency` small-particle case. Brownian diffusion dominates the collection efficiency; the Stokes number is far below S* so the impaction term is zero. This is the high-efficiency small-particle end of the Slinn curve, with E larger than the accumulation-mode case (upstream assertion E_small > E_medium). E matches particle_collection_eff.esm's aitken_mode_aerosol case.",
+                    "parameter_overrides": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "d_p": 1e-08,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.0006395679831498169
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 1.3325398928926437e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "accumulation_mode_aerosol",
+                    "description": "Accumulation-mode aerosol (d_p = 1 µm) collected by a 2 mm raindrop falling at 6.5 m/s — the upstream `Slinn Collection Efficiency` medium-particle case. This is the Greenfield gap: Brownian diffusion has weakened and inertial impaction has not yet switched on, so the collection efficiency E is at its minimum — smaller than both the aitken_mode and coarse_mode cases at the same raindrop — and Λ_particle is correspondingly small. E matches particle_collection_eff.esm's accumulation_mode_aerosol case.",
+                    "parameter_overrides": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "d_p": 1e-06,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.00012947432904135173
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 2.697597645576563e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "coarse_mode_aerosol",
+                    "description": "Coarse-mode aerosol (d_p = 10 µm) collected by a 2 mm raindrop falling at 6.5 m/s — the upstream `Slinn Collection Efficiency` large-particle case. The Stokes number St ≈ 2.1 now exceeds the critical S* ≈ 0.24, so the inertial impaction term switches on (stokes_diff > 0) and dominates E (~0.64), giving a scavenging coefficient three orders of magnitude above the Greenfield-gap value. St is asserted to confirm it exceeds S*. E matches particle_collection_eff.esm's coarse_mode_aerosol case.",
+                    "parameter_overrides": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "d_p": 1e-05,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 2.0984597530196507
+                        },
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.636198586474696
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 0.00013255197549200292
+                        }
+                    ]
+                },
+                {
+                    "id": "dense_coarse_aerosol",
+                    "description": "Dense coarse-mode aerosol (d_p = 10 µm, ρ_p = 2000 kg/m^3 — roughly mineral dust) collected by a 2 mm raindrop at 6.5 m/s. The doubled density doubles the relaxation time τ and hence the Stokes number relative to coarse_mode_aerosol, but the density correction sqrt(ρ_w/ρ_p) = sqrt(0.5) ≈ 0.707 scales the impaction term back down — exercising the ρ_p ≠ ρ_w branch of the density correction. E matches particle_collection_eff.esm's dense_coarse_aerosol case.",
+                    "parameter_overrides": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "d_p": 1e-05,
+                        "ρ_p": 2000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.5645328086732871
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 0.00011762041068707937
+                        }
+                    ]
+                },
+                {
+                    "id": "efficiency_clamp",
+                    "description": "Large light aerosol (d_p = 50 µm, ρ_p = 500 kg/m^3) collected by a 2 mm raindrop at 6.5 m/s. The large relaxation time gives a high Stokes number and the density correction sqrt(ρ_w/ρ_p) = sqrt(2) ≈ 1.414 amplifies the impaction term so that the unclamped sum E_total ≈ 1.47 exceeds 1. The Eq. 20.53 maximum-of-1 clamp therefore fires and E is pinned to exactly 1.0; Λ_particle then equals the geometric scavenging limit (3/2)·p₀/D_p. E and E_total match particle_collection_eff.esm's efficiency_clamp case.",
+                    "parameter_overrides": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "d_p": 5e-05,
+                        "ρ_p": 500.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "E_total",
+                            "time": 0.0,
+                            "expected": 1.4730112686254653
+                        },
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 0.00020835
+                        }
+                    ]
+                },
+                {
+                    "id": "heavy_precipitation",
+                    "description": "Precipitation rate raised tenfold to 10 mm/h (p₀ = 2.778e-6 m/s), all other parameters at the component defaults. The Slinn collection efficiency E depends only on the raindrop/particle geometry and is independent of p₀, so E is unchanged from default_parameters. Λ_particle = (3/2)·E·p₀/D_p scales linearly with p₀ (Eq. 20.57), so it is exactly ten times the default_parameters value — exercising the p₀ dependence that distinguishes this component from ParticleCollectionEfficiency.",
+                    "parameter_overrides": {
+                        "p₀": 2.778e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "E",
+                            "time": 0.0,
+                            "expected": 0.0002603198637924316
+                        },
+                        {
+                            "variable": "Λ_particle",
+                            "time": 0.0,
+                            "expected": 1.0847528724230622e-06
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "scavenging_spectrum_vs_aerosol_size",
+                    "description": "Slinn (1983) collection efficiency E and the resulting particle scavenging coefficient Λ_particle as a function of aerosol particle diameter, for a 2 mm raindrop falling at 6.5 m/s under a 1 mm/h precipitation rate. Reproduces the canonical below-cloud scavenging spectrum (Seinfeld & Pandis 2006, Fig. 20.13 / Eq. 20.57): Brownian diffusion dominates below ~0.1 µm, inertial impaction above ~1 µm, and the two leave the Greenfield-gap minimum at accumulation-mode sizes.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_p": 0.002,
+                        "U_t": 6.5,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "d_p",
+                                "range": {
+                                    "start": 1e-08,
+                                    "stop": 0.0001,
+                                    "count": 49,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "E_vs_dp",
+                            "type": "line",
+                            "description": "Collection efficiency E as a function of aerosol particle diameter (log-spaced) — the Greenfield-gap U-shape.",
+                            "x": {
+                                "variable": "d_p",
+                                "label": "Aerosol particle diameter (m)"
+                            },
+                            "y": {
+                                "variable": "E",
+                                "label": "Collection efficiency (dimensionless)"
+                            }
+                        },
+                        {
+                            "id": "Lambda_vs_dp",
+                            "type": "line",
+                            "description": "Particle scavenging coefficient Λ_particle as a function of aerosol particle diameter (Eq. 20.57).",
+                            "x": {
+                                "variable": "d_p",
+                                "label": "Aerosol particle diameter (m)"
+                            },
+                            "y": {
+                                "variable": "Λ_particle",
+                                "label": "Scavenging coefficient (1/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "scavenging_over_aerosol_and_raindrop_size",
+                    "description": "Two-dimensional sweep of the particle scavenging coefficient Λ_particle over aerosol particle diameter (10 nm to 100 µm, log-spaced) and raindrop diameter (0.2 mm to 5 mm, log-spaced) at a fixed fall speed U_t = 6.5 m/s and the default precipitation rate. Surfaces the joint control of particle and raindrop size on below-cloud scavenging: per Eq. 20.57 Λ_particle ∝ E/D_p, so small drizzle drops scavenge a given aerosol more efficiently, and the Greenfield gap runs as a low-Λ valley across the accumulation-mode column.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "U_t": 6.5,
+                        "ρ_p": 1000.0,
+                        "T": 298.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "d_p",
+                                "range": {
+                                    "start": 1e-08,
+                                    "stop": 0.0001,
+                                    "count": 15,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "D_p",
+                                "range": {
+                                    "start": 0.0002,
+                                    "stop": 0.005,
+                                    "count": 15,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Lambda_heatmap",
+                            "type": "heatmap",
+                            "description": "Particle scavenging coefficient Λ_particle as a function of aerosol particle diameter and raindrop diameter.",
+                            "x": {
+                                "variable": "d_p",
+                                "label": "Aerosol particle diameter (m)"
+                            },
+                            "y": {
+                                "variable": "D_p",
+                                "label": "Raindrop diameter (m)"
+                            },
+                            "value": {
+                                "variable": "Λ_particle",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
