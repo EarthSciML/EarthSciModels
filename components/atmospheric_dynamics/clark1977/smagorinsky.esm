@@ -1,0 +1,252 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SmagorinskyTurbulence",
+        "description": "Smagorinsky (1963) subgrid-scale turbulence closure as used in Clark (1977), 'A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation', J. Comput. Phys. 24, 186-215. A diagnostic (purely algebraic) eddy-viscosity scheme: from the six independent components of the resolved-flow deformation tensor (D11, D22, D33, D12, D13, D23; Eq. 2.16) and the grid filter width Δ_grid it computes the total deformation magnitude |Def| (Eq. 2.18), the Smagorinsky eddy viscosity coefficient K_M = (k·Δ)²·|Def| (Eq. 2.17), and the turbulent heat diffusivity K_H, which Clark sets equal to the eddy viscosity (Eq. 2.19, unit turbulent Prandtl number). The model has 3 algebraic variables (no time integration), 3 equations, and 9 parameters (2 physical constants — the Smagorinsky constant k = 0.25 and a unit reference deformation rate — plus 7 inputs). All quantities are SI. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:214 (`SmagorinskyTurbulence` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "turbulence",
+            "subgrid-scale",
+            "smagorinsky",
+            "clark-1977",
+            "eddy-viscosity",
+            "algebraic-system"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-oj6q)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215 — the Smagorinsky turbulence closure is Section 2, Eqs. 2.15-2.19: the Reynolds-stress / deformation-tensor relation (Eqs. 2.15-2.16), the eddy viscosity coefficient (Eq. 2.17), the total deformation magnitude (Eq. 2.18), and the turbulent heat diffusivity K_H = K_M (Eq. 2.19)."
+            },
+            {
+                "citation": "Smagorinsky, J. (1963). General Circulation Experiments with the Primitive Equations: I. The Basic Experiment. Monthly Weather Review, 91(3), 99-164 — the original subgrid-scale eddy-viscosity closure relating the turbulent mixing coefficient to the resolved-flow deformation rate and the square of the grid length."
+            }
+        ]
+    },
+    "models": {
+        "SmagorinskyTurbulence": {
+            "reference": {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215, Section 2 (Eqs. 2.15-2.19).",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/clark1977.jl:214\n\nUpstream `SmagorinskyTurbulence` is an MTK `@component` returning `System(eqs, t; name)` with 2 `@constants` (k_smag, Def_ref), 7 `@parameters` (Δ_grid, D11, D22, D33, D12, D13, D23), 3 `@variables` (Def, K_M, K_H), and 3 equations. Every equation is algebraic — there is no `D(...)` time derivative anywhere — so the system is a diagnostic subgrid-scale turbulence closure: given the resolved-flow deformation tensor it returns the eddy viscosity and the turbulent heat diffusivity by direct substitution.\n\nStructural shape (matches upstream test `SmagorinskyTurbulence Structure`, test/clark1977_test.jl:211-216): `length(unknowns()) == 3`, `length(equations()) == 3`. The .esm preserves this exactly — 3 `type: state` variables and 3 entries in `equations`. The 2 MTK `@constants` and the 7 `@parameters` together appear in `ModelingToolkit.parameters(sys)`, so all 9 are encoded as `type: parameter`; the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters — the same treatment used in the sibling algebraic migrations surface_flux.esm and general_circulation.esm. All 9 parameters occur in the equation set, so `System(eqs, t)` collects every one of them (no unused-parameter pruning is needed).\n\nThe 3 `@variables` are encoded as `type: state` and carry no `default`: each is the LHS of one non-differential equation — an algebraic state determined by its equation, not initial-valued. After `mtkcompile` the upstream system moves all 3 to its `observed` set; the canonical Python runner resolves them through its topological algebraic-state substitution loop — the equation set is a strict DAG: Def depends only on parameters, K_M on Def, K_H on K_M.\n\nLocal intermediate (not a variable): the upstream component defines a plain Julia local `Def_sq_dimless = (0.5·(D11²+D22²+D33²) + D12²+D13²+D23²) / Def_ref²` — the dimensionless squared deformation. It is neither a `@variable` nor a `@parameter`, so it is NOT carried as a 4th variable (that would break the `length(unknowns()) == 3` structural invariant). It is inlined verbatim inside the `Def` equation.\n\nEquation set (matches src/clark1977.jl:214-272 verbatim):\n  Def = Def_ref·sqrt((0.5·(D11²+D22²+D33²) + D12²+D13²+D23²)/Def_ref²)  — Eq. 2.18, total deformation magnitude |Def|.\n  K_M = (k_smag·Δ_grid)²·Def                                            — Eq. 2.17, Smagorinsky eddy viscosity coefficient.\n  K_H = K_M                                                              — Eq. 2.19, turbulent heat diffusivity, assumed equal to the eddy viscosity.\nThe `sqrt`, `^`, `*`, `/`, `+` ops are all first-class ESS expression ops (esm-schema.json ExpressionNode op enum).\n\nDimensional-consistency device: the upstream author divides the squared deformation by Def_ref² (Def_ref = 1 s⁻¹) before the `sqrt` and multiplies by Def_ref after it, so the `sqrt` operates on a dimensionless argument and MTK's unit checker accepts Eq. 2.18. Numerically Def_ref = 1 makes the device the identity; it is preserved verbatim so the migrated equation matches the upstream source and the parameter count stays at 9. The ESS runners do no dimensional analysis, so Def_ref simply evaluates as 1.0.\n\nWell-posedness (no singularities): the `sqrt` argument 0.5·(D11²+D22²+D33²)+D12²+D13²+D23² is a sum of squares, ≥ 0 for every real input, so `sqrt` is always real and finite; the divisor Def_ref² = 1 is a nonzero constant. At zero deformation (all D = 0) the argument is exactly 0 and Def = K_M = K_H = 0 — a regular point, not a singularity, since sqrt(0) = 0 is finite. Every variable is therefore a finite closed-form function of the parameters at every test point, so all inline tests are simulated directly (unlike general_circulation.esm, this model has no 0/0 point to avoid).\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): a diagnostic algebraic system with no ODE integration — the assertion values are the closed-form evaluation of the upstream equations in IEEE-754 double precision. rel=1e-6 covers float64 round-off in the closed-form expressions (sqrt, ^, divisions) and any sub-ULP libm difference between the Julia walker and the Python gate-of-record; abs=1e-9 covers the intended exact zeros — Def = K_M = K_H = 0 under zero deformation — for which a pure relative bound is undefined. This rel/abs pair is the same one used by the sibling algebraic migrations surface_flux.esm and general_circulation.esm.\n\nUpstream test reproduction. The structural test lives in the live test file (test/clark1977_test.jl:211-216); the numerical configurations come from `test/clark1977_test.jl.backup:218-283`, the pre-refactor full Smagorinsky suite (the live file keeps only the structural check after the test file's PDE-focused refactor — both files are committed in the upstream repo at the pinned SHA). Each inline test pins all 3 variables; assertion values are the closed-form evaluation of the upstream equations:\n- `SmagorinskyTurbulence Structure` (clark1977_test.jl:211-216) — reproduced by the structural shape: 3 `type: state` variables, 9 `type: parameter` variables, 3 entries in `equations`.\n- `Zero Deformation` (backup :232-240) — reproduced by `zero_deformation`: all six deformation components at their default 0 give Def = 0, hence K_M = K_H = 0. This is also the all-defaults configuration.\n- `Known Values` (backup :242-256) — reproduced by `known_values`: a single shear component D13 = 0.01 s⁻¹ at the default grid Δ_grid = 600 m gives Def = 0.01 s⁻¹ and K_M = (0.25·600)²·0.01 = 225 m²/s, matching the upstream hand-computed `(0.25*600.0)^2 * 0.01` check; K_H = K_M.\n- `Full Deformation` (backup :258-281) — reproduced by `full_deformation`: the full six-component tensor (D11 = 0.001, D22 = −0.001, D33 = 0, D12 = 0.005, D13 = 0.003, D23 = 0.002 s⁻¹) gives Def = sqrt(0.5·(D11²+D22²+D33²)+D12²+D13²+D23²) = 0.0062449… s⁻¹, the exact value the upstream `Def_expected` computes, and K_M > 0 (here pinned to its exact value 140.5124… m²/s, a strictly stronger assertion).\n`grid_resolution_scaling` additionally extends the upstream coverage: the same D13 = 0.01 s⁻¹ shear at a finer grid Δ_grid = 300 m gives the unchanged Def = 0.01 s⁻¹ but K_M = (0.25·300)²·0.01 = 56.25 m²/s — exactly one quarter of the 225 m²/s value at Δ = 600 m — verifying the quadratic dependence of the eddy viscosity on the grid filter width Δ that Eq. 2.17 predicts. Δ_grid is the one parameter the three upstream tests never vary, so this test closes that coverage gap.\n\nUnit balance (verified): the `sqrt` argument is (1/s)²/(1/s)² = dimensionless, so sqrt(·) is dimensionless and Def = Def_ref·sqrt(·) carries the units of Def_ref, 1/s; (k_smag·Δ_grid)² = (1·m)² = m², so K_M = m²·(1/s) = m²/s; K_H = K_M = m²/s. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-6,
+                "abs": 1.0e-9
+            },
+            "variables": {
+                "k_smag": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.25,
+                    "description": "Smagorinsky constant (dimensionless), Eq. 2.17. Upstream MTK `@constants`; sets the eddy viscosity through K_M = (k·Δ)²·|Def|. Clark (1977) uses k = 0.25."
+                },
+                "Def_ref": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 1.0,
+                    "description": "Reference deformation rate (1 s⁻¹). Upstream MTK `@constants`; a dimensional-consistency device — the squared deformation is divided by Def_ref² before the square root in Eq. 2.18 and the result multiplied by Def_ref, so the `sqrt` acts on a dimensionless argument. Numerically the identity (Def_ref = 1), so it does not change any computed value."
+                },
+                "Δ_grid": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 600.0,
+                    "description": "Grid resolution — the subgrid-scale filter width Δ in the Smagorinsky eddy viscosity (Eq. 2.17). K_M scales with Δ²."
+                },
+                "D11": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₁₁ (Eq. 2.16), the normal-strain rate along x. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                },
+                "D22": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₂₂ (Eq. 2.16), the normal-strain rate along y. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                },
+                "D33": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₃₃ (Eq. 2.16), the normal-strain rate along z. Enters the total deformation magnitude (Eq. 2.18) through the trace term ½(D₁₁²+D₂₂²+D₃₃²)."
+                },
+                "D12": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₁₂ (Eq. 2.16), the x-y shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₁₂²."
+                },
+                "D13": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₁₃ (Eq. 2.16), the x-z shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₁₃²."
+                },
+                "D23": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0,
+                    "description": "Deformation tensor component D₂₃ (Eq. 2.16), the y-z shear-strain rate. Enters the total deformation magnitude (Eq. 2.18) as the full square D₂₃²."
+                },
+                "Def": {
+                    "type": "state",
+                    "units": "1/s",
+                    "description": "Total deformation magnitude |Def| (Eq. 2.18): |Def| = sqrt[½(D₁₁²+D₂₂²+D₃₃²) + D₁₂²+D₁₃²+D₂₃²]. The scalar strain-rate invariant that drives the Smagorinsky eddy viscosity."
+                },
+                "K_M": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Eddy viscosity coefficient (Eq. 2.17): K_M = (k_smag·Δ_grid)²·|Def|. The subgrid-scale turbulent momentum diffusivity; grows with the resolved deformation rate and the square of the grid filter width."
+                },
+                "K_H": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Turbulent heat diffusivity (Eq. 2.19): K_H = K_M. Clark (1977) assumes the turbulent Prandtl number is unity, so the eddy heat diffusivity equals the eddy viscosity."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 2.18 — total deformation magnitude |Def| = Def_ref·sqrt[(½(D11²+D22²+D33²) + D12²+D13²+D23²)/Def_ref²]. The dimensionless squared deformation is the upstream Julia local `Def_sq_dimless`, inlined here. Def_ref = 1 s⁻¹ makes the /Def_ref² and ·Def_ref numerically the identity; they only keep the sqrt argument dimensionless.",
+                    "lhs": "Def",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "Def_ref",
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            0.5,
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    {"op": "^", "args": ["D11", 2.0]},
+                                                                    {"op": "^", "args": ["D22", 2.0]},
+                                                                    {"op": "^", "args": ["D33", 2.0]}
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {"op": "^", "args": ["D12", 2.0]},
+                                                    {"op": "^", "args": ["D13", 2.0]},
+                                                    {"op": "^", "args": ["D23", 2.0]}
+                                                ]
+                                            },
+                                            {"op": "^", "args": ["Def_ref", 2.0]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.17 — Smagorinsky eddy viscosity coefficient K_M = (k·Δ)²·|Def|, with k the Smagorinsky constant and Δ the grid filter width.",
+                    "lhs": "K_M",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    {"op": "*", "args": ["k_smag", "Δ_grid"]},
+                                    2.0
+                                ]
+                            },
+                            "Def"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.19 — turbulent heat diffusivity, set equal to the eddy viscosity (unit turbulent Prandtl number).",
+                    "lhs": "K_H",
+                    "rhs": "K_M"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "zero_deformation",
+                    "description": "Reproduces the upstream `Zero Deformation` test (test/clark1977_test.jl.backup:232-240). With every deformation-tensor component at its default value of 0 the total deformation magnitude vanishes (Def = 0), and the eddy viscosity and heat diffusivity vanish with it (K_M = K_H = 0). This is also the all-defaults configuration (Δ_grid = 600 m, k_smag = 0.25). Pins all 3 variables.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Def", "time": 0.0, "expected": 0.0},
+                        {"variable": "K_M", "time": 0.0, "expected": 0.0},
+                        {"variable": "K_H", "time": 0.0, "expected": 0.0}
+                    ]
+                },
+                {
+                    "id": "known_values",
+                    "description": "Reproduces the upstream `Known Values` test (test/clark1977_test.jl.backup:242-256). A single shear component D13 = 0.01 s⁻¹ (all other deformation components 0) at the default grid Δ_grid = 600 m gives the total deformation magnitude Def = sqrt(D13²) = 0.01 s⁻¹ and the eddy viscosity K_M = (0.25·600)²·0.01 = 225 m²/s — the value the upstream test verifies against the hand-written `(0.25*600.0)^2 * 0.01`. The heat diffusivity K_H equals K_M. Pins all 3 variables.",
+                    "parameter_overrides": {"D13": 0.01, "Δ_grid": 600.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Def", "time": 0.0, "expected": 0.01},
+                        {"variable": "K_M", "time": 0.0, "expected": 225.0},
+                        {"variable": "K_H", "time": 0.0, "expected": 225.0}
+                    ]
+                },
+                {
+                    "id": "full_deformation",
+                    "description": "Reproduces the upstream `Full Deformation` test (test/clark1977_test.jl.backup:258-281). The full six-component deformation tensor (D11 = 0.001, D22 = −0.001, D33 = 0, D12 = 0.005, D13 = 0.003, D23 = 0.002 s⁻¹) at Δ_grid = 600 m gives Def = sqrt(0.5·(D11²+D22²+D33²) + D12²+D13²+D23²) = sqrt(3.9e-5) = 0.006244997998398399 s⁻¹ — the exact value the upstream `Def_expected` computes — and a positive eddy viscosity K_M = (0.25·600)²·Def = 140.512454963964 m²/s (the upstream test asserts only K_M > 0; the .esm pins its exact value, a strictly stronger check). K_H = K_M. Pins all 3 variables.",
+                    "parameter_overrides": {"D11": 0.001, "D22": -0.001, "D33": 0.0, "D12": 0.005, "D13": 0.003, "D23": 0.002, "Δ_grid": 600.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Def", "time": 0.0, "expected": 0.006244997998398399},
+                        {"variable": "K_M", "time": 0.0, "expected": 140.512454963964},
+                        {"variable": "K_H", "time": 0.0, "expected": 140.512454963964}
+                    ]
+                },
+                {
+                    "id": "grid_resolution_scaling",
+                    "description": "Extends the upstream coverage: the same single shear component D13 = 0.01 s⁻¹ as the `known_values` test but at a finer grid Δ_grid = 300 m. The total deformation magnitude is unchanged (Def = 0.01 s⁻¹ — it does not depend on Δ), while the eddy viscosity K_M = (0.25·300)²·0.01 = 56.25 m²/s is exactly one quarter of the 225 m²/s obtained at Δ = 600 m, verifying the quadratic dependence of K_M on the grid filter width Δ predicted by Eq. 2.17. Δ_grid is the one parameter the three upstream tests hold fixed. Pins all 3 variables.",
+                    "parameter_overrides": {"D13": 0.01, "Δ_grid": 300.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Def", "time": 0.0, "expected": 0.01},
+                        {"variable": "K_M", "time": 0.0, "expected": 56.25},
+                        {"variable": "K_H", "time": 0.0, "expected": 56.25}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "eddy_viscosity_vs_shear",
+                    "description": "Reproduces the documented 'Smagorinsky Eddy Viscosity' figure from the AtmosphericDynamics.jl Clark (1977) page (docs/src/clark1977.md). The dominant shear deformation D13 is swept from 0 to 0.02 s⁻¹ (the other five deformation components held at 0) with the grid filter width fixed at Δ_grid = 600 m. With a single nonzero component the total deformation magnitude is Def = D13, so the eddy viscosity K_M = (k·Δ)²·D13 rises linearly with the shear from 0 — the documented response of the Smagorinsky closure (Eq. 2.17, k = 0.25, Δ = 600 m).",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {"Δ_grid": 600.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D13",
+                                "range": {"start": 0.0, "stop": 0.02, "count": 21, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "KM_vs_D13",
+                            "type": "line",
+                            "description": "Smagorinsky eddy viscosity K_M as a function of the dominant shear deformation D₁₃, for Δ = 600 m and k = 0.25 — a linear rise from zero, the resolved strain rate setting the subgrid-scale turbulent mixing.",
+                            "x": {"variable": "D13", "label": "Shear deformation D₁₃ (1/s)"},
+                            "y": {"variable": "K_M", "label": "Eddy viscosity K_M (m^2/s)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
