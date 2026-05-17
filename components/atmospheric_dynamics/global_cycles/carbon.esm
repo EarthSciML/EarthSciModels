@@ -1,0 +1,725 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CarbonCycle",
+        "description": "Seven-reservoir model of the global carbon cycle from Schmitz (2002), as presented in Seinfeld & Pandis (2006) Ch. 22 (Global Cycles: Sulfur and Carbon), Table 22.1 and Fig. 22.6, pp. 1009-1015. Carbon is tracked as a mass (kg) in seven reservoirs — atmosphere (M1), warm ocean surface waters (M2), cool ocean surface waters (M3), deep ocean waters (M4), terrestrial biota (M5), soils and detritus (M6), and fossil fuel reserves (M7) — plus a dimensionless land-use-change scaling factor G that modulates biotic uptake (Eq. 22.21). Inter-reservoir transport uses first-order exchange coefficients k_ij (Table 22.1), except three nonlinear fluxes carried as auxiliary algebraic variables: the saturating atmosphere-to-biota photosynthetic uptake F15 (Eq. 22.19) and the carbonate-buffer power-law ocean-to-atmosphere outgassing fluxes F21 and F31 (Eq. 22.18). Three external forcing parameters drive the anthropogenic perturbation — fossil fuel emissions Ff, deforestation Fd, and reforestation Fr — all zero by default, recovering the preindustrial (~1850) steady state. The system is an 11-unknown ODE model (8 time-differentiated reservoir states M1-M7,G + 3 algebraic flux states F15/F21/F31) with 11 equations and 25 parameters (22 first-order/derived constants + 3 forcing fluxes). All quantities are SI (kg for mass, s for time); the source material's Pg C (1 Pg = 1e12 kg) and years (1 yr = 31557600 s) are converted to maintain unit consistency. Migrated from AtmosphericDynamics.jl@816cc391 src/global_cycles.jl:115 (`CarbonCycle` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "global-cycles",
+            "carbon-cycle",
+            "biogeochemistry",
+            "ode-system",
+            "seinfeld-pandis",
+            "schmitz-2002"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-x6ds)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 22 (Global Cycles: Sulfur and Carbon), Table 22.1 and Figure 22.6, pp. 1009-1015 — the seven-reservoir global carbon cycle, first-order exchange coefficients, nonlinear ocean outgassing (Eq. 22.18), photosynthetic uptake (Eq. 22.19), and the land-use-change scaling factor (Eq. 22.21)."
+            },
+            {
+                "citation": "Schmitz, R. A. (2002). The Earth's carbon cycle: A chemical engineering perspective. Chemical Engineering Education, 36(4), 296-309 — original formulation of the seven-box global carbon cycle model with preindustrial steady-state reservoir masses and exchange coefficients."
+            }
+        ]
+    },
+    "models": {
+        "CarbonCycle": {
+            "reference": {
+                "citation": "Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Ch. 22, Table 22.1 / Fig. 22.6, pp. 1009-1015; after Schmitz, R. A. (2002), Chem. Eng. Educ. 36(4), 296.",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/global_cycles.jl:115\n\nUpstream `CarbonCycle` is an MTK `@component` returning `System(eqs, t; name)` with 3 `@parameters` (Ff, Fd, Fr — external anthropogenic forcing fluxes, kg/s), 22 `@constants` (10 first-order inter-reservoir exchange coefficients k_ij; 2 carbonate-buffer exponents β2/β3; the biotic uptake threshold/saturation pair γ_c/Γ_c; the land-use fractions a_d/a_r; the derived photosynthetic-uptake rate k15; the preindustrial ocean reference fluxes F21_pre/F31_pre; and the preindustrial normalization masses M2_pre/M3_pre/M5_0), 11 `@variables` (the 7 reservoir masses M1-M7, the land-use scaling factor G, and the 3 auxiliary flux variables F15_flux/F21_flux/F31_flux), and 11 equations — 8 first-order ODEs D(M1..M7), D(G) and 3 algebraic flux definitions. It implements Schmitz (2002) as presented in Seinfeld & Pandis (2006) Ch. 22 Table 22.1 / Eqs. 22.18-22.21.\n\nVariable-classification convention: MTK reports `length(unknowns(CarbonCycle())) == 11`, `length(parameters(CarbonCycle())) == 25`, `length(equations(CarbonCycle())) == 11` (upstream test `CarbonCycle - Structural`, test/global_cycles_test.jl:107-116). The .esm preserves this exactly. All 11 `@variables` are encoded as `type: state`: M1-M7 and G are genuine time-differentiated ODE states and carry the upstream initializer as `default` (the preindustrial initial condition); F15_flux, F21_flux, F31_flux are algebraic states — each is the LHS of one non-differential equation — and carry no `default` (they are determined by the algebraic equations, not initial-valued). After `mtkcompile` the three flux states move to the system's `observed` set; the canonical Python runner resolves them through its topological algebraic-state substitution loop. The 22 MTK `@constants` appear in `ModelingToolkit.parameters(sys)` alongside the 3 `@parameters`, so all 25 are encoded as `type: parameter`; only Ff/Fd/Fr are intended to be varied (the constants reproduce Table 22.1 and should be treated as fixed).\n\nUnit conversion (SI throughout): the source material (Schmitz 2002 / S&P Table 22.1) is stated in Pg C and per-year rates. The upstream @component converts every quantity to SI at construction — masses to kg (1 Pg = 1e12 kg) and rates to s^-1 / kg s^-1 (1 yr = 31557600 s, the Julian year). The .esm `default` values are the post-conversion SI numbers: e.g. k12 = 0.0931 yr^-1 / 31557600 = 2.950160975486095e-9 s^-1; k15 = 147.27e12 kg / 31557600 s = 4666704.692372044 kg/s; M1(0) = 612 Pg C = 6.12e14 kg. k15 is itself a derived constant: at the preindustrial steady state F15 = 100 Pg C/yr, M1 = 612 Pg, γ = 62 Pg, Γ = 198 Pg, so k15 = 100·(M1+Γ)/(M1-γ) = 100·810/550 ≈ 147.27 Pg C/yr (Eq. 22.19 inverted).\n\nEquation set (matches src/global_cycles.jl:213-251 verbatim, re-grouped as positive-minus-negative sums so every term carries an explicit sign without a unary-minus node):\n  F15_flux = k15·G·max(0, (M1-γ_c)/(M1+Γ_c))         — Eq. 22.19, saturating photosynthetic uptake; the max(0,·) floor zeroes uptake when atmospheric carbon drops below the threshold γ_c.\n  F21_flux = F21_pre·(M2/M2_pre)^β2                   — Eq. 22.18, nonlinear (carbonate-buffer) warm-ocean outgassing.\n  F31_flux = F31_pre·(M3/M3_pre)^β3                   — Eq. 22.18, nonlinear cool-ocean outgassing.\n  D(M1) = F21+F31+k51·M5+k61·M6+Ff+Fd − ((k12+k13)·M1+F15+Fr)   — Table 22.1 Eq. 1, atmosphere.\n  D(M2) = k12·M1+k42·M4 − ((k23+k24)·M2+F21)                    — Table 22.1 Eq. 2, warm ocean.\n  D(M3) = k13·M1+k23·M2+k43·M4 − (k34·M3+F31)                   — Table 22.1 Eq. 3, cool ocean.\n  D(M4) = k24·M2+k34·M3 − (k42+k43)·M4                          — Table 22.1 Eq. 4, deep ocean.\n  D(M5) = F15+Fr − ((k51+k56)·M5+Fd)                            — Table 22.1 Eq. 5, terrestrial biota.\n  D(M6) = k56·M5 − k61·M6                                       — Table 22.1 Eq. 6, soils/detritus.\n  D(M7) = −Ff                                                   — Table 22.1 Eq. 7, fossil fuel reserves.\n  D(G)  = (a_r·Fr − a_d·Fd)/M5_0                                — Eq. 22.21, land-use-change scaling factor (the upstream −(a_d·Fd−a_r·Fr)/M5_0 distributed).\n\nThe `max` operator at equations[0].rhs is a first-class ESM expression op (esm-schema.json ExpressionNode op enum; AGENTS.md §1 lists max among the single-sourced ops) and round-trips through every canonical runner — 21 committed .esm files use it. The `mtk2esm` scaffolder emits a spurious gt-p3ep gap warning for `max`; this is a known false positive (gt-p3ep tracks @register_symbolic lookup tables, not arithmetic ops) and the migration tracker classifies this component `blocking_gap: none`, so this .esm carries no schema-gap marker.\n\nTolerance rationale (model-level rel=1e-6): all numeric assertions are pinned from a reference simulation of the upstream `CarbonCycle()` MTK system (Tsit5, reltol=1e-10, abstol=1e-12) — the genuine source model, not a re-export of this file. rel=1e-6 absorbs the integrator-choice difference between the Julia walker (Tsit5) and the Python gate-of-record (scipy LSODA, rtol=1e-10, atol=1e-14) over the long carbon-cycle integrations (10-100 model years = 3.2e8-3.2e9 s); it is the spec §6.6.4 default and matches the sibling ODE-migration convention (methane_ode.esm). The reservoir masses span 1.4e14-3.7e16 kg and the fluxes 5e5-3.5e6 kg/s, all far above any abstol floor, so rel alone gates every assertion.\n\nUpstream test reproduction (test/global_cycles_test.jl):\n- `CarbonCycle - Structural` (lines 107-116) — reproduced by the structural shape: 11 `type: state` variables, 25 `type: parameter` variables, 11 entries in `equations`.\n- `CarbonCycle - Preindustrial Steady State` (lines 118-149, Ff=Fd=Fr=0, 10 yr, every reservoir within rtol=0.01 of its initial value) — reproduced and tightened by tests `preindustrial_initial_state` and `preindustrial_steady_state`, which pin M1-M7,G,F15/F21/F31 at t=0, 5 yr, 10 yr.\n- `CarbonCycle - Response to Fossil Fuel Emissions` (lines 151-185, Ff=5 Pg C/yr, 100 yr, M1 increases, M7 decreases, M7 depletes by exactly 500 Pg C, total carbon conserved to rtol=1e-6) — reproduced by `fossil_fuel_emissions_5pg`; the pinned M7 = 4.8e15 kg confirms the 500 Pg C (5.0e14 kg) drawdown, and summing the pinned M1-M7 at t=0 vs t=100 yr confirms conservation.\n- `CarbonCycle - Qualitative Response` (lines 187-212, Ff=3 Pg C/yr, 50 yr, M1 increases, warm/cool ocean both absorb CO2) — reproduced by `fossil_fuel_emissions_3pg`; the pinned M2 > 7.30e14 and M3 > 1.40e14 confirm ocean uptake.\nTests `deforestation_response` and `reforestation_response` extend coverage to the Fd and Fr forcing channels and the land-use scaling factor G: at Fd=Fr=2 Pg C/yr over 50 yr, G reaches 1 − 0.23·100/580 = 0.96034 (deforestation) and 1 + 1.0·100/580 = 1.17241 (reforestation), the closed-form integral of the constant-forcing D(G) equation.\n\nUnit balance (verified): every equation balances dimensionally. The k_ij·M terms are s^-1·kg = kg/s; F15/F21/F31, Ff, Fd, Fr are kg/s; so all D(M) ODEs are kg/s ✓. D(G) is (1·kg/s)/kg = s^-1 with G dimensionless ✓. In F15, (M1-γ_c)/(M1+Γ_c) is kg/kg = dimensionless and k15·G is kg/s ✓. In F21/F31, (M/M_pre)^β is dimensionless and F_pre is kg/s ✓. SI (kg, s) throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "M1": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 612000000000000.0,
+                    "description": "Carbon mass in the atmosphere [kg] — reservoir 1 of the Schmitz (2002) seven-box model. Preindustrial initial condition 612 Pg C = 6.12e14 kg (Seinfeld & Pandis Table 22.1). Driven by ocean outgassing, biotic and soil respiration, and anthropogenic forcing; drawn down by ocean uptake and photosynthesis."
+                },
+                "M2": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 730000000000000.0,
+                    "description": "Carbon mass in warm ocean surface waters [kg] — reservoir 2. Preindustrial initial condition 730 Pg C = 7.30e14 kg (Table 22.1)."
+                },
+                "M3": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 140000000000000.0,
+                    "description": "Carbon mass in cool ocean surface waters [kg] — reservoir 3. Preindustrial initial condition 140 Pg C = 1.40e14 kg (Table 22.1)."
+                },
+                "M4": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 37000000000000000.0,
+                    "description": "Carbon mass in deep ocean waters [kg] — reservoir 4, the dominant carbon store. Preindustrial initial condition 37000 Pg C = 3.70e16 kg (Table 22.1)."
+                },
+                "M5": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 580000000000000.0,
+                    "description": "Carbon mass in terrestrial biota [kg] — reservoir 5. Preindustrial initial condition 580 Pg C = 5.80e14 kg (Table 22.1)."
+                },
+                "M6": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 1500000000000000.0,
+                    "description": "Carbon mass in soils and detritus [kg] — reservoir 6. Preindustrial initial condition 1500 Pg C = 1.50e15 kg (Table 22.1)."
+                },
+                "M7": {
+                    "type": "state",
+                    "units": "kg",
+                    "default": 5300000000000000.0,
+                    "description": "Carbon mass remaining in fossil fuel reserves [kg] — reservoir 7. Preindustrial initial condition 5300 Pg C = 5.30e15 kg (Table 22.1). Depleted at rate Ff by fossil fuel combustion (D(M7) = −Ff)."
+                },
+                "G": {
+                    "type": "state",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Land-use-change scaling factor for biotic uptake [dimensionless] — Eq. 22.21. Starts at 1 (preindustrial). Permanent deforestation lowers it, reforestation raises it, multiplicatively scaling the photosynthetic uptake flux F15."
+                },
+                "F15_flux": {
+                    "type": "state",
+                    "units": "kg/s",
+                    "description": "Atmosphere → biota photosynthetic uptake flux [kg/s] — Eq. 22.19. A saturating function of atmospheric carbon M1, scaled by the land-use factor G; the max(0,·) floor zeroes uptake if M1 drops below the threshold γ_c. Algebraic variable (no initial condition); ≈ 100 Pg C/yr at the preindustrial state."
+                },
+                "F21_flux": {
+                    "type": "state",
+                    "units": "kg/s",
+                    "description": "Warm ocean → atmosphere CO2 outgassing flux [kg/s] — Eq. 22.18. A nonlinear carbonate-buffer power law in warm ocean carbon M2 with exponent β2. Algebraic variable (no initial condition); = F21_pre at the preindustrial state (M2 = M2_pre)."
+                },
+                "F31_flux": {
+                    "type": "state",
+                    "units": "kg/s",
+                    "description": "Cool ocean → atmosphere CO2 outgassing flux [kg/s] — Eq. 22.18. A nonlinear carbonate-buffer power law in cool ocean carbon M3 with exponent β3. Algebraic variable (no initial condition); = F31_pre at the preindustrial state (M3 = M3_pre)."
+                },
+                "k12": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.950160975486095e-09,
+                    "description": "Atmosphere → warm ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.0931 yr^-1 converted to SI (÷ 31557600 s/yr)."
+                },
+                "k13": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 9.854995310163003e-10,
+                    "description": "Atmosphere → cool ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.0311 yr^-1 converted to SI."
+                },
+                "k23": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.474839658275661e-09,
+                    "description": "Warm ocean → cool ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.0781 yr^-1 converted to SI."
+                },
+                "k24": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 5.196846401500749e-10,
+                    "description": "Warm ocean → deep ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.0164 yr^-1 converted to SI."
+                },
+                "k34": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.262529469921667e-08,
+                    "description": "Cool ocean → deep ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.714 yr^-1 converted to SI."
+                },
+                "k42": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 5.989048596851471e-11,
+                    "description": "Deep ocean → warm ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.00189 yr^-1 converted to SI."
+                },
+                "k43": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 3.6124420107993004e-11,
+                    "description": "Deep ocean → cool ocean first-order transfer coefficient [s^-1] — Table 22.1: 0.00114 yr^-1 converted to SI."
+                },
+                "k51": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.7315131695692954e-09,
+                    "description": "Terrestrial biota → atmosphere first-order transfer coefficient [s^-1] — Table 22.1: 0.0862 yr^-1 converted to SI (biotic respiration)."
+                },
+                "k56": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 2.7315131695692954e-09,
+                    "description": "Terrestrial biota → soils/detritus first-order transfer coefficient [s^-1] — Table 22.1: 0.0862 yr^-1 converted to SI (litterfall)."
+                },
+                "k61": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.055213324207164e-09,
+                    "description": "Soils/detritus → atmosphere first-order transfer coefficient [s^-1] — Table 22.1: 0.0333 yr^-1 converted to SI (soil respiration)."
+                },
+                "β2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 9.4,
+                    "description": "Warm ocean carbonate-buffer exponent [dimensionless] — Table 22.1 = 9.4. Sets the nonlinearity of warm-ocean CO2 outgassing: F21 ∝ (M2/M2_pre)^β2."
+                },
+                "β3": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 10.2,
+                    "description": "Cool ocean carbonate-buffer exponent [dimensionless] — Table 22.1 = 10.2. Sets the nonlinearity of cool-ocean CO2 outgassing: F31 ∝ (M3/M3_pre)^β3."
+                },
+                "γ_c": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 62000000000000.0,
+                    "description": "CO2 uptake threshold for biota [kg] — Table 22.1 = 62 Pg C = 6.2e13 kg. Atmospheric carbon below this value yields zero photosynthetic uptake (the max(0,·) floor in Eq. 22.19)."
+                },
+                "Γ_c": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 198000000000000.0,
+                    "description": "CO2 saturation parameter for biota [kg] — Table 22.1 = 198 Pg C = 1.98e14 kg. Sets the half-saturation scale of the photosynthetic uptake response (Eq. 22.19 denominator)."
+                },
+                "a_d": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.23,
+                    "description": "Fraction of deforested area permanently unavailable for regrowth [dimensionless] — Table 22.1 = 0.23. Drives the land-use scaling factor G downward under deforestation (Eq. 22.21)."
+                },
+                "a_r": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Fraction of reforested area that increases biota [dimensionless] — Table 22.1 = 1.0. Drives the land-use scaling factor G upward under reforestation (Eq. 22.21)."
+                },
+                "k15": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 4666704.692372044,
+                    "description": "Atmosphere → biota base photosynthetic uptake rate [kg/s] — derived constant. Calibrated so the preindustrial F15 = 100 Pg C/yr: k15 = 100·(M1+Γ)/(M1−γ) = 100·810/550 ≈ 147.27 Pg C/yr, converted to SI (147.27e12 / 31557600)."
+                },
+                "F21_pre": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 1837909.093213679,
+                    "description": "Preindustrial warm ocean → atmosphere reference flux [kg/s] — Table 22.1: 58 Pg C/yr converted to SI. Prefactor of the F21 carbonate-buffer power law."
+                },
+                "F31_pre": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 570385.5806525211,
+                    "description": "Preindustrial cool ocean → atmosphere reference flux [kg/s] — Table 22.1: 18 Pg C/yr converted to SI. Prefactor of the F31 carbonate-buffer power law."
+                },
+                "M2_pre": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 730000000000000.0,
+                    "description": "Preindustrial warm ocean surface carbon [kg] — 730 Pg C = 7.30e14 kg. Normalization mass for the F21 power law (M2/M2_pre)^β2."
+                },
+                "M3_pre": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 140000000000000.0,
+                    "description": "Preindustrial cool ocean surface carbon [kg] — 140 Pg C = 1.40e14 kg. Normalization mass for the F31 power law (M3/M3_pre)^β3."
+                },
+                "M5_0": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 580000000000000.0,
+                    "description": "Preindustrial terrestrial biota carbon [kg] — 580 Pg C = 5.80e14 kg. Normalization mass in the land-use-change equation for G (Eq. 22.21)."
+                },
+                "Ff": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 0.0,
+                    "description": "Fossil fuel combustion emission flux [kg/s] — external forcing, default 0 (preindustrial). Adds carbon to the atmosphere M1 and depletes the fossil reservoir M7. A value of 5 Pg C/yr corresponds to 5.0e12/31557600 ≈ 1.5844e5 kg/s."
+                },
+                "Fd": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 0.0,
+                    "description": "Deforestation carbon flux [kg/s] — external forcing, default 0. Transfers carbon from terrestrial biota M5 to the atmosphere M1 and lowers the land-use scaling factor G."
+                },
+                "Fr": {
+                    "type": "parameter",
+                    "units": "kg/s",
+                    "default": 0.0,
+                    "description": "Reforestation carbon flux [kg/s] — external forcing, default 0. Transfers carbon from the atmosphere M1 to terrestrial biota M5 and raises the land-use scaling factor G."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 22.19 — atmosphere-to-biota photosynthetic uptake (saturating, land-use-scaled). The max(0, .) floor zeroes uptake when M1 < γ_c.",
+                    "lhs": "F15_flux",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k15",
+                            "G",
+                            {
+                                "op": "max",
+                                "args": [
+                                    0.0,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {"op": "-", "args": ["M1", "γ_c"]},
+                                            {"op": "+", "args": ["M1", "Γ_c"]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 22.18 — nonlinear warm-ocean-to-atmosphere CO2 outgassing (carbonate buffer).",
+                    "lhs": "F21_flux",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "F21_pre",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {"op": "/", "args": ["M2", "M2_pre"]},
+                                    "β2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 22.18 — nonlinear cool-ocean-to-atmosphere CO2 outgassing (carbonate buffer).",
+                    "lhs": "F31_flux",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "F31_pre",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {"op": "/", "args": ["M3", "M3_pre"]},
+                                    "β3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 1 — atmosphere carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M1"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    "F21_flux",
+                                    "F31_flux",
+                                    {"op": "*", "args": ["k51", "M5"]},
+                                    {"op": "*", "args": ["k61", "M6"]},
+                                    "Ff",
+                                    "Fd"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": [{"op": "+", "args": ["k12", "k13"]}, "M1"]},
+                                    "F15_flux",
+                                    "Fr"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 2 — warm ocean surface carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M2"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": ["k12", "M1"]},
+                                    {"op": "*", "args": ["k42", "M4"]}
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": [{"op": "+", "args": ["k23", "k24"]}, "M2"]},
+                                    "F21_flux"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 3 — cool ocean surface carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M3"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": ["k13", "M1"]},
+                                    {"op": "*", "args": ["k23", "M2"]},
+                                    {"op": "*", "args": ["k43", "M4"]}
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": ["k34", "M3"]},
+                                    "F31_flux"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 4 — deep ocean carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M4"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": ["k24", "M2"]},
+                                    {"op": "*", "args": ["k34", "M3"]}
+                                ]
+                            },
+                            {"op": "*", "args": [{"op": "+", "args": ["k42", "k43"]}, "M4"]}
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 5 — terrestrial biota carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M5"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {"op": "+", "args": ["F15_flux", "Fr"]},
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "*", "args": [{"op": "+", "args": ["k51", "k56"]}, "M5"]},
+                                    "Fd"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 6 — soils and detritus carbon balance.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M6"]},
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {"op": "*", "args": ["k56", "M5"]},
+                            {"op": "*", "args": ["k61", "M6"]}
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Table 22.1 Eq. 7 — fossil fuel reserve depletion.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["M7"]},
+                    "rhs": {"op": "*", "args": [-1.0, "Ff"]}
+                },
+                {
+                    "_comment": "Eq. 22.21 — land-use-change scaling factor for biotic uptake.",
+                    "lhs": {"op": "D", "wrt": "t", "args": ["G"]},
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    {"op": "*", "args": ["a_r", "Fr"]},
+                                    {"op": "*", "args": ["a_d", "Fd"]}
+                                ]
+                            },
+                            "M5_0"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "preindustrial_initial_state",
+                    "description": "Preindustrial (~1850) initial state — the Schmitz (2002) / Seinfeld & Pandis Table 22.1 reservoir masses at t=0 with zero anthropogenic forcing. The seven reservoir states M1-M7 and the land-use factor G are at their declared defaults; the three algebraic flux states are evaluated from the t=0 state: F15 ≈ 3.169e6 kg/s ≈ 100 Pg C/yr photosynthetic uptake, F21 = F21_pre (M2/M2_pre = 1), F31 = F31_pre (M3/M3_pre = 1). Pins all 11 variables.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 315576000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 0.0, "expected": 612000000000000.0},
+                        {"variable": "M2", "time": 0.0, "expected": 730000000000000.0},
+                        {"variable": "M3", "time": 0.0, "expected": 140000000000000.0},
+                        {"variable": "M4", "time": 0.0, "expected": 37000000000000000.0},
+                        {"variable": "M5", "time": 0.0, "expected": 580000000000000.0},
+                        {"variable": "M6", "time": 0.0, "expected": 1500000000000000.0},
+                        {"variable": "M7", "time": 0.0, "expected": 5300000000000000.0},
+                        {"variable": "G", "time": 0.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 0.0, "expected": 3168750.099758795},
+                        {"variable": "F21_flux", "time": 0.0, "expected": 1837909.093213679},
+                        {"variable": "F31_flux", "time": 0.0, "expected": 570385.5806525211}
+                    ]
+                },
+                {
+                    "id": "preindustrial_steady_state",
+                    "description": "Reproduces the upstream `CarbonCycle - Preindustrial Steady State` test (test/global_cycles_test.jl:118-149). With zero anthropogenic forcing (Ff=Fd=Fr=0, all defaults) the Schmitz preindustrial state is near-stationary: integrated over 10 model years (3.15576e8 s) every reservoir drifts by well under 1% (the upstream rtol=0.01 bound). Pins all 11 variables at 5 yr and 10 yr — the small but nonzero drift confirms the model is integrating the full reservoir-exchange network, not merely holding constants.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 315576000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 157788000.0, "expected": 612165414351373.0},
+                        {"variable": "M2", "time": 157788000.0, "expected": 729922018006636.6},
+                        {"variable": "M3", "time": 157788000.0, "expected": 140130083217965.16},
+                        {"variable": "M4", "time": 157788000.0, "expected": 36999525315367800.0},
+                        {"variable": "M5", "time": 157788000.0, "expected": 580038221414953.0},
+                        {"variable": "M6", "time": 157788000.0, "expected": 1500218947641266.0},
+                        {"variable": "M7", "time": 157788000.0, "expected": 5300000000000000.0},
+                        {"variable": "G", "time": 157788000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 157788000.0, "expected": 3169055.942470585},
+                        {"variable": "F21_flux", "time": 157788000.0, "expected": 1836064.3814899235},
+                        {"variable": "F31_flux", "time": 157788000.0, "expected": 575814.5693528675},
+                        {"variable": "M1", "time": 315576000.0, "expected": 612313969657086.4},
+                        {"variable": "M2", "time": 315576000.0, "expected": 729936628933727.1},
+                        {"variable": "M3", "time": 315576000.0, "expected": 140132674609173.62},
+                        {"variable": "M4", "time": 315576000.0, "expected": 36999108884033168.0},
+                        {"variable": "M5", "time": 315576000.0, "expected": 580085794997164.2},
+                        {"variable": "M6", "time": 315576000.0, "expected": 1500422047769673.0},
+                        {"variable": "M7", "time": 315576000.0, "expected": 5300000000000000.0},
+                        {"variable": "G", "time": 315576000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 315576000.0, "expected": 3169330.50723958},
+                        {"variable": "F21_flux", "time": 315576000.0, "expected": 1836409.8858885535},
+                        {"variable": "F31_flux", "time": 315576000.0, "expected": 575923.1922461389}
+                    ]
+                },
+                {
+                    "id": "fossil_fuel_emissions_5pg",
+                    "description": "Reproduces the upstream `CarbonCycle - Response to Fossil Fuel Emissions` test (test/global_cycles_test.jl:151-185). Constant fossil fuel emission of 5 Pg C/yr (Ff = 5.0e12/31557600 kg/s) sustained for 100 model years (3.15576e9 s). Atmospheric carbon M1 rises from 612 to ~800 Pg C; the warm and cool oceans take up CO2 (M2, M3 increase); the fossil reservoir M7 depletes by exactly 500 Pg C (5.0e14 kg: M7 goes 5.30e15 → 4.80e15). Summing the pinned M1-M7 at t=0 against t=100 yr confirms total-carbon conservation. Pins all 11 variables at 50 yr and 100 yr.",
+                    "parameter_overrides": {"Ff": 158440.43907014476},
+                    "time_span": {"start": 0.0, "end": 3155760000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 1577880000.0, "expected": 727472446597591.6},
+                        {"variable": "M2", "time": 1577880000.0, "expected": 741842483999025.8},
+                        {"variable": "M3", "time": 1577880000.0, "expected": 142257576194832.75},
+                        {"variable": "M4", "time": 1577880000.0, "expected": 37042892434200224.0},
+                        {"variable": "M5", "time": 1577880000.0, "expected": 611649161714294.5},
+                        {"variable": "M6", "time": 1577880000.0, "expected": 1545885897294081.5},
+                        {"variable": "M7", "time": 1577880000.0, "expected": 5050000000000006.0},
+                        {"variable": "G", "time": 1577880000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 1577880000.0, "expected": 3355651.9165952303},
+                        {"variable": "F21_flux", "time": 1577880000.0, "expected": 2138056.26810315},
+                        {"variable": "F31_flux", "time": 1577880000.0, "expected": 671477.8691756701},
+                        {"variable": "M1", "time": 3155760000.0, "expected": 800202770025810.6},
+                        {"variable": "M2", "time": 3155760000.0, "expected": 748938252130095.6},
+                        {"variable": "M3", "time": 3155760000.0, "expected": 143533002597165.16},
+                        {"variable": "M4", "time": 3155760000.0, "expected": 37137759242988616.0},
+                        {"variable": "M5", "time": 3155760000.0, "expected": 629945943430492.0},
+                        {"variable": "M6", "time": 3155760000.0, "expected": 1601620788827849.5},
+                        {"variable": "M7", "time": 3155760000.0, "expected": 4800000000000008.0},
+                        {"variable": "G", "time": 3155760000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 3155760000.0, "expected": 3451176.8893532665},
+                        {"variable": "F21_flux", "time": 3155760000.0, "expected": 2338200.029895887},
+                        {"variable": "F31_flux", "time": 3155760000.0, "expected": 735479.5955247722}
+                    ]
+                },
+                {
+                    "id": "fossil_fuel_emissions_3pg",
+                    "description": "Reproduces the upstream `CarbonCycle - Qualitative Response` test (test/global_cycles_test.jl:187-212). Constant fossil fuel emission of 3 Pg C/yr (Ff = 3.0e12/31557600 kg/s) sustained for 50 model years (1.57788e9 s). Atmospheric carbon M1 increases; both the warm ocean (M2 > 7.30e14) and cool ocean (M3 > 1.40e14) absorb CO2; the fossil reservoir M7 depletes by 150 Pg C (3 Pg C/yr × 50 yr). Pins all 11 variables at 25 yr and 50 yr.",
+                    "parameter_overrides": {"Ff": 95064.26344208686},
+                    "time_span": {"start": 0.0, "end": 1577880000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 788940000.0, "expected": 654321243149263.0},
+                        {"variable": "M2", "time": 788940000.0, "expected": 734350916034921.1},
+                        {"variable": "M3", "time": 788940000.0, "expected": 140922798128107.38},
+                        {"variable": "M4", "time": 788940000.0, "expected": 37006449889931112.0},
+                        {"variable": "M5", "time": 788940000.0, "expected": 591225307127004.4},
+                        {"variable": "M6", "time": 788940000.0, "expected": 1509729845629576.2},
+                        {"variable": "M7", "time": 788940000.0, "expected": 5225000000000000.0},
+                        {"variable": "G", "time": 788940000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 788940000.0, "expected": 3243129.6849798555},
+                        {"variable": "F21_flux", "time": 788940000.0, "expected": 1943494.7252632843},
+                        {"variable": "F31_flux", "time": 788940000.0, "expected": 609917.934743212},
+                        {"variable": "M1", "time": 1577880000.0, "expected": 680431458722145.8},
+                        {"variable": "M2", "time": 1577880000.0, "expected": 737149778530260.4},
+                        {"variable": "M3", "time": 1577880000.0, "expected": 141418863894225.2},
+                        {"variable": "M4", "time": 1577880000.0, "expected": 37024369996307344.0},
+                        {"variable": "M5", "time": 1577880000.0, "expected": 599736465883165.9},
+                        {"variable": "M6", "time": 1577880000.0, "expected": 1528893436662844.8},
+                        {"variable": "M7", "time": 1577880000.0, "expected": 5149999999999999.0},
+                        {"variable": "G", "time": 1577880000.0, "expected": 1.0},
+                        {"variable": "F15_flux", "time": 1577880000.0, "expected": 3285443.5729424395},
+                        {"variable": "F21_flux", "time": 1577880000.0, "expected": 2014248.6982168509},
+                        {"variable": "F31_flux", "time": 1577880000.0, "expected": 632175.240623744}
+                    ]
+                },
+                {
+                    "id": "deforestation_response",
+                    "description": "Deforestation forcing — 2 Pg C/yr (Fd = 2.0e12/31557600 kg/s) sustained for 50 model years (1.57788e9 s), with no fossil fuel or reforestation forcing. Deforestation transfers carbon from terrestrial biota to the atmosphere: biota M5 declines below its 5.80e14 kg preindustrial value, soils/detritus M6 declines (less litterfall input), and atmospheric M1 rises. The land-use scaling factor G falls to 1 − a_d·Fd·t/M5_0 = 1 − 0.23·(2 Pg C/yr·50 yr)/(580 Pg C) = 0.96034 — the closed-form integral of the constant-forcing D(G) equation. M7 is untouched (Ff=0). Pins all 11 variables at 50 yr.",
+                    "parameter_overrides": {"Fd": 63376.1756280579},
+                    "time_span": {"start": 0.0, "end": 1577880000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 1577880000.0, "expected": 648972655023250.0},
+                        {"variable": "M2", "time": 1577880000.0, "expected": 733879809018645.8},
+                        {"variable": "M3", "time": 1577880000.0, "expected": 140835213595507.0},
+                        {"variable": "M4", "time": 1577880000.0, "expected": 37011579804461944.0},
+                        {"variable": "M5", "time": 1577880000.0, "expected": 558710745916017.1},
+                        {"variable": "M6", "time": 1577880000.0, "expected": 1468021771984596.5},
+                        {"variable": "M7", "time": 1577880000.0, "expected": 5300000000000000.0},
+                        {"variable": "G", "time": 1577880000.0, "expected": 0.9603448275862072},
+                        {"variable": "F15_flux", "time": 1577880000.0, "expected": 3105889.5084086633},
+                        {"variable": "F21_flux", "time": 1577880000.0, "expected": 1931806.266333063},
+                        {"variable": "F31_flux", "time": 1577880000.0, "expected": 606062.4725349754}
+                    ]
+                },
+                {
+                    "id": "reforestation_response",
+                    "description": "Reforestation forcing — 2 Pg C/yr (Fr = 2.0e12/31557600 kg/s) sustained for 50 model years (1.57788e9 s), with no fossil fuel or deforestation forcing. Reforestation transfers carbon from the atmosphere to terrestrial biota: biota M5 grows above its 5.80e14 kg preindustrial value, soils/detritus M6 grows, and atmospheric M1 is drawn down. The land-use scaling factor G rises to 1 + a_r·Fr·t/M5_0 = 1 + 1.0·(2 Pg C/yr·50 yr)/(580 Pg C) = 1.17241. The ocean outgassing fluxes F21/F31 fall as the depleted atmosphere lets the oceans release less CO2. Pins all 11 variables at 50 yr.",
+                    "parameter_overrides": {"Fr": 63376.1756280579},
+                    "time_span": {"start": 0.0, "end": 1577880000.0},
+                    "assertions": [
+                        {"variable": "M1", "time": 1577880000.0, "expected": 515447235258927.44},
+                        {"variable": "M2", "time": 1577880000.0, "expected": 718759571414954.4},
+                        {"variable": "M3", "time": 1577880000.0, "expected": 138139414719503.42},
+                        {"variable": "M4", "time": 1577880000.0, "expected": 36958343821380096.0},
+                        {"variable": "M5", "time": 1577880000.0, "expected": 642143934105343.9},
+                        {"variable": "M6", "time": 1577880000.0, "expected": 1589166023121174.2},
+                        {"variable": "M7", "time": 1577880000.0, "expected": 5300000000000000.0},
+                        {"variable": "G", "time": 1577880000.0, "expected": 1.1724137931034486},
+                        {"variable": "F15_flux", "time": 1577880000.0, "expected": 3477411.9148115036},
+                        {"variable": "F21_flux", "time": 1577880000.0, "expected": 1588456.650264892},
+                        {"variable": "F31_flux", "time": 1577880000.0, "expected": 497625.0252358915}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "preindustrial_equilibrium",
+                    "description": "The preindustrial (~1850) carbon cycle at rest. With zero anthropogenic forcing the Schmitz (2002) reservoir masses (Seinfeld & Pandis Table 22.1) are very nearly stationary — over 10 model years the atmospheric and biota reservoirs drift by far less than 1%. Reproduces the steady-state box diagram of S&P Fig. 22.6 as a time series.",
+                    "time_span": {"start": 0.0, "end": 315576000.0},
+                    "plots": [
+                        {
+                            "id": "atmosphere_vs_time",
+                            "type": "line",
+                            "description": "Atmospheric carbon M1 over 10 years at the preindustrial state — essentially flat, confirming the near-equilibrium of the unforced cycle.",
+                            "x": {"variable": "t", "label": "Time (s)"},
+                            "y": {"variable": "M1", "label": "Atmospheric carbon M1 (kg)"}
+                        },
+                        {
+                            "id": "biota_vs_time",
+                            "type": "line",
+                            "description": "Terrestrial biota carbon M5 over 10 years at the preindustrial state.",
+                            "x": {"variable": "t", "label": "Time (s)"},
+                            "y": {"variable": "M5", "label": "Terrestrial biota carbon M5 (kg)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "fossil_fuel_emission_trajectory",
+                    "description": "Three centuries of sustained fossil fuel emission at 5 Pg C/yr (Ff = 5.0e12/31557600 kg/s). Atmospheric carbon M1 climbs steeply while the warm ocean M2 slowly absorbs a fraction of the excess CO2 and the fossil reserve M7 is drawn down linearly (D(M7) = −Ff). This is the carbon-cycle response that underlies the anthropogenic CO2 rise discussed in Seinfeld & Pandis Ch. 22.",
+                    "parameters": {"Ff": 158440.43907014476},
+                    "time_span": {"start": 0.0, "end": 9467280000.0},
+                    "plots": [
+                        {
+                            "id": "atmosphere_rise",
+                            "type": "line",
+                            "description": "Atmospheric carbon M1 rising under 5 Pg C/yr fossil fuel emission over 300 years.",
+                            "x": {"variable": "t", "label": "Time (s)"},
+                            "y": {"variable": "M1", "label": "Atmospheric carbon M1 (kg)"}
+                        },
+                        {
+                            "id": "ocean_uptake",
+                            "type": "line",
+                            "description": "Warm ocean surface carbon M2 increasing as the ocean takes up a fraction of the emitted CO2.",
+                            "x": {"variable": "t", "label": "Time (s)"},
+                            "y": {"variable": "M2", "label": "Warm ocean carbon M2 (kg)"}
+                        },
+                        {
+                            "id": "fossil_depletion",
+                            "type": "line",
+                            "description": "Fossil fuel reserve M7 depleting linearly at the constant emission rate.",
+                            "x": {"variable": "t", "label": "Time (s)"},
+                            "y": {"variable": "M7", "label": "Fossil fuel reserve M7 (kg)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "fossil_fuel_rate_sweep",
+                    "description": "Sensitivity of the carbon cycle to the fossil fuel emission rate. The forcing Ff is swept linearly from 0 to 10 Pg C/yr (0 to 3.1688e5 kg/s) and the system is integrated for 100 model years. Plotting the 100-year reservoir masses against Ff shows how strongly atmospheric carbon M1 responds to the emission rate and how the warm ocean M2 buffers a part of it.",
+                    "time_span": {"start": 0.0, "end": 3155760000.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Ff",
+                                "range": {"start": 0.0, "stop": 316880.8781402895, "count": 21, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "atmosphere_vs_emission_rate",
+                            "type": "line",
+                            "description": "Atmospheric carbon M1 after 100 years as a function of the fossil fuel emission rate Ff — a near-linear rise in accumulated atmospheric carbon with emission rate.",
+                            "x": {"variable": "Ff", "label": "Fossil fuel emission rate Ff (kg/s)"},
+                            "y": {"variable": "M1", "label": "Atmospheric carbon M1 at 100 yr (kg)"}
+                        },
+                        {
+                            "id": "ocean_vs_emission_rate",
+                            "type": "line",
+                            "description": "Warm ocean carbon M2 after 100 years versus the fossil fuel emission rate Ff — the ocean buffer's response to anthropogenic forcing.",
+                            "x": {"variable": "Ff", "label": "Fossil fuel emission rate Ff (kg/s)"},
+                            "y": {"variable": "M2", "label": "Warm ocean carbon M2 at 100 yr (kg)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "deforestation_rate_sweep",
+                    "description": "Sensitivity of the terrestrial carbon pools and the land-use scaling factor to the deforestation rate. The forcing Fd is swept linearly from 0 to 4 Pg C/yr (0 to 1.2675e5 kg/s) and the system is integrated for 100 model years. Stronger deforestation draws down terrestrial biota M5, lowers the land-use scaling factor G (which further suppresses photosynthetic uptake), and raises atmospheric carbon M1.",
+                    "time_span": {"start": 0.0, "end": 3155760000.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Fd",
+                                "range": {"start": 0.0, "stop": 126752.3512561158, "count": 17, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "biota_vs_deforestation",
+                            "type": "line",
+                            "description": "Terrestrial biota carbon M5 after 100 years versus the deforestation rate Fd — biota depletion increasing with the deforestation rate.",
+                            "x": {"variable": "Fd", "label": "Deforestation rate Fd (kg/s)"},
+                            "y": {"variable": "M5", "label": "Terrestrial biota carbon M5 at 100 yr (kg)"}
+                        },
+                        {
+                            "id": "land_use_factor_vs_deforestation",
+                            "type": "line",
+                            "description": "Land-use scaling factor G after 100 years versus the deforestation rate Fd — the permanent-land-loss effect on biotic uptake capacity.",
+                            "x": {"variable": "Fd", "label": "Deforestation rate Fd (kg/s)"},
+                            "y": {"variable": "G", "label": "Land-use scaling factor G at 100 yr"}
+                        },
+                        {
+                            "id": "atmosphere_vs_deforestation",
+                            "type": "line",
+                            "description": "Atmospheric carbon M1 after 100 years versus the deforestation rate Fd — atmospheric carbon rising as deforestation releases biota carbon.",
+                            "x": {"variable": "Fd", "label": "Deforestation rate Fd (kg/s)"},
+                            "y": {"variable": "M1", "label": "Atmospheric carbon M1 at 100 yr (kg)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
