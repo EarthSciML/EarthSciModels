@@ -1,0 +1,1383 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SurfaceLayerProfile",
+        "description": "Monin-Obukhov surface-layer similarity theory for the atmospheric surface layer, from Seinfeld & Pandis (2006) \"Atmospheric Chemistry and Physics\", 2nd ed., Chapter 16 \"Meteorology of the Local Scale\". Observed-only algebraic component: from the friction velocity u_star, surface sensible heat flux q_z, and surface-layer geometry it computes the Monin-Obukhov length L (Eq. 16.70), the dimensionless stability parameter ζ = z/L, the Businger-Dyer stability functions φ_m and φ_h (Eq. 16.75), their integrated forms ψ_m and ψ_h (Eq. 16.78-16.79), and the stability-corrected mean wind speed ū (Eq. 16.66 with the Eq. 16.77 correction). Migrated from AtmosphericDynamics.jl@816cc391 src/local_scale_meteorology.jl:107 (`SurfaceLayerProfile` @component); the 4 upstream @constants (g, κ, ĉ_p, ε_q) are declared as fixed-default parameters.",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "boundary-layer",
+            "monin-obukhov",
+            "observed-only",
+            "ch16"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-3dve)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 16 (Meteorology of the Local Scale), pp. 720-760 — Eq. 16.66 (logarithmic wind profile), Eq. 16.70 (Monin-Obukhov length), Eq. 16.75 (Businger-Dyer stability functions), Eq. 16.78-16.79 (integrated stability functions). ISBN 978-0-471-72018-8."
+            },
+            {
+                "citation": "Businger, J. A., Wyngaard, J. C., Izumi, Y., & Bradley, E. F. (1971). Flux-Profile Relationships in the Atmospheric Surface Layer. Journal of the Atmospheric Sciences, 28(2), 181-189. DOI 10.1175/1520-0469(1971)028<0181:FPRITA>2.0.CO;2."
+            }
+        ]
+    },
+    "models": {
+        "SurfaceLayerProfile": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/local_scale_meteorology.jl:107\nUpstream `SurfaceLayerProfile` is a ModelingToolkit `@component` implementing Monin-Obukhov similarity theory for the atmospheric surface layer. g, κ, ĉ_p, ε_q are upstream `@constants`; z, z₀, T₀, ρ, u_star, q_z are `@parameters`; L, ζ, φ_m, φ_h, ψ_m, ψ_h, ū are `@variables` bound by 7 algebraic equations (no time derivative). For standalone serialization the 4 `@constants` are declared as fixed-default parameters here, matching the sibling scale_height.esm. The 7 equations are unchanged from upstream; `mtk2esm` reorders commutative `*`/`+` operands, rewrites `x^(-n)` as `1/x^n`, and folds `((1-15ζ)^0.25)^2` to `(1-15ζ)^0.5` (algebraically identical). The `π/2` term of the ψ_m unstable branch is folded to the float literal 1.5707963267948966.\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); rel=1e-6 covers float64 roundoff and cross-runner libm differences in the `^`/`log`/`atan` chain. Near-zero outputs in the neutral regime (ζ, ψ_m, ψ_h ~ 1e-8..1e-13, where π/2 − 2·atan(x≈1) cancels) carry a per-assertion abs=1e-6 — already far tighter than the upstream test suite's atol=1e-4 for ζ."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 10.0,
+                    "description": "Height above ground"
+                },
+                "z₀": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Roughness length (Table 16.1)"
+                },
+                "T₀": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 288.15,
+                    "description": "Reference temperature (surface)"
+                },
+                "ρ": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Air density"
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.3,
+                    "description": "Friction velocity"
+                },
+                "q_z": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.0,
+                    "description": "Surface sensible heat flux (positive upward)"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.807,
+                    "description": "Gravitational acceleration"
+                },
+                "κ": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "von Karman constant (dimensionless)"
+                },
+                "ĉ_p": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 1005.0,
+                    "description": "Specific heat of air at constant pressure"
+                },
+                "ε_q": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 1e-10,
+                    "description": "Small regularization for heat flux"
+                },
+                "L": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Monin-Obukhov length (Eq. 16.70)"
+                },
+                "ζ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stability parameter z/L (dimensionless)"
+                },
+                "φ_m": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Momentum stability function (Eq. 16.75) (dimensionless)"
+                },
+                "φ_h": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Heat stability function (Eq. 16.75) (dimensionless)"
+                },
+                "ψ_m": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Integrated momentum stability function (dimensionless)"
+                },
+                "ψ_h": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Integrated heat stability function (dimensionless)"
+                },
+                "ū": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Mean wind speed at height z (Eq. 16.66 with stability)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "L",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    "ĉ_p",
+                                    "ρ",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "u_star",
+                                            3
+                                        ]
+                                    },
+                                    "T₀"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "κ",
+                                    "g",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "q_z",
+                                            "ε_q"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ζ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "z",
+                            "L"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_m",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    "ζ",
+                                    0
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -15,
+                                                            "ζ"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            0.25
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            4.7,
+                                            "ζ"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "φ_h",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    "ζ",
+                                    0
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -15,
+                                                            "ζ"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            0.5
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            4.7,
+                                            "ζ"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ψ_m",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    "ζ",
+                                    0
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.5707963267948966,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -2,
+                                            {
+                                                "op": "atan",
+                                                "args": [
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    1,
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            -15,
+                                                                            "ζ"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            0.25
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            2,
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    1,
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "+",
+                                                                                "args": [
+                                                                                    1,
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [
+                                                                                            -15,
+                                                                                            "ζ"
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            0.25
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            2
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            1,
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    -15,
+                                                                                    "ζ"
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    0.5
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -4.7,
+                                    "ζ"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ψ_h",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    "ζ",
+                                    0
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1,
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            1,
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    -15,
+                                                                                    "ζ"
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    0.5
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -4.7,
+                                    "ζ"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ū",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "ψ_m"
+                                                ]
+                                            },
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z₀"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "u_star"
+                                ]
+                            },
+                            "κ"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (q_z = 0 -> the ε_q heat-flux regularization makes |L| enormous, so the surface layer is effectively neutral). ζ collapses to ~0, φ_m = φ_h -> 1, ψ_m = ψ_h -> 0, and ū reduces to the pure logarithmic profile (u_star/κ)·ln(z/z₀). Guards the serialized parameter defaults.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -24416778974839.395
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -4.095544301852688e-13,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999999984641
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999999969285
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 1.535438443056002e-12,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 3.0713209753206747e-12,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.4538776394899164
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 1.0,
+                            "expected": 3.4538776394899164
+                        }
+                    ]
+                },
+                {
+                    "id": "monin_obukhov_neutral",
+                    "description": "Monin-Obukhov length under near-neutral conditions (q_z = 1e-6 W/m^2, essentially zero heat flux). Upstream \"Monin-Obukhov length\" test 1: |L| must exceed 1e6 m. Here L = -2.44e9 m.",
+                    "parameter_overrides": {
+                        "q_z": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -2441433754.108529
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -4.095953856282873e-09,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999846401737
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999692803475
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 1.5359826240762353e-08,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 3.071965325174098e-08,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.453877627971199
+                        }
+                    ]
+                },
+                {
+                    "id": "monin_obukhov_unstable",
+                    "description": "Unstable surface layer: positive (upward) heat flux q_z = 100 W/m^2 with u_star = 0.4 m/s. Upstream \"Monin-Obukhov length\" test 2: L must be negative. ζ < 0 selects the Businger-Dyer unstable branch.",
+                    "parameter_overrides": {
+                        "u_star": 0.4,
+                        "q_z": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -57.876809421783676
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.172780775234583
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.7263979917166654
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.5276540423700046
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 0.40064640265675194
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 0.7398010106000124
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 4.20452378333134
+                        }
+                    ]
+                },
+                {
+                    "id": "monin_obukhov_stable",
+                    "description": "Stable surface layer: negative (downward) heat flux q_z = -50 W/m^2 (surface cooling). Upstream \"Monin-Obukhov length\" test 3: L must be positive. ζ > 0 selects the stable branch φ_m = φ_h = 1 + 4.7ζ.",
+                    "parameter_overrides": {
+                        "q_z": -50.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": 48.833557949776456
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 0.20477721509222482
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 1.9624529109334565
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 1.9624529109334565
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": -0.9624529109334566
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": -0.9624529109334566
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 4.175717322691161
+                        }
+                    ]
+                },
+                {
+                    "id": "businger_dyer_neutral",
+                    "description": "Businger-Dyer stability functions under near-neutral conditions (q_z = 1e-8 W/m^2). Upstream \"Businger-Dyer stability functions\" test 1: ζ ~ 0 and φ_m = φ_h ~ 1.",
+                    "parameter_overrides": {
+                        "q_z": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -241750286879.598
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -4.136499744871215e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999998448812
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999996897626
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 1.551183625931671e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 3.102371692635132e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.45387763937473
+                        }
+                    ]
+                },
+                {
+                    "id": "businger_dyer_stable",
+                    "description": "Businger-Dyer stability functions under stable conditions (u_star = 0.2 m/s, q_z = -50 W/m^2). Upstream \"Businger-Dyer stability functions\" test 2: ζ > 0 and φ_m = φ_h = 1 + 4.7ζ. Here 1 + 4.7·0.691123 = 4.248279.",
+                    "parameter_overrides": {
+                        "u_star": 0.2,
+                        "q_z": -50.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": 14.469202355489326
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": 0.6911231009362585
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 4.248278574400414
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 4.248278574400414
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": -3.248278574400415
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": -3.248278574400415
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.926724380194253
+                        }
+                    ]
+                },
+                {
+                    "id": "businger_dyer_unstable",
+                    "description": "Businger-Dyer stability functions under unstable conditions (q_z = 100 W/m^2). Upstream \"Businger-Dyer stability functions\" test 3: ζ < 0, φ_m = (1 - 15ζ)^(-1/4), φ_h = (1 - 15ζ)^(-1/2). Same parameters as the upstream \"Physical constraints\" test 3, which checks φ_m, φ_h > 0.",
+                    "parameter_overrides": {
+                        "q_z": 100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -24.416778974814978
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.40955443018567833
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.6116810518520646
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.37415370919484814
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 0.6862614089616637
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 1.2155589113923662
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 2.939181582769821
+                        }
+                    ]
+                },
+                {
+                    "id": "log_wind_profile_neutral",
+                    "description": "Logarithmic wind profile under neutral conditions (u_star = 0.4 m/s, z₀ = 0.1 m, z = 10 m, q_z = 1e-8 W/m^2). Upstream \"Logarithmic wind profile\" test 1: ū ~ (u_star/κ)·ln(z/z₀) = 1·ln(100) = 4.60517 m/s (ψ_m ~ 0).",
+                    "parameter_overrides": {
+                        "u_star": 0.4,
+                        "q_z": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -573037717047.9362
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -1.745085829867543e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999999345592
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999998691187
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 6.544076391782967e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 1.3088108374430828e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 4.605170185922651
+                        }
+                    ]
+                },
+                {
+                    "id": "log_wind_profile_wangara",
+                    "description": "Logarithmic wind profile with Wangara-experiment roughness (Seinfeld & Pandis p.745: z₀ = 0.0015 m, u_star = 0.4 m/s). Upstream \"Logarithmic wind profile\" test 2: ū ~ (u_star/κ)·ln(z/z₀) = ln(6666.67) = 8.80488 m/s. L/ζ/φ/ψ are independent of z₀, so they match log_wind_profile_neutral exactly.",
+                    "parameter_overrides": {
+                        "u_star": 0.4,
+                        "z₀": 0.0015,
+                        "q_z": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -573037717047.9362
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -1.745085829867543e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999999345592
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999998691187
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 6.544076391782967e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 1.3088108374430828e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 8.804875263802577
+                        }
+                    ]
+                },
+                {
+                    "id": "limiting_neutral_psi_to_zero",
+                    "description": "Limiting behaviour: as |L| -> infinity (q_z = 1e-10 W/m^2, essentially zero heat flux) the surface layer becomes neutral and the integrated stability function ψ_m -> 0, leaving a purely logarithmic wind profile. Upstream \"Limiting behaviors\" test 1.",
+                    "parameter_overrides": {
+                        "q_z": 1e-10
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -12208389487419.697
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -8.191088603705376e-13,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999999969285
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999999938567
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 3.0715430199255997e-12,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 6.14353012905633e-12,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.4538776394887654
+                        }
+                    ]
+                },
+                {
+                    "id": "wind_profile_z5m",
+                    "description": "Wind speed at z = 5 m under near-neutral conditions (q_z = 1e-8 W/m^2). Lower half of the upstream \"Limiting behaviors\" test 2 (wind speed increases with height): ū(5 m) = 2.93402 m/s.",
+                    "parameter_overrides": {
+                        "z": 5.0,
+                        "q_z": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -241750286879.598
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -2.0682498724356076e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999999224407
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.9999999998448814
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 7.755929232038987e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 1.5511858463777203e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 2.93401725401294
+                        }
+                    ]
+                },
+                {
+                    "id": "wind_profile_z20m",
+                    "description": "Wind speed at z = 20 m under near-neutral conditions (q_z = 1e-8 W/m^2). Upper half of the upstream \"Limiting behaviors\" test 2: ū(20 m) = 3.97374 m/s > ū(5 m), confirming wind speed increases with height.",
+                    "parameter_overrides": {
+                        "z": 20.0,
+                        "q_z": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -241750286879.598
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -8.27299948974243e-11,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.9999999996897626
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.999999999379525
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 3.102373913081181e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 6.204752266573222e-10,
+                            "tolerance": {
+                                "abs": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.973738024678349
+                        }
+                    ]
+                },
+                {
+                    "id": "summer_afternoon_boundary_layer",
+                    "description": "Summer-afternoon boundary layer from the AtmosphericDynamics.jl docs \"Complete Boundary Layer Analysis\" example (u_star = 0.35 m/s, q_z = 150 W/m^2 strong upward heat flux, T₀ = 300.15 K, ρ = 1.18 kg/m^3): a strongly unstable surface layer with L = -25.94 m and ζ = -0.386.",
+                    "parameter_overrides": {
+                        "u_star": 0.35,
+                        "q_z": 150.0,
+                        "T₀": 300.15,
+                        "ρ": 1.18
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L",
+                            "time": 0.0,
+                            "expected": -25.936007561545868
+                        },
+                        {
+                            "variable": "ζ",
+                            "time": 0.0,
+                            "expected": -0.3855643539689024
+                        },
+                        {
+                            "variable": "φ_m",
+                            "time": 0.0,
+                            "expected": 0.6196366508538875
+                        },
+                        {
+                            "variable": "φ_h",
+                            "time": 0.0,
+                            "expected": 0.38394957908142247
+                        },
+                        {
+                            "variable": "ψ_m",
+                            "time": 0.0,
+                            "expected": 0.6630617546704188
+                        },
+                        {
+                            "variable": "ψ_h",
+                            "time": 0.0,
+                            "expected": 1.1780765683268124
+                        },
+                        {
+                            "variable": "ū",
+                            "time": 0.0,
+                            "expected": 3.449344877402963
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "monin_obukhov_length_vs_heat_flux",
+                    "description": "Monin-Obukhov length L as a function of the surface sensible heat flux q_z over the unstable regime (q_z > 0, surface heating), at the default u_star = 0.3 m/s. Reproduces the unstable branch of the AtmosphericDynamics.jl docs figure \"Monin-Obukhov Length vs Heat Flux\": L is negative and grows toward 0 as the heat flux increases.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "q_z",
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 300.0,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "L_vs_q_z",
+                            "type": "line",
+                            "description": "Monin-Obukhov length L vs surface heat flux q_z (Eq. 16.70).",
+                            "x": {
+                                "variable": "q_z",
+                                "label": "Surface sensible heat flux q_z (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "L",
+                                "label": "Monin-Obukhov length L (m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "logarithmic_wind_profile",
+                    "description": "Mean wind speed ū as a function of height z under neutral conditions (default q_z = 0), with u_star = 0.4 m/s and z₀ = 0.1 m. Reproduces the neutral wind profile of the AtmosphericDynamics.jl docs figure \"Wind Profiles for Different Stability Conditions\": ū follows the logarithmic law (u_star/κ)·ln(z/z₀).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": {
+                                    "start": 1.0,
+                                    "stop": 50.0,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_vs_z",
+                            "type": "line",
+                            "description": "Logarithmic wind profile ū(z) (Eq. 16.66).",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "ū",
+                                "label": "Mean wind speed ū (m/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "businger_dyer_stability_functions",
+                    "description": "Businger-Dyer stability functions φ_m and φ_h as functions of the stability parameter ζ = z/L, traced by sweeping the surface heat flux q_z over the unstable regime (q_z > 0 -> ζ < 0). Reproduces the unstable branch of the AtmosphericDynamics.jl docs figure \"Businger-Dyer Stability Functions\": both functions fall below 1 as the surface layer becomes more unstable.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "q_z",
+                                "range": {
+                                    "start": 5.0,
+                                    "stop": 250.0,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phi_m_vs_zeta",
+                            "type": "line",
+                            "description": "Momentum stability function φ_m vs ζ (Eq. 16.75, unstable branch).",
+                            "x": {
+                                "variable": "ζ",
+                                "label": "Stability parameter ζ = z/L"
+                            },
+                            "y": {
+                                "variable": "φ_m",
+                                "label": "Momentum stability function φ_m"
+                            }
+                        },
+                        {
+                            "id": "phi_h_vs_zeta",
+                            "type": "line",
+                            "description": "Heat stability function φ_h vs ζ (Eq. 16.75, unstable branch).",
+                            "x": {
+                                "variable": "ζ",
+                                "label": "Stability parameter ζ = z/L"
+                            },
+                            "y": {
+                                "variable": "φ_h",
+                                "label": "Heat stability function φ_h"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
