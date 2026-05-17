@@ -1,0 +1,221 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "WetDepositionFlux",
+        "description": "Net wet deposition diagnostics — wet deposition flux, washout ratio, and wet deposition velocity — for a trace species removed from the atmosphere by falling rain, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 20 (Wet Deposition), Eqs. 20.6-20.9. Given the species concentration in ground-level rainwater (C_rain), its gas-phase concentration in air (C_air), and the precipitation rate (p₀), the component evaluates three quantities: the wet deposition flux F_w = C_rain·p₀ (Eq. 20.7) — the downward species mass flux carried to the surface by rain; the dimensionless washout ratio w_r = C_rain/C_air (Eq. 20.6) — a measure of how strongly the species partitions into rainwater; and the wet deposition velocity u_w = F_w/C_air (Eq. 20.8), equivalently w_r·p₀ (Eq. 20.9) — the flux normalized by the air-phase concentration. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_2006_ch20.jl:451 (`WetDepositionFlux` @component). Flat observed-only algebraic model: C_rain, C_air and p₀ are the input parameters and F_w, w_r, u_w are the algebraic outputs, each fixed by one equation with no time derivative. The upstream @component is a single flat System with no subsystems; the migration-tracker `coupling.couple` feature tag and `depends_on: ParticleScavengingCoeff, GasScavengingCoeff` describe a conceptual relationship that the source code does not implement, so this is migrated as a standalone flat model.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp06-ch20",
+            "wet-deposition",
+            "deposition-velocity",
+            "washout-ratio",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-ogm8)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 20: Wet Deposition, pp. 932-979. John Wiley & Sons, Inc. Eq. 20.6 (washout ratio), Eq. 20.7 (wet deposition flux), Eqs. 20.8-20.9 (wet deposition velocity)."
+            }
+        ]
+    },
+    "models": {
+        "WetDepositionFlux": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 20, Eqs. 20.6-20.9 (washout ratio, wet deposition flux, and wet deposition velocity). John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_2006_ch20.jl:451\nUpstream `WetDepositionFlux` is an MTK `@component` with 3 input `@parameters` (C_rain, C_air, p₀) and 3 output `@variables` (F_w, w_r, u_w), related by 3 algebraic equations. It returns `System(eqs, t, vars, params; name)` with no subsystems, so it is a flat algebraic model; the upstream `Wet Deposition Flux (Eq. 20.7-20.9)` test (test/seinfeld_pandis_2006_ch20_test.jl:293) checks equations(sys) == 3 and unknowns(sys) == 3.\n\nAlthough the EarthSciModels migration tracker lists `coupling.couple` in this row's features column and `depends_on: ParticleScavengingCoeff, GasScavengingCoeff`, the upstream `@component` (src lines 451-473) neither calls `couple` nor references those two components — its three equations use only its own parameters. Per the rig convention that the tracker feature / depends_on columns are not authoritative, the component is migrated as a standalone flat `models` block, mirroring the sibling observed-only sp06_ch20 migrations.\n\nNone of the equations carries a time derivative, so the system is purely algebraic (observed-only): `system_kind` is left unset because `ode` is the schema default and there is no differential state, matching the sibling observed-only sp06_ch20 migrations (gas_scavenging_coeff.esm, mass_transfer_coeff.esm, particle_collection_eff.esm, particle_scavenging_coeff.esm). F_w, w_r and u_w are each serialized as `type: state` with one explicit algebraic equation in the `equations` array.\n\nEquation mapping (one .esm equation per source line):\n  - F_w = C_rain·p₀ (Eq. 20.7; src line 467) — the wet deposition flux, the downward species mass flux carried to the ground by rain.\n  - w_r = C_rain/C_air (Eq. 20.6; src line 468) — the dimensionless washout ratio.\n  - u_w = F_w/C_air (Eq. 20.8; src line 469) — the wet deposition velocity. The upstream equation is `u_w ~ F_w / C_air` and is migrated verbatim: the right-hand side references the F_w algebraic state, which the ESS runner resolves through its topological algebraic-state substitution (u_w expands to C_rain·p₀/C_air). The source comment notes the equivalent closed form u_w = w_r·p₀ (Eq. 20.9); keeping F_w/C_air preserves the one-equation-per-source-line correspondence.\n\nNo module-level `@constants` of seinfeld_pandis_2006_ch20.jl (μ_air_sp, ρ_air_sp, μ_w_sp, ρ_w_sp, g_sp, kB_sp) are referenced by `WetDepositionFlux` — its three equations use only the component's own parameters — so no constants are migrated. The three equations are dimensionally consistent (F_w: [mol/m^3]·[m/s] = mol/(m^2·s); w_r: [mol/m^3]/[mol/m^3] = 1; u_w: [mol/(m^2·s)]/[mol/m^3] = m/s), so there is no upstream `checks=false` to mirror.\n\nThe 3 parameters carry the upstream component defaults (C_rain = 1.0e-3 mol/m^3, C_air = 1.0e-6 mol/m^3, p₀ = 2.778e-7 m/s ≈ 1 mm/h). F_w, w_r and u_w have no upstream defaults; they are fixed entirely by the algebraic equations. At the component defaults F_w = 2.778e-10 mol/(m^2·s), w_r = 1000 and u_w = 2.778e-4 m/s — the case pinned by the upstream `Wet Deposition Flux (Eq. 20.7-20.9)` testitem, which checks C_rain·p₀ ≈ 2.778e-10 (F_w) and C_rain/C_air ≈ 1000 (w_r).\n\nTolerance rationale (model-level rel=1e-6): an observed-only algebraic system with no ODE integration; each equation is one multiply or one divide on float64 parameter values, evaluated once per test point. rel=1e-6 covers float64 round-off (~1e-16 per op) with ample headroom across the tested ranges (F_w ~ 1e-11 to 1e-8, w_r ~ 1e3 to 1e5, u_w ~ 1e-5 to 1e-2). No output is ever exactly zero — every test uses C_air > 0 and C_rain, p₀ > 0 — so a relative tolerance is well-defined throughout and no `abs` floor is needed (matching the sibling gas_scavenging_coeff.esm)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "C_rain": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Species concentration in rainwater at the ground"
+                },
+                "C_air": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-6,
+                    "description": "Species gas-phase concentration in air at the ground"
+                },
+                "p₀": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.778e-7,
+                    "description": "Precipitation rate (2.778e-7 m/s = 1 mm/h)"
+                },
+                "F_w": {
+                    "type": "state",
+                    "units": "mol/(m^2*s)",
+                    "description": "Wet deposition flux — downward species mass flux carried to the surface by rain (Eq. 20.7)"
+                },
+                "w_r": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Washout ratio — ratio of the species concentration in rainwater to its gas-phase concentration in air (Eq. 20.6) (dimensionless)"
+                },
+                "u_w": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Wet deposition velocity — wet deposition flux normalized by the air-phase concentration (Eq. 20.8)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 20.7 (src line 467) — wet deposition flux: F_w = C_rain·p₀, the downward mass flux of the species carried to the ground by rain.",
+                    "lhs": "F_w",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["C_rain", "p₀"]
+                    }
+                },
+                {
+                    "_comment": "Eq. 20.6 (src line 468) — washout ratio: w_r = C_rain/C_air, the dimensionless ratio of the species concentration in rainwater to its gas-phase concentration in air.",
+                    "lhs": "w_r",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["C_rain", "C_air"]
+                    }
+                },
+                {
+                    "_comment": "Eq. 20.8 (src line 469) — wet deposition velocity: u_w = F_w/C_air. Migrated verbatim from the upstream `u_w ~ F_w / C_air`; the RHS references the F_w algebraic state, which the runner resolves by substitution (u_w = C_rain·p₀/C_air). Equivalently u_w = w_r·p₀ (Eq. 20.9), per the source comment.",
+                    "lhs": "u_w",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["F_w", "C_air"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Component defaults — C_rain = 1.0e-3 mol/m^3, C_air = 1.0e-6 mol/m^3, p₀ = 2.778e-7 m/s (≈ 1 mm/h). This is the case pinned by the upstream `Wet Deposition Flux (Eq. 20.7-20.9)` testitem, which checks C_rain·p₀ ≈ 2.778e-10 (F_w) and C_rain/C_air ≈ 1000 (w_r); the wet deposition velocity follows as u_w = F_w/C_air = 2.778e-4 m/s. The system is algebraic, so all three outputs are re-asserted at t = 1 to confirm time-invariance.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_w", "time": 0.0, "expected": 2.778e-10 },
+                        { "variable": "w_r", "time": 0.0, "expected": 1000.0000000000001 },
+                        { "variable": "u_w", "time": 0.0, "expected": 0.00027780000000000003 },
+                        { "variable": "F_w", "time": 1.0, "expected": 2.778e-10 },
+                        { "variable": "w_r", "time": 1.0, "expected": 1000.0000000000001 },
+                        { "variable": "u_w", "time": 1.0, "expected": 0.00027780000000000003 }
+                    ]
+                },
+                {
+                    "id": "heavy_precipitation",
+                    "description": "Heavy rainfall: p₀ raised tenfold to 2.778e-6 m/s (≈ 10 mm/h), C_rain and C_air at the component defaults. F_w = C_rain·p₀ (Eq. 20.7) and u_w = F_w/C_air (Eq. 20.8) both scale linearly with the precipitation rate, so each is exactly ten times its default_parameters value (F_w = 2.778e-9, u_w = 2.778e-3 m/s). The washout ratio w_r = C_rain/C_air is independent of p₀ and is unchanged at 1000.",
+                    "parameter_overrides": { "p₀": 2.778e-6 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_w", "time": 0.0, "expected": 2.778e-9 },
+                        { "variable": "u_w", "time": 0.0, "expected": 0.002778 },
+                        { "variable": "w_r", "time": 0.0, "expected": 1000.0000000000001 }
+                    ]
+                },
+                {
+                    "id": "light_drizzle",
+                    "description": "Light drizzle: p₀ lowered tenfold to 2.778e-8 m/s (≈ 0.1 mm/h), C_rain and C_air at the component defaults. F_w and u_w scale linearly with p₀ (Eqs. 20.7-20.8), so each is exactly one tenth of its default_parameters value (F_w = 2.778e-11, u_w = 2.778e-5 m/s) — the weak-scavenging regime where wet removal is a minor sink. w_r is unchanged at 1000.",
+                    "parameter_overrides": { "p₀": 2.778e-8 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_w", "time": 0.0, "expected": 2.7780000000000003e-11 },
+                        { "variable": "u_w", "time": 0.0, "expected": 2.7780000000000005e-5 },
+                        { "variable": "w_r", "time": 0.0, "expected": 1000.0000000000001 }
+                    ]
+                },
+                {
+                    "id": "soluble_gas_high_washout",
+                    "description": "A highly soluble gas (e.g. HNO₃): the rainwater concentration C_rain is raised to 1.0e-1 mol/m^3 while C_air stays at 1.0e-6 mol/m^3, giving a large washout ratio w_r = C_rain/C_air = 1.0e5 — strong partitioning of the species into rainwater. The wet deposition flux F_w = C_rain·p₀ rises in proportion to C_rain (F_w = 2.778e-8), and so does the deposition velocity u_w = F_w/C_air (u_w = 2.778e-2 m/s). Exercises the high-solubility end of the washout-ratio range.",
+                    "parameter_overrides": { "C_rain": 0.1 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "w_r", "time": 0.0, "expected": 100000.00000000001 },
+                        { "variable": "F_w", "time": 0.0, "expected": 2.778e-8 },
+                        { "variable": "u_w", "time": 0.0, "expected": 0.027780000000000003 }
+                    ]
+                },
+                {
+                    "id": "dilute_background_air",
+                    "description": "Dilute background air: the gas-phase concentration C_air is lowered tenfold to 1.0e-7 mol/m^3, with C_rain and p₀ at the component defaults. The wet deposition flux F_w = C_rain·p₀ depends only on C_rain and p₀, so it is unchanged from default_parameters (F_w = 2.778e-10) — confirming F_w is independent of C_air. The washout ratio w_r = C_rain/C_air and the wet deposition velocity u_w = F_w/C_air both scale as 1/C_air, so each is ten times its default value (w_r = 1.0e4, u_w = 2.778e-3 m/s).",
+                    "parameter_overrides": { "C_air": 1.0e-7 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "F_w", "time": 0.0, "expected": 2.778e-10 },
+                        { "variable": "w_r", "time": 0.0, "expected": 10000.0 },
+                        { "variable": "u_w", "time": 0.0, "expected": 0.002778 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "wet_deposition_vs_precipitation_rate",
+                    "description": "Wet deposition flux F_w and wet deposition velocity u_w as a function of the precipitation rate p₀, swept log-spaced from ≈ 0.1 mm/h (light drizzle) to ≈ 100 mm/h (intense rain) at the default rainwater and air concentrations. Both quantities are exactly linear in p₀ (F_w = C_rain·p₀, Eq. 20.7; u_w = F_w/C_air = w_r·p₀, Eqs. 20.8-20.9), so wet removal of a given species scales directly with rainfall intensity.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "C_rain": 1.0e-3, "C_air": 1.0e-6 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p₀",
+                                "range": { "start": 2.778e-8, "stop": 2.778e-5, "count": 31, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_w_vs_p0",
+                            "type": "line",
+                            "description": "Wet deposition flux F_w as a function of the precipitation rate p₀ (Eq. 20.7).",
+                            "x": { "variable": "p₀", "label": "Precipitation rate (m/s)" },
+                            "y": { "variable": "F_w", "label": "Wet deposition flux (mol/(m^2*s))" }
+                        },
+                        {
+                            "id": "u_w_vs_p0",
+                            "type": "line",
+                            "description": "Wet deposition velocity u_w as a function of the precipitation rate p₀ (Eqs. 20.8-20.9).",
+                            "x": { "variable": "p₀", "label": "Precipitation rate (m/s)" },
+                            "y": { "variable": "u_w", "label": "Wet deposition velocity (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "flux_over_rainwater_concentration_and_rate",
+                    "description": "Two-dimensional sweep of the wet deposition flux F_w over the rainwater concentration C_rain (1.0e-5 to 1.0e-1 mol/m^3, log-spaced) and the precipitation rate p₀ (≈ 0.1 to 100 mm/h, log-spaced), at the default air-phase concentration. Surfaces the bilinear Eq. 20.7 dependence F_w = C_rain·p₀: the wet deposition flux is largest for a species at high rainwater concentration scavenged by intense rain.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "C_air": 1.0e-6 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "C_rain",
+                                "range": { "start": 1.0e-5, "stop": 1.0e-1, "count": 16, "scale": "log" }
+                            },
+                            {
+                                "parameter": "p₀",
+                                "range": { "start": 2.778e-8, "stop": 2.778e-5, "count": 16, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_w_heatmap",
+                            "type": "heatmap",
+                            "description": "Wet deposition flux F_w as a function of the rainwater concentration C_rain and the precipitation rate p₀ (Eq. 20.7).",
+                            "x": { "variable": "C_rain", "label": "Rainwater concentration (mol/m^3)" },
+                            "y": { "variable": "p₀", "label": "Precipitation rate (m/s)" },
+                            "value": { "variable": "F_w", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
