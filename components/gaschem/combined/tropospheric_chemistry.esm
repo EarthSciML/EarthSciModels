@@ -1,0 +1,1493 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TroposphericChemistrySystem",
+        "description": "Combined tropospheric chemistry diagnostic system (Seinfeld & Pandis 2006, Chapter 6) — couples three photochemical subsystems into a comprehensive steady-state diagnostic model of tropospheric photochemistry: OH production from O3 photolysis (§6.1), the NOx photochemical cycle (§6.2), and CO oxidation chemistry (§6.3). Migrated from GasChem.jl@8c12c048 src/combined_system.jl:54 (`TroposphericChemistrySystem` @component). The three subsystems — `oh` (OHProduction), `nox` (NOxPhotochemistry), `co` (COOxidation) — are inlined verbatim (ESS spec §4.7 subsystem composition) from their already-migrated standalone .esm files; the parent supplies 14 coupling equations feeding the shared species (O3, NO, NO2, OH, HO2, CO, CH3O2, H2O, M, O2) into the subsystems and 9 combined-diagnostic equations (total/net O3 production, ozone production efficiency, NOx loss rate, HOx chain length). Purely algebraic — a steady-state diagnostic system with no time derivatives. SI units throughout (m^-3 for concentrations, m^3/s for bimolecular rate constants).",
+        "tags": [
+            "gaschem",
+            "tropospheric",
+            "photochemistry",
+            "combined-system",
+            "coupled-subsystems",
+            "seinfeld-pandis",
+            "diagnostics"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-ui1r)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. Wiley. Chapter 6 (Chemistry of the Atmosphere) — Section 6.1 OH production, Section 6.2 NOx photochemical cycle, Section 6.3 CO oxidation chemistry."
+            }
+        ]
+    },
+    "models": {
+        "TroposphericChemistrySystem": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. Wiley. Chapter 6.",
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/combined_system.jl:54\n\nUpstream `TroposphericChemistrySystem` is an MTK `@component` that composes three subsystems via `System(eqs, t; systems = [oh_sys, nox_sys, co_sys], name)` — oh_sys = OHProduction(name=:oh), nox_sys = NOxPhotochemistry(name=:nox), co_sys = COOxidation(name=:co) — and adds 14 coupling equations and 9 combined-diagnostic equations. It declares 2 `@parameters` (k_CH4_OH, k_CH3O2_NO), 10 input `@variables` (O3, NO, NO2, OH, HO2, CO, CH3O2, H2O, M, O2 — all m^-3) and 9 output `@variables` (NOx, HOx, RO2, P_O3_total, L_O3_total, P_O3_net, OPE, chain_length, L_NOx). The upstream tests compile it with `mtkcompile(sys; inputs=[...10 species...])` and solve a `NonlinearProblem` — the whole system is algebraic (no `D(·)`).\n\nMigration approach (ESS spec §4.7 subsystem composition): the three subsystems are inlined verbatim under `subsystems` as `oh`/`nox`/`co`, copied (variables + equations) from the already-migrated standalone files components/gaschem/oh_production.esm (OHProduction), components/gaschem/nox_photochemistry/photochemistry.esm (NOxPhotochemistry) and components/gaschem/co_oxidation/co_oxidation.esm (COOxidation). This mirrors the inline-subsystem precedent set by components/gaschem/radiation/radiation_fundamentals.esm (the other migrated `coupling.couple` @component) and keeps the combined model faithful to the upstream `systems=[...]` hierarchical structure.\n\nInput re-typing: each subsystem's input @variables — standalone typed `parameter` because they have no defining equation within the component (oh: O3/H2O/M; nox: NO/NO2/O3/O2/M; co: CO/OH/HO2/NO/NO2/O3) — are re-typed `state` here. In the combined model they DO have a defining equation: the parent coupling equation `<sub>.<input> ~ <input>` binds each to the corresponding combined-system input. A `parameter` cannot appear on an equation LHS, so the re-type is required; the standalone files remain unchanged. The 24 subsystem rate-constant parameters and the two `two` stoichiometric constants stay `parameter`.\n\nCoupling references: the 14 coupling equations and the diagnostic equations reference subsystem variables by their fully-qualified path from the top-level model name (spec §4.6), e.g. `TroposphericChemistrySystem.co.k_HO2_NO`. After flatten (earthsci_toolkit.flatten, spec §4.7.5) every variable is dot-namespaced by its owning system and the coupling equations join the subsystem inputs to the combined inputs.\n\nDangling parameter: `k_CH4_OH` is declared verbatim from upstream but referenced by no equation — the upstream @component declares it for the combined system's documented Section 6.4 methane scope but `TroposphericChemistrySystem` does not wire methane oxidation into its equation set. Preserved as a declared parameter for fidelity.\n\nSystem classification: purely algebraic — every equation is an `~` relation with no `D(·)` operator, so the flattened system is a steady-state diagnostic (NonlinearProblem upstream). The trajectory is constant in time; inline tests sample at t=0 over time_span [0, 1], mirroring the sibling observed-only/algebraic ESM files (oh_production.esm, co_oxidation.esm, photochemistry.esm, typical.esm).\n\nTolerance (model-level rel=1e-10 / abs=1e-12): the flattened system is a feed-forward algebraic cascade (combined inputs -> subsystem diagnostics -> combined diagnostics) of small expression trees; the canonical runner resolves it without iterative error accumulation. rel=1e-10 matches the three inlined subsystems' own model tolerance and is far tighter than the upstream tests' rtol=1e-6 combined-diagnostic bounds; abs=1e-12 gates the exact-IEEE-754-zero outputs that arise in the term-isolation test (HO2_ss=0 when CO=0).\n\nUpstream test reproduction (GasChem.jl test/test_combined_system.jl): the inline tests reproduce every numeric upstream testitem — `NOx = NO + NO2` / `HOx = OH + HO2` (NOx, HOx, RO2 sums), `O3 Production Diagnostics` and `O3 Production Budget Consistency` (P_O3_total, L_O3_total, P_O3_net), `NOx Loss Rate` (L_NOx = k_OH_NO2·OH·NO2), `OPE Calculation` (OPE = P_O3_total/L_NOx), `OH/NOx/CO Coupling` (oh/nox/co subsystem outputs), and `NOx-VOC Regime Differences` (Urban and Remote presets). The purely-structural upstream testitems (`Structural Verification`, `Subsystem Composition`, `Subsystem Variable Access`) are satisfied by the file structure — the 3 named subsystems and the diagnostic variable names — and are not expressible as numeric simulate assertions. Four further tests beyond the upstream suite isolate the CO term (CO=0), the O3 linearity of the loss budget (O3 doubled), the high-HO2 regime, and the low-NO regime.\n\nExamples: this file declares no `examples` block. The example-plot renderer (tools/render_example_plots.py) resolves algebraic (non-dynamic) models with an equation-resolution plan that operates on the top-level model alone and does not descend into `subsystems`; the combined-diagnostic equations reference subsystem variables by fully-qualified path and are therefore unresolvable by the renderer's algebraic path. This mirrors the sibling subsystem-composed `coupling.couple` migration components/gaschem/radiation/radiation_fundamentals.esm, which likewise declares no examples. The inline `tests` block provides the full numeric verification in lieu of example plots.\n\nAll inline-test expected values are the canonical ESS Python runner output: earthsci_toolkit.simulation.simulate(cse=False, rtol=1e-10, atol=1e-12) — the same runner and settings as the CI gate tools/run_esm_inline_tests.py. SI units throughout."
+            },
+            "variables": {
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1e+18,
+                    "description": "Ozone concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2500000000000000.0,
+                    "description": "Nitric oxide concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e+16,
+                    "description": "Nitrogen dioxide concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Hydroxyl radical concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000000000.0,
+                    "description": "Hydroperoxy radical concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "CO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e+18,
+                    "description": "Carbon monoxide concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "CH3O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000000000.0,
+                    "description": "Methylperoxy radical concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "H2O": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 4e+23,
+                    "description": "Water vapor concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e+25,
+                    "description": "Total air number density concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.25e+24,
+                    "description": "Molecular oxygen concentration — combined-system input species, supplied externally and fed into the oh/nox/co subsystems by the coupling equations. Default is the TypicalConditions mid-latitude lower-troposphere value (Seinfeld & Pandis 2006 Ch. 6)."
+                },
+                "k_CH4_OH": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.3437334324972315e-21,
+                    "description": "CH4 + OH rate constant — 2.45e-12·exp(-1775/298)·1e-6 cm^3/molec/s converted to m^3/s (Seinfeld & Pandis 2006 Table 6.1 reaction 1, evaluated at T=298 K). Declared verbatim from the upstream @parameters block for the combined system's documented Section 6.4 methane-oxidation scope; no TroposphericChemistrySystem equation references it (methane chemistry is not wired into this diagnostic model)."
+                },
+                "k_CH3O2_NO": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 7.699999999999999e-18,
+                    "description": "CH3O2 + NO rate constant — 7.7e-12 cm^3/molec/s converted to m^3/s (×1e-6). Drives the CH3O2+NO ozone-production channel in the P_O3_total diagnostic."
+                },
+                "NOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total NOx = NO + NO2."
+                },
+                "HOx": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total HOx = OH + HO2."
+                },
+                "RO2": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Total organic peroxy radicals (simplified to CH3O2 only)."
+                },
+                "P_O3_total": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Total O3 production rate — sum of the HO2+NO (co subsystem rate constant) and CH3O2+NO peroxy-radical ozone-production channels."
+                },
+                "L_O3_total": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Total O3 loss rate — sum of NO+O3 (nox subsystem rate constant), OH+O3 and HO2+O3 (co subsystem rate constants)."
+                },
+                "P_O3_net": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Net O3 tendency = P_O3_total - L_O3_total."
+                },
+                "OPE": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Ozone production efficiency = P_O3_total / L_NOx (dimensionless) — O3 molecules produced per NOx molecule consumed."
+                },
+                "chain_length": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "HOx chain length (dimensionless), re-exposed at the combined level from the co subsystem's chain_length diagnostic."
+                },
+                "L_NOx": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "NOx loss rate (mainly HNO3 formation) = k_OH_NO2·OH·NO2, using the co subsystem rate constant."
+                }
+            },
+            "subsystems": {
+                "oh": {
+                    "variables": {
+                        "j_O3": {
+                            "type": "parameter",
+                            "units": "s^-1",
+                            "default": 6e-05,
+                            "description": "O₃ photolysis rate producing O(¹D) at surface, solar zenith angle 0° (S&P Figure 4.15, Table B.1). The upstream default 6.0e-5 s⁻¹ is the noon-equatorial-surface canonical value; at other zenith angles and altitudes j_O₃ varies by factors of 10⁻²-10¹ — overridable for scenarios at higher altitudes (j_O₃ increases roughly 2-3× from surface to 12 km), higher latitudes (drops with sec(SZA)), or non-equatorial seasons. Downstream coupling: in the full TroposphericChemistrySystem this parameter is provided by the upstream FastJX or SuperFast photolysis subsystem via param_to_var coupling."
+                        },
+                        "k3_N2": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 2.6e-17,
+                            "description": "O(¹D) + N₂ quenching rate constant (S&P Table B.1, IUPAC-recommended at 298 K). The upstream default 2.6e-17 m³/s is the SI-converted form of the CGS value 2.6e-11 cm³/molec/s — the canonical IUPAC-recommended bimolecular rate coefficient for O(¹D) + N₂ → O(³P) + N₂ at 298 K. Weakly temperature-dependent (k₃,N₂ ∝ exp(110/T) per IUPAC 2007 update — about 50% faster at 200 K than 298 K) but the upstream uses the temperature-independent 298 K value for the algebraic system. The two quenching channels (k₃_N₂, k₃_O₂) are weighted by their atmospheric mass fractions (f_N₂=0.78, f_O₂=0.21) to give the effective k₃_eff = 0.78·k₃_N₂ + 0.21·k₃_O₂ = 2.868e-17 m³/s used in the denominator of Eqs. 6.1 and 6.4."
+                        },
+                        "k3_O2": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 4e-17,
+                            "description": "O(¹D) + O₂ quenching rate constant (S&P Table B.1, IUPAC-recommended at 298 K). The upstream default 4.0e-17 m³/s is the SI-converted form of the CGS value 4.0e-11 cm³/molec/s — the canonical bimolecular rate coefficient for O(¹D) + O₂ → O(³P) + O₂ at 298 K. About 1.5× faster than k₃_N₂ per molecule, but weighted by the smaller f_O₂=0.21 atmospheric mass fraction → the O₂ channel contributes 8.4e-18/2.868e-17 = 29% of k₃_eff while the N₂ channel contributes 71%. Weakly temperature-dependent (k₃,O₂ ∝ exp(55/T)) but the upstream uses the temperature-independent 298 K value."
+                        },
+                        "k4": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 2.2e-16,
+                            "description": "O(¹D) + H₂O → 2 OH rate constant (S&P Table B.1, IUPAC-recommended at 298 K). The upstream default 2.2e-16 m³/s is the SI-converted form of the CGS value 2.2e-10 cm³/molec/s — the canonical bimolecular rate coefficient at 298 K. The OH-producing channel is ~5-10× faster per molecule than either quenching channel (k₄/k₃_N₂ ≈ 8.5, k₄/k₃_O₂ ≈ 5.5) — the reason H₂O is a far more efficient O(¹D) reaction partner per molecule than N₂ or O₂. But because [H₂O] / ([N₂]+[O₂]) ≈ 0.01-0.03 at typical surface RH, the absolute reaction-rate balance still favors quenching by ~5× (numerator vs denominator in the ε_OH formula): k₄[H₂O] = 2.2e-16·4e23 = 8.8e7 vs k₃_eff[M] = 2.868e-17·2.5e25 = 7.17e8, giving ε_OH ≈ 0.22 at S&P p. 207 conditions (about 1 in 5 O(¹D) atoms makes OH)."
+                        },
+                        "f_N2": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.78,
+                            "description": "Fraction of air number density that is N₂, dimensionless (S&P Page 1). The upstream default 0.78 reflects the well-mixed atmosphere composition where N₂ is the dominant species at all altitudes below the homopause (~100 km). f_N₂ + f_O₂ = 0.99 here (not exactly 1.0) — the residual 1% (Ar 0.93%, CO₂ 0.04%, plus trace gases) is treated as an 'inactive bath' that contributes negligible O(¹D) quenching at S&P's stated precision. Overridable for a hypothetical pure-N₂ atmosphere (f_N₂=1.0, f_O₂=0.0 → k₃_eff = k₃_N₂ = 2.6e-17) or for sensitivity studies on the trace-gas correction."
+                        },
+                        "f_O2": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.21,
+                            "description": "Fraction of air number density that is O₂, dimensionless (S&P Page 1). The upstream default 0.21 is the canonical well-mixed atmospheric O₂ fraction (more precisely 0.2095 by the standard dry-air composition table; the upstream uses 2-digit precision)."
+                        },
+                        "two": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 2.0,
+                            "description": "Stoichiometric factor: 2 OH radicals produced per O(¹D) + H₂O reaction (dimensionless). Preserved from upstream `@constants two = 2` per the rig convention (translating upstream `@constants` to fixed-default parameters so MTK's unit checker sees a named dimensionless quantity in the equation RHS — matches chapman.esm/gwp.esm/stefan_boltzmann.esm convention). The factor is hardwired by the O(¹D) + H₂O → 2 OH stoichiometry and not expected to change in routine use; overridable only for hypothetical alternate-stoichiometry sensitivity studies."
+                        },
+                        "O3": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 1e+18,
+                            "description": "Ozone number density — the `oh` subsystem's O3 input. Re-typed from the standalone OHProduction component's `parameter` to `state`: in this combined model O3 is governed by the parent coupling equation `oh.O3 ~ O3`, which binds it to the combined-system input `O3`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "H2O": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 4e+23,
+                            "description": "Water vapor number density — the `oh` subsystem's H2O input. Re-typed from the standalone OHProduction component's `parameter` to `state`: in this combined model H2O is governed by the parent coupling equation `oh.H2O ~ H2O`, which binds it to the combined-system input `H2O`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "M": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2.5e+25,
+                            "description": "Total air number density number density — the `oh` subsystem's M input. Re-typed from the standalone OHProduction component's `parameter` to `state`: in this combined model M is governed by the parent coupling equation `oh.M ~ M`, which binds it to the combined-system input `M`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "O1D": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "description": "Excited atomic oxygen O(¹D) steady-state number density [m⁻³] (Eq. 6.1). Algebraic balance between source j_O₃·O₃ and sinks k₃_eff·M + k₄·H₂O: O(¹D) = j_O₃·O₃ / (k₃_eff·M + k₄·H₂O). At S&P p. 207 default conditions O(¹D) ≈ 7.45e4 m⁻³ ≈ 7.45e-2 molec/cm³ — orders of magnitude smaller than ground-state O(³P) which itself is ~1e6-1e7 m⁻³ in the troposphere. The 'steady-state' label reflects the quasi-equilibrium assumption: O(¹D) lifetime is ~10⁻⁹ s (the inverse of k₃_eff·M ≈ 7e8 s⁻¹) which is many orders of magnitude shorter than any other tropospheric timescale, so the quasi-steady-state approximation is exact to within numerical precision. Linear in O₃ — doubling O₃ doubles O(¹D)."
+                        },
+                        "ε_OH": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "OH yield: number of OH radicals produced per O(¹D) atom formed, dimensionless (Eq. 6.4). Algebraic ratio ε_OH = 2·k₄·H₂O / (k₃_eff·M + k₄·H₂O). Ranges from 0 (all O(¹D) quenched in pure-dry air → no OH made) to 2 (all O(¹D) reacts with H₂O → 2 OH per O(¹D) by stoichiometry of the 2-OH yield channel). At S&P p. 207 typical 50% RH default conditions ε_OH ≈ 0.22 (about 11% of O(¹D) reacts with H₂O, producing 22% as many OH as O(¹D) formed). The book table on p. 207 reports ε_OH ≈ {0.047, 0.12, 0.23, 0.38} at RH = {10%, 25%, 50%, 80%} respectively — reproduced here at low/moderate RH within ~5% (the book uses the approximate formula ε_OH ≈ 2·k₄·ξ_H₂O/k₃ which diverges at high RH where the k₄·H₂O denominator term becomes non-negligible)."
+                        },
+                        "P_OH": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "OH production rate [m⁻³·s⁻¹] (Eq. 6.3). Product of the O(¹D) source rate j_O₃·O₃ and the OH yield ε_OH: P_OH = j_O₃·O₃·ε_OH. Equivalent to the fully-expanded form 2·j_O₃·O₃·k₄·H₂O / (k₃_eff·M + k₄·H₂O). At S&P p. 207 default conditions P_OH ≈ 1.31e13 m⁻³/s ≈ 1.31e7 molec/cm³/s — the canonical 'OH production rate at 50% RH, 40 ppb O₃, surface' value driving tropospheric OH steady-state concentrations [OH] ≈ P_OH / k_OH_sinks ≈ 1e6-1e7 molec/cm³ that determine the lifetime of CH₄ and other OH-reactive trace gases. Linear in O₃ (via the j_O₃·O₃ factor) and approximately linear in H₂O at low RH (via ε_OH ~ H₂O when k₄·H₂O << k₃_eff·M)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "O1D",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "j_O3",
+                                            "O3"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "f_N2",
+                                                                    "k3_N2"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "f_O2",
+                                                                    "k3_O2"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "M"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k4",
+                                                    "H2O"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "ε_OH",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "two",
+                                            "k4",
+                                            "H2O"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "f_N2",
+                                                                    "k3_N2"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "f_O2",
+                                                                    "k3_O2"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "M"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k4",
+                                                    "H2O"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "P_OH",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "j_O3",
+                                    "O3",
+                                    "ε_OH"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "nox": {
+                    "variables": {
+                        "j_NO2": {
+                            "type": "parameter",
+                            "units": "s^-1",
+                            "default": 0.008,
+                            "description": "NO₂ photolysis rate j_{NO₂} [s⁻¹] for NO₂ + hν → NO + O (λ < 424 nm). The upstream default 8.0e-3 s⁻¹ is the canonical typical-midday surface value (S&P §6.2) — clear-sky, solar zenith angle near noon. j_NO2 is the engine of the whole NOx cycle: it sets the rate of O-atom production (Eq. 6.5) and, together with k_NO_O3, fixes the photostationary-state ozone level (Eq. 6.6). Highly variable in practice — it drops to zero at night, scales with sec(SZA) through the day, and increases with altitude as the overhead O₃ column thins. Overridable for diurnal, seasonal, or altitude scenarios; in the full TroposphericChemistrySystem it is supplied by the upstream FastJX photolysis subsystem via param_to_var coupling."
+                        },
+                        "k_O_O2_M": {
+                            "type": "parameter",
+                            "units": "m^6/s",
+                            "default": 6e-46,
+                            "description": "Termolecular rate constant for O + O₂ + M → O₃ + M [m⁶ s⁻¹]. The upstream default is the SI-converted CGS value 6.0e-34 cm⁶ molec⁻² s⁻¹ × 1e-12 (cm⁶→m⁶) = 6.0e-46 m⁶/s (the upstream Julia writes the literal product `6.0e-34 * 1.0e-12`, which evaluates to exactly 6.0e-46 in IEEE-754 Float64). This is the recombination step that converts the O atom from NO₂ photolysis into ozone; it appears only in Eq. 6.5 as part of the O-atom loss denominator k_O_O2_M·[O₂]·[M]. The very large quenching rate k_O_O2_M·[O₂]·[M] ≈ 7.9e4 s⁻¹ at STP makes the ground-state O atom extremely short-lived (~13 µs), which is why Eq. 6.5 is a valid steady-state relation."
+                        },
+                        "k_NO_O3": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 1.9e-20,
+                            "description": "Bimolecular rate constant for NO + O₃ → NO₂ + O₂ [m³ s⁻¹]. The upstream default is the SI-converted CGS value 1.9e-14 cm³ molec⁻¹ s⁻¹ × 1e-6 (cm³→m³) = 1.9e-20 m³/s (S&P p. 211; the upstream Julia writes the literal product `1.9e-14 * 1.0e-6`, exactly 1.9e-20 in Float64). This is the ozone-titration step that closes the NOx cycle by reconverting NO to NO₂. It sets the photostationary-state ozone level (Eq. 6.6: O3_pss ∝ j_NO2/k_NO_O3) and the ozone-loss term of the net production rate (Eq. 6.8). Weakly temperature-dependent in reality (Arrhenius); the upstream uses the temperature-independent ~298 K value for the algebraic system."
+                        },
+                        "NO": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2500000000000000.0,
+                            "description": "Nitric oxide number density — the `nox` subsystem's NO input. Re-typed from the standalone NOxPhotochemistry component's `parameter` to `state`: in this combined model NO is governed by the parent coupling equation `nox.NO ~ NO`, which binds it to the combined-system input `NO`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "NO2": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2.5e+16,
+                            "description": "Nitrogen dioxide number density — the `nox` subsystem's NO2 input. Re-typed from the standalone NOxPhotochemistry component's `parameter` to `state`: in this combined model NO2 is governed by the parent coupling equation `nox.NO2 ~ NO2`, which binds it to the combined-system input `NO2`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "O3": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 1e+18,
+                            "description": "Ozone number density — the `nox` subsystem's O3 input. Re-typed from the standalone NOxPhotochemistry component's `parameter` to `state`: in this combined model O3 is governed by the parent coupling equation `nox.O3 ~ O3`, which binds it to the combined-system input `O3`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "O2": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 5.25e+24,
+                            "description": "Molecular oxygen number density — the `nox` subsystem's O2 input. Re-typed from the standalone NOxPhotochemistry component's `parameter` to `state`: in this combined model O2 is governed by the parent coupling equation `nox.O2 ~ O2`, which binds it to the combined-system input `O2`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "M": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2.5e+25,
+                            "description": "Total air number density number density — the `nox` subsystem's M input. Re-typed from the standalone NOxPhotochemistry component's `parameter` to `state`: in this combined model M is governed by the parent coupling equation `nox.M ~ M`, which binds it to the combined-system input `M`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "O": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "description": "Ground-state atomic oxygen O(³P) steady-state number density [m⁻³] (Eq. 6.5). Algebraic balance between production from NO₂ photolysis (j_NO2·[NO₂]) and loss by recombination with O₂ (k_O_O2_M·[O₂]·[M]): O = j_NO2·[NO₂] / (k_O_O2_M·[O₂]·[M]). At the typical-midday default conditions O ≈ 5.08e9 m⁻³ — extremely low, because the O atom is consumed within ~13 µs by the fast three-body recombination. The 'steady-state' label reflects the quasi-equilibrium assumption: the O-atom lifetime is far shorter than any other timescale in the cycle, so its concentration tracks the instantaneous NO₂ photolysis rate. Linear in j_NO2 and in [NO₂]; inversely proportional to [O₂] and [M]."
+                        },
+                        "O3_pss": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "description": "Photostationary-state ozone number density [m⁻³] (Eq. 6.6 — the Leighton relationship). The ozone concentration the NO-NO₂-O₃ cycle would reach in pure photochemical equilibrium: O3_pss = j_NO2·[NO₂] / (k_NO_O3·[NO]). Proportional to the [NO₂]/[NO] ratio and to j_NO2/k_NO_O3. At the typical-midday defaults O3_pss ≈ 8.42e17 m⁻³ (~34 ppb). Independent of the ambient O3 input — O3_pss is what the cycle predicts, not what is measured. In real urban air the measured O3 deviates from O3_pss because peroxy radicals (HO₂, RO₂) provide an extra NO→NO₂ pathway beyond NO + O₃; that deviation is quantified by Φ."
+                        },
+                        "Φ": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Photostationary-state parameter Φ, dimensionless (Eq. 6.7). The ratio of the NO₂-photolysis ozone source to the NO+O₃ ozone sink: Φ = j_NO2·[NO₂] / (k_NO_O3·[NO]·[O₃]) = O3_pss/O3. Φ = 1 marks exact photostationary state (pure NO-NO₂-O₃ cycling, no net ozone change). Φ > 1 means the ambient O₃ is below its photostationary value — additional oxidants (HO₂, RO₂ peroxy radicals) are converting NO to NO₂ without consuming O₃, driving net ozone production; typical urban daytime measurements show Φ ≈ 1.5-3. Φ < 1 means ambient O₃ exceeds its PSS value — net ozone loss. At the typical-midday defaults Φ ≈ 0.842 (the default O3 input of 40 ppb sits above the 34 ppb photostationary value)."
+                        },
+                        "P_O3": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "Net ozone production rate [m⁻³ s⁻¹] (Eq. 6.8). The difference between the NO₂-photolysis ozone source and the NO+O₃ ozone sink: P_O3 = j_NO2·[NO₂] − k_NO_O3·[NO]·[O₃]. Positive when the system is below photostationary state (ambient O₃ < O3_pss → net production), negative when above (net loss), and zero at exact PSS — P_O3 and Φ are two views of the same departure from equilibrium (P_O3 = j_NO2·[NO₂]·(1 − 1/Φ)). At the typical-midday defaults P_O3 ≈ -7.5e13 m⁻³/s (net loss, since the default O3 exceeds O3_pss). This is the chemical tendency the NO-NO₂-O₃ cycle alone would impose on ozone; the full tropospheric tendency adds the peroxy-radical channels that NOxPhotochemistry deliberately omits."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "O",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "j_NO2",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_O_O2_M",
+                                            "O2",
+                                            "M"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "O3_pss",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "j_NO2",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_NO_O3",
+                                            "NO"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "Φ",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "j_NO2",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_NO_O3",
+                                            "NO",
+                                            "O3"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "P_O3",
+                            "rhs": {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "j_NO2",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_NO_O3",
+                                            "NO",
+                                            "O3"
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "co": {
+                    "variables": {
+                        "two": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 2.0,
+                            "description": "Stoichiometric factor for the HO₂ self-reaction HO₂ + HO₂ → H₂O₂ + O₂ (S&P §6.3 R6.15): two HO₂ radicals are consumed per reaction event, so the HOx loss contributed by the self-reaction is two·k_HO2_HO2·[HO₂]². Upstream this is an MTK `@constants` entry (default 2, dimensionless); it is preserved here as `type: parameter` with a fixed default of 2.0 so MTK's unit checker sees a named dimensionless quantity rather than a magic literal in the L_HO2 and L_HOx right-hand sides, and so downstream consumers can override the stoichiometric factor for sensitivity studies. The `two_constant_override_sentinel` test overrides it to 1.0 to catch a regression that hard-codes the factor as a literal."
+                        },
+                        "k_CO_OH": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 2.4e-19,
+                            "description": "CO + OH → CO₂ + H rate constant (S&P §6.3 R6.9, Table B.1, 298 K). The upstream default 2.4e-19 m³/s is the SI-converted form of the CGS value 2.4e-13 cm³/molec/s. This is the chain-initiating step of the CO-oxidation cycle — it consumes CO and an OH radical, producing the H atom that promptly forms HO₂. k_CO_OH appears in the OH loss rate L_OH and (via the CO·OH product) in the high-NOx HO₂ steady state HO2_ss. The clean literal 2.4e-19 differs from the upstream Julia product 2.4e-13·1.0e-6 = 2.3999999999999997e-19 by exactly one ULP (see model reference notes)."
+                        },
+                        "k_HO2_NO": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 8.1e-18,
+                            "description": "HO₂ + NO → OH + NO₂ rate constant (S&P §6.3 R6.11, Table B.1, 298 K). The upstream default 8.1e-18 m³/s is the SI-converted form of the CGS value 8.1e-12 cm³/molec/s. This is the O₃-producing chain-propagation step: it regenerates OH (sustaining the catalytic HOx cycle) and converts NO to NO₂, whose subsequent photolysis yields an O₃ molecule. k_HO2_NO appears in the HO₂ loss rate L_HO2, the gross O₃-production term of P_O3, the HO₂ steady-state denominator HO2_ss, and the chain_length numerator. The clean literal 8.1e-18 is bit-identical to the upstream Julia product 8.1e-12·1.0e-6."
+                        },
+                        "k_HO2_HO2": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 2.9e-18,
+                            "description": "HO₂ + HO₂ → H₂O₂ + O₂ rate constant (S&P §6.3 R6.15, Table B.1, 298 K). The upstream default 2.9e-18 m³/s is the SI-converted form of the CGS value 2.9e-12 cm³/molec/s. This is the dominant HOx self-termination channel at low NOx — the HO₂ self-reaction that converts two HO₂ radicals into stable hydrogen peroxide. It enters the HO₂ loss rate L_HO2 and the HOx loss rate L_HOx as the quadratic term two·k_HO2_HO2·[HO₂]² (the factor `two` for the two-HO₂-per-event stoichiometry). The clean literal 2.9e-18 is bit-identical to the upstream Julia product 2.9e-12·1.0e-6."
+                        },
+                        "k_OH_NO2": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 1e-17,
+                            "description": "OH + NO₂ + M → HNO₃ rate constant (S&P §6.3 R6.12, Table B.1, 298 K). The upstream default 1.0e-17 m³/s is the SI-converted form of the CGS value 1.0e-11 cm³/molec/s. This termolecular reaction is the dominant daytime HOx/NOx termination at high NOx: it removes an OH radical and an NO₂ molecule, converting reactive nitrogen into nitric acid. It enters the OH loss rate L_OH and the HOx loss rate L_HOx. The clean literal 1.0e-17 differs from the upstream Julia product 1.0e-11·1.0e-6 = 9.999999999999999e-18 by exactly one ULP (see model reference notes)."
+                        },
+                        "k_HO2_O3": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 2e-21,
+                            "description": "HO₂ + O₃ → OH + 2O₂ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 2.0e-21 m³/s is the SI-converted form of the CGS value 2.0e-15 cm³/molec/s. This is a slow ozone-loss channel — HO₂ reacting directly with ozone — that subtracts from net O₃ production P_O3 and adds to the HO₂ loss rate L_HO2. The clean literal 2.0e-21 differs from the upstream Julia product 2.0e-15·1.0e-6 = 2.0000000000000002e-21 by exactly one ULP (see model reference notes)."
+                        },
+                        "k_OH_O3": {
+                            "type": "parameter",
+                            "units": "m^3/s",
+                            "default": 7.3e-20,
+                            "description": "OH + O₃ → HO₂ + O₂ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 7.3e-20 m³/s is the SI-converted form of the CGS value 7.3e-14 cm³/molec/s. This ozone-loss channel — OH reacting with ozone — subtracts from net O₃ production P_O3 and adds to the OH loss rate L_OH. The clean literal 7.3e-20 is bit-identical to the upstream Julia product 7.3e-14·1.0e-6."
+                        },
+                        "CO": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2.5e+18,
+                            "description": "Carbon monoxide number density — the `co` subsystem's CO input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model CO is governed by the parent coupling equation `co.CO ~ CO`, which binds it to the combined-system input `CO`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "OH": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 1000000000000.0,
+                            "description": "Hydroxyl radical number density — the `co` subsystem's OH input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model OH is governed by the parent coupling equation `co.OH ~ OH`, which binds it to the combined-system input `OH`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "HO2": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 100000000000000.0,
+                            "description": "Hydroperoxy radical number density — the `co` subsystem's HO2 input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model HO2 is governed by the parent coupling equation `co.HO2 ~ HO2`, which binds it to the combined-system input `HO2`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "NO": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2500000000000000.0,
+                            "description": "Nitric oxide number density — the `co` subsystem's NO input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model NO is governed by the parent coupling equation `co.NO ~ NO`, which binds it to the combined-system input `NO`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "NO2": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 2.5e+16,
+                            "description": "Nitrogen dioxide number density — the `co` subsystem's NO2 input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model NO2 is governed by the parent coupling equation `co.NO2 ~ NO2`, which binds it to the combined-system input `NO2`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "O3": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "default": 1e+18,
+                            "description": "Ozone number density — the `co` subsystem's O3 input. Re-typed from the standalone COOxidation component's `parameter` to `state`: in this combined model O3 is governed by the parent coupling equation `co.O3 ~ O3`, which binds it to the combined-system input `O3`. The default is the TypicalConditions value, used only as the nonlinear-solver initial guess."
+                        },
+                        "P_O3": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "Net ozone production rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.9-6.13): P_O3 = k_HO2_NO·HO₂·NO − k_OH_O3·OH·O₃ − k_HO2_O3·HO₂·O₃. The gross production term k_HO2_NO·HO₂·NO counts the O₃ molecules made via HO₂ + NO → OH + NO₂ followed by NO₂ photolysis; the two subtracted terms are the OH+O₃ and HO₂+O₃ ozone-loss channels. At the default scenario P_O3 ≈ 1.752e12 m⁻³·s⁻¹ (net positive — production dominates). P_O3 can go negative when NO is too low to drive much production while O₃ is high (see `upstream_qualitative_low_corner`) or when HO₂ vanishes so only the OH+O₃ loss term survives (see `zero_ho2_net_o3_destruction`)."
+                        },
+                        "L_HOx": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "HOx radical-termination loss rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.11-6.12): L_HOx = k_OH_NO2·OH·NO₂ + two·k_HO2_HO2·HO₂². The two radical-termination channels — OH + NO₂ + M → HNO₃ (the high-NOx NHL channel) and the HO₂ + HO₂ → H₂O₂ self-reaction (the low-NOx HHL channel, carrying the stoichiometric factor `two`). At the default scenario L_HOx ≈ 3.08e11 m⁻³·s⁻¹. L_HOx is the denominator of the HOx chain length: a smaller L_HOx (low NOx, low HO₂) gives a longer catalytic chain."
+                        },
+                        "L_OH": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "OH radical loss rate [m⁻³·s⁻¹] (S&P §6.3, Eq. 6.17 denominator): L_OH = k_CO_OH·CO·OH + k_OH_NO2·OH·NO₂ + k_OH_O3·OH·O₃ — the total rate at which OH is consumed by reaction with CO, with NO₂, and with O₃. At the default scenario L_OH ≈ 9.23e11 m⁻³·s⁻¹. Linear in OH; the OH+CO channel dominates at the default CO=2.5e18 (~100 ppb) loading."
+                        },
+                        "L_HO2": {
+                            "type": "state",
+                            "units": "m^-3*s^-1",
+                            "description": "HO₂ radical loss rate [m⁻³·s⁻¹] (S&P §6.3): L_HO2 = k_HO2_NO·HO₂·NO + two·k_HO2_HO2·HO₂² + k_HO2_O3·HO₂·O₃ — the total rate at which HO₂ is consumed by reaction with NO, by the HO₂ self-reaction (with the stoichiometric factor `two`), and by reaction with O₃. At the default scenario L_HO2 ≈ 2.283e12 m⁻³·s⁻¹, dominated by the HO₂+NO chain-propagation channel. Quadratic in HO₂ through the self-reaction term, linear in HO₂ through the other two."
+                        },
+                        "chain_length": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "HOx chain length [dimensionless] (S&P §6.3): chain_length = (k_HO2_NO·HO₂·NO) / L_HOx — the propagation rate of the O₃-producing HO₂ + NO step divided by the HOx termination rate, i.e. the number of OH-HO₂ catalytic cycles a HOx radical completes before it is terminated. The equation references the L_HOx output variable rather than inlining its expression, preserving the upstream symbolic structure. At the default scenario chain_length ≈ 6.575 (a HOx radical drives ~6-7 O₃-producing cycles before termination). chain_length > 1 confirms genuine catalytic cycling; it rises in the low-NOx long-chain regime and falls below 1 in the high-NOx short-chain regime."
+                        },
+                        "HO2_ss": {
+                            "type": "state",
+                            "units": "m^-3",
+                            "description": "HO₂ steady-state concentration in the high-NOx limit [m⁻³] (S&P §6.3 Eq. 6.18): HO2_ss = k_CO_OH·CO·OH / (k_HO2_NO·NO). At high NOx, HO₂ is removed primarily by reaction with NO, so the steady-state HO₂ balances its production from the CO + OH → ... → HO₂ initiation against the HO₂ + NO loss. At the default scenario HO2_ss ≈ 2.963e13 m⁻³. Proportional to CO and OH, inversely proportional to NO; it is a diagnostic estimate independent of the actual HO₂ input used elsewhere in the component."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "lhs": "L_OH",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_CO_OH",
+                                            "CO",
+                                            "OH"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_OH_NO2",
+                                            "OH",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_OH_O3",
+                                            "OH",
+                                            "O3"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "L_HO2",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_HO2_NO",
+                                            "HO2",
+                                            "NO"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "two",
+                                            "k_HO2_HO2",
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "HO2",
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_HO2_O3",
+                                            "HO2",
+                                            "O3"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "L_HOx",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_OH_NO2",
+                                            "OH",
+                                            "NO2"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "two",
+                                            "k_HO2_HO2",
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "HO2",
+                                                    2
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "HO2_ss",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_CO_OH",
+                                            "CO",
+                                            "OH"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_HO2_NO",
+                                            "NO"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "P_O3",
+                            "rhs": {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k_HO2_NO",
+                                                    "HO2",
+                                                    "NO"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k_OH_O3",
+                                                    "OH",
+                                                    "O3"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_HO2_O3",
+                                            "HO2",
+                                            "O3"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "lhs": "chain_length",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_HO2_NO",
+                                            "HO2",
+                                            "NO"
+                                        ]
+                                    },
+                                    "L_HOx"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "TroposphericChemistrySystem.oh.O3",
+                    "rhs": "O3"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.oh.H2O",
+                    "rhs": "H2O"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.oh.M",
+                    "rhs": "M"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.nox.NO",
+                    "rhs": "NO"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.nox.NO2",
+                    "rhs": "NO2"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.nox.O3",
+                    "rhs": "O3"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.nox.O2",
+                    "rhs": "O2"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.nox.M",
+                    "rhs": "M"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.CO",
+                    "rhs": "CO"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.OH",
+                    "rhs": "OH"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.HO2",
+                    "rhs": "HO2"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.NO",
+                    "rhs": "NO"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.NO2",
+                    "rhs": "NO2"
+                },
+                {
+                    "lhs": "TroposphericChemistrySystem.co.O3",
+                    "rhs": "O3"
+                },
+                {
+                    "lhs": "NOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "NO",
+                            "NO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "HOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "OH",
+                            "HO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "RO2",
+                    "rhs": "CH3O2"
+                },
+                {
+                    "lhs": "P_O3_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "TroposphericChemistrySystem.co.k_HO2_NO",
+                                    "HO2",
+                                    "NO"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_CH3O2_NO",
+                                    "CH3O2",
+                                    "NO"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_O3_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "TroposphericChemistrySystem.nox.k_NO_O3",
+                                    "NO",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "TroposphericChemistrySystem.co.k_OH_O3",
+                                    "OH",
+                                    "O3"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "TroposphericChemistrySystem.co.k_HO2_O3",
+                                    "HO2",
+                                    "O3"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "P_O3_net",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            "P_O3_total",
+                            "L_O3_total"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_NOx",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "TroposphericChemistrySystem.co.k_OH_NO2",
+                            "OH",
+                            "NO2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "OPE",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "P_O3_total",
+                            "L_NOx"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "chain_length",
+                    "rhs": "TroposphericChemistrySystem.co.chain_length"
+                }
+            ],
+            "tolerance": {
+                "rel": 1e-10,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "upstream_combined_diagnostics_typical",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem` combined-diagnostic testitems at the TypicalConditions default scenario (test/test_combined_system.jl: `NOx = NO + NO2`:98, `HOx = OH + HO2`:121, `O3 Production Diagnostics`:148, `NOx Loss Rate`:176, `OPE Calculation`:204, `O3 Production Budget Consistency`:370). Pins all 9 combined diagnostics: NOx=2.75e16 (=NO+NO2), HOx=1.01e14 (=OH+HO2, HO2-dominated), RO2=1e14 (=CH3O2); P_O3_total/L_O3_total/P_O3_net satisfy the budget identity P_O3_net = P_O3_total - L_O3_total; L_NOx = k_OH_NO2·OH·NO2 = 1e-17·1e12·2.5e16 (the upstream-asserted 2.5e11); OPE = P_O3_total/L_NOx; chain_length re-exposed from the co subsystem. Upstream asserts rtol=1e-6 bounds and identities; re-asserted here at the tighter model rel=1e-10.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 2.75e+16
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 101000000000000.0
+                        },
+                        {
+                            "variable": "RO2",
+                            "time": 0.0,
+                            "expected": 100000000000000.0
+                        },
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 3949999999999.9995
+                        },
+                        {
+                            "variable": "L_O3_total",
+                            "time": 0.0,
+                            "expected": 47773000000000.0
+                        },
+                        {
+                            "variable": "P_O3_net",
+                            "time": 0.0,
+                            "expected": -43823000000000.0
+                        },
+                        {
+                            "variable": "OPE",
+                            "time": 0.0,
+                            "expected": 15.799999999999995
+                        },
+                        {
+                            "variable": "L_NOx",
+                            "time": 0.0,
+                            "expected": 250000000000.00003
+                        },
+                        {
+                            "variable": "chain_length",
+                            "time": 0.0,
+                            "expected": 6.574675324675325
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_oh_production_coupling_typical",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: OH Production Coupling` testitem (test/test_combined_system.jl:235): the `oh` subsystem produces valid OH-production outputs when fed the combined-system shared species. Pins oh.O1D (O(1D) steady state), oh.P_OH (OH production rate) and oh.ε_OH (OH yield, 0 < ε_OH < 1) — identical to the standalone oh_production.esm values at the same O3/H2O/M, confirming the coupling equations feed the subsystem correctly.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "oh.O1D",
+                            "time": 0.0,
+                            "expected": 74534.16149068323
+                        },
+                        {
+                            "variable": "oh.P_OH",
+                            "time": 0.0,
+                            "expected": 13118012422360.248
+                        },
+                        {
+                            "variable": "oh.ε_OH",
+                            "time": 0.0,
+                            "expected": 0.2186335403726708
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_nox_cycling_coupling_typical",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: NOx Cycling Coupling` testitem (test/test_combined_system.jl:266): the `nox` subsystem produces valid photostationary-state outputs when fed the combined-system shared species. Pins nox.O (ground-state O atom), nox.O3_pss (photostationary O3), nox.Φ (photostationary parameter) and nox.P_O3 (net O3 production from the NOx cycle, finite, may be either sign per Eq. 6.8).",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "nox.O",
+                            "time": 0.0,
+                            "expected": 2539682539.6825395
+                        },
+                        {
+                            "variable": "nox.O3_pss",
+                            "time": 0.0,
+                            "expected": 4.2105263157894743e+18
+                        },
+                        {
+                            "variable": "nox.Φ",
+                            "time": 0.0,
+                            "expected": 4.2105263157894735
+                        },
+                        {
+                            "variable": "nox.P_O3",
+                            "time": 0.0,
+                            "expected": 152500000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_co_oxidation_coupling_typical",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: CO Oxidation Coupling` testitem (test/test_combined_system.jl:298): the `co` subsystem produces valid CO-oxidation outputs when fed the combined-system shared species. Pins co.L_OH/L_HO2/L_HOx (HOx loss rates, all > 0), co.HO2_ss (HO2 steady state), co.P_O3 (net O3 production from the CO cycle, > 0 at typical conditions) and co.chain_length (> 1, catalytic cycling). The upstream test also asserts the top-level chain_length equals co.chain_length — pinned in upstream_combined_diagnostics_typical to the same value.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "co.L_OH",
+                            "time": 0.0,
+                            "expected": 923000000000.0001
+                        },
+                        {
+                            "variable": "co.L_HO2",
+                            "time": 0.0,
+                            "expected": 2283000000000.0
+                        },
+                        {
+                            "variable": "co.L_HOx",
+                            "time": 0.0,
+                            "expected": 308000000000.0
+                        },
+                        {
+                            "variable": "co.HO2_ss",
+                            "time": 0.0,
+                            "expected": 29629629629629.633
+                        },
+                        {
+                            "variable": "co.P_O3",
+                            "time": 0.0,
+                            "expected": 1752000000000.0
+                        },
+                        {
+                            "variable": "co.chain_length",
+                            "time": 0.0,
+                            "expected": 6.574675324675325
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_regime_urban",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: NOx-VOC Regime Differences` testitem (test/test_combined_system.jl:335) for the UrbanConditions preset (elevated NOx/CO, HOx suppressed: O3=2e18, NO=2.5e17, NO2=7.5e17, OH=5e11, HO2=5e13, CH3O2=5e13, CO=5e19). Applied via parameter_overrides on the combined-system inputs — the coupling equations propagate the regime into all three subsystems. The upstream test asserts OPE > 0 and P_O3_total > 0; pins all 9 combined diagnostics plus the oh.P_OH / nox.P_O3 / co.P_O3 subsystem-production outputs.",
+                    "parameter_overrides": {
+                        "O3": 2e+18,
+                        "NO": 2.5e+17,
+                        "NO2": 7.5e+17,
+                        "OH": 500000000000.0,
+                        "HO2": 50000000000000.0,
+                        "CH3O2": 50000000000000.0,
+                        "CO": 5e+19,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 1e+18
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 50500000000000.0
+                        },
+                        {
+                            "variable": "RO2",
+                            "time": 0.0,
+                            "expected": 50000000000000.0
+                        },
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 197500000000000.0
+                        },
+                        {
+                            "variable": "L_O3_total",
+                            "time": 0.0,
+                            "expected": 9500273000000000.0
+                        },
+                        {
+                            "variable": "P_O3_net",
+                            "time": 0.0,
+                            "expected": -9302773000000000.0
+                        },
+                        {
+                            "variable": "OPE",
+                            "time": 0.0,
+                            "expected": 52.66666666666666
+                        },
+                        {
+                            "variable": "L_NOx",
+                            "time": 0.0,
+                            "expected": 3750000000000.0005
+                        },
+                        {
+                            "variable": "chain_length",
+                            "time": 0.0,
+                            "expected": 26.896002125116215
+                        },
+                        {
+                            "variable": "oh.P_OH",
+                            "time": 0.0,
+                            "expected": 26236024844720.496
+                        },
+                        {
+                            "variable": "nox.P_O3",
+                            "time": 0.0,
+                            "expected": -3500000000000000.0
+                        },
+                        {
+                            "variable": "co.P_O3",
+                            "time": 0.0,
+                            "expected": 100977000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_regime_remote",
+                    "description": "Reproduces the upstream `TroposphericChemistrySystem: NOx-VOC Regime Differences` testitem (test/test_combined_system.jl:335) for the RemoteConditions preset (low NOx, elevated HO2: O3=7.5e17, NO=2.5e14, NO2=5e14, OH=1e12, HO2=2e14, CH3O2=2e14, CO=2e18). Applied via parameter_overrides on the combined-system inputs. The upstream test asserts OPE > 0 and P_O3_total > 0; pins all 9 combined diagnostics plus the oh.P_OH / nox.P_O3 / co.P_O3 subsystem-production outputs. Remote OPE is far higher than Typical/Urban — low NOx means each NOx molecule catalyzes many O3 molecules before HNO3 termination.",
+                    "parameter_overrides": {
+                        "O3": 7.5e+17,
+                        "NO": 250000000000000.0,
+                        "NO2": 500000000000000.0,
+                        "OH": 1000000000000.0,
+                        "HO2": 200000000000000.0,
+                        "CH3O2": 200000000000000.0,
+                        "CO": 2e+18,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 750000000000000.0
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 201000000000000.0
+                        },
+                        {
+                            "variable": "RO2",
+                            "time": 0.0,
+                            "expected": 200000000000000.0
+                        },
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 790000000000.0
+                        },
+                        {
+                            "variable": "L_O3_total",
+                            "time": 0.0,
+                            "expected": 3917249999999.9995
+                        },
+                        {
+                            "variable": "P_O3_net",
+                            "time": 0.0,
+                            "expected": -3127249999999.9995
+                        },
+                        {
+                            "variable": "OPE",
+                            "time": 0.0,
+                            "expected": 158.0
+                        },
+                        {
+                            "variable": "L_NOx",
+                            "time": 0.0,
+                            "expected": 5000000000.0
+                        },
+                        {
+                            "variable": "chain_length",
+                            "time": 0.0,
+                            "expected": 1.7088607594936709
+                        },
+                        {
+                            "variable": "oh.P_OH",
+                            "time": 0.0,
+                            "expected": 9838509316770.186
+                        },
+                        {
+                            "variable": "nox.P_O3",
+                            "time": 0.0,
+                            "expected": 437500000000.0005
+                        },
+                        {
+                            "variable": "co.P_O3",
+                            "time": 0.0,
+                            "expected": 50250000000.00006
+                        }
+                    ]
+                },
+                {
+                    "id": "co_term_isolation_zero_co",
+                    "description": "Coverage beyond the upstream suite: zeroes the CO input (parameter_overrides CO=0, all other species at TypicalConditions) to isolate the CO-dependent terms. co.HO2_ss = k_CO_OH·CO·OH / (k_HO2_NO·NO) collapses to exact IEEE-754 zero (gated by abs=1e-12); co.L_OH loses its k_CO_OH·CO·OH term. P_O3_total is unchanged from the Typical value (its two channels HO2+NO and CH3O2+NO carry no CO factor) and chain_length is unchanged (k_HO2_NO·HO2·NO / L_HOx has no CO dependence) — confirming the CO input couples only into the co-subsystem CO-oxidation terms.",
+                    "parameter_overrides": {
+                        "O3": 1e+18,
+                        "NO": 2500000000000000.0,
+                        "NO2": 2.5e+16,
+                        "OH": 1000000000000.0,
+                        "HO2": 100000000000000.0,
+                        "CO": 0.0,
+                        "CH3O2": 100000000000000.0,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "co.HO2_ss",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "co.L_OH",
+                            "time": 0.0,
+                            "expected": 323000000000.0
+                        },
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 3949999999999.9995
+                        },
+                        {
+                            "variable": "chain_length",
+                            "time": 0.0,
+                            "expected": 6.574675324675325
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_loss_linearity_doubled_o3",
+                    "description": "Coverage beyond the upstream suite: doubles the O3 input (parameter_overrides O3=2e18, all other species at TypicalConditions). All three L_O3_total terms (k_NO_O3·NO·O3, k_OH_O3·OH·O3, k_HO2_O3·HO2·O3) are linear in O3, so L_O3_total doubles relative to the Typical value; P_O3_net = P_O3_total - L_O3_total falls accordingly. The nox subsystem responds too: nox.Φ = O3_pss/O3 halves and nox.P_O3 = j_NO2·NO2 - k_NO_O3·NO·O3 drops. Pins L_O3_total, P_O3_net, nox.Φ and nox.P_O3.",
+                    "parameter_overrides": {
+                        "O3": 2e+18,
+                        "NO": 2500000000000000.0,
+                        "NO2": 2.5e+16,
+                        "OH": 1000000000000.0,
+                        "HO2": 100000000000000.0,
+                        "CO": 2.5e+18,
+                        "CH3O2": 100000000000000.0,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "L_O3_total",
+                            "time": 0.0,
+                            "expected": 95546000000000.0
+                        },
+                        {
+                            "variable": "P_O3_net",
+                            "time": 0.0,
+                            "expected": -91596000000000.0
+                        },
+                        {
+                            "variable": "nox.Φ",
+                            "time": 0.0,
+                            "expected": 2.1052631578947367
+                        },
+                        {
+                            "variable": "nox.P_O3",
+                            "time": 0.0,
+                            "expected": 105000000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "hox_perturbation_high_ho2",
+                    "description": "Coverage beyond the upstream suite: raises HO2 to 5e14 m^-3 (the high end of the remote-regime HO2 range), all other species at TypicalConditions. The HO2+NO ozone-production channel (co.k_HO2_NO·HO2·NO) scales with HO2, so P_O3_total rises above its Typical value; HOx = OH + HO2 tracks HO2; and the co subsystem's L_HO2 picks up the quadratic 2·k_HO2_HO2·HO2^2 self-reaction term. Pins P_O3_total, P_O3_net, HOx, OPE, chain_length and co.L_HO2.",
+                    "parameter_overrides": {
+                        "O3": 1e+18,
+                        "NO": 2500000000000000.0,
+                        "NO2": 2.5e+16,
+                        "OH": 1000000000000.0,
+                        "HO2": 500000000000000.0,
+                        "CO": 2.5e+18,
+                        "CH3O2": 100000000000000.0,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 12050000000000.0
+                        },
+                        {
+                            "variable": "P_O3_net",
+                            "time": 0.0,
+                            "expected": -36523000000000.0
+                        },
+                        {
+                            "variable": "HOx",
+                            "time": 0.0,
+                            "expected": 501000000000000.0
+                        },
+                        {
+                            "variable": "OPE",
+                            "time": 0.0,
+                            "expected": 48.199999999999996
+                        },
+                        {
+                            "variable": "chain_length",
+                            "time": 0.0,
+                            "expected": 5.955882352941177
+                        },
+                        {
+                            "variable": "co.L_HO2",
+                            "time": 0.0,
+                            "expected": 12575000000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "nox_perturbation_low_no",
+                    "description": "Coverage beyond the upstream suite: lowers NO to 5e14 m^-3 (between the Remote and Typical NO values), all other species at TypicalConditions. Both P_O3_total channels carry an NO factor so P_O3_total falls; the NO+O3 term of L_O3_total shrinks; nox.O3_pss = j_NO2·NO2/(k_NO_O3·NO) rises as NO drops. Pins NOx, P_O3_total, L_O3_total, OPE, L_NOx and nox.O3_pss.",
+                    "parameter_overrides": {
+                        "O3": 1e+18,
+                        "NO": 500000000000000.0,
+                        "NO2": 2.5e+16,
+                        "OH": 1000000000000.0,
+                        "HO2": 100000000000000.0,
+                        "CO": 2.5e+18,
+                        "CH3O2": 100000000000000.0,
+                        "H2O": 4e+23,
+                        "M": 2.5e+25,
+                        "O2": 5.25e+24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "NOx",
+                            "time": 0.0,
+                            "expected": 2.55e+16
+                        },
+                        {
+                            "variable": "P_O3_total",
+                            "time": 0.0,
+                            "expected": 790000000000.0
+                        },
+                        {
+                            "variable": "L_O3_total",
+                            "time": 0.0,
+                            "expected": 9773000000000.0
+                        },
+                        {
+                            "variable": "OPE",
+                            "time": 0.0,
+                            "expected": 3.1599999999999997
+                        },
+                        {
+                            "variable": "L_NOx",
+                            "time": 0.0,
+                            "expected": 250000000000.00003
+                        },
+                        {
+                            "variable": "nox.O3_pss",
+                            "time": 0.0,
+                            "expected": 2.105263157894737e+19
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
