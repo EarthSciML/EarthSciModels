@@ -1,0 +1,376 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DiagnosticPressure",
+        "description": "Diagnostic pressure equation for the anelastic atmosphere in terrain-following coordinates, from Clark (1977) \"A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation\", Section 4. Observed-only algebraic component: from the pressure-gradient-force divergences, the pressure-perturbation Laplacian terms, and a momentum-divergence source it computes the pressure-gradient-force divergence div_PF (with the terrain-following Jacobian factor G^(1/2) scaling the vertical term), the pressure Laplacian laplacian_p, and the diagnostic pressure equation residual pressure_residual (Eq. 4.2), which vanishes when the anelastic mass-continuity constraint is satisfied. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:499 (`DiagnosticPressure` @component); the upstream @constant g is declared as a fixed-default parameter.",
+        "tags": [
+            "atmospheric_dynamics",
+            "clark-1977",
+            "anelastic",
+            "diagnostic-pressure",
+            "terrain-following",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-qlsq)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215 — Section 4, Eqs. 4.1-4.2 (the diagnostic pressure equation derived from the anelastic mass-continuity constraint)."
+            }
+        ]
+    },
+    "models": {
+        "DiagnosticPressure": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/clark1977.jl:499\n\nDiagnosticPressure is a ModelingToolkit `@component` implementing the diagnostic pressure equation of Clark (1977), Section 4 — the elliptic equation (Eq. 4.2) for the pressure perturbation derived from the anelastic mass-continuity constraint. All three equations are algebraic (no time derivative): div_PF, laplacian_p, and pressure_residual are `@variables` bound by three `~` equations; g is an upstream `@constant`; C_a, G_sqrt, p_prime, d2p_dx2, d2p_dy2, d2p_dz2, F_source, dPFX_dx, dPFY_dy, dPFZ_dz are `@parameters`.\n\nConstant g: the upstream `@constant` g (gravitational acceleration) is serialized as a parameter-type variable with a fixed default — the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters, matching the sibling general_circulation.esm and surface_layer_profile.esm migrations.\n\nOmitted declarations: the upstream component also declares an `@constant` ρ_ref = 1.225 kg/m^3 and three `@parameters` PFX, PFY, PFZ (the un-differentiated pressure-gradient-force terms) that appear in no equation — the equations use the pre-differentiated divergences dPFX_dx, dPFY_dy, dPFZ_dz instead. MTK builds the system from the equations alone, so these four symbols are not in `parameters(sys)`; mtk2esm follows suit and they are not carried here, mirroring the omitted air-pressure parameter in general_circulation.esm.\n\nDimensional note (upstream `checks = false`): the upstream `System(...; checks = false)` disables MTK unit validation because the pressure_residual equation is dimensionally inconsistent — the pseudo-compressible term g*p_prime/C_a^2 has dimension Pa/m ((m/s^2)*Pa / (m/s)^2), whereas laplacian_p and F_source are Pa/m^2. The upstream source documents this as a deliberately simplified form (its comment: \"the full equation includes terrain-following metric terms\"). The .esm `units` fields are descriptive metadata only — the ESS Python runner of record (earthsci_toolkit.simulation.simulate) performs no dimensional analysis, and the Model schema object has no `checks` field — so the units are recorded faithfully as declared upstream and the inconsistency is preserved, not papered over.\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): an observed-only algebraic system with no ODE integration — every output is constant in time. rel=1e-6 covers float64 roundoff in the closed-form +, -, *, /, ^ expressions; abs=1e-9 covers the intended exact zeros (every output when its driving inputs are zero) and the anelastic_balance test, where pressure_residual cancels to a ~3e-17 floating-point residual.\n\nTests: the upstream clark1977_test.jl carries only a structure test for DiagnosticPressure (3 unknowns, 3 equations) with no numeric assertions. The .esm tests below are derived directly from the three algebraic equations, each exercised across a physically meaningful parameter regime: the pressure Laplacian, the pressure-gradient-force divergence with and without a terrain Jacobian, the pseudo-compressible and source terms of the residual, the anelastic-balance case where the residual vanishes, and a full combined check sampled at two times to confirm time-invariance."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-09
+            },
+            "variables": {
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration"
+                },
+                "C_a": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 50.0,
+                    "description": "Pseudo-compressible acoustic speed (numerical parameter)"
+                },
+                "G_sqrt": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "G^(1/2) Jacobian factor of the terrain-following coordinates (dimensionless)"
+                },
+                "p_prime": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 0.0,
+                    "description": "Pressure perturbation"
+                },
+                "d2p_dx2": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Second derivative of the pressure perturbation in x"
+                },
+                "d2p_dy2": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Second derivative of the pressure perturbation in y"
+                },
+                "d2p_dz2": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Second derivative of the pressure perturbation in z (terrain-following coordinate)"
+                },
+                "F_source": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Pressure equation source F(x) from the momentum-equation divergences (Eq. 4.1)"
+                },
+                "dPFX_dx": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Divergence of the x-pressure gradient force term, d(PFX)/dx"
+                },
+                "dPFY_dy": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Divergence of the y-pressure gradient force term, d(PFY)/dy"
+                },
+                "dPFZ_dz": {
+                    "type": "parameter",
+                    "units": "Pa/m^2",
+                    "default": 0.0,
+                    "description": "Divergence of the z-pressure gradient force term, d(PFZ)/dz (terrain-following coordinate)"
+                },
+                "laplacian_p": {
+                    "type": "state",
+                    "units": "Pa/m^2",
+                    "description": "Pressure-perturbation Laplacian in terrain-following coordinates"
+                },
+                "pressure_residual": {
+                    "type": "state",
+                    "units": "Pa/m^2",
+                    "description": "Diagnostic pressure equation residual (Eq. 4.2); zero when the anelastic constraint is satisfied"
+                },
+                "div_PF": {
+                    "type": "state",
+                    "units": "Pa/m^2",
+                    "description": "Divergence of the pressure gradient forces"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "div_PF",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "dPFX_dx",
+                            "dPFY_dy",
+                            {
+                                "op": "/",
+                                "args": ["dPFZ_dz", "G_sqrt"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "laplacian_p",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["d2p_dx2", "d2p_dy2", "d2p_dz2"]
+                    }
+                },
+                {
+                    "lhs": "pressure_residual",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "laplacian_p",
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["g", "p_prime"]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": ["C_a", 2]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [-1, "F_source"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (every pressure-gradient-force divergence, second derivative, source, and the pressure perturbation are zero; G_sqrt = 1, C_a = 50, g = 9.81). All three outputs are zero. Guards the serialized parameter defaults.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "pressure_laplacian",
+                    "description": "Pressure-perturbation Laplacian as the sum of the three second derivatives (laplacian_p = d2p_dx2 + d2p_dy2 + d2p_dz2 = 0.5 + 0.3 - 0.2 = 0.6 Pa/m^2). With p_prime = 0 and F_source = 0 the residual reduces to laplacian_p, so pressure_residual = 0.6 Pa/m^2; div_PF = 0 because no pressure-gradient-force divergence is set.",
+                    "parameter_overrides": { "d2p_dx2": 0.5, "d2p_dy2": 0.3, "d2p_dz2": -0.2 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.6 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.6 }
+                    ]
+                },
+                {
+                    "id": "pressure_gradient_force_divergence",
+                    "description": "Divergence of the pressure gradient forces with a non-unit terrain Jacobian: div_PF = dPFX_dx + dPFY_dy + dPFZ_dz / G_sqrt = 0.1 + 0.2 + 0.4 / 2.0 = 0.5 Pa/m^2. The vertical term dPFZ_dz is scaled by 1 / G_sqrt; the horizontal terms are not. laplacian_p and pressure_residual stay zero.",
+                    "parameter_overrides": { "dPFX_dx": 0.1, "dPFY_dy": 0.2, "dPFZ_dz": 0.4, "G_sqrt": 2.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.5 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "flat_terrain_jacobian",
+                    "description": "Flat-terrain limit G_sqrt = 1: the vertical pressure-gradient-force divergence is passed through unscaled, so div_PF = dPFZ_dz = 0.7 Pa/m^2 when the horizontal terms are zero. Confirms the terrain Jacobian factor reduces to a no-op over flat ground.",
+                    "parameter_overrides": { "dPFX_dx": 0.0, "dPFY_dy": 0.0, "dPFZ_dz": 0.7, "G_sqrt": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.7 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "compressibility_term",
+                    "description": "Pseudo-compressible term of the diagnostic pressure equation at the default acoustic speed (C_a = 50 m/s): with laplacian_p = 0 and F_source = 0, pressure_residual = -g * p_prime / C_a^2 = -9.81 * 100 / 2500 = -0.3924 Pa/m^2. Isolates the term that couples the pressure perturbation back into the residual.",
+                    "parameter_overrides": { "p_prime": 100.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": -0.3924 }
+                    ]
+                },
+                {
+                    "id": "acoustic_speed_sensitivity",
+                    "description": "Effect of the pseudo-compressible acoustic speed: at C_a = 100 m/s (double the default) and p_prime = 500 Pa, pressure_residual = -g * p_prime / C_a^2 = -9.81 * 500 / 10000 = -0.4905 Pa/m^2. The 1 / C_a^2 dependence makes the compressibility correction shrink as the artificial sound speed grows.",
+                    "parameter_overrides": { "p_prime": 500.0, "C_a": 100.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": -0.4905 }
+                    ]
+                },
+                {
+                    "id": "source_term",
+                    "description": "Source-term contribution: with the Laplacian and pressure perturbation zero, the residual is the negative of the momentum-divergence source, pressure_residual = -F_source = -0.35 Pa/m^2.",
+                    "parameter_overrides": { "F_source": 0.35 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": -0.35 }
+                    ]
+                },
+                {
+                    "id": "anelastic_balance",
+                    "description": "Anelastic constraint satisfied: when the pressure Laplacian exactly balances the pseudo-compressible and source terms the residual vanishes (Eq. 4.2). Here laplacian_p = d2p_dx2 = 0.4924 Pa/m^2 equals g * p_prime / C_a^2 + F_source = 9.81 * 100 / 2500 + 0.1 = 0.3924 + 0.1, so pressure_residual cancels to zero (a ~3e-17 floating-point residual, covered by the model-level abs=1e-9 tolerance).",
+                    "parameter_overrides": { "p_prime": 100.0, "C_a": 50.0, "F_source": 0.1, "d2p_dx2": 0.4924 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.4924 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "negative_pf_divergence",
+                    "description": "Pressure-gradient-force divergence with mixed-sign terms and a sub-unit terrain Jacobian (G_sqrt = 0.75, terrain steeper than flat): div_PF = dPFX_dx + dPFY_dy + dPFZ_dz / G_sqrt = -0.3 + 0.1 + (-0.6) / 0.75 = -0.3 + 0.1 - 0.8 = -1.0 Pa/m^2.",
+                    "parameter_overrides": { "dPFX_dx": -0.3, "dPFY_dy": 0.1, "dPFZ_dz": -0.6, "G_sqrt": 0.75 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": -1.0 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.0 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "full_diagnostic",
+                    "description": "Comprehensive check exercising all three outputs with every driving input nonzero: C_a = 60 m/s, G_sqrt = 1.5, p_prime = 150 Pa, d2p_dx2 = 0.6, d2p_dy2 = 0.25, d2p_dz2 = -0.15, F_source = 0.05, dPFX_dx = 0.12, dPFY_dy = 0.08, dPFZ_dz = 0.3 Pa/m^2. div_PF = 0.12 + 0.08 + 0.3 / 1.5 = 0.4; laplacian_p = 0.6 + 0.25 - 0.15 = 0.7; pressure_residual = 0.7 - 9.81 * 150 / 3600 - 0.05 = 0.24125 Pa/m^2. Sampled at t = 0 and t = 1 to confirm the algebraic system is time-invariant.",
+                    "parameter_overrides": {
+                        "C_a": 60.0,
+                        "G_sqrt": 1.5,
+                        "p_prime": 150.0,
+                        "d2p_dx2": 0.6,
+                        "d2p_dy2": 0.25,
+                        "d2p_dz2": -0.15,
+                        "F_source": 0.05,
+                        "dPFX_dx": 0.12,
+                        "dPFY_dy": 0.08,
+                        "dPFZ_dz": 0.3
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_PF", "time": 0.0, "expected": 0.4 },
+                        { "variable": "laplacian_p", "time": 0.0, "expected": 0.7 },
+                        { "variable": "pressure_residual", "time": 0.0, "expected": 0.24125 },
+                        { "variable": "div_PF", "time": 1.0, "expected": 0.4 },
+                        { "variable": "laplacian_p", "time": 1.0, "expected": 0.7 },
+                        { "variable": "pressure_residual", "time": 1.0, "expected": 0.24125 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "pressure_residual_vs_pressure_perturbation",
+                    "description": "Diagnostic pressure residual as a function of the pressure perturbation p_prime, at the default acoustic speed C_a = 50 m/s with the Laplacian and source terms zero. The residual is the pure pseudo-compressible term pressure_residual = -g * p_prime / C_a^2 — a straight line through the origin, negative for p_prime > 0.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p_prime",
+                                "range": { "start": -200.0, "stop": 200.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "residual_vs_p_prime",
+                            "type": "line",
+                            "description": "Diagnostic pressure residual vs pressure perturbation (pseudo-compressible term of Eq. 4.2).",
+                            "x": { "variable": "p_prime", "label": "Pressure perturbation p' (Pa)" },
+                            "y": { "variable": "pressure_residual", "label": "Diagnostic pressure residual (Pa/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "div_pf_vs_terrain_jacobian",
+                    "description": "Pressure-gradient-force divergence as a function of the terrain-following Jacobian factor G^(1/2), with the vertical term fixed at dPFZ_dz = 0.5 Pa/m^2 and the horizontal terms zero. div_PF = dPFZ_dz / G_sqrt traces the 1 / G_sqrt scaling that the terrain-following transformation applies to the vertical pressure-gradient-force divergence.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "dPFZ_dz": 0.5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "G_sqrt",
+                                "range": { "start": 0.5, "stop": 2.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "div_PF_vs_G_sqrt",
+                            "type": "line",
+                            "description": "Pressure-gradient-force divergence vs terrain Jacobian factor G^(1/2).",
+                            "x": { "variable": "G_sqrt", "label": "Terrain Jacobian factor G^(1/2)" },
+                            "y": { "variable": "div_PF", "label": "Pressure gradient force divergence (Pa/m^2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "pressure_residual_vs_acoustic_speed",
+                    "description": "Diagnostic pressure residual as a function of the pseudo-compressible acoustic speed C_a, at a fixed pressure perturbation p_prime = 300 Pa with the Laplacian and source terms zero. The residual -g * p_prime / C_a^2 decays toward zero as C_a grows: increasing the artificial sound speed makes the pseudo-compressible scheme approach the true anelastic limit.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "p_prime": 300.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "C_a",
+                                "range": { "start": 20.0, "stop": 200.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "residual_vs_C_a",
+                            "type": "line",
+                            "description": "Diagnostic pressure residual vs pseudo-compressible acoustic speed C_a.",
+                            "x": { "variable": "C_a", "label": "Pseudo-compressible acoustic speed C_a (m/s)" },
+                            "y": { "variable": "pressure_residual", "label": "Diagnostic pressure residual (Pa/m^2)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
