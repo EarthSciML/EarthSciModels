@@ -1,0 +1,453 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "OHReactionLifetime",
+        "description": "Atmospheric lifetime against reaction with the hydroxyl radical (OH), from Seinfeld & Pandis (2006) Atmospheric Chemistry and Physics Ch. 2, Eq. 2.12: tau = 1/(k_OH*[OH]). OH is the dominant daytime oxidant of the troposphere, so the OH-reaction lifetime sets how long most reactive trace gases \u2014 methane, carbon monoxide, non-methane VOCs \u2014 persist in the atmosphere. This observed-only algebraic component implements two relations: an effective pseudo-first-order loss rate constant k_eff = k_OH*OH_conc (the second-order reaction X + OH collapsed onto the approximately constant ambient OH), and the lifetime tau_OH = 1/k_eff. The lifetime is jointly controlled by the species' intrinsic reactivity (k_OH, spanning four-plus decades across tropospheric trace gases) and the ambient oxidising capacity ([OH], varying with season, latitude and pollution): a species may persist for years in clean remote air and only hours in a polluted daytime plume. Purely algebraic system (no time derivatives): four variables \u2014 one parameter k_OH, one input OH_conc encoded as a parameter, two outputs k_eff and tau_OH as state \u2014 and two equations. Migrated from GasChem.jl@280ee50f src/AtmosphericLifetime.jl:264 (`OHReactionLifetime` @component).",
+        "tags": [
+            "gaschem",
+            "atmospheric-lifetime",
+            "oh-reaction",
+            "hydroxyl-radical",
+            "tropospheric-chemistry",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-58k2)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 2, Eq. 2.12 (atmospheric lifetime against OH reaction, tau = 1/(k_OH*[OH])), with the effective pseudo-first-order rate constant of Eq. 2.6. OH-reaction rate constants for CH4 and CO from the GasChem.jl AtmosphericLifetime test suite."
+            }
+        ]
+    },
+    "models": {
+        "OHReactionLifetime": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/AtmosphericLifetime.jl:264\n\nUpstream `OHReactionLifetime` is an MTK `@component` declaring one `@parameter` (k_OH, the second-order OH reaction rate constant), three time-indexed `@variables` (OH_conc the input OH number density; k_eff and tau_OH the two outputs), zero `@constants`, and two algebraic equations. It implements Seinfeld & Pandis (2006) Ch. 2 Eq. 2.12 \u2014 the atmospheric lifetime of a trace species against removal by reaction with the hydroxyl radical, tau = 1 / (k_OH*[OH]). OH is the dominant daytime tropospheric oxidant, so this lifetime sets the persistence of most reactive trace gases (CH4, CO, non-methane VOCs). The upstream docstring notes the product k_OH*[OH] is an effective first-order rate constant 'consistent with Eq. 2.6'.\n\nVariable-classification convention: the input @variable OH_conc is encoded here as `type: parameter` because it has no defining equation within the OHReactionLifetime component itself \u2014 it is an externally-supplied ambient OH concentration. The upstream structural test `1.4 OHReactionLifetime Structure` (test/atmospheric_lifetime_test.jl) builds the raw `@named` System where OH_conc is still an `unknown`; the canonical simulate path compiles such an input-bearing component with `mtkcompile(sys; inputs=[OH_conc])`, which resolves the input @variable into a parameter. This mirrors the rig-wide convention applied by sibling oh_production.esm (input @variables O3/H2O/M encoded as `type: parameter`), ope.esm (OH/HO2/RO2/NO/NO2), and the same-source-file sibling tropospheric_budget.esm (P_n/P_a/P_c). The single declared @parameter k_OH carries `type: parameter` directly. The two output @variables k_eff and tau_OH are encoded as `type: state` \u2014 each is the LHS of exactly one algebraic equation; this matches the sibling observed-only gaschem ESM convention (ope.esm P_O3/L_NOx/OPE all `type: state`, oh_production.esm O1D/P_OH/eps_OH all `type: state`).\n\nStructural-test reproduction: upstream `1.4 OHReactionLifetime Structure` asserts the raw System carries the three variable names OH_conc/k_eff/tau_OH among `unknowns`, k_OH among `parameters`, and `length(equations) == 2`. The .esm preserves this with four declared variables (2 parameter k_OH+OH_conc, 2 state k_eff+tau_OH \u2014 together the four symbols that upstream splits into 3 unknowns + 1 parameter) and exactly two entries in `equations`.\n\nCGS->SI unit translation: the upstream Julia declares the component in CGS units \u2014 k_OH as u\"cm^3/(molec*s)\", OH_conc as u\"molec/cm^3\", k_eff as u\"s^-1\", tau_OH as u\"s\" \u2014 and carries no `default =` value on either k_OH or OH_conc. The .esm declares the two number-density-bearing quantities in SI, dropping the dimensionless `molec` count: k_OH in m^3/s and OH_conc in m^-3, matching the rig-wide SI unit vocabulary (no committed .esm uses `cm^3` or `molec`; siblings oh_production.esm and ope.esm convert the identical CGS rate-constant and number-density quantities to m^3/s and m^-3). The conversion is exact and physics-invariant for the two outputs: k_OH[m^3/s] = k_OH[cm^3/molec/s] * 1e-6 (1 cm^3 = 1e-6 m^3) and OH_conc[m^-3] = OH_conc[molec/cm^3] * 1e6 (1 cm^-3 = 1e6 m^-3), so their product k_eff = k_OH*OH_conc is unchanged (the *1e-6 and *1e6 factors cancel) and tau_OH = 1/k_eff is likewise unchanged. Both equations are unit-system-agnostic in form; only the input/parameter literals carry the conversion. Unlike sibling ope.esm \u2014 whose upstream Julia already wrote the rate constants as the SI-converted product (8.1e-12 * 1.0e-6) \u2014 the OHReactionLifetime upstream is purely CGS, so this migration introduces the conversion: the .esm encodes the clean SI literals (6.3e-21, 2.4e-19, 1.0e-16, 1.0e-20 m^3/s; 1.0e12 m^-3) directly.\n\nObservability classification: this component is purely algebraic \u2014 both equations are `~` assignment relations with no `D(.)` time-derivative operator, so the `(t)` time index has no dynamical role and every trajectory is constant in time. Test and example scenarios use time_span [0.0, 1.0] and sample at t=0, mirroring the convention of sibling observed-only ESM files (ope.esm, oh_production.esm, gwp.esm).\n\nEquation cascade: the two equations form a topologically-ordered cascade \u2014 k_eff depends only on the parameter k_OH and the input OH_conc; tau_OH depends on k_eff. tau_OH's equation is written `tau_OH ~ 1 / k_eff` (referencing the k_eff output) rather than fully inlined as 1/(k_OH*OH_conc) \u2014 this preserves the upstream symbolic structure, which splits the lifetime into an explicit pseudo-first-order rate constant k_eff and its reciprocal, mirroring the ope.esm `OPE ~ P_O3/L_NOx` and oh_production.esm cascade convention.\n\nNumerical defaults: the upstream input @variable OH_conc and @parameter k_OH carry no defaults \u2014 the .esm defaults are taken from the canonical upstream verification test `2.9 Eq. 2.12: OH Reaction Lifetime` (test/atmospheric_lifetime_test.jl), the methane scenario:\n  k_OH    = 6.3e-21 m^3/s   (methane + OH; upstream CGS 6.3e-15 cm^3/molec/s)\n  OH_conc = 1.0e12 m^-3     (global tropospheric mean OH; upstream CGS 1.0e6 molec/cm^3)\nAt these defaults k_eff = 6.3e-9 s^-1 and tau_OH = 158730158.73015872 s ~= 5.03 Julian years \u2014 the canonical methane OH-lifetime. Methane is the textbook illustration of an OH-controlled lifetime; the upstream docstring's stated 'tau: seconds to years' range is anchored at its long-lived end by exactly this CH4 case.\n\nUpstream test reproduction:\n- `1.4 OHReactionLifetime Structure` (test/atmospheric_lifetime_test.jl) \u2014 reproduced by the .esm structural shape (4 variables = 2 parameter + 2 state, 2 equations).\n- `2.9 Eq. 2.12: OH Reaction Lifetime` (test/atmospheric_lifetime_test.jl) \u2014 a pure-arithmetic verification of tau = 1/(k_OH*[OH]) for two species: methane (k_OH=6.3e-15 cm^3/molec/s, [OH]=1e6 molec/cm^3 -> tau ~= 5.0 years, upstream rtol=0.1) and carbon monoxide (k_OH=2.4e-13 cm^3/molec/s -> tau ~= 48 days, upstream rtol=0.1). Reproduced and tightened to rel=1e-10 by `upstream_eq212_methane_lifetime_defaults` (CH4, at the declared defaults) and `upstream_eq212_carbon_monoxide_lifetime` (CO, k_OH overridden to 2.4e-19 m^3/s). The CO pinned values are computed from the .esm's own SI literal 2.4e-19 m^3/s \u2014 k_eff = 2.4e-19*1.0e12 = 2.4000000000000003e-07 s^-1, tau_OH = 4166666.666666666 s \u2014 internally exact at rel=1e-10; this differs from the upstream CGS arithmetic 1/(2.4e-13*1e6) by one ULP (~2e-16 relative, six orders of magnitude below the upstream rtol=0.1).\nThe remaining eight tests extend coverage beyond the upstream suite: inverse scaling of tau_OH in OH_conc (doubled, halved), the k_OH<->OH_conc product symmetry (doubling k_OH gives a lifetime bit-identical to doubling OH_conc), the docstring's stated k_OH range endpoints (1e-14 and 1e-10 cm^3/molec/s \u2014 slowly- and highly-reactive species), the clean-remote and polluted-daytime OH regimes, and a joint two-input perturbation.\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the two algebraic equations are minimal expression trees \u2014 k_eff is a single two-factor product (1 IEEE-754 op), tau_OH a single reciprocal (1 op). Each output is correctly-rounded to within ~1 ULP ~= 1e-16 relative; rel=1e-10 leaves six orders of magnitude of headroom and is far tighter than the upstream test 2.9's rtol=0.1. No test scenario produces a zero or near-zero output (the smallest pinned magnitudes are k_eff ~= 1e-4 s^-1 and tau_OH = 1e4 s, in the highly-reactive case), so the abs=1.0e-12 floor is never the binding tolerance; it is retained as a model-level floor matching the sibling observed-only ESM convention (ope.esm rel=1e-10/abs=1e-12, oh_production.esm rel=1e-10/abs=1e-12). The OH_conc->0 boundary (k_eff->0, tau_OH = 1/0 -> +Inf) is deliberately not exercised as a test scenario \u2014 a non-finite expected value has no meaningful rel/abs tolerance \u2014 and no example sweep reaches OH_conc = 0.\n\nUnit balance (verified): both equations balance dimensionally.\n  k_eff  `k_OH*OH_conc`: (m^3/s)*(m^-3) = s^-1 ok\n  tau_OH `1 / k_eff`: 1/(s^-1) = s ok (the literal 1 is dimensionless)\nAll number densities in SI m^-3, the rate constant in SI m^3/s, the effective first-order rate constant in s^-1, the lifetime in s. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1e-10,
+                "abs": 1e-12
+            },
+            "variables": {
+                "k_OH": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 6.3e-21,
+                    "description": "Second-order (bimolecular) rate constant for the trace-species + OH reaction [m^3/s] (Seinfeld & Pandis 2006 Ch. 2, Eq. 2.12). The intrinsic OH reactivity of the species, which with the ambient OH concentration sets the effective first-order loss rate k_eff = k_OH*OH_conc. The default 6.3e-21 m^3/s is the methane + OH rate constant \u2014 the SI form of the upstream CGS value 6.3e-15 cm^3/molec/s (1 cm^3 = 1e-6 m^3, the dimensionless `molec` count dropped). The upstream docstring quotes a typical species range of 1e-14 to 1e-10 cm^3/molec/s (1e-20 to 1e-16 m^3/s); methane, exceptionally unreactive, sits just below it. Encoded as `type: parameter`: it is the component's sole upstream @parameter, set via parameter_overrides in tests and parameter sweeps in examples."
+                },
+                "OH_conc": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1000000000000.0,
+                    "description": "Ambient hydroxyl-radical number density [m^-3] (externally-supplied input). The default 1.0e12 m^-3 ~= 1e6 molec/cm^3 is the global tropospheric mean OH concentration and is the value used by the upstream verification test `2.9 Eq. 2.12` for both its methane and carbon-monoxide cases; it is the SI form of the upstream CGS 1.0e6 molec/cm^3 (1 cm^-3 = 1e6 m^-3). OH appears only in k_eff = k_OH*OH_conc, so the OH-reaction lifetime tau_OH is exactly inversely proportional to OH_conc \u2014 a higher ambient OH burden shortens the lifetime of every species. Encoded as `type: parameter` (not `type: state`) because OHReactionLifetime has no governing equation for OH_conc \u2014 it is an externally-supplied input variable, resolved into a parameter by the canonical mtkcompile(sys; inputs=[OH_conc]) compile path."
+                },
+                "k_eff": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Effective pseudo-first-order rate constant for loss by OH reaction [s^-1]: k_eff = k_OH*OH_conc. Collapses the second-order reaction X + OH into a first-order decay constant for X by absorbing the (approximately constant) OH concentration \u2014 the standard pseudo-first-order treatment, consistent with Eq. 2.6 of Seinfeld & Pandis (2006). At the methane default scenario k_eff = 6.3e-9 s^-1. Exactly linear in both k_OH and OH_conc."
+                },
+                "tau_OH": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "Atmospheric lifetime of the trace species against removal by reaction with OH [s] (Seinfeld & Pandis 2006 Ch. 2, Eq. 2.12): tau_OH = 1/k_eff = 1/(k_OH*[OH]). The e-folding time for first-order decay of the species under OH oxidation. At the methane default scenario tau_OH ~= 1.587e8 s ~= 5.03 years; carbon monoxide (~38x more reactive) is ~48 days. Inversely proportional to both the species reactivity k_OH and the ambient OH concentration \u2014 the OH-reaction lifetime spans seconds (fast alkenes in polluted air) to years (CH4 in clean air)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "k_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k_OH",
+                            "OH_conc"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "tau_OH",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            "k_eff"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_eq212_methane_lifetime_defaults",
+                    "description": "Reproduces and tightens the methane branch of the upstream `2.9 Eq. 2.12: OH Reaction Lifetime` test (GasChem.jl test/atmospheric_lifetime_test.jl). At the declared defaults k_OH=6.3e-21 m^3/s (methane + OH, upstream CGS 6.3e-15 cm^3/molec/s) and OH_conc=1.0e12 m^-3 (global tropospheric mean OH, upstream CGS 1.0e6 molec/cm^3): k_eff = k_OH*OH_conc = 6.3e-9 s^-1 and tau_OH = 1/k_eff = 158730158.73015872 s = 5.0299 Julian years. The upstream asserts tau_CH4 in years ~= 5.0 at rtol=0.1; this test pins both outputs to single-ULP precision at rel=1e-10, nine orders of magnitude tighter. Because nothing is overridden it also guards the k_OH and OH_conc defaults: any drift in either shifts both pinned values.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 6.3e-09
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 158730158.73015872
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_eq212_carbon_monoxide_lifetime",
+                    "description": "Reproduces and tightens the carbon-monoxide branch of the upstream `2.9 Eq. 2.12` test. k_OH overridden to 2.4e-19 m^3/s (CO + OH, upstream CGS 2.4e-13 cm^3/molec/s), OH_conc at the default 1.0e12 m^-3. k_eff = 2.4000000000000003e-07 s^-1, tau_OH = 4166666.666666666 s = 48.2253 days. The upstream asserts tau_CO in days ~= 48 at rtol=0.1; this test pins both outputs at rel=1e-10. The pinned values are computed from the .esm's own SI literal 2.4e-19; they differ from the upstream CGS arithmetic 1/(2.4e-13*1e6) by one ULP (~2e-16 relative), six orders of magnitude inside the upstream rtol=0.1. CO is ~38x more reactive toward OH than CH4, so its OH lifetime is ~38x shorter (weeks, not years).",
+                    "parameter_overrides": {
+                        "k_OH": 2.4e-19
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 2.4000000000000003e-07
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 4166666.666666666
+                        }
+                    ]
+                },
+                {
+                    "id": "oh_conc_doubled_halves_lifetime",
+                    "description": "OH_conc doubled to 2.0e12 m^-3, k_OH at the CH4 default. k_eff = k_OH*OH_conc is exactly linear in OH_conc, so k_eff doubles to 1.26e-8 s^-1 and tau_OH = 1/k_eff halves to 79365079.36507936 s (2.515 yr). Verifies the inverse proportionality tau_OH ~ 1/[OH]: a more oxidising (higher-OH) atmosphere removes the trace species twice as fast.",
+                    "parameter_overrides": {
+                        "OH_conc": 2000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 1.26e-08
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 79365079.36507936
+                        }
+                    ]
+                },
+                {
+                    "id": "oh_conc_halved_doubles_lifetime",
+                    "description": "OH_conc halved to 5.0e11 m^-3, k_OH at the CH4 default. k_eff halves to 3.15e-9 s^-1 and tau_OH doubles to 317460317.46031743 s (10.06 yr). The downward-OH counterpart of `oh_conc_doubled_halves_lifetime` \u2014 together they bracket the default scenario and confirm tau_OH is exactly inversely proportional to the ambient OH concentration.",
+                    "parameter_overrides": {
+                        "OH_conc": 500000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 3.15e-09
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 317460317.46031743
+                        }
+                    ]
+                },
+                {
+                    "id": "k_oh_doubled_matches_oh_doubled_symmetry",
+                    "description": "k_OH doubled to 1.26e-20 m^3/s, OH_conc at the default 1.0e12 m^-3. k_eff = k_OH*OH_conc depends only on the product, so k_eff = 1.26e-8 s^-1 and tau_OH = 79365079.36507936 s \u2014 bit-identical to the `oh_conc_doubled_halves_lifetime` result. Verifies the k_OH<->OH_conc product symmetry: doubling the intrinsic reactivity of the species is numerically indistinguishable from doubling the ambient OH. A regression that wired k_eff to only one of the two factors would break exactly one of this test / `oh_conc_doubled_halves_lifetime`.",
+                    "parameter_overrides": {
+                        "k_OH": 1.26e-20
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 1.26e-08
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 79365079.36507936
+                        }
+                    ]
+                },
+                {
+                    "id": "highly_reactive_species_short_lifetime",
+                    "description": "Highly reactive trace species: k_OH = 1.0e-16 m^3/s, the upper end of the upstream docstring's stated k_OH range (1e-10 cm^3/molec/s). OH_conc at the default. k_eff = 9.999999999999999e-05 s^-1, tau_OH = 10000.0 s (2.78 hours) \u2014 the short-lived end of the docstring's 'seconds to years' span. Representative of fast-oxidising species (many alkenes, terpenes) that are destroyed within hours of emission.",
+                    "parameter_overrides": {
+                        "k_OH": 1e-16
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 9.999999999999999e-05
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 10000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "slowly_reactive_species_long_lifetime",
+                    "description": "Slowly reactive trace species: k_OH = 1.0e-20 m^3/s, the lower end of the upstream docstring's stated k_OH range (1e-14 cm^3/molec/s). OH_conc at the default. k_eff = 1e-08 s^-1, tau_OH = 100000000.0 s (3.169 yr). Confirms that an unreactive species accumulates a multi-year OH lifetime; methane (k_OH=6.3e-21, even less reactive) sits just below this bound at ~5 yr.",
+                    "parameter_overrides": {
+                        "k_OH": 1e-20
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 1e-08
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 100000000.0
+                        }
+                    ]
+                },
+                {
+                    "id": "clean_remote_low_oh_long_lifetime",
+                    "description": "Clean remote atmosphere: OH_conc lowered to 1.0e11 m^-3 (~1e5 molec/cm^3, an order of magnitude below the global mean), k_OH at the CH4 default. k_eff = 6.3e-10 s^-1, tau_OH = 1587301587.3015873 s (50.30 yr). With little OH available the methane lifetime stretches tenfold \u2014 illustrating that the OH-reaction lifetime is set jointly by species reactivity and the ambient oxidant burden.",
+                    "parameter_overrides": {
+                        "OH_conc": 100000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 6.3e-10
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 1587301587.3015873
+                        }
+                    ]
+                },
+                {
+                    "id": "polluted_high_oh_short_lifetime",
+                    "description": "Polluted daytime atmosphere: OH_conc raised to 1.0e13 m^-3 (~1e7 molec/cm^3, a daytime urban-plume peak), k_OH at the CH4 default. k_eff = 6.3e-08 s^-1, tau_OH = 15873015.873015875 s (183.7 days = 0.503 yr). The high-OH counterpart of `clean_remote_low_oh_long_lifetime`: a tenfold rise in OH compresses the methane lifetime tenfold, from ~5 yr to ~6 months.",
+                    "parameter_overrides": {
+                        "OH_conc": 10000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 6.3e-08
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 15873015.873015875
+                        }
+                    ]
+                },
+                {
+                    "id": "carbon_monoxide_in_polluted_air_joint_perturbation",
+                    "description": "Joint two-input perturbation: k_OH = 2.4e-19 m^3/s (CO) and OH_conc = 5.0e12 m^-3 (5x the mean, a moderately polluted air mass) both overridden away from the CH4 defaults. k_eff = 1.2000000000000002e-06 s^-1, tau_OH = 833333.3333333333 s (9.645 days). Exercises both equation inputs simultaneously to catch cross-wiring between the k_OH and OH_conc slots of k_eff; the result is the product of the CO reactivity and the elevated OH.",
+                    "parameter_overrides": {
+                        "k_OH": 2.4e-19,
+                        "OH_conc": 5000000000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k_eff",
+                            "time": 0.0,
+                            "expected": 1.2000000000000002e-06
+                        },
+                        {
+                            "variable": "tau_OH",
+                            "time": 0.0,
+                            "expected": 833333.3333333333
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "lifetime_vs_oh_rate_constant_sweep",
+                    "description": "OH-reaction lifetime and effective rate constant as functions of the species rate constant k_OH, swept logarithmically from 1.0e-21 to 1.0e-16 m^3/s (upstream CGS 1e-15 to 1e-10 cm^3/molec/s) with OH_conc at the global-mean default 1.0e12 m^-3. The sweep spans the full reactivity range of tropospheric trace gases: methane (k_OH=6.3e-21) near the slow end, carbon monoxide (k_OH=2.4e-19) mid-range, and fast-oxidising alkenes/terpenes near 1e-16. Because tau_OH = 1/(k_OH*[OH]), the lifetime falls as 1/k_OH across five decades \u2014 from decades down to hours \u2014 the continuous form of the textbook species-lifetime table of Seinfeld & Pandis (2006) Ch. 2.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_OH",
+                                "range": {
+                                    "start": 1e-21,
+                                    "stop": 1e-16,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_oh_vs_k_oh",
+                            "type": "line",
+                            "description": "OH-reaction lifetime tau_OH vs the species rate constant k_OH on log-log axes. A straight falling line of slope -1 (tau_OH proportional to 1/k_OH at fixed OH): the more reactive the species, the shorter its atmospheric persistence, dropping from ~32 yr at k_OH=1e-21 to ~3 hours at k_OH=1e-16.",
+                            "x": {
+                                "variable": "k_OH",
+                                "label": "OH rate constant k_OH (m^3/s, log)"
+                            },
+                            "y": {
+                                "variable": "tau_OH",
+                                "label": "OH-reaction lifetime tau_OH (s, log)"
+                            }
+                        },
+                        {
+                            "id": "k_eff_vs_k_oh",
+                            "type": "line",
+                            "description": "Effective pseudo-first-order rate constant k_eff = k_OH*OH_conc vs k_OH. A straight rising line through the origin (k_eff exactly linear in k_OH at fixed OH_conc) \u2014 the loss rate that drives the tau_OH decline.",
+                            "x": {
+                                "variable": "k_OH",
+                                "label": "OH rate constant k_OH (m^3/s, log)"
+                            },
+                            "y": {
+                                "variable": "k_eff",
+                                "label": "effective rate constant k_eff (s^-1, log)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "lifetime_vs_oh_concentration_sweep",
+                    "description": "Methane OH-reaction lifetime as a function of the ambient OH concentration, swept logarithmically from 1.0e10 to 1.0e13 m^-3 (upstream CGS 1e4 to 1e7 molec/cm^3) with k_OH at the methane default 6.3e-21 m^3/s. The range runs from a clean remote free-troposphere OH burden up to a daytime polluted-plume peak. tau_OH = 1/(k_OH*[OH]) falls as 1/[OH], so the same molecule's lifetime varies by three orders of magnitude purely with the oxidising capacity of the surrounding air \u2014 the mechanism behind the seasonal and latitudinal spread of the methane lifetime.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH_conc",
+                                "range": {
+                                    "start": 10000000000.0,
+                                    "stop": 10000000000000.0,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_oh_vs_oh_conc",
+                            "type": "line",
+                            "description": "Methane OH-reaction lifetime tau_OH vs ambient OH number density on log-log axes. A straight falling line of slope -1 (tau_OH proportional to 1/[OH]): higher OH shortens the lifetime from ~500 yr in the cleanest air to ~6 months at a polluted daytime OH peak.",
+                            "x": {
+                                "variable": "OH_conc",
+                                "label": "OH number density (m^-3, log)"
+                            },
+                            "y": {
+                                "variable": "tau_OH",
+                                "label": "OH-reaction lifetime tau_OH (s, log)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "lifetime_heatmap_k_oh_oh_conc",
+                    "description": "OH-reaction lifetime as a joint function of species reactivity k_OH and ambient OH concentration (2-D log-log sweep). k_OH in [1.0e-21, 1.0e-16] m^3/s x OH_conc in [1.0e10, 1.0e13] m^-3. Because tau_OH = 1/(k_OH*[OH]) depends only on the product k_OH*[OH], the iso-lifetime contours are straight anti-diagonal lines of constant k_OH*OH_conc: the long-lived corner is the unreactive species in clean air (low k_OH, low OH), the short-lived corner is the reactive species in polluted air (high k_OH, high OH). Surfaces the full bivariate structure that the two 1-D sweeps each section.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_OH",
+                                "range": {
+                                    "start": 1e-21,
+                                    "stop": 1e-16,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "OH_conc",
+                                "range": {
+                                    "start": 10000000000.0,
+                                    "stop": 10000000000000.0,
+                                    "count": 20,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_oh_heatmap_k_oh_oh_conc",
+                            "type": "heatmap",
+                            "description": "tau_OH as a function of (k_OH, OH_conc) on log-log axes. The iso-lifetime contours run anti-diagonally as lines of constant k_OH*OH_conc product: the lower-left region (low reactivity, low OH) is the long-lived regime, the upper-right region (high reactivity, high OH) is the short-lived regime.",
+                            "x": {
+                                "variable": "k_OH",
+                                "label": "OH rate constant k_OH (m^3/s, log)"
+                            },
+                            "y": {
+                                "variable": "OH_conc",
+                                "label": "OH number density (m^-3, log)"
+                            },
+                            "value": {
+                                "variable": "tau_OH",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
