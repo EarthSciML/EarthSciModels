@@ -1,0 +1,400 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TerrainFollowingTransform",
+        "description": "Terrain-following coordinate transformation from Clark (1977) \"A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation\", Eqs. 2.20-2.23 and 2.27. Observed-only algebraic component: from the terrain surface height z_s, the domain height H, the transformed vertical coordinate z_bar, and the two terrain slopes dz_s_dx and dz_s_dy it computes the transformation Jacobian G^(1/2) = 1 - z_s/H (G_sqrt), the two metric coefficients G^(1/2)G^13 and G^(1/2)G^23 that carry the terrain slope into the transformed equations (G_sqrt_G13, G_sqrt_G23), the physical height z_phys recovered from z_bar (the inverse of the mapping z_bar = H(z - z_s)/(H - z_s)), and the diagnostic Jacobian factor ω_diag used to recover the contravariant vertical velocity ω (Eq. 2.27). The transformation maps the irregular lower boundary z = z_s(x,y) to the flat computational surface z_bar = 0 while preserving the rigid lid z = H at z_bar = H. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:157 (`TerrainFollowingTransform` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "clark-1977",
+            "terrain-following",
+            "coordinate-transform",
+            "metric-jacobian",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-soqm)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215 — Section 2, Eqs. 2.20-2.23 (the terrain-following coordinate transformation and its metric coefficients) and Eq. 2.27 (the contravariant vertical velocity ω)."
+            }
+        ]
+    },
+    "models": {
+        "TerrainFollowingTransform": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/clark1977.jl:157\n\nTerrainFollowingTransform is a ModelingToolkit `@component` implementing the terrain-following coordinate transformation of Clark (1977), Section 2 — the mapping z_bar = H(z - z_s)/(H - z_s) (Eq. 2.20) that flattens the irregular lower boundary z = z_s(x,y) onto the computational surface z_bar = 0 while pinning the rigid lid z = H at z_bar = H, together with the transformation Jacobian (Eq. 2.21) and metric coefficients (Eqs. 2.22-2.23) it induces.\n\nAlgebraic structure: all five equations are algebraic (no time derivative). G_sqrt, G_sqrt_G13, G_sqrt_G23, z_phys, and ω_diag are `@variables` (system unknowns) bound by five `~` equations; z_s, H, z_bar, dz_s_dx, dz_s_dy are `@parameters`. The upstream structure test asserts `length(unknowns) == 5` and `length(equations) == 5`, captured here by the five declared state variables and five equations.\n\nNo constants: unlike the sibling DiagnosticPressure and IsentropicBaseState components of clark1977.jl, TerrainFollowingTransform declares no `@constants` block — every symbol is either a parameter or a variable, so there is no upstream constant to fold into a fixed-default parameter.\n\nDimensional consistency: the upstream `System(eqs, t; name)` is constructed WITHOUT `checks = false` — every equation is dimensionally consistent. z_s/H and z_bar/H are length/length and therefore dimensionless; G_sqrt and the two metric coefficients are dimensionless; z_phys is a length in metres. The .esm `units` fields record the upstream annotations as declared: z_s, H, z_bar, z_phys are `m`; the two terrain slopes dz_s_dx, dz_s_dy and the three Jacobian/metric variables G_sqrt, G_sqrt_G13, G_sqrt_G23, ω_diag carry no upstream `unit=` annotation and are dimensionless, recorded as `units: \"1\"`.\n\nUnicode name: the diagnostic Jacobian factor ω_diag retains its upstream Greek-letter name, matching the sibling surface_layer_profile.esm migration which preserves ζ, φ_m, φ_h, and similar Unicode unknowns.\n\nEq. 2.27 factor: the fifth equation ω_diag ~ G_sqrt is the trivial identity that names the G^(1/2) factor of the contravariant-vertical-velocity transformation ω = (w + G^(1/2)G^13·u + G^(1/2)G^23·v) / G^(1/2). It is preserved as a distinct unknown and equation to keep the migrated component structurally faithful to the upstream 5-unknown / 5-equation system.\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): an observed-only algebraic system, linear in its five unknowns, with no ODE integration — every output is constant in time. rel=1e-6 covers float64 roundoff in the closed-form +, -, *, / expressions (e.g. 1 - 100/8000, where neither 1/80 nor 0.9875 is exactly representable in binary floating point); abs=1e-9 covers the intended exact zeros (G_sqrt_G13 and G_sqrt_G23 vanish when the corresponding terrain slope is zero or z_bar = H, and z_phys = 0 when z_bar = 0 and z_s = 0).\n\nTests: the upstream test suite (test/clark1977_test_original.jl) carries five TerrainFollowingTransform testsets — Structure (5 unknowns / 5 equations), Flat Terrain, Boundary Mapping (surface and lid solves), Jacobian, and Metric Coefficients (surface and lid solves); the current test/clark1977_test.jl retains only the Structure testset. The structural test is captured by the .esm declaring exactly five state variables and five equations. The four behavioral testsets are reproduced below as numeric tests, each exercising all five outputs, and extended with: a y-direction metric test (the upstream tests vary only dz_s_dx, leaving G_sqrt_G23 always zero), a steep-terrain Jacobian case, a combined mid-column case, and a full comprehensive case sampled at two times to confirm the algebraic system is time-invariant."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-09
+            },
+            "variables": {
+                "z_s": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Terrain surface height z_s(x,y)"
+                },
+                "H": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 8000.0,
+                    "description": "Domain height (rigid-lid altitude)"
+                },
+                "z_bar": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Transformed (terrain-following) vertical coordinate"
+                },
+                "dz_s_dx": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Terrain slope d(z_s)/dx in the x direction (dimensionless)"
+                },
+                "dz_s_dy": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Terrain slope d(z_s)/dy in the y direction (dimensionless)"
+                },
+                "G_sqrt": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Coordinate-transformation Jacobian G^(1/2) = 1 - z_s/H (Eq. 2.21)"
+                },
+                "G_sqrt_G13": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Metric coefficient G^(1/2)G^13 carrying the x terrain slope into the transformed equations (Eq. 2.22)"
+                },
+                "G_sqrt_G23": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Metric coefficient G^(1/2)G^23 carrying the y terrain slope into the transformed equations (Eq. 2.23)"
+                },
+                "z_phys": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Physical height z recovered from the transformed coordinate z_bar (inverse of Eq. 2.20)"
+                },
+                "ω_diag": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Diagnostic Jacobian factor for the contravariant vertical velocity ω (Eq. 2.27); equals G^(1/2)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "G_sqrt",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            1,
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    {
+                                        "op": "/",
+                                        "args": ["z_s", "H"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "G_sqrt_G13",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": ["z_bar", "H"]
+                                    },
+                                    -1
+                                ]
+                            },
+                            "dz_s_dx"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "G_sqrt_G23",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": ["z_bar", "H"]
+                                    },
+                                    -1
+                                ]
+                            },
+                            "dz_s_dy"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "z_phys",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "z_bar",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "H",
+                                                    {
+                                                        "op": "*",
+                                                        "args": [-1, "z_s"]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "H"
+                                ]
+                            },
+                            "z_s"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ω_diag",
+                    "rhs": "G_sqrt"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (z_s = 0, H = 8000 m, z_bar = 0, dz_s_dx = dz_s_dy = 0). Flat ground with the column sampled at the surface: G_sqrt = 1 - 0/8000 = 1; both metric coefficients vanish because the terrain slopes are zero; z_phys = 0·(8000-0)/8000 + 0 = 0 m; ω_diag tracks G_sqrt = 1. Guards the serialized parameter defaults.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 1.0 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 0.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "flat_terrain",
+                    "description": "Upstream \"Flat Terrain\" testset: flat ground (z_s = 0) with the column sampled at mid-domain z_bar = 4000 m (H = 8000 m). The Jacobian is unity (G_sqrt = 1 - 0/8000 = 1); the metric coefficients vanish (zero terrain slope); over flat ground the transformation is the identity, so z_phys = 4000·(8000-0)/8000 + 0 = 4000 m equals z_bar.",
+                    "parameter_overrides": { "z_s": 0.0, "z_bar": 4000.0, "H": 8000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 1.0 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 4000.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 1.0 }
+                    ]
+                },
+                {
+                    "id": "boundary_mapping_surface",
+                    "description": "Upstream \"Boundary Mapping\" testset, lower-boundary solve: over a 100 m terrain (z_s = 100, H = 8000 m) the computational surface z_bar = 0 maps to the physical terrain height, z_phys = 0·(8000-100)/8000 + 100 = 100 m = z_s. The Jacobian is G_sqrt = 1 - 100/8000 = 0.9875; the metric coefficients vanish (zero terrain slope).",
+                    "parameter_overrides": { "z_s": 100.0, "z_bar": 0.0, "H": 8000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.9875 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 100.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.9875 }
+                    ]
+                },
+                {
+                    "id": "boundary_mapping_lid",
+                    "description": "Upstream \"Boundary Mapping\" testset, upper-boundary solve: over the same 100 m terrain (z_s = 100, H = 8000 m) the computational lid z_bar = H = 8000 maps to the physical rigid lid, z_phys = 8000·(8000-100)/8000 + 100 = 7900 + 100 = 8000 m = H. The transformation pins the domain top regardless of terrain. G_sqrt = 0.9875; metric coefficients vanish.",
+                    "parameter_overrides": { "z_s": 100.0, "z_bar": 8000.0, "H": 8000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.9875 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 8000.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.9875 }
+                    ]
+                },
+                {
+                    "id": "jacobian_steep_terrain",
+                    "description": "Upstream \"Jacobian\" testset, extended to a steep terrain to make the Jacobian clearly non-trivial: with the terrain at one quarter of the domain height (z_s = 2000, H = 8000 m) the transformation Jacobian is G_sqrt = 1 - 2000/8000 = 0.75 (Eq. 2.21). At the surface (z_bar = 0) z_phys = 0·(8000-2000)/8000 + 2000 = 2000 m = z_s; metric coefficients vanish (zero terrain slope).",
+                    "parameter_overrides": { "z_s": 2000.0, "z_bar": 0.0, "H": 8000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.75 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 2000.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.75 }
+                    ]
+                },
+                {
+                    "id": "metric_coefficient_x_surface",
+                    "description": "Upstream \"Metric Coefficients\" testset, surface solve: over a 100 m terrain with x-slope dz_s_dx = -0.01 (z_bar = 0, H = 8000 m) the x metric coefficient at the surface is G_sqrt_G13 = (0/8000 - 1)·(-0.01) = 0.01 — full terrain-slope influence at z_bar = 0 (Eq. 2.22). G_sqrt = 0.9875; G_sqrt_G23 vanishes (dz_s_dy = 0); z_phys = 100 m.",
+                    "parameter_overrides": { "z_s": 100.0, "z_bar": 0.0, "H": 8000.0, "dz_s_dx": -0.01 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.9875 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.01 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 100.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.9875 }
+                    ]
+                },
+                {
+                    "id": "metric_coefficient_x_lid",
+                    "description": "Upstream \"Metric Coefficients\" testset, lid solve: with the same x-slope dz_s_dx = -0.01 but the column sampled at the rigid lid (z_bar = H = 8000), the x metric coefficient vanishes, G_sqrt_G13 = (8000/8000 - 1)·(-0.01) = 0 — the terrain slope has no influence at the domain top (Eq. 2.22). G_sqrt = 0.9875; z_phys = 8000·(8000-100)/8000 + 100 = 8000 m.",
+                    "parameter_overrides": { "z_s": 100.0, "z_bar": 8000.0, "H": 8000.0, "dz_s_dx": -0.01 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.9875 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": 0.0 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 8000.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.9875 }
+                    ]
+                },
+                {
+                    "id": "metric_coefficient_y",
+                    "description": "y-direction metric coefficient (the upstream tests vary only dz_s_dx, leaving G_sqrt_G23 always zero). With a 200 m terrain, y-slope dz_s_dy = 0.02, and the column sampled at z_bar = 2000 m (H = 8000 m): G_sqrt_G23 = (2000/8000 - 1)·0.02 = (-0.75)·0.02 = -0.015 (Eq. 2.23). G_sqrt = 1 - 200/8000 = 0.975; G_sqrt_G13 vanishes (dz_s_dx = 0); z_phys = 2000·(8000-200)/8000 + 200 = 1950 + 200 = 2150 m.",
+                    "parameter_overrides": { "z_s": 200.0, "z_bar": 2000.0, "H": 8000.0, "dz_s_dy": 0.02 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.975 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.0 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": -0.015 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 2150.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.975 }
+                    ]
+                },
+                {
+                    "id": "midcolumn_combined",
+                    "description": "Combined mid-column case with both terrain slopes active: z_s = 2000 m, z_bar = 4000 m (mid-domain), H = 8000 m, dz_s_dx = -0.05, dz_s_dy = 0.03. G_sqrt = 1 - 2000/8000 = 0.75; G_sqrt_G13 = (4000/8000 - 1)·(-0.05) = (-0.5)·(-0.05) = 0.025; G_sqrt_G23 = (4000/8000 - 1)·0.03 = (-0.5)·0.03 = -0.015; z_phys = 4000·(8000-2000)/8000 + 2000 = 3000 + 2000 = 5000 m; ω_diag = G_sqrt = 0.75.",
+                    "parameter_overrides": { "z_s": 2000.0, "z_bar": 4000.0, "H": 8000.0, "dz_s_dx": -0.05, "dz_s_dy": 0.03 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.75 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.025 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": -0.015 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 5000.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.75 }
+                    ]
+                },
+                {
+                    "id": "full_transform",
+                    "description": "Comprehensive check exercising all five outputs with every input non-default and a non-default domain height: z_s = 500 m, z_bar = 6000 m, H = 10000 m, dz_s_dx = -0.08, dz_s_dy = 0.04. G_sqrt = 1 - 500/10000 = 0.95; G_sqrt_G13 = (6000/10000 - 1)·(-0.08) = (-0.4)·(-0.08) = 0.032; G_sqrt_G23 = (6000/10000 - 1)·0.04 = (-0.4)·0.04 = -0.016; z_phys = 6000·(10000-500)/10000 + 500 = 5700 + 500 = 6200 m; ω_diag = G_sqrt = 0.95. Sampled at t = 0 and t = 1 to confirm the algebraic system is time-invariant.",
+                    "parameter_overrides": { "z_s": 500.0, "z_bar": 6000.0, "H": 10000.0, "dz_s_dx": -0.08, "dz_s_dy": 0.04 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "G_sqrt", "time": 0.0, "expected": 0.95 },
+                        { "variable": "G_sqrt_G13", "time": 0.0, "expected": 0.032 },
+                        { "variable": "G_sqrt_G23", "time": 0.0, "expected": -0.016 },
+                        { "variable": "z_phys", "time": 0.0, "expected": 6200.0 },
+                        { "variable": "ω_diag", "time": 0.0, "expected": 0.95 },
+                        { "variable": "G_sqrt", "time": 1.0, "expected": 0.95 },
+                        { "variable": "G_sqrt_G13", "time": 1.0, "expected": 0.032 },
+                        { "variable": "G_sqrt_G23", "time": 1.0, "expected": -0.016 },
+                        { "variable": "z_phys", "time": 1.0, "expected": 6200.0 },
+                        { "variable": "ω_diag", "time": 1.0, "expected": 0.95 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "jacobian_vs_terrain_height",
+                    "description": "Coordinate-transformation Jacobian G^(1/2) as a function of the terrain surface height z_s, at the default domain height H = 8000 m. G_sqrt = 1 - z_s/H is a straight line falling from 1 over flat ground to 0.5 when the terrain reaches half the domain height — the Jacobian measures how the terrain-following transformation compresses the vertical grid above a mountain (Eq. 2.21).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_s",
+                                "range": { "start": 0.0, "stop": 4000.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "G_sqrt_vs_z_s",
+                            "type": "line",
+                            "description": "Transformation Jacobian G^(1/2) vs terrain surface height z_s.",
+                            "x": { "variable": "z_s", "label": "Terrain surface height z_s (m)" },
+                            "y": { "variable": "G_sqrt", "label": "Transformation Jacobian G^(1/2)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "physical_height_vs_transformed_coordinate",
+                    "description": "Physical height z_phys as a function of the transformed vertical coordinate z_bar, over a 1 km mountain (z_s = 1000 m, the peak of the h = 1 km Witch-of-Agnesi case from the AtmosphericDynamics.jl documentation) with H = 8000 m. z_phys = z_bar·(H - z_s)/H + z_s rises linearly from the terrain height z_s at z_bar = 0 to the rigid lid H at z_bar = H — one vertical grid column of the terrain-following coordinate grid (inverse of Eq. 2.20).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "z_s": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_bar",
+                                "range": { "start": 0.0, "stop": 8000.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "z_phys_vs_z_bar",
+                            "type": "line",
+                            "description": "Physical height z_phys vs transformed coordinate z_bar over a 1 km mountain.",
+                            "x": { "variable": "z_bar", "label": "Transformed coordinate z_bar (m)" },
+                            "y": { "variable": "z_phys", "label": "Physical height z (m)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "metric_coefficient_vs_height",
+                    "description": "x-direction metric coefficient G^(1/2)G^13 as a function of the transformed vertical coordinate z_bar, for a fixed terrain slope dz_s_dx = -0.05 and H = 8000 m. G_sqrt_G13 = (z_bar/H - 1)·dz_s_dx decays linearly from its full value at the surface (0.05 at z_bar = 0) to zero at the rigid lid (z_bar = H): the terrain slope's influence on the transformed equations fades with height (Eq. 2.22).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "dz_s_dx": -0.05 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_bar",
+                                "range": { "start": 0.0, "stop": 8000.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "G_sqrt_G13_vs_z_bar",
+                            "type": "line",
+                            "description": "x metric coefficient G^(1/2)G^13 vs transformed coordinate z_bar.",
+                            "x": { "variable": "z_bar", "label": "Transformed coordinate z_bar (m)" },
+                            "y": { "variable": "G_sqrt_G13", "label": "Metric coefficient G^(1/2)G^13" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
