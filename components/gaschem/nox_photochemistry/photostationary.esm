@@ -1,0 +1,301 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PhotostationaryState",
+        "description": "Photostationary-state diagnostic for the NO-NO₂-O₃ Leighton cycle — Seinfeld & Pandis (2006) Ch. 6 §6.2, Eqs. 6.6-6.7, pp. 207-212. Computes the photostationary-state parameter Φ = j_NO2·[NO₂] / (k_NO+O₃·[NO]·[O₃]) and its deviation from unity Φ_deviation = Φ - 1. Φ = 1 is the exact Leighton photostationary state (pure NO-NO₂-O₃ cycling, zero net ozone production); Φ > 1 indicates additional oxidants (peroxy radicals HO₂/RO₂ converting NO→NO₂ and producing ozone), Φ < 1 indicates net ozone loss. This observed-only algebraic component is the simplified companion to NOxPhotochemistry (the full Eqs. 6.5-6.8 diagnostic): five variables (three inputs NO/NO₂/O₃ encoded as parameters, two outputs Φ/Φ_deviation as state), two rate parameters (j_NO2, k_NO_O3) plus the dimensionless unity constant `one`, and two algebraic equations. No time derivatives. Migrated from GasChem.jl@8c12c048 src/nox_photochemistry.jl:145 (`PhotostationaryState` @component).",
+        "tags": [
+            "gaschem",
+            "nox-photochemistry",
+            "photostationary-state",
+            "leighton-relationship",
+            "tropospheric-chemistry",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-oot1)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 6 §6.2, Eqs. 6.5-6.8, pp. 207-212. The NOx (NO + NO₂) photochemical cycle and the photostationary-state (Leighton) relationship; Eq. 6.7 defines the photostationary-state parameter Φ. Rate constants from Table B.1 (298 K)."
+            },
+            {
+                "citation": "Leighton, P. A. (1961). Photochemistry of Air Pollution. Academic Press, New York. The original treatment of the NO-NO₂-O₃ photostationary state — the relationship Φ = 1 between the three species during daytime photochemical equilibrium is known as the Leighton relationship."
+            }
+        ]
+    },
+    "models": {
+        "PhotostationaryState": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/nox_photochemistry.jl:145\n\nUpstream `PhotostationaryState` is an MTK `@component` with 5 `@variables` (3 inputs NO/NO₂/O₃ + 2 outputs Φ/Φ_deviation), 2 `@parameters` (j_NO2, k_NO_O3), 1 `@constants` (one = 1), and 2 algebraic equations from Seinfeld & Pandis §6.2 Eqs. 6.6-6.7. It is the simplified companion to `NOxPhotochemistry` (the full 4-equation Eqs. 6.5-6.8 diagnostic at src/nox_photochemistry.jl:88): PhotostationaryState isolates the photostationary-state parameter Φ (the Leighton-relationship deviation index) and its deviation from unity. The upstream test compiles the system with `compile_with_inputs(sys, [:NO, :NO2, :O3])` and solves it as a `NonlinearProblem` with the three inputs pinned to user-supplied concentrations.\n\nVariable-classification convention: the 3 input @variables (NO, NO₂, O₃) are encoded here as `type: parameter` because they have no defining equation within the PhotostationaryState component itself — they are externally-supplied inputs that the upstream compile treats via `compile_with_inputs(...)` (i.e. `mtkcompile` with `inputs=[...]`). This mirrors the rig-wide convention applied by sibling gaschem migrations ope.esm (its five input @variables OH/HO₂/RO₂/NO/NO₂ are encoded `type: parameter`) and oh_production.esm (its three input @variables O₃/H₂O/M encoded `type: parameter`). The 2 output @variables (Φ, Φ_deviation) are encoded `type: state` because each has exactly one defining algebraic equation. The upstream structural test `PhotostationaryState: Structural Verification` (test/test_nox_photochemistry.jl:33-49) asserts `length(unknowns(sys)) == 5` and `length(equations(sys)) == 2` — the .esm preserves this with the 5 declared variables (3 parameter + 2 state) and 2 entries in `equations`.\n\nConstant→parameter translation: the upstream `@constants one = 1` (a dimensionless unity used to form the deviation Φ - 1) is encoded as a fixed-default parameter `one` carrying the value 1.0. This mirrors the rig-wide convention of translating `@constants` to fixed-default parameters (sibling stefan_boltzmann.esm encodes its σ `@constants` the same way; chapman.esm encodes its four `@constants` the same way) so MTK's unit checker sees `one` as a named dimensionless quantity rather than a bare literal in the equation RHS. The upstream declares `one` with `unit = u\"1\"`; the .esm preserves the dimensionless unit \"1\".\n\nObservability classification: this component is purely algebraic — every output variable is the LHS of one algebraic equation in the inputs, parameters, and (for Φ_deviation) the other output Φ. No equation contains a `D(·)` operator, so the `(t)` time index has no role and the trajectory is constant in time. Test and example scenarios use `time_span: [0.0, 1.0]` and sample at t=0 (the `default_typical_urban` test also samples t=1 to pin time-invariance), mirroring the convention used by sibling observed-only ESM files (ope.esm, photon_energy.esm, stefan_boltzmann.esm).\n\nEquation cascade: the two equations form a topologically-ordered cascade — Φ depends only on inputs/parameters; Φ_deviation depends on the Φ output. Φ_deviation's equation is written `Φ_deviation ~ Φ - one` (referencing the output variable Φ) rather than fully inlined, preserving the upstream symbolic structure (mirrors the ope.esm `OPE ~ P_O3 / L_NOx` cascade convention).\n\nPhysics: Φ is the photostationary-state parameter (S&P Eq. 6.7) Φ = j_NO2·[NO₂] / (k_NO+O₃·[NO]·[O₃]). In a pure NO-NO₂-O₃ Leighton cycle (NO₂ + hν → NO + O; O + O₂ + M → O₃ + M; NO + O₃ → NO₂ + O₂) Φ = 1 — the photostationary state, zero net ozone production. Φ > 1 indicates additional oxidants (HO₂, RO₂ peroxy radicals converting NO→NO₂ without consuming O₃) are perturbing the cycle and net ozone is being produced; Φ < 1 indicates net ozone loss. Φ_deviation = Φ - 1 is the signed deviation. Typical urban daytime measurements show Φ ≈ 1.5-3 (S&P §6.2; GasChem.jl docs/src/nox_photochemistry.md), reflecting significant peroxy-radical activity.\n\nNumerical defaults: the upstream input @variables carry no defaults — the .esm defaults are the canonical typical-urban scenario used by the sibling `NOxPhotochemistry` Leighton-relationship test (test/test_nox_photochemistry.jl:86-90), all in SI m⁻³:\n  NO  = 2.5e16 m⁻³   (~1 ppb at STP air number density 2.5e25 m⁻³)\n  NO₂ = 5.0e16 m⁻³   (~2 ppb at STP, NO₂/NO ratio 2 — moderately-polluted daytime partitioning)\n  O₃  = 1.0e18 m⁻³   (~40 ppb at STP, a typical tropospheric value)\nAt these defaults Φ = 0.8421052631578948 (slightly below unity — the chosen 40-ppb O₃ sits just above the photostationary-state O₃ ≈ 8.42e17 m⁻³ for 1-ppb NO / 2-ppb NO₂) and Φ_deviation = -0.1578947368421052. The two rate parameters keep their upstream defaults: j_NO2 = 8.0e-3 s⁻¹ (typical midday NO₂ photolysis rate) and k_NO_O3 = 1.9e-20 m³/s. The upstream Julia writes the latter as the product `1.9e-14 * 1.0e-6` (the cm³/molec/s → m³/s conversion of the 1.9e-14 CGS value, S&P p. 211); that product evaluates in IEEE-754 to exactly 1.9e-20, so the clean literal 1.9e-20 used here is bit-identical to the upstream product (verified) — matching the SI-literal default of sibling methane_ode.esm's k_NO_O3.\n\nUpstream test reproduction:\n- `PhotostationaryState: Structural Verification` (test_nox_photochemistry.jl:33-49) — reproduced by the .esm structural shape (5 variables = 3 parameter + 2 state, 2 equations).\n- `PhotostationaryState: Deviation from PSS` (test_nox_photochemistry.jl:230-258) computes O3_pss_val = j_NO2·NO₂ / (k_NO_O3·NO) at NO=2.5e16, NO₂=5.0e16 and asserts: Φ_deviation ≈ 0 (atol=1e-6) at O₃ = O3_pss_val; Φ_deviation > 0 below PSS (O₃ = 0.5·O3_pss_val); Φ_deviation < 0 above PSS (O₃ = 2.0·O3_pss_val). Reproduced and tightened by `upstream_pss_zero_deviation` (O₃ = 8.421052631578948e17, pins Φ = 1 / Φ_deviation = 0), `upstream_below_pss_positive_deviation` (O₃ = 4.210526315789474e17, pins Φ = 2 / Φ_deviation = 1), `upstream_above_pss_negative_deviation` (O₃ = 1.6842105263157896e18, pins Φ = 0.5 / Φ_deviation = -0.5). The three O₃ overrides are O3_pss_val and its exact ×0.5 / ×2.0 multiples (0.5 and 2.0 are exact powers of two, so the products are exact IEEE-754 exponent shifts); the resulting Φ values 1 / 2 / 0.5 are exact in IEEE-754.\nThe remaining tests extend coverage beyond the upstream suite: single-input linear/inverse scaling (NO₂, NO, O₃), rate-parameter scaling (j_NO2, k_NO_O3), the strong-peroxy-radical urban regime, the `one`-constant wiring sentinel, and time-invariance of the algebraic trajectory.\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the two algebraic equations are small expression trees — Φ is one division of a 2-factor product by a 3-factor product (≈4 IEEE-754 ops), Φ_deviation is one subtraction. Each output is correctly-rounded to within ~1-3 ULP ≈ 1e-15 relative; rel=1e-10 leaves ~5 orders of magnitude of headroom and is far tighter than the upstream atol=1e-6. The abs=1.0e-12 floor handles the exact-photostationary case (Φ_deviation collapses to IEEE-754 zero at O₃ = O3_pss_val), gating the stuck-at-non-zero failure mode. Matches sibling observed-only ESM tolerance: ope.esm rel=1e-10/abs=1e-12, photon_energy.esm rel=1e-10/abs=1e-12.\n\nUnit balance (verified): both equations balance dimensionally.\n  Φ            `j_NO2·NO₂ / (k_NO_O3·NO·O₃)`: (s⁻¹·m⁻³) / (m³·s⁻¹·m⁻³·m⁻³) = (m⁻³·s⁻¹)/(m⁻³·s⁻¹) = dimensionless ✓\n  Φ_deviation  `Φ - one`: dimensionless − dimensionless = dimensionless ✓\nAll concentrations in SI m⁻³, j_NO2 in s⁻¹, k_NO_O3 in m³/s, Φ and Φ_deviation dimensionless. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 8.0e-3,
+                    "description": "NO₂ photolysis rate constant j_{NO₂} [s⁻¹] (S&P §6.2). The upstream default 8.0e-3 s⁻¹ is the typical midday value (S&P p. 211 / Table B.1). j_NO2 drives the NO₂ + hν → NO + O photolysis (reaction R1 of the Leighton cycle) and appears in the numerator of Φ — a faster photolysis rate raises Φ proportionally. Encoded as `type: parameter` (already an MTK `@parameters` upstream)."
+                },
+                "k_NO_O3": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.9e-20,
+                    "description": "NO + O₃ → NO₂ + O₂ rate constant k_{NO+O₃} [m³/s] (S&P §6.2, p. 211). The upstream default 1.9e-20 m³/s is the SI form of the CGS value 1.9e-14 cm³/molec/s; the upstream Julia writes it as the product `1.9e-14 * 1.0e-6`, which evaluates in IEEE-754 to exactly 1.9e-20 (so the clean literal here is bit-identical). k_NO_O3 governs the ozone-consuming reaction R3 of the Leighton cycle and appears in the denominator of Φ — a faster NO+O₃ reaction lowers Φ. Encoded as `type: parameter` (already an MTK `@parameters` upstream)."
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Dimensionless unity constant used to form the photostationary-state deviation Φ_deviation = Φ - one. Upstream this is an MTK `@constants one = 1` with `unit = u\"1\"`; it is encoded here as a fixed-default parameter (default 1.0) per the rig convention of translating `@constants` to fixed-default parameters so MTK's unit checker sees it as a named dimensionless quantity rather than a bare literal in the equation RHS. At its default 1.0, Φ_deviation is the signed deviation of Φ from the exact-photostationary-state value Φ = 1."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e16,
+                    "description": "Nitric oxide number density [m⁻³] (externally-supplied input). The default 2.5e16 m⁻³ ≈ 1 ppb at STP air number density (2.5e25 m⁻³) and matches the canonical typical-urban scenario of the sibling NOxPhotochemistry Leighton test (test_nox_photochemistry.jl:86-90). NO appears in the denominator of Φ — Φ is inversely proportional to NO. Encoded as `type: parameter` because PhotostationaryState has no governing equation for NO; it is purely an input, set via `parameter_overrides` in tests and `parameter_sweep` in examples."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e16,
+                    "description": "Nitrogen dioxide number density [m⁻³] (externally-supplied input). The default 5.0e16 m⁻³ ≈ 2 ppb at STP (NO₂/NO ratio 2, the canonical moderately-polluted daytime partitioning). NO₂ appears in the numerator of Φ — Φ is linearly proportional to NO₂. Encoded as `type: parameter`."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e18,
+                    "description": "Ozone number density [m⁻³] (externally-supplied input — the measured ambient O₃). The default 1.0e18 m⁻³ ≈ 40 ppb at STP, a typical tropospheric value. O₃ appears in the denominator of Φ — Φ is inversely proportional to O₃. The photostationary-state condition Φ = 1 is reached at O₃ = j_NO2·NO₂ / (k_NO_O3·NO); for the default NO/NO₂ that is O₃ ≈ 8.42e17 m⁻³ (~34 ppb), so the 40-ppb default sits just above PSS (Φ < 1). Encoded as `type: parameter`."
+                },
+                "Φ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Photostationary-state parameter [dimensionless] (S&P Eq. 6.7): Φ = j_NO2·[NO₂] / (k_NO+O₃·[NO]·[O₃]). In a pure NO-NO₂-O₃ Leighton cycle Φ = 1 (exact photostationary state, zero net ozone production). Φ > 1 signals additional oxidants — peroxy radicals HO₂/RO₂ converting NO→NO₂ without consuming O₃ — driving net ozone production; Φ < 1 signals net ozone loss. Typical urban daytime measurements show Φ ≈ 1.5-3 (S&P §6.2). Defined by an algebraic equation in the inputs and rate parameters; encoded as `type: state`."
+                },
+                "Φ_deviation": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Deviation of the photostationary-state parameter from unity [dimensionless]: Φ_deviation = Φ - 1. The signed indicator of the net effect of peroxy-radical chemistry on the NO-NO₂-O₃ cycle — positive when peroxy radicals are producing ozone (Φ > 1), negative under net ozone loss (Φ < 1), and exactly zero at the pure photostationary state. Defined by the algebraic equation Φ_deviation ~ Φ - one (a cascade on the Φ output); encoded as `type: state`."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "Φ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["j_NO2", "NO2"]},
+                            {"op": "*", "args": ["k_NO_O3", "NO", "O3"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Φ_deviation",
+                    "rhs": {"op": "-", "args": ["Φ", "one"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_pss_zero_deviation",
+                    "description": "Reproduces the at-photostationary-state case of the upstream `PhotostationaryState: Deviation from PSS` test (GasChem.jl test/test_nox_photochemistry.jl:230-258). The upstream computes O3_pss_val = j_NO2·NO₂ / (k_NO_O3·NO) at NO=2.5e16, NO₂=5.0e16 and asserts Φ_deviation ≈ 0 (atol=1e-6) when O₃ is set to that value. Here O₃ = 8.421052631578948e17 m⁻³ (= O3_pss_val for the declared rate-parameter and NO/NO₂ defaults), which makes the numerator j_NO2·NO₂ exactly equal the denominator k_NO_O3·NO·O₃, so Φ = 1 and Φ_deviation = 0 exactly in IEEE-754. Pins Φ = 1.0 at the model rel=1e-10 and Φ_deviation = 0.0 at abs=1e-12 (gating the stuck-at-non-zero failure mode) — 6 orders of magnitude tighter than the upstream atol=1e-6.",
+                    "parameter_overrides": {"O3": 8.421052631578948e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 1.0},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "upstream_below_pss_positive_deviation",
+                    "description": "Reproduces the below-photostationary-state case of the upstream `PhotostationaryState: Deviation from PSS` test (test_nox_photochemistry.jl:230-258), which asserts Φ_deviation > 0 when O₃ is set to 0.5·O3_pss_val. Here O₃ = 4.210526315789474e17 m⁻³ (= O3_pss_val × 0.5, an exact IEEE-754 exponent shift). Halving O₃ below its photostationary value doubles Φ to exactly 2.0 (Φ ∝ 1/O₃) — far below the upstream is the measured O₃, so the cycle is producing net ozone (peroxy radicals active). Pins Φ = 2.0 and Φ_deviation = 1.0 at rel=1e-10, reproducing the upstream qualitative Φ_deviation > 0 assertion as a pinned numeric value.",
+                    "parameter_overrides": {"O3": 4.210526315789474e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 2.0},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 1.0}
+                    ]
+                },
+                {
+                    "id": "upstream_above_pss_negative_deviation",
+                    "description": "Reproduces the above-photostationary-state case of the upstream `PhotostationaryState: Deviation from PSS` test (test_nox_photochemistry.jl:230-258), which asserts Φ_deviation < 0 when O₃ is set to 2.0·O3_pss_val. Here O₃ = 1.6842105263157896e18 m⁻³ (= O3_pss_val × 2.0, an exact IEEE-754 exponent shift). Doubling O₃ above its photostationary value halves Φ to exactly 0.5 (Φ ∝ 1/O₃) — measured O₃ exceeds the photostationary value, so the cycle is in net ozone loss. Pins Φ = 0.5 and Φ_deviation = -0.5 at rel=1e-10, reproducing the upstream qualitative Φ_deviation < 0 assertion as a pinned numeric value.",
+                    "parameter_overrides": {"O3": 1.6842105263157896e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.5},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": -0.5}
+                    ]
+                },
+                {
+                    "id": "default_typical_urban",
+                    "description": "Canonical typical-urban scenario with every input and parameter at its declared default: NO=2.5e16 (~1 ppb), NO₂=5.0e16 (~2 ppb), O₃=1.0e18 (~40 ppb), j_NO2=8.0e-3, k_NO_O3=1.9e-20, one=1.0. The 40-ppb default O₃ sits just above the photostationary-state O₃ (≈ 8.42e17 m⁻³) for this NO/NO₂ pair, so Φ = 0.8421052631578948 (slightly below unity) and Φ_deviation = -0.1578947368421052 (net ozone loss). Asserts at both t=0 and t=1 — the component is observed-only algebraic with no time derivative, so the trajectory is exactly constant in time; pinning both endpoints gates a spurious-time-dependence regression. Because nothing is overridden, this test also implicitly verifies all six default values: any wrong default shifts Φ off its pinned value.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.8421052631578948},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": -0.1578947368421052},
+                        {"variable": "Φ", "time": 1.0, "expected": 0.8421052631578948},
+                        {"variable": "Φ_deviation", "time": 1.0, "expected": -0.1578947368421052}
+                    ]
+                },
+                {
+                    "id": "no2_doubled_phi_scales_linearly",
+                    "description": "NO₂ doubled to 1.0e17 m⁻³ (2× default), all other inputs at defaults. NO₂ appears only in the numerator of Φ = j_NO2·NO₂ / (k_NO_O3·NO·O₃), so Φ scales exactly linearly with NO₂: Φ doubles from the default 0.8421052631578948 to 1.6842105263157896 and Φ_deviation rises to 0.6842105263157896. Verifies the linear-in-NO₂ scaling — physically, more NO₂ available for photolysis pushes the cycle toward net ozone production.",
+                    "parameter_overrides": {"NO2": 1.0e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 1.6842105263157896},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 0.6842105263157896}
+                    ]
+                },
+                {
+                    "id": "no_tripled_phi_scales_inversely",
+                    "description": "NO tripled to 7.5e16 m⁻³ (3× default), all other inputs at defaults. NO appears only in the denominator of Φ, so Φ scales as 1/NO: Φ falls to one third of the default, 0.28070175438596495, and Φ_deviation drops to -0.7192982456140351. Verifies the inverse-in-NO scaling — more NO accelerates the NO + O₃ ozone-consuming reaction, deepening the net ozone loss.",
+                    "parameter_overrides": {"NO": 7.5e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.28070175438596495},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": -0.7192982456140351}
+                    ]
+                },
+                {
+                    "id": "o3_quadrupled_phi_scales_inversely",
+                    "description": "O₃ quadrupled to 4.0e18 m⁻³ (4× default, ~160 ppb), all other inputs at defaults. O₃ appears only in the denominator of Φ, so Φ scales as 1/O₃: Φ falls to one quarter of the default, 0.2105263157894737, and Φ_deviation drops to -0.7894736842105263. Verifies the inverse-in-O₃ scaling — the higher the measured ambient ozone above its photostationary value, the deeper the net ozone loss the diagnostic reports.",
+                    "parameter_overrides": {"O3": 4.0e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.2105263157894737},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": -0.7894736842105263}
+                    ]
+                },
+                {
+                    "id": "j_no2_override_scales_phi_linearly",
+                    "description": "NO₂ photolysis rate j_NO2 raised to 4.0e-2 s⁻¹ (5× the default 8.0e-3), all inputs at defaults. j_NO2 appears only in the numerator of Φ, so Φ scales exactly linearly with it: Φ rises 5× to 4.210526315789474 and Φ_deviation to 3.2105263157894743. Confirms j_NO2 acts as a parameter (not a hard-coded literal) and exercises the strong-photolysis regime (intense midday sun) where the Leighton cycle is far from photostationary on the ozone-production side.",
+                    "parameter_overrides": {"j_NO2": 4.0e-2},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 4.210526315789474},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 3.2105263157894743}
+                    ]
+                },
+                {
+                    "id": "k_no_o3_override_scales_phi_inversely",
+                    "description": "NO + O₃ rate constant k_NO_O3 lowered to 1.9e-21 m³/s (0.1× the default 1.9e-20), all inputs at defaults. k_NO_O3 appears only in the denominator of Φ, so Φ scales as 1/k_NO_O3: Φ rises 10× to 8.421052631578949 and Φ_deviation to 7.421052631578949. Confirms k_NO_O3 acts as a parameter (not a hard-coded literal) — a slower ozone-consuming NO+O₃ reaction shifts the diagnostic far onto the net-ozone-production side.",
+                    "parameter_overrides": {"k_NO_O3": 1.9e-21},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 8.421052631578949},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 7.421052631578949}
+                    ]
+                },
+                {
+                    "id": "strong_peroxy_radical_regime",
+                    "description": "Strong-peroxy-radical urban regime: O₃ lowered to 3.0e17 m⁻³ (~12 ppb, well below the photostationary-state O₃) with NO/NO₂ at defaults. Φ = 2.80701754385965 and Φ_deviation = 1.8070175438596499 — Φ lands in the canonical urban daytime range 1.5-3 reported by S&P §6.2 (GasChem.jl docs/src/nox_photochemistry.md), where peroxy radicals HO₂/RO₂ are actively converting NO to NO₂ and producing ozone faster than the pure Leighton cycle would. Anchors the diagnostic's headline use case: detecting peroxy-radical-driven ozone production from a measured O₃-NO-NO₂ triple.",
+                    "parameter_overrides": {"O3": 3.0e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 2.80701754385965},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 1.8070175438596499}
+                    ]
+                },
+                {
+                    "id": "one_constant_wiring_sentinel",
+                    "description": "Overrides the `one` constant to 0.0 with all inputs at defaults. With one = 0, the deviation equation Φ_deviation ~ Φ - one collapses to Φ_deviation = Φ, so Φ_deviation = 0.8421052631578948 = Φ exactly. Confirms the upstream `@constants one` is wired through as an overridable parameter (not folded into a literal `Φ - 1` in the equation RHS) and that Φ itself is unaffected by the `one` override — a regression that hard-coded the unity offset would leave Φ_deviation at the default -0.1578947368421052 and fail this test.",
+                    "parameter_overrides": {"one": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.8421052631578948},
+                        {"variable": "Φ_deviation", "time": 0.0, "expected": 0.8421052631578948}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "pss_parameter_vs_o3",
+                    "description": "Reproduces the `Photostationary State Parameter (Phi) vs O₃` figure from the GasChem.jl documentation (docs/src/nox_photochemistry.md, the `PhotostationaryState`-based analysis). Sweeps the measured ozone O₃ from 0.5e18 to 3.0e18 m⁻³ (~20 to ~120 ppb at STP) with NO=2.5e16 (~1 ppb) and NO₂=5.0e16 (~2 ppb) at their defaults. Φ falls monotonically as 1/O₃ and crosses unity at the photostationary-state O₃ ≈ 8.42e17 m⁻³ (~34 ppb): to the left (low O₃) Φ > 1, the cycle is producing net ozone with peroxy radicals active; to the right (high O₃) Φ < 1, net ozone loss. Φ_deviation is the same curve shifted down by one, crossing zero at the same photostationary O₃.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "O3",
+                                "range": {"start": 5.0e17, "stop": 3.0e18, "count": 60, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phi_vs_o3",
+                            "type": "line",
+                            "description": "Photostationary-state parameter Φ vs measured ozone O₃. Monotonically falling curve (Φ ∝ 1/O₃) that crosses Φ = 1 at the photostationary-state ozone ≈ 8.42e17 m⁻³ — the dividing line between net ozone production (Φ > 1, low O₃) and net ozone loss (Φ < 1, high O₃).",
+                            "x": {"variable": "O3", "label": "Measured O₃ number density (m⁻³)"},
+                            "y": {"variable": "Φ", "label": "Photostationary-state parameter Φ (dimensionless)"}
+                        },
+                        {
+                            "id": "phi_deviation_vs_o3",
+                            "type": "line",
+                            "description": "Photostationary-state deviation Φ_deviation = Φ - 1 vs measured ozone O₃. The Φ curve shifted down by one: positive at low O₃ (net ozone production), negative at high O₃ (net ozone loss), and exactly zero at the photostationary-state ozone ≈ 8.42e17 m⁻³.",
+                            "x": {"variable": "O3", "label": "Measured O₃ number density (m⁻³)"},
+                            "y": {"variable": "Φ_deviation", "label": "PSS deviation Φ - 1 (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "pss_parameter_vs_no2",
+                    "description": "Photostationary-state parameter Φ as a function of NO₂, swept logarithmically from 1.0e16 to 2.0e17 m⁻³ (~0.4 to ~8 ppb at STP) with NO=2.5e16 and O₃=1.0e18 at their defaults. NO₂ enters Φ only through the numerator, so Φ rises exactly linearly with NO₂ — on log-log axes a straight line of slope 1. The curve crosses Φ = 1 at the NO₂ that puts the system in photostationary state for the fixed NO and O₃; above that NO₂ the diagnostic reports net ozone production. This is the within-component analog of the documentation's `Photostationary State O₃ vs NO₂/NO ratio` analysis (which sweeps the NO₂/NO ratio for the full NOxPhotochemistry system).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 1.0e16, "stop": 2.0e17, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phi_vs_no2",
+                            "type": "line",
+                            "description": "Photostationary-state parameter Φ vs NO₂ number density on log-log axes — a straight line of slope 1 (Φ ∝ NO₂). Rising NO₂ supplies more photolysable nitrogen dioxide, pushing the Leighton cycle from net ozone loss (Φ < 1, low NO₂) through photostationary state (Φ = 1) into net ozone production (Φ > 1, high NO₂).",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³, log)"},
+                            "y": {"variable": "Φ", "label": "Photostationary-state parameter Φ (dimensionless, log)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "pss_deviation_heatmap_no_o3",
+                    "description": "Photostationary-state deviation Φ_deviation as a joint function of NO and O₃ (2-D log-log sweep), surfacing the photostationary surface in the NO-O₃ plane. NO ∈ [1.0e16, 1.0e17] m⁻³ × O₃ ∈ [3.0e17, 3.0e18] m⁻³, with NO₂=5.0e16 fixed at its default. Because Φ = j_NO2·NO₂ / (k_NO_O3·NO·O₃) depends on NO and O₃ only through their product, the iso-Φ (and hence iso-Φ_deviation) contours are hyperbolae of constant NO·O₃: the Φ_deviation = 0 contour is the photostationary ridge separating the high-deviation corner (low NO, low O₃ — net ozone production, Φ > 1) from the negative-deviation corner (high NO, high O₃ — net ozone loss, Φ < 1).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 1.0e16, "stop": 1.0e17, "count": 25, "scale": "log"}
+                            },
+                            {
+                                "parameter": "O3",
+                                "range": {"start": 3.0e17, "stop": 3.0e18, "count": 20, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phi_deviation_heatmap_no_o3",
+                            "type": "heatmap",
+                            "description": "Φ_deviation as a function of (NO, O₃) on log-log axes. Iso-deviation contours run as hyperbolae of constant NO·O₃: the lower-left region (low NO, low O₃) is the positive-deviation net-ozone-production regime, the upper-right region (high NO, high O₃) is the negative-deviation net-ozone-loss regime, and the Φ_deviation = 0 contour between them is the photostationary ridge.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³, log)"},
+                            "y": {"variable": "O3", "label": "O₃ number density (m⁻³, log)"},
+                            "value": {"variable": "Φ_deviation", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
