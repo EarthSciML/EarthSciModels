@@ -1,0 +1,457 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SurfaceRunoff",
+        "description": "Single-node surface-runoff model based on the Saint-Venant overland-flow equations, from Wang et al. (2020), Eq. 1. The component tracks two ODE states at one surface computing node — the ponded flow depth h_tilde and the surface runoff flux per unit width q — plus one algebraic (observed) state, the Manning friction slope S_f. Mass conservation (Eq. 1a) reads dh_tilde/dt = -dqdl + (P - I_infil): the flow depth rises with the net of precipitation P over infiltration I_infil and falls with the spatial divergence of runoff flux dqdl. Momentum conservation (Eq. 1b) reads dq/dt = -dFdl + g*max(h_tilde,h_tilde_0)*(S_0 - S_f): the runoff flux is driven by the imbalance between the surface slope S_0 and the friction slope S_f, minus the spatial divergence of momentum flux dFdl. The friction slope closes the system via Manning's equation S_f = (n_mann*q)^2 / h_tilde^(10/3), written here in non-dimensionalized form so the fractional powers act on dimensionless bases. Because this is a single-node reduction of a spatial PDE, the two spatial-divergence terms dqdl and dFdl are exposed as input parameters to be supplied by a discretization scheme or a coupled model; with both at zero the component reduces to the local mass/momentum response. Migrated from EnvironmentalTransport.jl@a48559c4 src/surface_runoff.jl:35 (`SurfaceRunoff` @component).",
+        "tags": [
+            "environmental_transport",
+            "surface-runoff",
+            "overland-flow",
+            "hydrology",
+            "saint-venant",
+            "manning-friction",
+            "wang-2020"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "EnvironmentalTransport.jl contributors",
+            "EarthSciModels migration (esm-dgeq)"
+        ],
+        "references": [
+            {
+                "citation": "Wang, Z., Timlin, D., Kouznetsov, M., Fleisher, D., Li, S., Tully, K., & Reddy, V. (2020). Coupled model of surface runoff and surface-subsurface water movement. Advances in Water Resources, 137, 103499. The Saint-Venant overland-flow equation system (mass conservation Eq. 1a, momentum conservation Eq. 1b, Manning friction slope) implemented by the SurfaceRunoff component is Eq. 1 of this paper.",
+                "doi": "10.1016/j.advwatres.2019.103499"
+            }
+        ]
+    },
+    "models": {
+        "SurfaceRunoff": {
+            "reference": {
+                "doi": "10.1016/j.advwatres.2019.103499",
+                "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/surface_runoff.jl:35\n\nUpstream `SurfaceRunoff` is an MTK `@component` returning `System(eqs, t; name)` with: four `@constants` (g, h_ref, q_ref, n_ref), seven `@parameters` (S_0, n_mann, h_tilde_0, P, I_infil, dqdl, dFdl), three time-indexed `@variables` (h_tilde, q, S_f), and three equations — two first-order ODEs (mass and momentum conservation) and one algebraic relation (Manning's friction slope). It is the single-node ODE reduction of the Saint-Venant overland-flow system; the sibling `SaintVenantPDE` builder in the same source file carries the full 1-D PDE form and is migrated separately (bead for `saint_venant.esm`).\n\nVariable renamed -- `h_tilde` (upstream `h̃`): the upstream component names the flow-depth @variable and its minimum-depth @parameter with a combining tilde -- `h̃(t)` and `h̃_0`. Those identifiers are `h` + U+0303 (COMBINING TILDE), a two-codepoint grapheme; carrying a combining mark through JSON, the ESS parser, and `Symbol`/`getproperty` round-trips on the compiled MTK system is fragile. They are renamed here to the plain-ASCII `h_tilde` and `h_tilde_0`. This is not an arbitrary transliteration: the sibling `SaintVenantPDE` builder in the very same upstream file (`src/surface_runoff.jl:131`) already names this exact physical quantity `h_tilde` in ASCII, so the rename adopts the upstream repo's own ASCII spelling for the depth variable. No other identifier is changed -- q, S_f, S_0, n_mann, P, I_infil, dqdl, dFdl, g, h_ref, q_ref and n_ref are all ASCII upstream and kept verbatim. None of the kept names collides with the ESS reserved physical-constant registry {R, k_B, N_A}; in particular the gravitational acceleration is `g`, not `R`.\n\n@constants encoded as type:parameter: the schema's `ModelVariable.type` enum is {state, parameter, observed, brownian} -- there is no `constant` member. The four upstream `@constants` (g = 9.81 m/s^2 gravitational acceleration; h_ref = 1.0 m, q_ref = 1.0 m^2/s, n_ref = 1.0 m^(-1/3)*s the three non-dimensionalization references) are therefore encoded as `type: parameter`, each carrying its upstream constant value as `default`. This matches the rig-wide convention for migrating MTK `@constants` (sibling ideal_gas.esm encodes the upstream `@constants` R_GAS and M_AIR as type:parameter). They are physical constants, not tunable inputs -- tests and examples never override them.\n\nInput-parameter defaults: the upstream component is built for composition into a larger system, so its forcing @parameters (S_0, n_mann, P, I_infil) carry no upstream default and only h_tilde_0 (=1.0e-5 m), dqdl (=0.0) and dFdl (=0.0) do. For standalone serialization every parameter and ODE state needs a value, so the `.esm` defaults assemble one self-consistent canonical scenario drawn from the upstream documentation page's worked examples (docs/src/surface_runoff.md): S_0 = 0.01 (a 1% slope), n_mann = 0.03 (Manning coefficient for bare soil), P = 2.0e-5 m/s and I_infil = 1.0e-5 m/s (a moderate rainfall with partial infiltration -- the values used in the doc page's Manning-roughness figure), h_tilde_0 = 1.0e-5 m and dqdl = dFdl = 0.0 (the upstream defaults), and ODE-state initial values h_tilde = 1.0e-3 m, q = 0.0 m^2/s (a thin initial film at rest, again the doc page's Manning-roughness figure). At these defaults the mass equation gives a steady net input P - I_infil = 1.0e-5 m/s, so h_tilde rises linearly, while the momentum equation accelerates q from rest because the 1% slope exceeds the (initially zero) friction slope.\n\nState vs. equation classification: the upstream `System(eqs, t)` carries all three of h_tilde, q and S_f as unknowns and all three relations in its `eqs` array (the upstream structural test `SurfaceRunoff - Structural Verification` asserts `length(equations(sys)) == 3`). That pre-`mtkcompile` structure is preserved: h_tilde, q and S_f are all `type: state`, and all three relations are entries in the model `equations` array. h_tilde and q carry a time derivative (`lhs` is a `D` node) and a `default` initial value; S_f is defined by the algebraic Manning relation (`lhs` is the bare name `S_f`, no derivative) and carries no `default`, because `mtkcompile` eliminates it into an observed quantity -- exactly the upstream `SurfaceRunoff - Compilation` test, which asserts that after `mtkcompile` only h_tilde and q remain as states (`length(unknowns(csys)) == 2`) and S_f becomes observed. Encoding the algebraic output as type:state + an `equations` entry (rather than type:observed + an `expression`) matches the verified sibling algebraic migrations ideal_gas.esm (the output `rho`) and species_lifetime.esm (the four `tau_*` outputs).\n\nNon-dimensionalization (n_ref, q_ref, h_ref): Manning's friction slope is physically S_f = (n_mann*q)^2 / h_tilde^(10/3). Taken literally that expression raises dimensional quantities to fractional powers, which is not dimensionally well-defined. The upstream component divides each base by a unit-valued reference constant -- n_ref, q_ref, h_ref, all = 1.0 in their respective units -- so the friction-slope equation is S_f = ((n_mann*q)/(n_ref*q_ref))^2 / (max(h_tilde,h_tilde_0)/h_ref)^(10/3): the base of every power is a dimensionless ratio, and S_f comes out dimensionless. The references are exactly 1.0, so they change no numbers; they exist solely to make the fractional powers dimensionally legal. They are preserved verbatim in the migrated equation.\n\nThe h_tilde_0 floor: both the momentum equation and the friction-slope equation reference `max(h_tilde, h_tilde_0)` rather than h_tilde directly. h_tilde_0 (default 1.0e-5 m) is a minimum flow depth that keeps the friction-slope denominator (max(h_tilde,h_tilde_0)/h_ref)^(10/3) strictly positive and bounded away from zero -- without it, a vanishing or transiently-negative flow depth would send S_f to infinity or make the fractional power of a non-positive base ill-defined. The `max` op is part of the ESS expression vocabulary and is migrated directly.\n\nUpstream test reproduction (upstream suite: EnvironmentalTransport.jl test/surface_runoff_test.jl, the @testitem blocks tagged :surface_runoff):\n- `SurfaceRunoff - Structural Verification` and `SurfaceRunoff - Compilation` (three equations; the unknowns h_tilde/q/S_f; the parameters P/I_infil/S_0/n_mann/h_tilde_0/dqdl/dFdl; two states after compile) -- reproduced by construction: the migrated file has exactly three `equations` entries, the three state-typed variables and the eleven parameter-typed variables, and is loaded + compiled through the ESS runner before any assertion below is evaluated.\n- `SurfaceRunoff - Mass Conservation (no spatial flux)` (P = 1.0e-6, I = 0, S_0 = 0, n_mann = 1.0, dqdl = dFdl = 0, h_tilde(0) = 1.0e-5, q(0) = 0; over (0,10) h_tilde grows linearly as h_tilde_0 + (P-I)*t, upstream rtol = 0.01) -- reproduced and tightened by test `mass_conservation_no_spatial_flux`.\n- `SurfaceRunoff - Qualitative: Precipitation increases water depth` (P = 2.0e-6 > I = 1.0e-6, S_0 = 0; h_tilde(end) > h_tilde(0)) -- reproduced and tightened by test `precipitation_increases_depth`.\n- `SurfaceRunoff - Qualitative: Infiltration decreases water depth` (P = 0 < I = 1.0e-6, S_0 = 0; h_tilde(end) < h_tilde(0)) -- reproduced and tightened by test `infiltration_decreases_depth`.\n- `SurfaceRunoff - Friction Slope Steady State` (h = 0.01, q = q_eq = sqrt(S_0)*h^(5/3)/n with S_0 = 0.01, n = 0.03; the computed S_f equals S_0 within rtol = 1e-6) -- reproduced by test `friction_slope_steady_state`.\n- `SurfaceRunoff - Manning friction slope formula` (three (h, q, n) cases checked against the analytic S_f = (n*q)^2/h^(10/3), upstream rtol = 1e-6) -- reproduced by tests `manning_formula_thin_film`, `manning_formula_moderate_flow` and `manning_formula_rough_surface`.\nThe remaining tests extend coverage beyond the upstream suite: the balanced-input regime (P = I_infil, depth held constant), the unforced static regime, the genuinely coupled momentum response at the canonical defaults sampled over time, and the two spatial-divergence input parameters dqdl and dFdl, which the upstream suite leaves at zero throughout.\n\nTolerance rationale (model-level rel = 1e-6): the canonical solver path is `mtkcompile` -> `ODEProblem` -> Tsit5 at reltol = 1e-10, abstol = 1e-12. The mass-conservation equation dh_tilde/dt = -dqdl + (P - I_infil) is decoupled from q and S_f and has a constant right-hand side, so h_tilde(t) is exactly linear and an order-5 integrator reproduces it to floating-point roundoff; assertions on h_tilde are pinned at rel = 1e-8. When S_0 = 0 and q(0) = 0 the momentum right-hand side g*h*(0 - S_f) with S_f proportional to q^2 keeps q identically zero, so q and S_f assertions in those scenarios are exact zeros pinned with an absolute floor abs = 1e-12. The algebraic friction slope S_f is a closed-form expression of the instantaneous h_tilde and q, so its t = 0 value is solver-independent and pinned at rel = 1e-9. Only the genuinely coupled momentum trajectory (S_0 > 0, q evolving) is integrator-dependent; those captured values use the model default rel = 1e-6, matching the sibling ODE migration methane_ode.esm.\n\nUnit balance (verified): h_tilde [m], q [m^2/s], S_f [1]. Mass eq: dqdl [m/s], (P - I_infil) [m/s], dh_tilde/dt [m/s] -- balances. Momentum eq: dFdl [m^2/s^2], g [m/s^2] * max(h_tilde,h_tilde_0) [m] * (S_0 - S_f) [1] = [m^2/s^2], dq/dt [m^2/s^2] -- balances. Friction eq: (n_mann [m^(-1/3)*s] * q [m^2/s]) / (n_ref [m^(-1/3)*s] * q_ref [m^2/s]) is dimensionless, squared is dimensionless; (max(h_tilde,h_tilde_0) [m] / h_ref [m]) is dimensionless, raised to 10/3 is dimensionless; the quotient S_f is dimensionless [1]. SI throughout. Per the ESS MTK binding, units are recorded as advisory metadata and are not fed into MTK's dimensional checker, so they do not affect compilation or the inline-test gate."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration. Upstream `@constants` value; multiplies the slope-imbalance term in the momentum equation (Eq. 1b). Encoded as type:parameter because the schema has no constant type; never overridden by tests or examples."
+                },
+                "h_ref": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Reference flow depth for non-dimensionalization. Upstream `@constants` value (1.0 m). Divides the flow depth inside the friction-slope equation so the (10/3)-power base is dimensionless; the unit value changes no numbers."
+                },
+                "q_ref": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0,
+                    "description": "Reference runoff flux for non-dimensionalization. Upstream `@constants` value (1.0 m^2/s). Divides the runoff flux inside the friction-slope equation so the squared base is dimensionless; the unit value changes no numbers."
+                },
+                "n_ref": {
+                    "type": "parameter",
+                    "units": "m^(-1/3)*s",
+                    "default": 1.0,
+                    "description": "Reference Manning coefficient for non-dimensionalization. Upstream `@constants` value (1.0 m^(-1/3)*s). Divides the Manning coefficient inside the friction-slope equation so the squared base is dimensionless; the unit value changes no numbers."
+                },
+                "S_0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.01,
+                    "description": "Surface slope (dimensionless), the gradient of the soil surface along the flow direction. Drives the runoff flux in the momentum equation (Eq. 1b) through the imbalance S_0 - S_f. The upstream @parameter carries no default; the canonical default 0.01 is a 1% slope, the value used in the upstream documentation page's Manning-roughness and friction-steady-state worked examples."
+                },
+                "n_mann": {
+                    "type": "parameter",
+                    "units": "m^(-1/3)*s",
+                    "default": 0.03,
+                    "description": "Manning roughness coefficient of the surface. Larger values produce a larger friction slope S_f and so a smaller runoff flux. The upstream @parameter carries no default; the canonical default 0.03 m^(-1/3)*s is the Manning coefficient for bare soil used in the upstream documentation page's Manning-roughness example (which compares 0.01 smooth, 0.03 bare soil, 0.10 dense grass)."
+                },
+                "h_tilde_0": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Minimum flow depth used as a floor (via max(h_tilde, h_tilde_0)) to prevent a singularity in the friction-slope equation when the flow depth vanishes. Upstream default 1.0e-5 m, kept verbatim. Keeps the (10/3)-power denominator strictly positive and bounded away from zero."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.0e-5,
+                    "description": "Precipitation / irrigation flux density at the surface (Eq. 1a). A source term for the flow depth. The upstream @parameter carries no default; the canonical default 2.0e-5 m/s (~72 mm/hr) is the rainfall rate used in the upstream documentation page's Manning-roughness example."
+                },
+                "I_infil": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0e-5,
+                    "description": "Infiltration flux density into the soil (Eq. 1a). A sink term for the flow depth. The upstream @parameter carries no default; the canonical default 1.0e-5 m/s gives a net surface input P - I_infil = 1.0e-5 m/s at the defaults, the partial-infiltration case of the upstream documentation page's Manning-roughness example."
+                },
+                "dqdl": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Spatial derivative of the runoff flux, d(q)/d(l), entering the mass-conservation equation (Eq. 1a) as -dqdl. In the full Saint-Venant PDE this is computed from neighbouring nodes; in this single-node reduction it is an input parameter to be supplied by a discretization scheme or coupled model. Upstream default 0.0, kept verbatim -- a single isolated node has no spatial divergence."
+                },
+                "dFdl": {
+                    "type": "parameter",
+                    "units": "m^2/s^2",
+                    "default": 0.0,
+                    "description": "Spatial derivative of the momentum flux, d/d(l) of (q^2/h_tilde + g*h_tilde^2/2), entering the momentum-conservation equation (Eq. 1b) as -dFdl. In the full Saint-Venant PDE this is computed from neighbouring nodes; in this single-node reduction it is an input parameter to be supplied by a discretization scheme or coupled model. Upstream default 0.0, kept verbatim."
+                },
+                "h_tilde": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 1.0e-3,
+                    "description": "Flow depth / ponded water height at the surface node (Eq. 1) -- the first ODE state. Governed by mass conservation: rises with the net surface input P - I_infil and falls with the runoff-flux divergence dqdl. The canonical initial value 1.0e-3 m is a thin initial film, the value used in the upstream documentation page's Manning-roughness example."
+                },
+                "q": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "default": 0.0,
+                    "description": "Surface runoff flux per unit width at the surface node (Eq. 1) -- the second ODE state. Governed by momentum conservation: accelerated by the slope/friction imbalance g*h_tilde*(S_0 - S_f) and the momentum-flux divergence dFdl. The canonical initial value 0.0 m^2/s starts the surface at rest, as in every upstream test and the documentation page's worked examples."
+                },
+                "S_f": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Manning friction slope (dimensionless) -- the algebraic (observed) state. Defined by Manning's equation S_f = (n_mann*q)^2 / h_tilde^(10/3) (non-dimensionalized). It opposes the surface slope S_0 in the momentum equation, so the runoff flux reaches a local steady state when S_f balances S_0. Carries no default: it is determined instantaneously by h_tilde and q, and `mtkcompile` eliminates it into an observed quantity."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 1a (Wang et al. 2020) -- mass conservation of the Saint-Venant system: dh_tilde/dt = -dqdl + (P - I_infil). The ponded depth rises with the net of precipitation over infiltration and falls with the spatial divergence of the runoff flux.",
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": ["h_tilde"]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [-1.0, "dqdl"]
+                            },
+                            {
+                                "op": "-",
+                                "args": ["P", "I_infil"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 1b (Wang et al. 2020) -- momentum conservation of the Saint-Venant system: dq/dt = -dFdl + g*max(h_tilde,h_tilde_0)*(S_0 - S_f). The runoff flux is driven by the imbalance between the surface slope and the friction slope, minus the spatial divergence of the momentum flux. The max(h_tilde,h_tilde_0) floor keeps the depth factor positive.",
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": ["q"]
+                    },
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [-1.0, "dFdl"]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "g",
+                                    {
+                                        "op": "max",
+                                        "args": ["h_tilde", "h_tilde_0"]
+                                    },
+                                    {
+                                        "op": "-",
+                                        "args": ["S_0", "S_f"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Manning's friction slope (Wang et al. 2020, Eq. 1): S_f = (n_mann*q)^2 / h_tilde^(10/3). Non-dimensionalized via n_ref, q_ref, h_ref (all = 1.0) so the squared base and the (10/3)-power base are dimensionless. Algebraic relation -- after mtkcompile, S_f is observed.",
+                    "lhs": "S_f",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["n_mann", "q"]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": ["n_ref", "q_ref"]
+                                            }
+                                        ]
+                                    },
+                                    2.0
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "max",
+                                                "args": ["h_tilde", "h_tilde_0"]
+                                            },
+                                            "h_ref"
+                                        ]
+                                    },
+                                    3.3333333333333335
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_canonical_run",
+                    "description": "Headline run at the declared defaults: 1% slope, bare-soil Manning roughness, moderate rainfall with partial infiltration, thin initial film at rest. The mass equation has constant right-hand side P - I_infil = 1.0e-5 m/s, so h_tilde rises exactly linearly as 1.0e-3 + 1.0e-5*t (pinned at rel=1e-8). Because the slope S_0 = 0.01 is non-zero, the momentum equation accelerates q from rest; q and S_f are the genuinely coupled, integrator-dependent quantities and are pinned at the model-default rel=1e-6 (q starts at exactly 0 and S_f at exactly 0 since S_f is proportional to q^2).",
+                    "time_span": {"start": 0.0, "end": 5.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 1.0e-3, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 1.0, "expected": 1.01e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 2.5, "expected": 1.025e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 5.0, "expected": 1.05e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q", "time": 1.0, "expected": 3.360478443484672e-5},
+                        {"variable": "q", "time": 2.5, "expected": 3.4636269802875454e-5},
+                        {"variable": "q", "time": 5.0, "expected": 3.605650858723156e-5},
+                        {"variable": "S_f", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_f", "time": 5.0, "expected": 0.009944406172179347}
+                    ]
+                },
+                {
+                    "id": "mass_conservation_no_spatial_flux",
+                    "description": "Upstream `SurfaceRunoff - Mass Conservation (no spatial flux)`. With dqdl = 0 the mass equation reduces to dh_tilde/dt = P - I_infil; with P = 1.0e-6 m/s and I_infil = 0 the depth grows linearly as 1.0e-5 + 1.0e-6*t. The flat surface (S_0 = 0) plus q(0) = 0 keeps q identically zero (the momentum right-hand side is -g*h*S_f with S_f proportional to q^2), so S_f stays zero too. Upstream asserted h_tilde linear at rtol=0.01; tightened here to rel=1e-8.",
+                    "initial_conditions": {"h_tilde": 1.0e-5, "q": 0.0},
+                    "parameter_overrides": {"P": 1.0e-6, "I_infil": 0.0, "S_0": 0.0, "n_mann": 1.0, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 10.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 1.0e-5, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 1.0, "expected": 1.1e-5, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 5.0, "expected": 1.5e-5, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 10.0, "expected": 2.0e-5, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 10.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_f", "time": 10.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "precipitation_increases_depth",
+                    "description": "Upstream `SurfaceRunoff - Qualitative: Precipitation increases water depth`. Rainfall P = 2.0e-6 m/s exceeds infiltration I_infil = 1.0e-6 m/s, so the net input is +1.0e-6 m/s and the flow depth rises from 1.0e-4 m, reaching 1.1e-4 m at t = 10 s. Flat surface (S_0 = 0), so q stays zero. Upstream asserted only the inequality h_tilde(end) > h_tilde(0); pinned here to the exact linear value.",
+                    "initial_conditions": {"h_tilde": 1.0e-4, "q": 0.0},
+                    "parameter_overrides": {"P": 2.0e-6, "I_infil": 1.0e-6, "S_0": 0.0, "n_mann": 1.0, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 10.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 1.0e-4, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 10.0, "expected": 1.1e-4, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 10.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "infiltration_decreases_depth",
+                    "description": "Upstream `SurfaceRunoff - Qualitative: Infiltration decreases water depth`. With no rainfall (P = 0) and infiltration I_infil = 1.0e-6 m/s draining the surface, the net input is -1.0e-6 m/s and the flow depth falls from 0.01 m, reaching 0.0099 m at t = 100 s. Flat surface (S_0 = 0), so q stays zero. Upstream asserted only the inequality h_tilde(end) < h_tilde(0); pinned here to the exact linear value.",
+                    "initial_conditions": {"h_tilde": 0.01, "q": 0.0},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 1.0e-6, "S_0": 0.0, "n_mann": 1.0, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 100.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 0.01, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 100.0, "expected": 0.0099, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 100.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "balanced_precip_infiltration",
+                    "description": "Balanced-input regime: precipitation exactly matches infiltration (P = I_infil = 1.5e-5 m/s) on a flat surface (S_0 = 0). The mass equation right-hand side is zero, so the flow depth holds at its initial 5.0e-3 m for all time, and q stays zero. Verifies the steady-depth case that lies between the precipitation- and infiltration-dominated upstream tests.",
+                    "initial_conditions": {"h_tilde": 5.0e-3, "q": 0.0},
+                    "parameter_overrides": {"P": 1.5e-5, "I_infil": 1.5e-5, "S_0": 0.0, "n_mann": 0.03, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 50.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 5.0e-3, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 25.0, "expected": 5.0e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 50.0, "expected": 5.0e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 50.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "zero_forcing_static",
+                    "description": "Unforced static regime: no rainfall, no infiltration, no spatial divergence, flat surface, surface at rest. Every right-hand side is zero, so both ODE states are frozen -- h_tilde holds at 2.0e-3 m and q at 0. Confirms the trivial equilibrium of the coupled system.",
+                    "initial_conditions": {"h_tilde": 2.0e-3, "q": 0.0},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 0.0, "S_0": 0.0, "n_mann": 0.03, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 100.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 2.0e-3, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 100.0, "expected": 2.0e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 100.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "S_f", "time": 100.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "friction_slope_steady_state",
+                    "description": "Upstream `SurfaceRunoff - Friction Slope Steady State`. The runoff flux is started at the Manning equilibrium value q_eq = sqrt(S_0)*h^(5/3)/n_mann for h = 0.01 m, S_0 = 0.01, n_mann = 0.03, which evaluates to 0.001547196277870926 m^2/s. At that flux the friction slope S_f computed from Manning's equation equals the surface slope S_0 = 0.01 (to floating-point roundoff), so the momentum equation is at its local steady state. The assertion checks S_f at t = 0, the instantaneous algebraic value -- solver-independent -- pinned at rel=1e-9; the expected 0.010000000000000002 is the IEEE-754 evaluation of (n_mann*q_eq)^2 / h^(10/3), one ULP above the exact 0.01.",
+                    "initial_conditions": {"h_tilde": 0.01, "q": 0.001547196277870926},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 0.0, "S_0": 0.01, "n_mann": 0.03, "h_tilde_0": 1.0e-7, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 0.01},
+                    "assertions": [
+                        {"variable": "S_f", "time": 0.0, "expected": 0.010000000000000002, "tolerance": {"rel": 1.0e-9}}
+                    ]
+                },
+                {
+                    "id": "manning_formula_thin_film",
+                    "description": "Upstream `SurfaceRunoff - Manning friction slope formula`, case 1 (thin film). Checks the algebraic friction slope S_f = (n_mann*q)^2 / h_tilde^(10/3) at t = 0 for h_tilde = 0.01 m, q = 1.0e-4 m^2/s, n_mann = 0.03 m^(-1/3)*s. Solver-independent instantaneous value, pinned at rel=1e-9.",
+                    "initial_conditions": {"h_tilde": 0.01, "q": 1.0e-4},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 0.0, "S_0": 0.01, "n_mann": 0.03, "h_tilde_0": 1.0e-7, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 0.001},
+                    "assertions": [
+                        {"variable": "S_f", "time": 0.0, "expected": 4.1774299502515044e-5, "tolerance": {"rel": 1.0e-9}}
+                    ]
+                },
+                {
+                    "id": "manning_formula_moderate_flow",
+                    "description": "Upstream `SurfaceRunoff - Manning friction slope formula`, case 2 (moderate flow, smooth surface). Checks S_f = (n_mann*q)^2 / h_tilde^(10/3) at t = 0 for h_tilde = 0.05 m, q = 1.0e-3 m^2/s, n_mann = 0.01 m^(-1/3)*s. Solver-independent instantaneous value, pinned at rel=1e-9.",
+                    "initial_conditions": {"h_tilde": 0.05, "q": 1.0e-3},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 0.0, "S_0": 0.01, "n_mann": 0.01, "h_tilde_0": 1.0e-7, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 0.001},
+                    "assertions": [
+                        {"variable": "S_f", "time": 0.0, "expected": 2.1715340932759263e-6, "tolerance": {"rel": 1.0e-9}}
+                    ]
+                },
+                {
+                    "id": "manning_formula_rough_surface",
+                    "description": "Upstream `SurfaceRunoff - Manning friction slope formula`, case 3 (rough surface). Checks S_f = (n_mann*q)^2 / h_tilde^(10/3) at t = 0 for h_tilde = 0.1 m, q = 5.0e-3 m^2/s, n_mann = 0.05 m^(-1/3)*s. Solver-independent instantaneous value, pinned at rel=1e-9.",
+                    "initial_conditions": {"h_tilde": 0.1, "q": 5.0e-3},
+                    "parameter_overrides": {"P": 0.0, "I_infil": 0.0, "S_0": 0.01, "n_mann": 0.05, "h_tilde_0": 1.0e-7, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 0.001},
+                    "assertions": [
+                        {"variable": "S_f", "time": 0.0, "expected": 0.00013465216812699274, "tolerance": {"rel": 1.0e-9}}
+                    ]
+                },
+                {
+                    "id": "spatial_flux_divergence_drains",
+                    "description": "Exercises the dqdl input parameter, which the upstream test suite leaves at zero throughout. With a positive runoff-flux divergence dqdl = 3.0e-5 m/s representing net runoff leaving the node, the mass equation becomes dh_tilde/dt = -dqdl + (P - I_infil) = -3.0e-5 + (2.0e-5 - 0) = -1.0e-5 m/s: the depth drains linearly even though precipitation is positive, falling from 4.0e-3 m to 3.5e-3 m at t = 50 s. Flat surface, so q stays zero.",
+                    "initial_conditions": {"h_tilde": 4.0e-3, "q": 0.0},
+                    "parameter_overrides": {"P": 2.0e-5, "I_infil": 0.0, "S_0": 0.0, "n_mann": 0.03, "h_tilde_0": 1.0e-5, "dqdl": 3.0e-5, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 50.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 0.0, "expected": 4.0e-3, "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "h_tilde", "time": 25.0, "expected": 3.75e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "h_tilde", "time": 50.0, "expected": 3.5e-3, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 50.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "momentum_flux_divergence",
+                    "description": "Exercises the dFdl input parameter, which the upstream test suite leaves at zero throughout. On a flat surface (S_0 = 0) with the surface at rest, a negative momentum-flux divergence -dFdl is the only term driving the runoff flux: dq/dt = -dFdl - g*max(h_tilde,h_tilde_0)*S_f. With dFdl = -2.0e-5 m^2/s^2 the flux accelerates from zero; q and S_f are genuinely coupled and integrator-dependent, pinned at the model-default rel=1e-6. The flow depth holds constant (P = I_infil, dqdl = 0).",
+                    "initial_conditions": {"h_tilde": 1.0e-2, "q": 0.0},
+                    "parameter_overrides": {"P": 1.0e-5, "I_infil": 1.0e-5, "S_0": 0.0, "n_mann": 0.03, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": -2.0e-5},
+                    "time_span": {"start": 0.0, "end": 2.0},
+                    "assertions": [
+                        {"variable": "h_tilde", "time": 2.0, "expected": 1.0e-2, "tolerance": {"rel": 1.0e-8}},
+                        {"variable": "q", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "q", "time": 0.5, "expected": 9.993175495460934e-6},
+                        {"variable": "q", "time": 2.0, "expected": 3.956853104046224e-5}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "canonical_runoff_response",
+                    "description": "Headline single run at the declared defaults (1% slope, bare-soil Manning roughness n_mann = 0.03, rainfall P = 2.0e-5 m/s with infiltration I_infil = 1.0e-5 m/s, thin initial film h_tilde = 1.0e-3 m at rest). Over 5 s the flow depth rises linearly under the steady net surface input while the runoff flux accelerates from rest as the 1% slope drives the momentum equation, with the friction slope S_f climbing toward the surface slope. Reproduces the canonical (n = 0.03) trajectory of the upstream documentation page's Manning-roughness figure.",
+                    "time_span": {"start": 0.0, "end": 5.0},
+                    "plots": [
+                        {
+                            "id": "q_vs_time",
+                            "type": "line",
+                            "description": "Surface runoff flux q accelerating from rest under the slope/friction imbalance.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "q", "label": "runoff flux q (m^2/s)"}
+                        },
+                        {
+                            "id": "h_tilde_vs_time",
+                            "type": "line",
+                            "description": "Flow depth h_tilde rising linearly under the steady net surface input P - I_infil.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "h_tilde", "label": "flow depth h_tilde (m)"}
+                        },
+                        {
+                            "id": "friction_slope_vs_time",
+                            "type": "line",
+                            "description": "Manning friction slope S_f climbing toward the surface slope S_0 as the runoff flux grows.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "S_f", "label": "friction slope S_f (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "manning_roughness_comparison",
+                    "description": "Reproduces the upstream documentation page's `Manning's Friction Effect on Surface Runoff` figure (docs/src/surface_runoff.md). The Manning roughness coefficient n_mann is swept over three surface types -- 0.01 (smooth), 0.03 (bare soil) and 0.10 (dense grass) -- with rainfall P = 2.0e-5 m/s, infiltration I_infil = 1.0e-5 m/s, 1% slope, thin initial film at rest. Higher roughness produces a larger friction slope and so a slower-growing runoff flux. The plot overlays the q(t) trajectory for each roughness value.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {"h_tilde": 1.0e-3, "q": 0.0}
+                    },
+                    "parameters": {"P": 2.0e-5, "I_infil": 1.0e-5, "S_0": 0.01, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 5.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "n_mann",
+                                "values": [0.01, 0.03, 0.10]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "q_vs_time_by_roughness",
+                            "type": "line",
+                            "description": "Runoff flux q over time for each Manning roughness coefficient; rougher surfaces (larger n_mann) yield more friction and a slower-growing flux.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "q", "label": "runoff flux q (m^2/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "precipitation_infiltration_regimes",
+                    "description": "Reproduces the upstream documentation page's `Water Depth Accumulation Under Different Precipitation-Infiltration Regimes` figure (docs/src/surface_runoff.md), which contrasts net-gain, balanced and net-loss surface-water budgets. Infiltration is held at I_infil = 2.0e-5 m/s and the precipitation P is swept over 1.0e-5, 2.0e-5 and 3.0e-5 m/s, giving net surface inputs of -1.0e-5 (net loss), 0 (balanced) and +1.0e-5 m/s (net gain). On a flat surface (S_0 = 0) the flow depth changes linearly at the net rate. The plot overlays the h_tilde(t) trajectory for each regime.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {"h_tilde": 5.0e-3, "q": 0.0}
+                    },
+                    "parameters": {"I_infil": 2.0e-5, "S_0": 0.0, "n_mann": 0.03, "h_tilde_0": 1.0e-5, "dqdl": 0.0, "dFdl": 0.0},
+                    "time_span": {"start": 0.0, "end": 200.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "P",
+                                "values": [1.0e-5, 2.0e-5, 3.0e-5]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "h_tilde_vs_time_by_regime",
+                            "type": "line",
+                            "description": "Flow depth h_tilde over time for each precipitation rate; depth falls in the net-loss regime, holds in the balanced regime, and rises in the net-gain regime.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "h_tilde", "label": "flow depth h_tilde (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
