@@ -1,0 +1,2461 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SuperFastRateLaws",
+        "description": "The five SuperFast rate-law helper functions migrated from GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309 src/SuperFast.jl — the reusable builder functions the SuperFast() chemical mechanism uses to construct the rate coefficient of every gas-phase reaction. Each is migrated as its own observed-only algebraic `models` entry: rate_toppb (SuperFast.jl:6) the constant-rate / `constant_k` converter, arrh (:33) the modified-Arrhenius workhorse, arr_3rd (:64) the third-body / Troe-falloff law, rate_2HO2 (:102) the HO2+HO2 law with water-vapour enhancement, and rate_OH_CO (:142) the JPL 15-10 OH+CO law. Upstream each function returns a one-variable ReactionSystem (`@variables k(t)`); the composed builders (arr_3rd, rate_2HO2, rate_OH_CO) compose `arrh` sub-systems. This file reproduces each function's compiled rate as a topologically-ordered cascade of `type: state` algebraic equations whose named intermediates mirror the upstream Julia locals and sub-system k's verbatim, with the Arrhenius coefficients exposed as `type: parameter` (defaults taken from the representative SuperFast reaction each builder serves). All five models are purely algebraic — no time derivatives — so each rate coefficient is constant in time. Units follow the upstream's mixed CGS / ppb system (rate coefficients in 1/(s*ppb), Arrhenius pre-exponentials in cm^3/molec/s).",
+        "tags": [
+            "gaschem",
+            "superfast",
+            "rate-laws",
+            "reaction-rate",
+            "arrhenius",
+            "troe-falloff",
+            "interface",
+            "observed-only",
+            "tropospheric-chemistry"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-d7iu)"
+        ],
+        "references": [
+            {
+                "citation": "Brown-Steiner, B., Selin, N. E., Prinn, R. G., Tilmes, S., Emmons, L., Lamarque, J.-F., & Cameron-Smith, P. (2018). Evaluating simplified chemical mechanisms within present-day simulations of the Community Earth System Model version 1.2 with CAM4 (CESM1.2 CAM-chem): MOZART-4 vs. Reduced Hydrocarbon vs. Super-Fast chemistry. Geoscientific Model Development, 11, 4155-4174. The Super-Fast mechanism whose rate laws these builder functions construct."
+            },
+            {
+                "citation": "Atkinson, R., Baulch, D. L., Cox, R. A., Hampson, R. F., Kerr, J. A., & Troe, J. (1992). Evaluated kinetic and photochemical data for atmospheric chemistry. Journal of Physical and Chemical Reference Data, 21, 1125-1568. Source of the Troe falloff parameterization used by arr_3rd (the fv broadening parameter)."
+            },
+            {
+                "citation": "Sander, S. P., et al. (2011). Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation No. 17 (JPL Publication 10-6). The OH + CO rate parameterization (cf. 'JPL 15-10') reproduced by rate_OH_CO."
+            }
+        ]
+    },
+    "models": {
+        "rate_toppb": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/SuperFast.jl:6\n\n`rate_toppb(t, T, P, a0)` is the SuperFast constant-rate (a.k.a. `constant_k`) builder: it wraps a temperature-independent reaction rate coefficient a0, supplied in CGS cm^3/molec/s, and converts it to the (s*ppb)^-1 units the SuperFast mechanism's ppb-based species require. It is the rate law used for the single constant-rate SuperFast reaction `cons(4.0e-24, T, P), H2O + NO2 --> 0.5HNO3` (SuperFast.jl:291); the SuperFast() builder calls it through the local `cons` closure, hence the `constant_k` alias in the migration tracker title.\n\nUpstream the function returns a one-variable `ReactionSystem` with `@variables k(t)` and the single equation `k ~ a0 * c`, where `air_volume = R*T/P` and `c = A/air_volume*ppb_unit` are Julia locals. This migration preserves that decomposition explicitly: air_volume and c are `type: state` cascade variables (each defined by one algebraic equation) and k is the `type: state` output. The rate coefficient a0 and the three physical constants A/R/ppb_unit are `type: parameter`. The upstream `@constants` block also declares num_density_unit_inv, which rate_toppb's equation never references; it is omitted here so every declared parameter is load-bearing.\n\nDefault a0 = 4.0e-24 cm^3/molec/s is the coefficient of the only SuperFast reaction that uses this builder (H2O + NO2 --> 0.5HNO3). T = 280 K and P = 101325 Pa are the SuperFast() parameter defaults. At those defaults air_volume = 22974.784110535405 cm^3/mol, c = 26202640125.09021 and k = 1.0481056050036084e-13 (s*ppb)^-1.\n\nAlgebraic, no time derivative: every variable is the LHS of exactly one equation in T, P and the constants, so the trajectory is constant in time (the default test pins k at t=0 and t=1). Tolerance rel=1e-10 is purely relative — the three equations are a handful of IEEE-754 ops each, correctly-rounded to ~1 ULP, and 1e-10 leaves ~5 orders of magnitude of headroom while still catching any coefficient or operator regression. No abs floor is needed: every value is solidly non-zero."
+            },
+            "tolerance": {
+                "rel": 1e-10
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 280.0,
+                    "description": "Air temperature. Upstream the rate-law builders receive T as a `ParentScope` parameter; the default 280.0 K is the SuperFast() `@parameters T` default (SuperFast.jl:250)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure. Upstream a `ParentScope` parameter; the default 101325 Pa (1 atm) is the SuperFast() `@parameters P` default (SuperFast.jl:251)."
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "molec/mol",
+                    "default": 6.02e+23,
+                    "description": "Avogadro's number. Upstream `@constants A = 6.02e23` (SuperFast.jl). Appears in the ppb conversion factor c = A/air_volume*ppb_unit."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "(Pa*cm^3)/(K*mol)",
+                    "default": 8314000.0,
+                    "description": "Universal gas constant in the upstream's mixed Pa-cm^3 unit system. Upstream `@constants R = 8.314e6`. Sets the molar air volume air_volume = R*T/P."
+                },
+                "ppb_unit": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 1e-09,
+                    "description": "mol/mol_air -> ppb conversion factor. Upstream `@constants ppb_unit = 1.0e-9`."
+                },
+                "a0": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 4e-24,
+                    "description": "Constant (temperature-independent) reaction rate coefficient in CGS cm^3/molec/s. Default 4.0e-24 from the SuperFast reaction `H2O + NO2 --> 0.5HNO3` (SuperFast.jl:291)."
+                },
+                "air_volume": {
+                    "type": "state",
+                    "units": "cm^3/mol",
+                    "description": "Molar volume of air, R*T/P."
+                },
+                "c": {
+                    "type": "state",
+                    "units": "molec*ppb/cm^3",
+                    "description": "ppb conversion factor A/air_volume*ppb_unit applied to the CGS rate coefficient."
+                },
+                "k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Reaction rate coefficient in SuperFast (s*ppb)^-1 units: k = a0 * c."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "air_volume",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T"
+                                ]
+                            },
+                            "P"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A",
+                                    "air_volume"
+                                ]
+                            },
+                            "ppb_unit"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a0",
+                            "c"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_h2o_no2_reaction",
+                    "description": "All parameters at their defaults: T=280 K, P=101325 Pa, a0=4.0e-24 cm^3/molec/s (the H2O + NO2 --> 0.5HNO3 coefficient). Pins every cascade variable, so any wrong constant or operator is caught. k is asserted at t=0 and t=1 — the model is algebraic with no time derivative, so the trajectory must be exactly constant.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 22974.784110535405
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1.0481056050036084e-13
+                        },
+                        {
+                            "variable": "k",
+                            "time": 1.0,
+                            "expected": 1.0481056050036084e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_temperature",
+                    "description": "T lowered to 250 K with P and a0 at defaults. air_volume = R*T/P falls with T, so the conversion factor c = A/air_volume*ppb_unit rises and k rises proportionally — k is inversely proportional to temperature.",
+                    "parameter_overrides": {
+                        "T": 250.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 20513.200098692327
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 29346956940.101036
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1.1738782776040414e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "high_pressure",
+                    "description": "P raised to 120000 Pa with T and a0 at defaults. air_volume falls with rising P, so c and k both rise — k is linearly proportional to pressure.",
+                    "parameter_overrides": {
+                        "P": 120000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 19399.333333333332
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 31031994226.60573
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1.241279769064229e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_coefficient_doubled",
+                    "description": "a0 doubled to 8.0e-24 cm^3/molec/s with T and P at defaults. Since k = a0*c and c depends only on T and P, k doubles exactly while air_volume and c are unchanged — confirms a0 is wired as a linear multiplier.",
+                    "parameter_overrides": {
+                        "a0": 8e-24
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 2.0962112100072168e-13
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "constant_rate_vs_temperature",
+                    "description": "Sweeps temperature T from 230 K to 320 K (the tropospheric range) with P and a0 at defaults. The constant-rate builder has no Arrhenius factor, so the only temperature dependence is through c = A*P/(R*T)*ppb_unit: k falls as 1/T across the sweep.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 230.0,
+                                    "stop": 320.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "constant_rate_k_vs_t",
+                            "type": "line",
+                            "description": "Converted constant rate coefficient k versus temperature — a smooth 1/T decay.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature (K)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        "arrh": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/SuperFast.jl:33\n\n`arrh(t, T, P, a0, b0, c0)` is the SuperFast modified-Arrhenius rate builder. It is the workhorse rate law of the SuperFast mechanism: most of the ~20 gas-phase reactions in SuperFast() are built with it (through the local `arr` closure), and the three other builders in this file (arr_3rd, rate_2HO2, rate_OH_CO) all compose arrh sub-systems internally.\n\nThe compiled equation is `k ~ a0 * exp(c0/T) * (K_300/T)^b0 * c`, with `air_volume = R*T/P` and `c = A/air_volume*ppb_unit` as Julia locals. NOTE the exponent base: the source CODE uses (K_300/T)^b0 = (300/T)^b0, whereas the function's docstring writes (T/300)^b0 — the code is authoritative and is what every SuperFast reaction actually uses, so this migration transcribes (K_300/T)^b0. air_volume and c are `type: state` cascade variables; k is the `type: state` output. a0/b0/c0 and A/R/ppb_unit/K_300 are `type: parameter`; the unused upstream `@constants num_density_unit_inv` is omitted.\n\nDefaults a0 = 1.7e-12 cm^3/molec/s, b0 = 0 (dimensionless), c0 = -940 K are the coefficients of the first SuperFast reaction, `arr(T, P, 1.7e-12, 0.0, -940.0), O3 + OH --> HO2 + O2` (SuperFast.jl:275). With b0 = 0 the (K_300/T)^b0 factor is exactly 1.0; the b0_nonzero test exercises a non-trivial power-law factor and the o3_no_reaction_coefficients test swaps in a second real SuperFast coefficient set. At the defaults k = 0.0015516914092470017 (s*ppb)^-1.\n\nAlgebraic, no time derivative. Tolerance rel=1e-10, purely relative: the equation adds one exp and one pow to the rate_toppb expression tree; both are correctly-rounded library calls and 1e-10 absorbs any libm/numpy ULP-level difference while still pinning a0, b0, c0 and the (K_300/T) base to full working precision."
+            },
+            "tolerance": {
+                "rel": 1e-10
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 280.0,
+                    "description": "Air temperature. Upstream the rate-law builders receive T as a `ParentScope` parameter; the default 280.0 K is the SuperFast() `@parameters T` default (SuperFast.jl:250)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure. Upstream a `ParentScope` parameter; the default 101325 Pa (1 atm) is the SuperFast() `@parameters P` default (SuperFast.jl:251)."
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "molec/mol",
+                    "default": 6.02e+23,
+                    "description": "Avogadro's number. Upstream `@constants A = 6.02e23` (SuperFast.jl). Appears in the ppb conversion factor c = A/air_volume*ppb_unit."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "(Pa*cm^3)/(K*mol)",
+                    "default": 8314000.0,
+                    "description": "Universal gas constant in the upstream's mixed Pa-cm^3 unit system. Upstream `@constants R = 8.314e6`. Sets the molar air volume air_volume = R*T/P."
+                },
+                "ppb_unit": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 1e-09,
+                    "description": "mol/mol_air -> ppb conversion factor. Upstream `@constants ppb_unit = 1.0e-9`."
+                },
+                "K_300": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Arrhenius reference temperature (300 K). Upstream `@constants K_300 = 300`."
+                },
+                "a0": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 1.7e-12,
+                    "description": "Arrhenius pre-exponential factor in CGS cm^3/molec/s. Default 1.7e-12 from `O3 + OH --> HO2 + O2` (SuperFast.jl:275)."
+                },
+                "b0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Arrhenius power-law (temperature) exponent for the (K_300/T)^b0 factor. Default 0.0 (no power-law dependence) from `O3 + OH --> HO2 + O2`."
+                },
+                "c0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": -940.0,
+                    "description": "Arrhenius activation-temperature parameter (-Ea/R) in K for the exp(c0/T) factor. Default -940.0 from `O3 + OH --> HO2 + O2`."
+                },
+                "air_volume": {
+                    "type": "state",
+                    "units": "cm^3/mol",
+                    "description": "Molar volume of air, R*T/P."
+                },
+                "c": {
+                    "type": "state",
+                    "units": "molec*ppb/cm^3",
+                    "description": "ppb conversion factor A/air_volume*ppb_unit."
+                },
+                "k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Modified-Arrhenius rate coefficient in (s*ppb)^-1: k = a0*exp(c0/T)*(K_300/T)^b0*c."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "air_volume",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T"
+                                ]
+                            },
+                            "P"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A",
+                                    "air_volume"
+                                ]
+                            },
+                            "ppb_unit"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a0",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c0",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    "b0"
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_o3_oh_reaction",
+                    "description": "All parameters at their defaults: T=280 K, P=101325 Pa, a0=1.7e-12, b0=0.0, c0=-940.0 (the O3 + OH --> HO2 + O2 coefficient set). With b0=0 the (K_300/T)^b0 power-law factor is exactly 1.0. Pins every cascade variable; k asserted at t=0 and t=1 for time-invariance.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 22974.784110535405
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0015516914092470017
+                        },
+                        {
+                            "variable": "k",
+                            "time": 1.0,
+                            "expected": 0.0015516914092470017
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature",
+                    "description": "T raised to 300 K. Both the exp(c0/T) Arrhenius factor and the conversion factor c shift with temperature; the test pins the combined result.",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 24615.84011843079
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 24455797450.084198
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0018115126600967313
+                        }
+                    ]
+                },
+                {
+                    "id": "nonzero_power_law_exponent",
+                    "description": "b0 set to 2.0 with all else at defaults, activating the (K_300/T)^b0 power-law factor. At T=280 K, K_300/T = 300/280 > 1, so (K_300/T)^2 > 1 and k is larger than the b0=0 default.",
+                    "parameter_overrides": {
+                        "b0": 2.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0017812784034723233
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_activation_temperature",
+                    "description": "c0 set to 0.0, so the exp(c0/T) factor collapses to exp(0)=1.0 and k reduces to a0*(K_300/T)^b0*c. With the default b0=0 this is just a0*c = the rate_toppb form — k jumps by exactly the factor 1/exp(-940/280) relative to the default.",
+                    "parameter_overrides": {
+                        "c0": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.04454448821265336
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_no_reaction_coefficients",
+                    "description": "A second real SuperFast coefficient set: a0=3.0e-12, b0=0.0, c0=-1500.0, the O3 + NO --> NO2 + O2 reaction (SuperFast.jl:280). Exercises arrh with a different pre-exponential and a stronger (more negative) activation temperature.",
+                    "parameter_overrides": {
+                        "a0": 3e-12,
+                        "b0": 0.0,
+                        "c0": -1500.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.00037058575829340316
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "arrhenius_rate_vs_temperature",
+                    "description": "Sweeps temperature T from 230 K to 320 K with the default O3+OH coefficients (a0=1.7e-12, b0=0, c0=-940). With c0 negative the exp(c0/T) Arrhenius factor rises steeply with temperature, the classic Arrhenius rate-vs-temperature curve.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 230.0,
+                                    "stop": 320.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "arrhenius_k_vs_t",
+                            "type": "line",
+                            "description": "Modified-Arrhenius rate coefficient k versus temperature for the O3 + OH reaction — a rising Arrhenius curve.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature (K)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        "arr_3rd": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/SuperFast.jl:64\n\n`arr_3rd(t, T, P, a1, b1, c1, a2, b2, c2, fv)` is the SuperFast third-body / pressure-dependent (Troe falloff) rate builder. (a1,b1,c1) are the Arrhenius parameters of the low-pressure limit, (a2,b2,c2) of the high-pressure limit, and fv is the Troe falloff broadening parameter (Atkinson et al. 1992, J. Phys. Chem. Ref. Data 21 p.1145; usually 0.6). It builds the single SuperFast third-body reaction `arr3(T, P, 1.8e-30, 3.0, 0.0, 2.8e-11, 0.0, 0.0, 0.6), NO2 + OH --> HNO3` (SuperFast.jl:282).\n\nUpstream arr_3rd composes two `arrh` sub-systems (`alow`, `ahigh`) and combines their k via the Julia locals num_density_unitless, rlow, rhigh, xyrat, blog, fexp:\n  num_density_unitless = A*P/(R*T)*num_density_unit_inv\n  alow.k, ahigh.k       = arrh(a1,b1,c1), arrh(a2,b2,c2)\n  rlow  = alow.k*num_density_unitless ; rhigh = ahigh.k\n  xyrat = rlow/rhigh ; blog = log10(xyrat)\n  fexp  = 1/(1+blog*blog)\n  k     = rlow*(fv^fexp)/(1+xyrat)\nThis migration makes each upstream-named quantity a `type: state` cascade variable: air_volume, c (the shared ppb conversion, used by both sub-arrh equations), num_density_unitless, alow_k, ahigh_k, rlow, xyrat, blog, fexp and the output k — ten equations, topologically ordered. The trivial alias rhigh = ahigh.k is folded into xyrat = rlow/ahigh_k. The two sub-arrh k's are the genuine MTK `@variables k(t)` of the composed `arrh` ReactionSystems; the rest are upstream Julia locals reproduced verbatim. a1/b1/c1/a2/b2/c2/fv and A/R/ppb_unit/num_density_unit_inv/K_300 are `type: parameter`.\n\nDefaults are the NO2+OH coefficient set: a1=1.8e-30, b1=3.0, c1=0.0, a2=2.8e-11, b2=0.0, c2=0.0, fv=0.6. At T=280 K, P=101325 Pa the low-pressure branch gives alow_k=5.801058263845591e-20, rlow=1.5200304203222663, the falloff ratio xyrat=2.071806522801997 and k=0.3110225103483613 (s*ppb)^-1.\n\nAlgebraic, no time derivative. Tolerance rel=1e-10, purely relative — the cascade is ten small expression trees including one log10 and two pow calls; 1e-10 pins the falloff combination while absorbing library ULP noise. No abs floor: every cascade value is solidly non-zero across the tested scenarios."
+            },
+            "tolerance": {
+                "rel": 1e-10
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 280.0,
+                    "description": "Air temperature. Upstream the rate-law builders receive T as a `ParentScope` parameter; the default 280.0 K is the SuperFast() `@parameters T` default (SuperFast.jl:250)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure. Upstream a `ParentScope` parameter; the default 101325 Pa (1 atm) is the SuperFast() `@parameters P` default (SuperFast.jl:251)."
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "molec/mol",
+                    "default": 6.02e+23,
+                    "description": "Avogadro's number. Upstream `@constants A = 6.02e23` (SuperFast.jl). Appears in the ppb conversion factor c = A/air_volume*ppb_unit."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "(Pa*cm^3)/(K*mol)",
+                    "default": 8314000.0,
+                    "description": "Universal gas constant in the upstream's mixed Pa-cm^3 unit system. Upstream `@constants R = 8.314e6`. Sets the molar air volume air_volume = R*T/P."
+                },
+                "ppb_unit": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 1e-09,
+                    "description": "mol/mol_air -> ppb conversion factor. Upstream `@constants ppb_unit = 1.0e-9`."
+                },
+                "num_density_unit_inv": {
+                    "type": "parameter",
+                    "units": "cm^3/molec",
+                    "default": 1.0,
+                    "description": "Unit-stripping factor that turns the air number density into the dimensionless num_density_unitless. Upstream `@constants num_density_unit_inv = 1`."
+                },
+                "K_300": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Arrhenius reference temperature (300 K). Upstream `@constants K_300 = 300`."
+                },
+                "a1": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 1.8e-30,
+                    "description": "Low-pressure-limit Arrhenius pre-exponential. Default 1.8e-30 from `NO2 + OH --> HNO3` (SuperFast.jl:282)."
+                },
+                "b1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.0,
+                    "description": "Low-pressure-limit power-law exponent. Default 3.0."
+                },
+                "c1": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 0.0,
+                    "description": "Low-pressure-limit activation-temperature parameter. Default 0.0."
+                },
+                "a2": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 2.8e-11,
+                    "description": "High-pressure-limit Arrhenius pre-exponential. Default 2.8e-11 from `NO2 + OH --> HNO3`."
+                },
+                "b2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "High-pressure-limit power-law exponent. Default 0.0."
+                },
+                "c2": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 0.0,
+                    "description": "High-pressure-limit activation-temperature parameter. Default 0.0."
+                },
+                "fv": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.6,
+                    "description": "Troe falloff broadening parameter (Atkinson et al. 1992). Default 0.6 from `NO2 + OH --> HNO3`."
+                },
+                "air_volume": {
+                    "type": "state",
+                    "units": "cm^3/mol",
+                    "description": "Molar volume of air, R*T/P."
+                },
+                "c": {
+                    "type": "state",
+                    "units": "molec*ppb/cm^3",
+                    "description": "ppb conversion factor A/air_volume*ppb_unit, shared by both sub-arrh equations."
+                },
+                "num_density_unitless": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless air number density A*P/(R*T)*num_density_unit_inv."
+                },
+                "alow_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Low-pressure-limit Arrhenius rate (arrh with a1,b1,c1)."
+                },
+                "ahigh_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "High-pressure-limit Arrhenius rate (arrh with a2,b2,c2)."
+                },
+                "rlow": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Low-pressure rate scaled by number density, alow_k*num_density_unitless."
+                },
+                "xyrat": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Falloff ratio rlow/rhigh (rhigh = ahigh_k)."
+                },
+                "blog": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "log10 of the falloff ratio."
+                },
+                "fexp": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Troe broadening exponent 1/(1+blog*blog)."
+                },
+                "k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Third-body / falloff rate coefficient rlow*(fv^fexp)/(1+xyrat)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "air_volume",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T"
+                                ]
+                            },
+                            "P"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A",
+                                    "air_volume"
+                                ]
+                            },
+                            "ppb_unit"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "num_density_unitless",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "A",
+                                            "P"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "R",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "num_density_unit_inv"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "alow_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a1",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c1",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    "b1"
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ahigh_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a2",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c2",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    "b2"
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "rlow",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "alow_k",
+                            "num_density_unitless"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "xyrat",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "rlow",
+                            "ahigh_k"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "blog",
+                    "rhs": {
+                        "op": "log10",
+                        "args": [
+                            "xyrat"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "fexp",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1.0,
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "blog",
+                                            "blog"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rlow",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "fv",
+                                            "fexp"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    "xyrat"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_no2_oh_reaction",
+                    "description": "All parameters at their defaults: the NO2 + OH --> HNO3 coefficient set (a1=1.8e-30, b1=3.0, c1=0.0, a2=2.8e-11, b2=0.0, c2=0.0, fv=0.6) at T=280 K, P=101325 Pa. Pins all ten cascade variables — the two sub-arrh limits, the falloff ratio xyrat, the Troe exponent fexp and the output k. k asserted at t=0 and t=1 for time-invariance.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 22974.784110535405
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.620264012509021e+19
+                        },
+                        {
+                            "variable": "alow_k",
+                            "time": 0.0,
+                            "expected": 5.801058263845591e-20
+                        },
+                        {
+                            "variable": "ahigh_k",
+                            "time": 0.0,
+                            "expected": 0.7336739235025259
+                        },
+                        {
+                            "variable": "rlow",
+                            "time": 0.0,
+                            "expected": 1.5200304203222663
+                        },
+                        {
+                            "variable": "xyrat",
+                            "time": 0.0,
+                            "expected": 2.071806522801997
+                        },
+                        {
+                            "variable": "blog",
+                            "time": 0.0,
+                            "expected": 0.3163491960525565
+                        },
+                        {
+                            "variable": "fexp",
+                            "time": 0.0,
+                            "expected": 0.9090274310086746
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.3110225103483613
+                        },
+                        {
+                            "variable": "k",
+                            "time": 1.0,
+                            "expected": 0.3110225103483613
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature",
+                    "description": "T raised to 300 K. Both Arrhenius limits and num_density_unitless shift; the falloff ratio xyrat and the broadening fexp move with them. Pins the full recomputed cascade.",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.4455797450084196e+19
+                        },
+                        {
+                            "variable": "alow_k",
+                            "time": 0.0,
+                            "expected": 4.402043541015156e-20
+                        },
+                        {
+                            "variable": "ahigh_k",
+                            "time": 0.0,
+                            "expected": 0.6847623286023575
+                        },
+                        {
+                            "variable": "rlow",
+                            "time": 0.0,
+                            "expected": 1.0765548520551804
+                        },
+                        {
+                            "variable": "xyrat",
+                            "time": 0.0,
+                            "expected": 1.5721584075054125
+                        },
+                        {
+                            "variable": "fexp",
+                            "time": 0.0,
+                            "expected": 0.9628245758394326
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.25593932670573394
+                        }
+                    ]
+                },
+                {
+                    "id": "low_pressure",
+                    "description": "P lowered to 80000 Pa. num_density_unitless is proportional to P, so the low-pressure branch rlow weakens and the falloff ratio xyrat shifts — the headline pressure dependence of the third-body rate.",
+                    "parameter_overrides": {
+                        "P": 80000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.0687996151070482e+19
+                        },
+                        {
+                            "variable": "rlow",
+                            "time": 0.0,
+                            "expected": 0.9475432206035881
+                        },
+                        {
+                            "variable": "xyrat",
+                            "time": 0.0,
+                            "expected": 1.6357712491898322
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.22056336170821683
+                        }
+                    ]
+                },
+                {
+                    "id": "falloff_parameter_unity",
+                    "description": "fv set to 1.0 (no Troe broadening) with all else at defaults. fv enters only as fv^fexp, which becomes 1.0^fexp = 1.0, so k = rlow/(1+xyrat); the sub-arrh limits, rlow, xyrat, blog and fexp are all unchanged from the default test.",
+                    "parameter_overrides": {
+                        "fv": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "xyrat",
+                            "time": 0.0,
+                            "expected": 2.071806522801997
+                        },
+                        {
+                            "variable": "fexp",
+                            "time": 0.0,
+                            "expected": 0.9090274310086746
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.4948327341058403
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "third_body_rate_vs_pressure",
+                    "description": "Sweeps pressure P from 20000 Pa to 101325 Pa (upper troposphere to surface) with the default NO2+OH coefficients. num_density_unitless is proportional to P, so the low-pressure branch and the falloff ratio xyrat both strengthen with pressure — the defining behaviour of a third-body / falloff rate law.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "P",
+                                "range": {
+                                    "start": 20000.0,
+                                    "stop": 101325.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "third_body_k_vs_p",
+                            "type": "line",
+                            "description": "Third-body rate coefficient k versus pressure — k climbs as the low-pressure branch fills in.",
+                            "x": {
+                                "variable": "P",
+                                "label": "Pressure (Pa)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        },
+                        {
+                            "id": "falloff_ratio_vs_p",
+                            "type": "line",
+                            "description": "Falloff ratio xyrat = rlow/rhigh versus pressure, showing the transition between the low- and high-pressure limits.",
+                            "x": {
+                                "variable": "P",
+                                "label": "Pressure (Pa)"
+                            },
+                            "y": {
+                                "variable": "xyrat",
+                                "label": "Falloff ratio xyrat (dimensionless)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        "rate_2HO2": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/SuperFast.jl:102\n\n`rate_2HO2(t, T, P, H2O, a0, c0, a1, c1)` is the SuperFast rate builder for `HO2 + HO2 --> H2O2 + O2` (SuperFast.jl:278). It sums a bimolecular channel and a termolecular (number-density-scaled) channel and multiplies by a water-vapour enhancement factor.\n\nUpstream it composes two b0=0 `arrh` sub-systems (`k0`, `k1`) and uses the Julia locals num_density_unitless and H2O_ppb_molec_cm3:\n  num_density_unitless = A*P/(R*T)*num_density_unit_inv\n  H2O_ppb_molec_cm3    = H2O*ppb_inv*1.0e-9*num_density_unitless\n  k0.k = arrh(a0,0.0,c0) ; k1.k = arrh(a1,0.0,c1)\n  k    = (k0.k + k1.k*num_density_unitless)\n         * (1 + 1.4e-21*H2O*H2O_ppb_molec_cm3*exp(T_0/T))\nThis migration reproduces each named quantity as a `type: state` cascade variable: air_volume, c, num_density_unitless, H2O_ppb_molec_cm3, the two sub-arrh outputs k0_k and k1_k, and the output k — seven equations. Both sub-arrh calls fix b0=0, so the (K_300/T)^0.0 factor is written verbatim and evaluates to exactly 1.0. The water-enhancement term is transcribed exactly as upstream writes it, including H2O appearing both as the raw ppb value and (via H2O_ppb_molec_cm3) as a number density — this product shape is preserved verbatim from the source, not 'corrected'.\n\nDefaults H2O=1.839e7 ppb (the SuperFast() `@parameters H2O` default, SuperFast.jl:254), a0=3.0e-13, c0=460.0, a1=2.1e-33, c1=920.0 (the HO2+HO2 coefficient set, SuperFast.jl:278). At T=280 K, P=101325 Pa the water-enhancement factor is ~3.2e7, so k = 2538324.212508474 (s*ppb)^-1; with H2O=0 the factor collapses to exactly 1.0 and k = 0.07917658137395685 (the bare k0_k + k1_k*num_density_unitless sum). The h2o_zero test pins both that k and H2O_ppb_molec_cm3 = 0.0 exactly.\n\nAlgebraic, no time derivative. Tolerance rel=1e-10, purely relative: relative tolerance handles the ~8-orders-of-magnitude spread between the small k1_k channel and the large k. The single exact-zero assertion (H2O_ppb_molec_cm3 at H2O=0) is bit-exactly 0.0 because 0.0*x = 0.0 in IEEE-754, so it passes the runner's exact-match path with no abs floor required."
+            },
+            "tolerance": {
+                "rel": 1e-10
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 280.0,
+                    "description": "Air temperature. Upstream the rate-law builders receive T as a `ParentScope` parameter; the default 280.0 K is the SuperFast() `@parameters T` default (SuperFast.jl:250)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure. Upstream a `ParentScope` parameter; the default 101325 Pa (1 atm) is the SuperFast() `@parameters P` default (SuperFast.jl:251)."
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "molec/mol",
+                    "default": 6.02e+23,
+                    "description": "Avogadro's number. Upstream `@constants A = 6.02e23` (SuperFast.jl). Appears in the ppb conversion factor c = A/air_volume*ppb_unit."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "(Pa*cm^3)/(K*mol)",
+                    "default": 8314000.0,
+                    "description": "Universal gas constant in the upstream's mixed Pa-cm^3 unit system. Upstream `@constants R = 8.314e6`. Sets the molar air volume air_volume = R*T/P."
+                },
+                "ppb_unit": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 1e-09,
+                    "description": "mol/mol_air -> ppb conversion factor. Upstream `@constants ppb_unit = 1.0e-9`."
+                },
+                "num_density_unit_inv": {
+                    "type": "parameter",
+                    "units": "cm^3/molec",
+                    "default": 1.0,
+                    "description": "Unit-stripping factor that turns the air number density into the dimensionless num_density_unitless. Upstream `@constants num_density_unit_inv = 1`."
+                },
+                "ppb_inv": {
+                    "type": "parameter",
+                    "units": "1/ppb",
+                    "default": 1.0,
+                    "description": "Unit-stripping factor (ppb^-1). Upstream `@constants ppb_inv = 1`."
+                },
+                "K_300": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Arrhenius reference temperature (300 K). Upstream `@constants K_300 = 300`."
+                },
+                "T_0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 2200.0,
+                    "description": "Characteristic temperature of the HO2+HO2 water-vapour enhancement term. Upstream `@constants T_0 = 2200.0`."
+                },
+                "H2O": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 18390000.0,
+                    "description": "Water-vapour mixing ratio in ppb. Default 1.839e7 ppb (~1.8%) is the SuperFast() `@parameters H2O` default (SuperFast.jl:254)."
+                },
+                "a0": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 3e-13,
+                    "description": "Bimolecular-channel Arrhenius pre-exponential. Default 3.0e-13 from `HO2 + HO2 --> H2O2 + O2` (SuperFast.jl:278)."
+                },
+                "c0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 460.0,
+                    "description": "Bimolecular-channel activation-temperature parameter. Default 460.0."
+                },
+                "a1": {
+                    "type": "parameter",
+                    "units": "cm^3/molec/s",
+                    "default": 2.1e-33,
+                    "description": "Termolecular-channel Arrhenius pre-exponential. Default 2.1e-33 from `HO2 + HO2 --> H2O2 + O2`."
+                },
+                "c1": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 920.0,
+                    "description": "Termolecular-channel activation-temperature parameter. Default 920.0."
+                },
+                "air_volume": {
+                    "type": "state",
+                    "units": "cm^3/mol",
+                    "description": "Molar volume of air, R*T/P."
+                },
+                "c": {
+                    "type": "state",
+                    "units": "molec*ppb/cm^3",
+                    "description": "ppb conversion factor A/air_volume*ppb_unit."
+                },
+                "num_density_unitless": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless air number density A*P/(R*T)*num_density_unit_inv."
+                },
+                "H2O_ppb_molec_cm3": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Water-vapour concentration converted from ppb toward a molec/cm^3 number density, H2O*ppb_inv*1.0e-9*num_density_unitless."
+                },
+                "k0_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Bimolecular HO2+HO2 channel (arrh with a0,0,c0)."
+                },
+                "k1_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Termolecular HO2+HO2 channel base rate (arrh with a1,0,c1), scaled by num_density_unitless in k."
+                },
+                "k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "HO2+HO2 rate coefficient including the water-vapour enhancement factor."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "air_volume",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T"
+                                ]
+                            },
+                            "P"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A",
+                                    "air_volume"
+                                ]
+                            },
+                            "ppb_unit"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "num_density_unitless",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "A",
+                                            "P"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "R",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "num_density_unit_inv"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "H2O_ppb_molec_cm3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H2O",
+                            "ppb_inv",
+                            1e-09,
+                            "num_density_unitless"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k0_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a0",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c0",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    0.0
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k1_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "a1",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c1",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    0.0
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    "k0_k",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k1_k",
+                                            "num_density_unitless"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            1.4e-21,
+                                            "H2O",
+                                            "H2O_ppb_molec_cm3",
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "T_0",
+                                                            "T"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_ho2_ho2_reaction",
+                    "description": "All parameters at their defaults: H2O=1.839e7 ppb, a0=3.0e-13, c0=460.0, a1=2.1e-33, c1=920.0 (the HO2 + HO2 --> H2O2 + O2 coefficient set) at T=280 K, P=101325 Pa. The water-vapour enhancement factor is ~3.2e7, so k ~ 2.5e6 (s*ppb)^-1. Pins all seven cascade variables; k asserted at t=0 and t=1 for time-invariance.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 22974.784110535405
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.620264012509021e+19
+                        },
+                        {
+                            "variable": "H2O_ppb_molec_cm3",
+                            "time": 0.0,
+                            "expected": 4.8186655190040896e+17
+                        },
+                        {
+                            "variable": "k0_k",
+                            "time": 0.0,
+                            "expected": 0.04063966305858998
+                        },
+                        {
+                            "variable": "k1_k",
+                            "time": 0.0,
+                            "expected": 1.4707265424931754e-21
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 2538324.212508474
+                        },
+                        {
+                            "variable": "k",
+                            "time": 1.0,
+                            "expected": 2538324.212508474
+                        }
+                    ]
+                },
+                {
+                    "id": "dry_air_no_water_enhancement",
+                    "description": "H2O set to 0.0. H2O_ppb_molec_cm3 becomes exactly 0.0 (0.0*x=0.0 in IEEE-754) and the water-enhancement factor collapses to exactly 1.0, so k reduces to the bare two-channel sum k0_k + k1_k*num_density_unitless ~ 0.079 (s*ppb)^-1. Isolates the non-water part of the rate law.",
+                    "parameter_overrides": {
+                        "H2O": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "H2O_ppb_molec_cm3",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "k0_k",
+                            "time": 0.0,
+                            "expected": 0.04063966305858998
+                        },
+                        {
+                            "variable": "k1_k",
+                            "time": 0.0,
+                            "expected": 1.4707265424931754e-21
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.07917658137395685
+                        }
+                    ]
+                },
+                {
+                    "id": "doubled_water_vapour",
+                    "description": "H2O doubled to 3.678e7 ppb. H2O_ppb_molec_cm3 is linear in H2O and the enhancement term carries H2O*H2O_ppb_molec_cm3, so the enhancement grows quadratically in H2O — k rises steeply.",
+                    "parameter_overrides": {
+                        "H2O": 36780000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "H2O_ppb_molec_cm3",
+                            "time": 0.0,
+                            "expected": 9.637331038008179e+17
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 10153296.612504153
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature",
+                    "description": "T raised to 300 K with H2O at default. The exp(T_0/T) term in the water enhancement weakens as T rises (T_0=2200 K), and both sub-arrh channels and num_density_unitless shift; pins the recomputed cascade.",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.4455797450084196e+19
+                        },
+                        {
+                            "variable": "H2O_ppb_molec_cm3",
+                            "time": 0.0,
+                            "expected": 4.497421151070484e+17
+                        },
+                        {
+                            "variable": "k0_k",
+                            "time": 0.0,
+                            "expected": 0.03399548872805895
+                        },
+                        {
+                            "variable": "k1_k",
+                            "time": 0.0,
+                            "expected": 1.1026496264711838e-21
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1080329.8241944418
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ho2_rate_vs_water_vapour",
+                    "description": "Sweeps the water-vapour mixing ratio H2O from 0 to 3.678e7 ppb (dry air to twice the SuperFast default ~1.8%) with T and P at defaults. The HO2+HO2 rate carries a water-enhancement factor 1 + 1.4e-21*H2O*H2O_ppb_molec_cm3*exp(T_0/T); since H2O_ppb_molec_cm3 is itself linear in H2O, k grows quadratically in water vapour.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H2O",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 36780000.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ho2_k_vs_h2o",
+                            "type": "line",
+                            "description": "HO2+HO2 rate coefficient k versus water-vapour mixing ratio — a steep quadratic rise driven by the water-enhancement factor.",
+                            "x": {
+                                "variable": "H2O",
+                                "label": "Water vapour (ppb)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        }
+                    ]
+                }
+            ]
+        },
+        "rate_OH_CO": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/SuperFast.jl:142\n\n`rate_OH_CO(t, T, P)` is the SuperFast rate builder for `OH + CO --> HO2` (SuperFast.jl:284), the JPL 15-10 parameterization of the OH+CO reaction. Unlike the other four builders it takes no Arrhenius-coefficient arguments — its inputs are only T and P. The rate is the sum of two pressure-dependent (Troe-style) channels, each combining a low- and high-pressure-limit `arrh` sub-system.\n\nBecause the four sub-arrh coefficient sets are hard-coded literals in the upstream function body (not function arguments), they are transcribed here as numeric literals inside the equations rather than as parameters:\n  klo1 = arrh(5.9e-33, 1, 0)   khi1 = arrh(1.1e-12, -1.3, 0)\n  klo2 = arrh(1.5e-13, 0, 0)   khi2 = arrh(2.1e9,  -6.1, 0)\nAll four have c0 = 0, so each exp(0.0/T) factor is written verbatim and evaluates to exactly 1.0. The two channels are combined through the upstream Julia locals:\n  num_density_unitless = A*P/(R*T)*num_density_unit_inv\n  xyrat1 = klo1.k*num_density_unitless/khi1.k ; blog1 = log10(xyrat1)\n  fexp1  = 1/(1+blog1*blog1)\n  kco1   = klo1.k*num_density_unitless*0.6^fexp1/(1+xyrat1)\n  xyrat2 = klo2.k*num_density_unitless/khi2.k ; blog2 = log10(xyrat2)\n  fexp2  = 1/(1+blog2*blog2)\n  kco2   = klo2.k*0.6^fexp2/(1+xyrat2)\n  k      = kco1 + kco2\nNote kco2 — unlike kco1 — does NOT carry a num_density_unitless factor; this asymmetry is preserved verbatim from the source. This migration reproduces every upstream-named quantity as a `type: state` cascade variable (air_volume, c, num_density_unitless, the four sub-arrh k's, xyrat1/blog1/fexp1/kco1, xyrat2/blog2/fexp2/kco2 and the output k) — sixteen topologically-ordered equations. The only `type: parameter`s are T, P and the physical constants A/R/ppb_unit/num_density_unit_inv/K_300.\n\nAt T=280 K, P=101325 Pa the first channel gives kco1 = 0.0027151547323616947, the second kco2 = 0.0036604066483741124, for k = 0.0063755613807358075 (s*ppb)^-1.\n\nAlgebraic, no time derivative. Tolerance rel=1e-10, purely relative — the cascade spans from klo1_k ~ 1.7e-22 to khi2_k ~ 3.6e19, ~41 orders of magnitude, which a single absolute floor could not cover; relative tolerance pins every channel uniformly. 1e-10 is far tighter than any plausible regression yet absorbs the ULP-level noise of the two log10 and two pow calls per channel."
+            },
+            "tolerance": {
+                "rel": 1e-10
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 280.0,
+                    "description": "Air temperature. Upstream the rate-law builders receive T as a `ParentScope` parameter; the default 280.0 K is the SuperFast() `@parameters T` default (SuperFast.jl:250)."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure. Upstream a `ParentScope` parameter; the default 101325 Pa (1 atm) is the SuperFast() `@parameters P` default (SuperFast.jl:251)."
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "molec/mol",
+                    "default": 6.02e+23,
+                    "description": "Avogadro's number. Upstream `@constants A = 6.02e23` (SuperFast.jl). Appears in the ppb conversion factor c = A/air_volume*ppb_unit."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "(Pa*cm^3)/(K*mol)",
+                    "default": 8314000.0,
+                    "description": "Universal gas constant in the upstream's mixed Pa-cm^3 unit system. Upstream `@constants R = 8.314e6`. Sets the molar air volume air_volume = R*T/P."
+                },
+                "ppb_unit": {
+                    "type": "parameter",
+                    "units": "ppb",
+                    "default": 1e-09,
+                    "description": "mol/mol_air -> ppb conversion factor. Upstream `@constants ppb_unit = 1.0e-9`."
+                },
+                "num_density_unit_inv": {
+                    "type": "parameter",
+                    "units": "cm^3/molec",
+                    "default": 1.0,
+                    "description": "Unit-stripping factor that turns the air number density into the dimensionless num_density_unitless. Upstream `@constants num_density_unit_inv = 1`."
+                },
+                "K_300": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Arrhenius reference temperature (300 K). Upstream `@constants K_300 = 300`."
+                },
+                "air_volume": {
+                    "type": "state",
+                    "units": "cm^3/mol",
+                    "description": "Molar volume of air, R*T/P."
+                },
+                "c": {
+                    "type": "state",
+                    "units": "molec*ppb/cm^3",
+                    "description": "ppb conversion factor A/air_volume*ppb_unit, shared by all four sub-arrh equations."
+                },
+                "num_density_unitless": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless air number density A*P/(R*T)*num_density_unit_inv."
+                },
+                "klo1_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-1 low-pressure-limit arrh rate (5.9e-33, 1, 0)."
+                },
+                "khi1_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-1 high-pressure-limit arrh rate (1.1e-12, -1.3, 0)."
+                },
+                "xyrat1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Channel-1 falloff ratio klo1_k*num_density_unitless/khi1_k."
+                },
+                "blog1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "log10 of the channel-1 falloff ratio."
+                },
+                "fexp1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Channel-1 Troe broadening exponent 1/(1+blog1^2)."
+                },
+                "kco1": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-1 rate contribution klo1_k*num_density_unitless*0.6^fexp1/(1+xyrat1)."
+                },
+                "klo2_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-2 low-pressure-limit arrh rate (1.5e-13, 0, 0)."
+                },
+                "khi2_k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-2 high-pressure-limit arrh rate (2.1e9, -6.1, 0)."
+                },
+                "xyrat2": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Channel-2 falloff ratio klo2_k*num_density_unitless/khi2_k."
+                },
+                "blog2": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "log10 of the channel-2 falloff ratio."
+                },
+                "fexp2": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Channel-2 Troe broadening exponent 1/(1+blog2^2)."
+                },
+                "kco2": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Channel-2 rate contribution klo2_k*0.6^fexp2/(1+xyrat2) (no number-density factor)."
+                },
+                "k": {
+                    "type": "state",
+                    "units": "1/(s*ppb)",
+                    "description": "Total OH+CO rate coefficient kco1 + kco2."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "air_volume",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T"
+                                ]
+                            },
+                            "P"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A",
+                                    "air_volume"
+                                ]
+                            },
+                            "ppb_unit"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "num_density_unitless",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "A",
+                                            "P"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "R",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "num_density_unit_inv"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "klo1_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            5.9e-33,
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            0.0,
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    1.0
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "khi1_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            1.1e-12,
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            0.0,
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    -1.3
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "xyrat1",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "klo1_k",
+                                    "num_density_unitless"
+                                ]
+                            },
+                            "khi1_k"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "blog1",
+                    "rhs": {
+                        "op": "log10",
+                        "args": [
+                            "xyrat1"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "fexp1",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1.0,
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "blog1",
+                                            "blog1"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "kco1",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "klo1_k",
+                                    "num_density_unitless",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            0.6,
+                                            "fexp1"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    "xyrat1"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "klo2_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            1.5e-13,
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            0.0,
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    0.0
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "khi2_k",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            2100000000.0,
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            0.0,
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "K_300",
+                                            "T"
+                                        ]
+                                    },
+                                    -6.1
+                                ]
+                            },
+                            "c"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "xyrat2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "klo2_k",
+                                    "num_density_unitless"
+                                ]
+                            },
+                            "khi2_k"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "blog2",
+                    "rhs": {
+                        "op": "log10",
+                        "args": [
+                            "xyrat2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "fexp2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1.0,
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "blog2",
+                                            "blog2"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "kco2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "klo2_k",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            0.6,
+                                            "fexp2"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    "xyrat2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "k",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "kco1",
+                            "kco2"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_oh_co_reaction",
+                    "description": "T=280 K, P=101325 Pa — the SuperFast() defaults. rate_OH_CO takes no coefficient arguments (the four sub-arrh coefficient sets are hard-coded JPL 15-10 literals), so this default test pins the entire sixteen-variable cascade for both Troe-style channels and the total rate k = kco1 + kco2 ~ 0.0064 (s*ppb)^-1. k asserted at t=0 and t=1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "air_volume",
+                            "time": 0.0,
+                            "expected": 22974.784110535405
+                        },
+                        {
+                            "variable": "c",
+                            "time": 0.0,
+                            "expected": 26202640125.09021
+                        },
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.620264012509021e+19
+                        },
+                        {
+                            "variable": "klo1_k",
+                            "time": 0.0,
+                            "expected": 1.6563811793360597e-22
+                        },
+                        {
+                            "variable": "khi1_k",
+                            "time": 0.0,
+                            "expected": 0.026350298961086337
+                        },
+                        {
+                            "variable": "xyrat1",
+                            "time": 0.0,
+                            "expected": 0.1647099337135034
+                        },
+                        {
+                            "variable": "blog1",
+                            "time": 0.0,
+                            "expected": -0.7832802075888214
+                        },
+                        {
+                            "variable": "fexp1",
+                            "time": 0.0,
+                            "expected": 0.6197599745029656
+                        },
+                        {
+                            "variable": "kco1",
+                            "time": 0.0,
+                            "expected": 0.0027151547323616947
+                        },
+                        {
+                            "variable": "klo2_k",
+                            "time": 0.0,
+                            "expected": 0.003930396018763532
+                        },
+                        {
+                            "variable": "khi2_k",
+                            "time": 0.0,
+                            "expected": 3.6123405334999413e+19
+                        },
+                        {
+                            "variable": "xyrat2",
+                            "time": 0.0,
+                            "expected": 0.0028509702081981137
+                        },
+                        {
+                            "variable": "blog2",
+                            "time": 0.0,
+                            "expected": -2.5450073209166946
+                        },
+                        {
+                            "variable": "fexp2",
+                            "time": 0.0,
+                            "expected": 0.13374236628722203
+                        },
+                        {
+                            "variable": "kco2",
+                            "time": 0.0,
+                            "expected": 0.0036604066483741124
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0063755613807358075
+                        },
+                        {
+                            "variable": "k",
+                            "time": 1.0,
+                            "expected": 0.0063755613807358075
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature",
+                    "description": "T raised to 300 K. Every sub-arrh limit, num_density_unitless and both falloff ratios shift; pins the recomputed two-channel cascade.",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.4455797450084196e+19
+                        },
+                        {
+                            "variable": "klo1_k",
+                            "time": 0.0,
+                            "expected": 1.4428920495549676e-22
+                        },
+                        {
+                            "variable": "khi1_k",
+                            "time": 0.0,
+                            "expected": 0.026901377195092616
+                        },
+                        {
+                            "variable": "xyrat1",
+                            "time": 0.0,
+                            "expected": 0.13117200450499705
+                        },
+                        {
+                            "variable": "kco1",
+                            "time": 0.0,
+                            "expected": 0.0023405990613121035
+                        },
+                        {
+                            "variable": "klo2_k",
+                            "time": 0.0,
+                            "expected": 0.0036683696175126295
+                        },
+                        {
+                            "variable": "khi2_k",
+                            "time": 0.0,
+                            "expected": 5.135717464517682e+19
+                        },
+                        {
+                            "variable": "xyrat2",
+                            "time": 0.0,
+                            "expected": 0.0017468426750060137
+                        },
+                        {
+                            "variable": "kco2",
+                            "time": 0.0,
+                            "expected": 0.0034509146663411045
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.005791513727653208
+                        }
+                    ]
+                },
+                {
+                    "id": "low_pressure",
+                    "description": "P lowered to 80000 Pa. num_density_unitless scales with P, shifting both pressure-dependent channels and lowering the total OH+CO rate.",
+                    "parameter_overrides": {
+                        "P": 80000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "num_density_unitless",
+                            "time": 0.0,
+                            "expected": 2.0687996151070482e+19
+                        },
+                        {
+                            "variable": "xyrat1",
+                            "time": 0.0,
+                            "expected": 0.13004485267288696
+                        },
+                        {
+                            "variable": "kco1",
+                            "time": 0.0,
+                            "expected": 0.001798289544833046
+                        },
+                        {
+                            "variable": "xyrat2",
+                            "time": 0.0,
+                            "expected": 0.0022509510649479304
+                        },
+                        {
+                            "variable": "kco2",
+                            "time": 0.0,
+                            "expected": 0.002904936319144779
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.004703225863977825
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "oh_co_rate_vs_pressure",
+                    "description": "Sweeps pressure P from 20000 Pa to 101325 Pa with T at its default. Both OH+CO channels are pressure-dependent through num_density_unitless; the total rate k = kco1 + kco2 rises with pressure.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "P",
+                                "range": {
+                                    "start": 20000.0,
+                                    "stop": 101325.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "oh_co_k_vs_p",
+                            "type": "line",
+                            "description": "Total OH + CO rate coefficient k versus pressure.",
+                            "x": {
+                                "variable": "P",
+                                "label": "Pressure (Pa)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "oh_co_rate_vs_temperature",
+                    "description": "Sweeps temperature T from 230 K to 320 K with P at its default, showing the weak temperature dependence of the JPL 15-10 OH+CO parameterization.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 230.0,
+                                    "stop": 320.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "oh_co_k_vs_t",
+                            "type": "line",
+                            "description": "Total OH + CO rate coefficient k versus temperature.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature (K)"
+                            },
+                            "y": {
+                                "variable": "k",
+                                "label": "Rate coefficient k (1/(s*ppb))"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
