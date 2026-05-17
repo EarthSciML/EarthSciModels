@@ -1,0 +1,577 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "COOxidation",
+        "description": "CO oxidation chemistry diagnostics from Seinfeld & Pandis (2006) Ch. 6 §6.3 Eqs. 6.9-6.18, pp. 212-219. CO oxidation is the simplest hydrocarbon-oxidation mechanism and illustrates the catalytic HOx cycling that drives tropospheric ozone production (net: CO + 2O₂ + hν → CO₂ + O₃, with OH regenerated through HO₂ + NO). This observed-only algebraic component implements six diagnostic relations: the OH loss rate L_OH (to CO, NO₂, O₃), the HO₂ loss rate L_HO2 (to NO, the HO₂ self-reaction, and O₃), the HOx radical-termination loss rate L_HOx (OH+NO₂→HNO₃ plus the HO₂ self-reaction), the high-NOx HO₂ steady-state concentration HO2_ss (Eq. 6.18), the net ozone production rate P_O3 (HO₂+NO production minus the OH+O₃ and HO₂+O₃ loss channels), and the HOx chain length (propagation rate over termination rate — the number of OH-HO₂ cycles before radical termination). Observed-only algebraic system (no time derivatives): twelve variables (six inputs CO/OH/HO₂/NO/NO₂/O₃ encoded as parameters, six outputs L_OH/L_HO2/L_HOx/HO2_ss/P_O3/chain_length as state), six rate-constant parameters (k_CO_OH, k_HO2_NO, k_HO2_HO2, k_OH_NO2, k_HO2_O3, k_OH_O3), one dimensionless stoichiometric constant (two), and six algebraic equations. Migrated from GasChem.jl@8c12c048 src/co_oxidation.jl:88 (`COOxidation` @component).",
+        "tags": [
+            "gaschem",
+            "co-oxidation",
+            "hox-cycling",
+            "ozone-production",
+            "tropospheric-chemistry",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-kzix)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 6 §6.3, Eqs. 6.9-6.18, pp. 212-219. CO oxidation as the simplest hydrocarbon-oxidation mechanism: the HOx catalytic cycle (CO + OH → CO₂ + H; H + O₂ + M → HO₂ + M; HO₂ + NO → OH + NO₂; NO₂ + hν → NO + O; O + O₂ + M → O₃ + M), the HO₂ steady state, the HOx chain length, and net ozone production. Rate constants from Table B.1."
+            }
+        ]
+    },
+    "models": {
+        "COOxidation": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/co_oxidation.jl:88\n\nUpstream `COOxidation` is an MTK `@component` with 12 `@variables` (6 inputs CO/OH/HO₂/NO/NO₂/O₃ + 6 outputs P_O3/L_HOx/L_OH/L_HO2/chain_length/HO2_ss), 6 `@parameters` (k_CO_OH, k_HO2_NO, k_HO2_HO2, k_OH_NO2, k_HO2_O3, k_OH_O3), 1 `@constants` (two), and 6 algebraic equations from S&P Ch. 6 §6.3 Eqs. 6.9-6.18. The upstream test compiles the system with `compile_with_inputs(sys, [:CO, :OH, :HO2, :NO, :NO2, :O3])` and solves it as a `NonlinearProblem` with the six inputs pinned to user-supplied concentrations.\n\nVariable-classification convention: the six input @variables (CO, OH, HO₂, NO, NO₂, O₃) are encoded here as `type: parameter` because they have no defining equation within the COOxidation component itself — they are externally-supplied inputs that the upstream compile treats via `compile_with_inputs(...)` (i.e. `mtkcompile` with `inputs=[...]`). This mirrors the rig-wide convention applied by sibling ope.esm (its five input @variables OH/HO₂/RO₂/NO/NO₂ are encoded as `type: parameter`) and oh_production.esm/stefan_boltzmann.esm/typical.esm. The six output @variables (L_OH, L_HO2, L_HOx, HO2_ss, P_O3, chain_length) are encoded as `type: state` because each has exactly one defining algebraic equation. The single upstream `@constants` entry `two` (the stoichiometric factor 2 for the HO₂ self-reaction HO₂ + HO₂ → H₂O₂ + O₂, which consumes two HO₂ radicals per event) is preserved verbatim as `type: parameter` with a fixed default of 2.0 — mirroring the constant→parameter convention of sibling oh_production.esm (`two`), chapman.esm, gwp.esm and stefan_boltzmann.esm: encoding it as a named dimensionless parameter lets MTK's unit checker treat it as a named quantity rather than a magic literal in the L_HO2 and L_HOx right-hand sides, and lets downstream consumers override the stoichiometric factor for sensitivity studies. The upstream structural test `COOxidation: Structural Verification` (test/test_co_oxidation.jl:4-32) asserts `length(unknowns(sys)) == 12`, `length(equations(sys)) == 6`, and `length(parameters(sys)) == 7` — the .esm preserves this with the 12 declared @variable entries (6 type:parameter inputs + 6 type:state outputs), 6 entries in `equations`, and 7 declared parameter entries (the 6 rate constants + the `two` constant; MTK counts `@constants` in `parameters(sys)`, hence 7, not 6).\n\nRate-constant CGS→SI translation: the upstream Julia declares the six rate constants as the SI-converted CGS values via explicit multiplication by 1e-6 (the cm³/molec/s → m³/s factor for bimolecular rate coefficients):\n  k_CO_OH   = 2.4e-13 · 1.0e-6 = 2.4e-19 m³/s   (CO + OH → CO₂ + H, S&P §6.3 R6.9 — the chain-initiating CO-consumption step)\n  k_HO2_NO  = 8.1e-12 · 1.0e-6 = 8.1e-18 m³/s   (HO₂ + NO → OH + NO₂, R6.11 — the O₃-producing chain-propagation step that regenerates OH)\n  k_HO2_HO2 = 2.9e-12 · 1.0e-6 = 2.9e-18 m³/s   (HO₂ + HO₂ → H₂O₂ + O₂, R6.15 — the low-NOx HOx self-termination)\n  k_OH_NO2  = 1.0e-11 · 1.0e-6 = 1.0e-17 m³/s   (OH + NO₂ + M → HNO₃, R6.12 — the high-NOx HOx/NOx termination)\n  k_HO2_O3  = 2.0e-15 · 1.0e-6 = 2.0e-21 m³/s   (HO₂ + O₃ → OH + 2O₂ — an O₃-loss channel)\n  k_OH_O3   = 7.3e-14 · 1.0e-6 = 7.3e-20 m³/s   (OH + O₃ → HO₂ + O₂ — an O₃-loss channel)\nThe .esm encodes the clean SI literals 2.4e-19, 8.1e-18, 2.9e-18, 1.0e-17, 2.0e-21, 7.3e-20 directly — matching the SI-literal convention of sibling ope.esm and oh_production.esm. Three of the six literals are bit-identical to the upstream Julia product (k_HO2_NO 8.1e-18, k_HO2_HO2 2.9e-18, k_OH_O3 7.3e-20); the other three differ from the product by exactly one ULP (k_CO_OH 2.4e-19 vs the product 2.3999999999999997e-19, k_OH_NO2 1.0e-17 vs 9.999999999999999e-18, k_HO2_O3 2.0e-21 vs 2.0000000000000002e-21 — each a ~1e-16 relative difference). Every inline-test expected value below is computed from the .esm's own declared literal defaults, so the file is internally exact at the rel=1e-10 inline-test tolerance regardless of that choice; the 1-ULP literal-vs-product difference is ~6 orders of magnitude below rel=1e-10 and far below the upstream tests' own rtol=0.01-0.05 acceptance bounds.\n\nObservability classification: this component is purely algebraic — every output variable is the LHS of one algebraic equation in the inputs, parameters, and (for chain_length) another output. No equation contains a `D(·)` operator, so the `(t)` time index has no role and the trajectory is constant in time. Test and example scenarios use `time_span: [0.0, 1.0]` and sample at t=0, mirroring the convention used by sibling observed-only ESM files (ope.esm, oh_production.esm, gwp.esm).\n\nEquation cascade: the six equations form a topologically-ordered cascade — L_OH, L_HO2, L_HOx, HO2_ss and P_O3 depend only on inputs and parameters; chain_length depends on the output L_HOx. chain_length's equation is written `chain_length ~ (k_HO2_NO·HO2·NO) / L_HOx` (referencing the L_HOx output variable) rather than fully inlined — this preserves the upstream symbolic structure (S&P writes the HOx chain length as a propagation rate divided by a termination rate) instead of the fully-expanded form, mirroring the ope.esm / oh_production.esm cascade convention. Equation order in the `equations` array follows the upstream `eqs` array verbatim (L_OH, L_HO2, L_HOx, HO2_ss, P_O3, chain_length); since L_HOx precedes chain_length the order is already a valid topological sort.\n\nNumerical defaults: the upstream input @variables carry no defaults — the .esm defaults are taken from the canonical upstream test scenario shared by the four `COOxidation` equation-verification tests (`Eq 6.18 HO2 Steady-State`, `Net O3 Production Rate`, `HOx Loss Rate`, `Chain Length`, test/test_co_oxidation.jl:60-192), all in SI m⁻³:\n  CO  = 2.5e18 m⁻³  (~100 ppb at STP air number density 2.5e25 m⁻³)\n  OH  = 1.0e12 m⁻³  (~1e6 molec/cm³, typical daytime tropospheric OH)\n  HO₂ = 1.0e14 m⁻³  (~1e8 molec/cm³, typical daytime tropospheric HO₂)\n  NO  = 2.5e15 m⁻³  (~0.1 ppb at STP)\n  NO₂ = 2.5e16 m⁻³  (~1 ppb at STP)\n  O₃  = 1.0e18 m⁻³  (~40 ppb at STP, typical tropospheric ozone)\nAt these defaults: L_OH = 9.23e11, L_HO2 = 2.283e12, L_HOx = 3.08e11, P_O3 = 1.752e12 m⁻³·s⁻¹, HO2_ss = 2.963e13 m⁻³, chain_length = 6.575 (dimensionless).\n\nUpstream test reproduction:\n- `COOxidation: Structural Verification` (test_co_oxidation.jl:4-32) — reproduced by the .esm structural shape (12 @variable entries = 6 parameter + 6 state, 6 equations, 7 parameter entries).\n- `COOxidation: Rate Constants at 298 K` (test_co_oxidation.jl:197-211, asserts the six k_* defaults) — reproduced implicitly by the declared rate-constant defaults; `upstream_defaults_all_outputs` pins all six outputs, each computed from the rate constants, so any wrong default shifts a pinned value.\n- `COOxidation: Eq 6.18 HO2 Steady-State (High NOx)` (test_co_oxidation.jl:60-93, upstream rtol=0.05 on HO2_ss≈2.963e13) — reproduced and tightened by `upstream_defaults_all_outputs` at rel=1e-10.\n- `COOxidation: Net O3 Production Rate` (test_co_oxidation.jl:95-126, upstream rtol=0.01 on P_O3≈1.752e12) — reproduced and tightened by `upstream_defaults_all_outputs`.\n- `COOxidation: HOx Loss Rate` (test_co_oxidation.jl:128-158, upstream rtol=0.01 on L_HOx≈3.08e11) — reproduced and tightened by `upstream_defaults_all_outputs`.\n- `COOxidation: Chain Length` (test_co_oxidation.jl:160-192, upstream rtol=0.02 on chain_length≈6.58, bounded 1 < chain_length < 100) — reproduced and tightened by `upstream_defaults_all_outputs`.\n- `COOxidation: HOx Catalytic Cycling` (test_co_oxidation.jl:368-395, asserts chain_length > 1 and P_O3 > 0 at defaults) — reproduced by `upstream_defaults_all_outputs` (pins chain_length=6.575 > 1 and P_O3=1.752e12 > 0).\n- `COOxidation: High NOx - Short Chain Length` (test_co_oxidation.jl:272-303, asserts L_HOx(high NOx) > L_HOx(low NOx) and chain_length > 0 for both) — reproduced by the pair `upstream_high_nox_short_chain_low_nox` / `upstream_high_nox_short_chain_high_nox`, which pin both endpoints at rel=1e-10 (L_HOx 1.395e11 < 3.7645e12; both chain lengths positive — the upstream cross-test inequality becomes a structural fact under the two pinned values).\n- `COOxidation: Qualitative - Positive Production and Loss` (test_co_oxidation.jl:337-366, sweeps OH×HO₂×NO over a 3×3×3 grid and asserts L_OH/L_HO2/L_HOx/HO2_ss all > 0) — reproduced by `upstream_qualitative_low_corner` and `upstream_qualitative_high_corner`, the two extreme corners of that grid, which pin all four (positive) loss/steady-state outputs at rel=1e-10.\nThe remaining tests extend coverage beyond the upstream suite: term isolation by zeroing O₃ / CO / HO₂, single-input doubling of OH / NO / NO₂ / CO / O₃, the low-NOx long-chain and high-NOx short-chain regimes, the HO₂-self-reaction-dominated termination regime, and a `two`-constant override sentinel.\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the six algebraic equations are small expression trees — the largest (L_OH, L_HO2) sum three 3-factor products (≤11 IEEE-754 ops); HO2_ss and chain_length each add one division; P_O3 subtracts two products from a third. Each output is correctly-rounded to within a few ULP ≈ 1e-15 relative; rel=1e-10 leaves ~5 orders of magnitude of headroom and is far tighter than the upstream rtol=0.01-0.05. The abs=1.0e-12 floor gates the exact-IEEE-754-zero outputs that arise at the term-isolation boundaries (HO2_ss=0 when CO=0; L_HO2=0 and chain_length=0 when HO₂=0), catching the stuck-at-non-zero failure mode. Matches sibling observed-only ESM tolerance: ope.esm rel=1e-10/abs=1e-12, oh_production.esm rel=1e-10/abs=1e-12.\n\nUnit balance (verified): all six equations balance dimensionally.\n  L_OH  `k_CO_OH·CO·OH + k_OH_NO2·OH·NO2 + k_OH_O3·OH·O3`: each term (m³/s)·(m⁻³)·(m⁻³) = m⁻³·s⁻¹ ✓\n  L_HO2 `k_HO2_NO·HO2·NO + two·k_HO2_HO2·HO2² + k_HO2_O3·HO2·O3`: (m³/s)·(m⁻³)·(m⁻³) and (1)·(m³/s)·(m⁻⁶) = m⁻³·s⁻¹ ✓\n  L_HOx `k_OH_NO2·OH·NO2 + two·k_HO2_HO2·HO2²`: (m³/s)·(m⁻³)·(m⁻³) and (1)·(m³/s)·(m⁻⁶) = m⁻³·s⁻¹ ✓\n  HO2_ss `k_CO_OH·CO·OH / (k_HO2_NO·NO)`: (m⁻³·s⁻¹)/(s⁻¹) = m⁻³ ✓\n  P_O3  `k_HO2_NO·HO2·NO − k_OH_O3·OH·O3 − k_HO2_O3·HO2·O3`: each term (m³/s)·(m⁻³)·(m⁻³) = m⁻³·s⁻¹ ✓\n  chain_length `k_HO2_NO·HO2·NO / L_HOx`: (m⁻³·s⁻¹)/(m⁻³·s⁻¹) = dimensionless ✓\nAll concentrations in SI m⁻³, rate constants in SI m³/s, production/loss rates in m⁻³·s⁻¹, chain length dimensionless. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "two": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2.0,
+                    "description": "Stoichiometric factor for the HO₂ self-reaction HO₂ + HO₂ → H₂O₂ + O₂ (S&P §6.3 R6.15): two HO₂ radicals are consumed per reaction event, so the HOx loss contributed by the self-reaction is two·k_HO2_HO2·[HO₂]². Upstream this is an MTK `@constants` entry (default 2, dimensionless); it is preserved here as `type: parameter` with a fixed default of 2.0 so MTK's unit checker sees a named dimensionless quantity rather than a magic literal in the L_HO2 and L_HOx right-hand sides, and so downstream consumers can override the stoichiometric factor for sensitivity studies. The `two_constant_override_sentinel` test overrides it to 1.0 to catch a regression that hard-codes the factor as a literal."
+                },
+                "k_CO_OH": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.4e-19,
+                    "description": "CO + OH → CO₂ + H rate constant (S&P §6.3 R6.9, Table B.1, 298 K). The upstream default 2.4e-19 m³/s is the SI-converted form of the CGS value 2.4e-13 cm³/molec/s. This is the chain-initiating step of the CO-oxidation cycle — it consumes CO and an OH radical, producing the H atom that promptly forms HO₂. k_CO_OH appears in the OH loss rate L_OH and (via the CO·OH product) in the high-NOx HO₂ steady state HO2_ss. The clean literal 2.4e-19 differs from the upstream Julia product 2.4e-13·1.0e-6 = 2.3999999999999997e-19 by exactly one ULP (see model reference notes)."
+                },
+                "k_HO2_NO": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8.1e-18,
+                    "description": "HO₂ + NO → OH + NO₂ rate constant (S&P §6.3 R6.11, Table B.1, 298 K). The upstream default 8.1e-18 m³/s is the SI-converted form of the CGS value 8.1e-12 cm³/molec/s. This is the O₃-producing chain-propagation step: it regenerates OH (sustaining the catalytic HOx cycle) and converts NO to NO₂, whose subsequent photolysis yields an O₃ molecule. k_HO2_NO appears in the HO₂ loss rate L_HO2, the gross O₃-production term of P_O3, the HO₂ steady-state denominator HO2_ss, and the chain_length numerator. The clean literal 8.1e-18 is bit-identical to the upstream Julia product 8.1e-12·1.0e-6."
+                },
+                "k_HO2_HO2": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.9e-18,
+                    "description": "HO₂ + HO₂ → H₂O₂ + O₂ rate constant (S&P §6.3 R6.15, Table B.1, 298 K). The upstream default 2.9e-18 m³/s is the SI-converted form of the CGS value 2.9e-12 cm³/molec/s. This is the dominant HOx self-termination channel at low NOx — the HO₂ self-reaction that converts two HO₂ radicals into stable hydrogen peroxide. It enters the HO₂ loss rate L_HO2 and the HOx loss rate L_HOx as the quadratic term two·k_HO2_HO2·[HO₂]² (the factor `two` for the two-HO₂-per-event stoichiometry). The clean literal 2.9e-18 is bit-identical to the upstream Julia product 2.9e-12·1.0e-6."
+                },
+                "k_OH_NO2": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.0e-17,
+                    "description": "OH + NO₂ + M → HNO₃ rate constant (S&P §6.3 R6.12, Table B.1, 298 K). The upstream default 1.0e-17 m³/s is the SI-converted form of the CGS value 1.0e-11 cm³/molec/s. This termolecular reaction is the dominant daytime HOx/NOx termination at high NOx: it removes an OH radical and an NO₂ molecule, converting reactive nitrogen into nitric acid. It enters the OH loss rate L_OH and the HOx loss rate L_HOx. The clean literal 1.0e-17 differs from the upstream Julia product 1.0e-11·1.0e-6 = 9.999999999999999e-18 by exactly one ULP (see model reference notes)."
+                },
+                "k_HO2_O3": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 2.0e-21,
+                    "description": "HO₂ + O₃ → OH + 2O₂ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 2.0e-21 m³/s is the SI-converted form of the CGS value 2.0e-15 cm³/molec/s. This is a slow ozone-loss channel — HO₂ reacting directly with ozone — that subtracts from net O₃ production P_O3 and adds to the HO₂ loss rate L_HO2. The clean literal 2.0e-21 differs from the upstream Julia product 2.0e-15·1.0e-6 = 2.0000000000000002e-21 by exactly one ULP (see model reference notes)."
+                },
+                "k_OH_O3": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 7.3e-20,
+                    "description": "OH + O₃ → HO₂ + O₂ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 7.3e-20 m³/s is the SI-converted form of the CGS value 7.3e-14 cm³/molec/s. This ozone-loss channel — OH reacting with ozone — subtracts from net O₃ production P_O3 and adds to the OH loss rate L_OH. The clean literal 7.3e-20 is bit-identical to the upstream Julia product 7.3e-14·1.0e-6."
+                },
+                "CO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e18,
+                    "description": "Carbon monoxide number density [m⁻³] (externally-supplied input). The default 2.5e18 m⁻³ ≈ 100 ppb at STP air number density (2.5e25 m⁻³) and matches the canonical upstream test scenario (test_co_oxidation.jl:65). CO is the oxidized substrate of the cycle — it appears in the OH loss term k_CO_OH·CO·OH of L_OH and (via the CO·OH product) in the HO₂ steady state HO2_ss. Encoded as `type: parameter` because COOxidation has no governing equation for CO — it is purely an input, set via `parameter_overrides` in tests and `parameter_sweep` in examples."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "Hydroxyl radical number density [m⁻³] (externally-supplied input from the coupled HOx chemistry). The default 1.0e12 m⁻³ ≈ 1e6 molec/cm³ is the typical daytime tropospheric OH concentration and matches the canonical upstream test scenario. OH appears in all three terms of the OH loss rate L_OH, in the OH+NO₂ term of the HOx loss rate L_HOx, in the OH+O₃ loss term of P_O3, and in the HO₂ steady state HO2_ss. Encoded as `type: parameter` (externally-supplied input with no governing equation in this component)."
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e14,
+                    "description": "Hydroperoxyl radical number density [m⁻³] (externally-supplied input). The default 1.0e14 m⁻³ ≈ 1e8 molec/cm³ is the typical daytime tropospheric HO₂ concentration and matches the canonical upstream test scenario. HO₂ appears in all three terms of the HO₂ loss rate L_HO2 (linearly in the HO₂+NO and HO₂+O₃ terms, quadratically in the self-reaction term), in the quadratic self-reaction term of L_HOx, and linearly in the gross-production and HO₂+O₃-loss terms of P_O3 and in the chain_length numerator. Encoded as `type: parameter`."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e15,
+                    "description": "Nitric oxide number density [m⁻³] (externally-supplied input). The default 2.5e15 m⁻³ ≈ 0.1 ppb at STP and matches the canonical upstream test scenario. NO drives the O₃-producing HO₂+NO chain-propagation step: it appears in the HO₂+NO term of L_HO2, the gross-production term of P_O3, the chain_length numerator, and (in the denominator) the HO₂ steady state HO2_ss. Encoded as `type: parameter`. Note: HO2_ss = k_CO_OH·CO·OH / (k_HO2_NO·NO) divides by NO, so NO must remain strictly positive — the inline tests keep NO ≥ 1e14 m⁻³."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e16,
+                    "description": "Nitrogen dioxide number density [m⁻³] (externally-supplied input). The default 2.5e16 m⁻³ ≈ 1 ppb at STP and matches the canonical upstream test scenario (NO/NO₂ ratio 0.1, the canonical daytime photostationary partitioning). NO₂ appears in the OH+NO₂ termination term of both the OH loss rate L_OH and the HOx loss rate L_HOx — so raising NO₂ shortens the HOx chain. Encoded as `type: parameter`."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e18,
+                    "description": "Ozone number density [m⁻³] (externally-supplied input). The default 1.0e18 m⁻³ ≈ 40 ppb at STP is a typical tropospheric ozone concentration and matches the canonical upstream test scenario. O₃ appears in the OH+O₃ loss term of L_OH, the HO₂+O₃ loss term of L_HO2, and both ozone-loss terms subtracted in the net O₃ production rate P_O3. Encoded as `type: parameter`."
+                },
+                "P_O3": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Net ozone production rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.9-6.13): P_O3 = k_HO2_NO·HO₂·NO − k_OH_O3·OH·O₃ − k_HO2_O3·HO₂·O₃. The gross production term k_HO2_NO·HO₂·NO counts the O₃ molecules made via HO₂ + NO → OH + NO₂ followed by NO₂ photolysis; the two subtracted terms are the OH+O₃ and HO₂+O₃ ozone-loss channels. At the default scenario P_O3 ≈ 1.752e12 m⁻³·s⁻¹ (net positive — production dominates). P_O3 can go negative when NO is too low to drive much production while O₃ is high (see `upstream_qualitative_low_corner`) or when HO₂ vanishes so only the OH+O₃ loss term survives (see `zero_ho2_net_o3_destruction`)."
+                },
+                "L_HOx": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "HOx radical-termination loss rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.11-6.12): L_HOx = k_OH_NO2·OH·NO₂ + two·k_HO2_HO2·HO₂². The two radical-termination channels — OH + NO₂ + M → HNO₃ (the high-NOx NHL channel) and the HO₂ + HO₂ → H₂O₂ self-reaction (the low-NOx HHL channel, carrying the stoichiometric factor `two`). At the default scenario L_HOx ≈ 3.08e11 m⁻³·s⁻¹. L_HOx is the denominator of the HOx chain length: a smaller L_HOx (low NOx, low HO₂) gives a longer catalytic chain."
+                },
+                "L_OH": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "OH radical loss rate [m⁻³·s⁻¹] (S&P §6.3, Eq. 6.17 denominator): L_OH = k_CO_OH·CO·OH + k_OH_NO2·OH·NO₂ + k_OH_O3·OH·O₃ — the total rate at which OH is consumed by reaction with CO, with NO₂, and with O₃. At the default scenario L_OH ≈ 9.23e11 m⁻³·s⁻¹. Linear in OH; the OH+CO channel dominates at the default CO=2.5e18 (~100 ppb) loading."
+                },
+                "L_HO2": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "HO₂ radical loss rate [m⁻³·s⁻¹] (S&P §6.3): L_HO2 = k_HO2_NO·HO₂·NO + two·k_HO2_HO2·HO₂² + k_HO2_O3·HO₂·O₃ — the total rate at which HO₂ is consumed by reaction with NO, by the HO₂ self-reaction (with the stoichiometric factor `two`), and by reaction with O₃. At the default scenario L_HO2 ≈ 2.283e12 m⁻³·s⁻¹, dominated by the HO₂+NO chain-propagation channel. Quadratic in HO₂ through the self-reaction term, linear in HO₂ through the other two."
+                },
+                "chain_length": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "HOx chain length [dimensionless] (S&P §6.3): chain_length = (k_HO2_NO·HO₂·NO) / L_HOx — the propagation rate of the O₃-producing HO₂ + NO step divided by the HOx termination rate, i.e. the number of OH-HO₂ catalytic cycles a HOx radical completes before it is terminated. The equation references the L_HOx output variable rather than inlining its expression, preserving the upstream symbolic structure. At the default scenario chain_length ≈ 6.575 (a HOx radical drives ~6-7 O₃-producing cycles before termination). chain_length > 1 confirms genuine catalytic cycling; it rises in the low-NOx long-chain regime and falls below 1 in the high-NOx short-chain regime."
+                },
+                "HO2_ss": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "HO₂ steady-state concentration in the high-NOx limit [m⁻³] (S&P §6.3 Eq. 6.18): HO2_ss = k_CO_OH·CO·OH / (k_HO2_NO·NO). At high NOx, HO₂ is removed primarily by reaction with NO, so the steady-state HO₂ balances its production from the CO + OH → ... → HO₂ initiation against the HO₂ + NO loss. At the default scenario HO2_ss ≈ 2.963e13 m⁻³. Proportional to CO and OH, inversely proportional to NO; it is a diagnostic estimate independent of the actual HO₂ input used elsewhere in the component."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "L_OH",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {"op": "*", "args": ["k_CO_OH", "CO", "OH"]},
+                            {"op": "*", "args": ["k_OH_NO2", "OH", "NO2"]},
+                            {"op": "*", "args": ["k_OH_O3", "OH", "O3"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_HO2",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {"op": "*", "args": ["k_HO2_NO", "HO2", "NO"]},
+                            {"op": "*", "args": ["two", "k_HO2_HO2", {"op": "^", "args": ["HO2", 2]}]},
+                            {"op": "*", "args": ["k_HO2_O3", "HO2", "O3"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_HOx",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {"op": "*", "args": ["k_OH_NO2", "OH", "NO2"]},
+                            {"op": "*", "args": ["two", "k_HO2_HO2", {"op": "^", "args": ["HO2", 2]}]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "HO2_ss",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["k_CO_OH", "CO", "OH"]},
+                            {"op": "*", "args": ["k_HO2_NO", "NO"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "P_O3",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    {"op": "*", "args": ["k_HO2_NO", "HO2", "NO"]},
+                                    {"op": "*", "args": ["k_OH_O3", "OH", "O3"]}
+                                ]
+                            },
+                            {"op": "*", "args": ["k_HO2_O3", "HO2", "O3"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "chain_length",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["k_HO2_NO", "HO2", "NO"]},
+                            "L_HOx"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_defaults_all_outputs",
+                    "description": "Reproduces and tightens the four upstream `COOxidation` equation-verification tests at the canonical default scenario (every input and rate constant at its declared default: CO=2.5e18, OH=1e12, HO₂=1e14, NO=2.5e15, NO₂=2.5e16, O₃=1e18 m⁻³). The upstream `Eq 6.18 HO2 Steady-State` test (test_co_oxidation.jl:60-93) asserts HO2_ss≈2.963e13 at rtol=0.05; `Net O3 Production Rate` (95-126) asserts P_O3≈1.752e12 at rtol=0.01; `HOx Loss Rate` (128-158) asserts L_HOx≈3.08e11 at rtol=0.01; `Chain Length` (160-192) asserts chain_length≈6.58 at rtol=0.02 with 1 < chain_length < 100; `HOx Catalytic Cycling` (368-395) asserts chain_length>1 and P_O3>0. This test pins all six outputs at rel=1e-10 — up to 8 orders of magnitude tighter than the upstream bounds. Because nothing is overridden it also implicitly reproduces the upstream `Rate Constants at 298 K` test (197-211): any wrong rate-constant default would shift a pinned output off its value.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 923000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 6.574675324675325}
+                    ]
+                },
+                {
+                    "id": "upstream_high_nox_short_chain_low_nox",
+                    "description": "Low-NOx endpoint of the upstream `COOxidation: High NOx - Short Chain Length` test (test_co_oxidation.jl:272-303). Inputs CO=2.5e18, OH=5.0e11, HO₂=5.0e13, NO=2.5e15, NO₂=2.5e16, O₃=1e18 m⁻³ — the radical pool halved from the default. Pins all six outputs at rel=1e-10. Pairs with `upstream_high_nox_short_chain_high_nox` to reproduce the upstream cross-test assertion L_HOx(high NOx) > L_HOx(low NOx): this endpoint pins L_HOx=1.395e11, the high-NOx endpoint pins L_HOx=3.7645e12, so the inequality holds structurally. chain_length=7.258 > 0 satisfies the upstream positivity assertion.",
+                    "parameter_overrides": {"OH": 5.0e11, "HO2": 5.0e13},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 461500000000.00006},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 1127000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 139500000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 14814814814814.816},
+                        {"variable": "P_O3", "time": 0.0, "expected": 876000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 7.258064516129032}
+                    ]
+                },
+                {
+                    "id": "upstream_high_nox_short_chain_high_nox",
+                    "description": "High-NOx endpoint of the upstream `COOxidation: High NOx - Short Chain Length` test (test_co_oxidation.jl:272-303). Same halved radical pool (OH=5.0e11, HO₂=5.0e13) but NO=2.5e17 and NO₂=7.5e17 m⁻³ — two orders of magnitude more NOx. Pins all six outputs at rel=1e-10. L_HOx=3.7645e12 here far exceeds the low-NOx endpoint's 1.395e11, reproducing the upstream L_HOx-grows-with-NOx assertion as a structural fact; chain_length=26.9 > 0. (At this high-NOx point the chain length is longer than at the low-NOx endpoint because the gross-propagation numerator k_HO2_NO·HO₂·NO scales with NO — up 100× — faster than the NO₂-driven OH+NO₂ termination term; the upstream test asserts only chain_length > 0, not a chain-length ordering.)",
+                    "parameter_overrides": {"OH": 5.0e11, "HO2": 5.0e13, "NO": 2.5e17, "NO2": 7.5e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 4086500000000.0005},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 101364500000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 3764500000000.0005},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 148148148148.1482},
+                        {"variable": "P_O3", "time": 0.0, "expected": 101113500000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 26.896002125116215}
+                    ]
+                },
+                {
+                    "id": "upstream_qualitative_low_corner",
+                    "description": "Low corner of the upstream `COOxidation: Qualitative - Positive Production and Loss` 3×3×3 sweep (test_co_oxidation.jl:337-366): OH=1e11, HO₂=1e13, NO=1e14, NO₂=2e14 m⁻³ (CO=2.5e18, O₃=1e18 at defaults). The upstream test asserts L_OH, L_HO2, L_HOx and HO2_ss are all strictly positive at every sweep point — pinned here at rel=1e-10 (L_OH=6.75e10, L_HO2=2.868e10, L_HOx=7.8e8, HO2_ss=7.407e13, all > 0). Note P_O3 is negative here (−1.92e10): at this very low NO the gross HO₂+NO production cannot keep up with the OH+O₃ and HO₂+O₃ ozone-loss channels, so the net O₃ rate is destruction — a regime the upstream qualitative test does not constrain (it checks only the four loss/steady-state outputs).",
+                    "parameter_overrides": {"OH": 1.0e11, "HO2": 1.0e13, "NO": 1.0e14, "NO2": 2.0e14},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 67500000000.00001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 28679999999.999996},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 780000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 74074074074074.1},
+                        {"variable": "P_O3", "time": 0.0, "expected": -19199999999.999996},
+                        {"variable": "chain_length", "time": 0.0, "expected": 10.384615384615385}
+                    ]
+                },
+                {
+                    "id": "upstream_qualitative_high_corner",
+                    "description": "High corner of the upstream `COOxidation: Qualitative - Positive Production and Loss` 3×3×3 sweep (test_co_oxidation.jl:337-366): OH=1e13, HO₂=1e15, NO=1e18, NO₂=2e18 m⁻³ (CO=2.5e18, O₃=1e18 at defaults). The upstream test asserts L_OH, L_HO2, L_HOx and HO2_ss are all strictly positive — pinned here at rel=1e-10 (L_OH=2.067e14, L_HO2=8.108e15, L_HOx=2.058e14, HO2_ss=7.407e11, all > 0). Together with `upstream_qualitative_low_corner` this brackets the two extreme corners of the upstream sweep grid; P_O3=8.097e15 and chain_length=39.36 are pinned as extension coverage.",
+                    "parameter_overrides": {"OH": 1.0e13, "HO2": 1.0e15, "NO": 1.0e18, "NO2": 2.0e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 206730000000000.0},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 8107800000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 205800000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 740740740740.7408},
+                        {"variable": "P_O3", "time": 0.0, "expected": 8097270000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 39.35860058309038}
+                    ]
+                },
+                {
+                    "id": "zero_o3_isolates_o3_loss_terms",
+                    "description": "Boundary case O₃=0: removes the OH+O₃ term from L_OH, the HO₂+O₃ term from L_HO2, and both ozone-loss terms from P_O3 (so P_O3 collapses to the pure gross-production rate k_HO2_NO·HO₂·NO = 2.025e12, larger than the default 1.752e12). L_HOx, HO2_ss and chain_length have no O₃ dependence and stay at their default values. Verifies that the three O₃-dependent terms are wired only into the equations that should contain them.",
+                    "parameter_overrides": {"O3": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 850000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2083000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 2025000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 6.574675324675325}
+                    ]
+                },
+                {
+                    "id": "zero_co_zeroes_ho2_steady_state",
+                    "description": "Boundary case CO=0: the high-NOx HO₂ steady state HO2_ss = k_CO_OH·CO·OH/(k_HO2_NO·NO) collapses to exactly 0 (no CO means no CO+OH initiation, hence no HO₂ production to balance), and the k_CO_OH·CO·OH term drops out of L_OH (L_OH falls from 9.23e11 to 3.23e11). L_HO2, L_HOx, P_O3 and chain_length have no CO dependence and stay at default. The zero-valued HO2_ss assertion uses abs=1e-12 to gate the stuck-at-non-zero failure mode.",
+                    "parameter_overrides": {"CO": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 323000000000.0},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 6.574675324675325}
+                    ]
+                },
+                {
+                    "id": "zero_ho2_net_o3_destruction",
+                    "description": "Boundary case HO₂=0: L_HO2 collapses to exactly 0 (all three of its terms carry an HO₂ factor) and chain_length to exactly 0 (its numerator k_HO2_NO·HO₂·NO vanishes). L_HOx loses its quadratic HO₂ self-reaction term, dropping to k_OH_NO2·OH·NO₂ = 2.5e11. With no HO₂ the gross O₃-production term vanishes and only the OH+O₃ ozone-loss channel survives, so P_O3 = −k_OH_O3·OH·O₃ = −7.3e10 — net ozone destruction. L_OH and HO2_ss (the latter independent of the HO₂ input) stay at default. The zero-valued L_HO2 and chain_length assertions use abs=1e-12.",
+                    "parameter_overrides": {"HO2": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 923000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": -73000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "oh_doubled_scales_oh_channels",
+                    "description": "OH doubled to 2.0e12 m⁻³ (2× default). L_OH is exactly linear in OH and doubles to 1.846e12. L_HOx gains only through its OH+NO₂ term (the HO₂² term is OH-independent), rising to 5.58e11; chain_length therefore falls (the numerator is OH-independent, the denominator L_HOx grows). HO2_ss is linear in OH and doubles to 5.926e13. P_O3 drops slightly (its OH+O₃ loss term grows with OH). L_HO2 has no OH dependence and is unchanged. Verifies the OH-linearity of L_OH and HO2_ss and the partial-OH dependence of L_HOx and P_O3.",
+                    "parameter_overrides": {"OH": 2.0e12},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 1846000000000.0002},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 558000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 59259259259259.266},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1679000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 3.629032258064516}
+                    ]
+                },
+                {
+                    "id": "no_doubled_scales_no_channels",
+                    "description": "NO doubled to 5.0e15 m⁻³ (2× default). The HO₂+NO term of L_HO2 doubles its contribution; the gross-production term of P_O3 and the numerator of chain_length are linear in NO. HO2_ss = k_CO_OH·CO·OH/(k_HO2_NO·NO) is inversely proportional to NO and halves to 1.481e13. L_OH and L_HOx have no NO dependence and are unchanged. chain_length doubles (numerator ∝ NO, denominator NO-independent). Verifies the NO-linearity of the propagation channels and the inverse-NO dependence of HO2_ss.",
+                    "parameter_overrides": {"NO": 5.0e15},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 923000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 4308000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 14814814814814.816},
+                        {"variable": "P_O3", "time": 0.0, "expected": 3777000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 13.14935064935065}
+                    ]
+                },
+                {
+                    "id": "no2_doubled_scales_termination",
+                    "description": "NO₂ doubled to 5.0e16 m⁻³ (2× default). The OH+NO₂ termination term grows in both L_OH and L_HOx; L_HOx rises to 5.58e11 and chain_length falls accordingly (numerator NO₂-independent, denominator grows). L_HO2, HO2_ss and P_O3 have no NO₂ dependence and are unchanged. Verifies that NO₂ enters only the OH+NO₂ termination channels and that raising NO₂ shortens the HOx chain.",
+                    "parameter_overrides": {"NO2": 5.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 1173000000000.0002},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 558000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 3.629032258064516}
+                    ]
+                },
+                {
+                    "id": "co_doubled_scales_oh_loss_and_ho2ss",
+                    "description": "CO doubled to 5.0e18 m⁻³ (2× default). The k_CO_OH·CO·OH term grows in L_OH (rising to 1.523e12) and HO2_ss is linear in CO and doubles to 5.926e13. L_HO2, L_HOx, P_O3 and chain_length have no CO dependence and are unchanged. Verifies that CO enters only the OH-loss and HO₂-steady-state equations.",
+                    "parameter_overrides": {"CO": 5.0e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 1523000000000.0002},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 59259259259259.266},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 6.574675324675325}
+                    ]
+                },
+                {
+                    "id": "o3_doubled_deepens_o3_loss",
+                    "description": "O₃ doubled to 2.0e18 m⁻³ (2× default). The OH+O₃ term grows in L_OH and the HO₂+O₃ term grows in L_HO2; both ozone-loss terms subtracted in P_O3 grow, dropping the net O₃ production from 1.752e12 to 1.479e12. L_HOx, HO2_ss and chain_length have no O₃ dependence and are unchanged. The complement of `zero_o3_isolates_o3_loss_terms`: together they bracket the O₃-loss-channel contribution.",
+                    "parameter_overrides": {"O3": 2.0e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 996000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2483000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 308000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1479000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 6.574675324675325}
+                    ]
+                },
+                {
+                    "id": "low_nox_long_chain_regime",
+                    "description": "NOx-limited long-chain regime: NO₂ lowered to 2.5e15 m⁻³ (one tenth of default), all else default. The OH+NO₂ termination term shrinks 10×, dropping L_HOx to 8.3e10, so the HOx chain length rises to 24.4 — each HOx radical now drives ~24 O₃-producing cycles before termination. L_OH also falls (its OH+NO₂ term shrinks). L_HO2, HO2_ss and P_O3 are unchanged. The within-component analog of the low-NOx left edge of S&P Figure 6.3 (docs/src/co_oxidation.md), where suppressed NOx termination lengthens the catalytic chain.",
+                    "parameter_overrides": {"NO2": 2.5e15},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 698000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 83000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 24.397590361445783}
+                    ]
+                },
+                {
+                    "id": "high_nox_short_chain_regime",
+                    "description": "VOC-limited short-chain regime: NO₂ raised to 2.5e17 m⁻³ (10× default), all else default. The OH+NO₂ termination term grows 10×, raising L_HOx to 2.558e12, so the HOx chain length falls to 0.792 — below 1, meaning the OH+NO₂→HNO₃ termination outpaces the O₃-producing propagation. L_OH also rises. L_HO2, HO2_ss and P_O3 are unchanged. The within-component analog of the high-NOx right edge of S&P Figure 6.3, where NOx termination dominates and the catalytic chain is cut short.",
+                    "parameter_overrides": {"NO2": 2.5e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 3173000000000.0},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2283000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 2558000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 0.7916340891321345}
+                    ]
+                },
+                {
+                    "id": "ho2_self_reaction_dominated_termination",
+                    "description": "HO₂-self-reaction-dominated regime: HO₂ raised to 1.0e15 and NO₂ lowered to 1.0e15 m⁻³. With abundant HO₂ and little NO₂, the quadratic two·k_HO2_HO2·HO₂² self-reaction term (5.8e12) dominates the OH+NO₂ term (1e10) in L_HOx, which rises to 5.81e12. L_HO2 is likewise dominated by its self-reaction and HO₂+O₃ terms. This is the low-NOx HHL-dominated termination regime of S&P Figure 6.4 panel (c). Exercises the quadratic HO₂² term and the `two` stoichiometric factor under the regime where they carry the bulk of the loss rate.",
+                    "parameter_overrides": {"HO2": 1.0e15, "NO2": 1.0e15},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 683000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 28050000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 5810000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 18177000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 3.485370051635112}
+                    ]
+                },
+                {
+                    "id": "two_constant_override_sentinel",
+                    "description": "Overrides the `two` stoichiometric constant from its default 2.0 to 1.0, all inputs at default. This halves the HO₂ self-reaction contribution to L_HO2 (2.283e12 → 2.254e12, a 2.9e10 drop) and to L_HOx (3.08e11 → 2.79e11, the same 2.9e10 drop), and chain_length rises to 7.258 as its L_HOx denominator shrinks. L_OH, HO2_ss and P_O3 (none of which contain the self-reaction term) are unchanged. Catches the regression where the stoichiometric factor is hard-coded as a literal 2 instead of being read from the overridable `two` parameter.",
+                    "parameter_overrides": {"two": 1.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "L_OH", "time": 0.0, "expected": 923000000000.0001},
+                        {"variable": "L_HO2", "time": 0.0, "expected": 2254000000000.0},
+                        {"variable": "L_HOx", "time": 0.0, "expected": 279000000000.0},
+                        {"variable": "HO2_ss", "time": 0.0, "expected": 29629629629629.633},
+                        {"variable": "P_O3", "time": 0.0, "expected": 1752000000000.0},
+                        {"variable": "chain_length", "time": 0.0, "expected": 7.258064516129032}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "chain_length_vs_no2_regime_sweep",
+                    "description": "HOx chain length and HOx termination rate as functions of NO₂, swept logarithmically from 2.5e15 to 2.5e17 m⁻³ (~0.1 to ~10 ppb at STP) with all other inputs at their defaults (CO=2.5e18, OH=1e12, HO₂=1e14, NO=2.5e15, O₃=1e18). As NO₂ rises the OH+NO₂→HNO₃ termination accelerates: L_HOx grows while the gross propagation rate k_HO2_NO·HO₂·NO is unchanged, so chain_length falls. This is the within-component analog of S&P Figure 6.3 (docs/src/co_oxidation.md) — the transition from the low-NOx long-chain (NOx-limited) regime to the high-NOx short-chain (VOC-limited) regime.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 2.5e15, "stop": 2.5e17, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "chain_length_vs_no2",
+                            "type": "line",
+                            "description": "HOx chain length vs NO₂ number density on log-log axes. Monotonically falling curve: higher NO₂ accelerates OH+NO₂ termination, shortening the catalytic chain from ~24 cycles at NO₂=2.5e15 down through 1 and toward ~0.8 at NO₂=2.5e17.",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³)"},
+                            "y": {"variable": "chain_length", "label": "HOx chain length (dimensionless)"}
+                        },
+                        {
+                            "id": "l_hox_vs_no2",
+                            "type": "line",
+                            "description": "HOx termination rate L_HOx vs NO₂ number density. Rises with NO₂ — the OH+NO₂ termination term is linear in NO₂ — while the HO₂-self-reaction term stays fixed; the growing termination rate is what drives the chain-length decline.",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³)"},
+                            "y": {"variable": "L_HOx", "label": "HOx termination rate L_HOx (m⁻³·s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_production_vs_no_sweep",
+                    "description": "Net ozone production rate and high-NOx HO₂ steady state as functions of NO, swept logarithmically from 2.5e14 to 2.5e16 m⁻³ (~0.01 to ~1 ppb at STP) with all other inputs at their defaults. The gross-production term k_HO2_NO·HO₂·NO is linear in NO so P_O3 rises with NO (and goes net-negative at the low-NO end where the fixed O₃-loss terms dominate). HO2_ss = k_CO_OH·CO·OH/(k_HO2_NO·NO) is inversely proportional to NO, so it falls as NO rises — the more NO available, the faster HO₂ is consumed and the lower its high-NOx steady state.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 2.5e14, "stop": 2.5e16, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "p_o3_vs_no",
+                            "type": "line",
+                            "description": "Net O₃ production rate P_O3 vs NO number density. Rises with NO — the gross HO₂+NO production term is linear in NO — crossing from net destruction (negative) at low NO to net production at higher NO once the propagation term overtakes the fixed OH+O₃ and HO₂+O₃ ozone-loss terms.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³)"},
+                            "y": {"variable": "P_O3", "label": "Net O₃ production rate P_O3 (m⁻³·s⁻¹)"}
+                        },
+                        {
+                            "id": "ho2_ss_vs_no",
+                            "type": "line",
+                            "description": "High-NOx HO₂ steady state HO2_ss vs NO number density on log-log axes. Falls as 1/NO (HO2_ss = k_CO_OH·CO·OH/(k_HO2_NO·NO)) — a straight line of slope -1 — since more NO drains HO₂ faster.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³)"},
+                            "y": {"variable": "HO2_ss", "label": "HO₂ steady-state concentration (m⁻³)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "hox_termination_vs_ho2_sweep",
+                    "description": "HOx and HO₂ loss rates as functions of the HO₂ radical concentration, swept logarithmically from 1e13 to 1e15 m⁻³ with all other inputs at their defaults. The HO₂ self-reaction term two·k_HO2_HO2·HO₂² is quadratic in HO₂ while the OH+NO₂ term of L_HOx is HO₂-independent, so L_HOx crosses over from NHL-dominated (OH+NO₂ termination) at low HO₂ to HHL-dominated (HO₂ self-reaction) at high HO₂. This is the within-component analog of the HHL/NHL crossover in S&P Figure 6.4 panel (c).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HO2",
+                                "range": {"start": 1.0e13, "stop": 1.0e15, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "l_hox_vs_ho2",
+                            "type": "line",
+                            "description": "HOx termination rate L_HOx vs HO₂ number density on log-log axes. Flat at the OH+NO₂ floor (~2.5e11) at low HO₂, then rising as the quadratic HO₂-self-reaction term overtakes it — the NHL→HHL termination crossover.",
+                            "x": {"variable": "HO2", "label": "HO₂ number density (m⁻³)"},
+                            "y": {"variable": "L_HOx", "label": "HOx termination rate L_HOx (m⁻³·s⁻¹)"}
+                        },
+                        {
+                            "id": "l_ho2_vs_ho2",
+                            "type": "line",
+                            "description": "HO₂ loss rate L_HO2 vs HO₂ number density on log-log axes. Rises monotonically, steepening from the linear HO₂+NO and HO₂+O₃ channels toward the quadratic HO₂-self-reaction channel at high HO₂.",
+                            "x": {"variable": "HO2", "label": "HO₂ number density (m⁻³)"},
+                            "y": {"variable": "L_HO2", "label": "HO₂ loss rate L_HO2 (m⁻³·s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "chain_length_heatmap_no_no2",
+                    "description": "HOx chain length as a joint function of NO and NO₂ (2-D log-log sweep), surfacing the NOx-regime structure of the catalytic cycle. NO ∈ [2.5e14, 2.5e16] m⁻³ × NO₂ ∈ [2.5e15, 2.5e17] m⁻³, with CO/OH/HO₂/O₃ at their defaults. chain_length = k_HO2_NO·HO₂·NO / (k_OH_NO2·OH·NO₂ + two·k_HO2_HO2·HO₂²): the numerator rises with NO while the denominator rises with NO₂, so the high-chain-length corner is high NO / low NO₂ (NOx-limited long-chain regime) and the low-chain-length corner is low NO / high NO₂ (VOC-limited short-chain regime).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 2.5e14, "stop": 2.5e16, "count": 25, "scale": "log"}
+                            },
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 2.5e15, "stop": 2.5e17, "count": 20, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "chain_length_heatmap",
+                            "type": "heatmap",
+                            "description": "HOx chain length as a function of (NO, NO₂) on log-log axes. The lower-right region (high NO, low NO₂) is the high-chain-length NOx-limited regime; the upper-left region (low NO, high NO₂) is the low-chain-length VOC-limited regime where NOx termination cuts the catalytic cycle short.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³, log)"},
+                            "y": {"variable": "NO2", "label": "NO₂ number density (m⁻³, log)"},
+                            "value": {"variable": "chain_length", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
