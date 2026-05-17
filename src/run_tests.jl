@@ -172,13 +172,27 @@ function _try_require(uuid::AbstractString, name::AbstractString)
     return get(Base.loaded_modules, pkg, nothing)
 end
 
+# Per-file stiff-solver override (esm-4sxf). .esm basenames listed here are
+# integrated with the stiff Rosenbrock23 solver instead of the default
+# non-stiff Tsit5. Mirrors SOLVER_METHOD_OVERRIDE_FILENAMES in
+# tools/run_esm_inline_tests.py — see that file and the pollu.esm reference
+# notes for the rationale: the POLLU stiff-ODE benchmark (rate constants
+# spanning ~8e-7 to ~7e9 1/s) cannot be integrated by an explicit non-stiff
+# method, and Rosenbrock23 is the solver the upstream GasChem.jl reference
+# values were generated with.
+const STIFF_SOLVER_OVERRIDE_FILENAMES = Set(["pollu.esm"])
+
 # Pick a solver: prefer Tsit5 (non-stiff, fast); fall back to Rosenbrock23.
-function _pick_solver()
+# `.esm` files in `STIFF_SOLVER_OVERRIDE_FILENAMES` force Rosenbrock23.
+function _pick_solver(file::AbstractString="")
+    rb = _try_require("43230ef6-c299-4910-a778-202eb28ce4ce",
+                      "OrdinaryDiffEqRosenbrock")
+    if rb !== nothing && basename(file) in STIFF_SOLVER_OVERRIDE_FILENAMES
+        return (rb.Rosenbrock23(), :rosenbrock23)
+    end
     tsit = _try_require("b1df2697-797e-41e3-8120-5422d3b24e4a",
                         "OrdinaryDiffEqTsit5")
     tsit !== nothing && return (tsit.Tsit5(), :tsit5)
-    rb = _try_require("43230ef6-c299-4910-a778-202eb28ce4ce",
-                      "OrdinaryDiffEqRosenbrock")
     rb !== nothing && return (rb.Rosenbrock23(), :rosenbrock23)
     throw(ArgumentError(
         "run_esm_tests requires an OrdinaryDiffEq solver to be loaded " *
@@ -204,7 +218,7 @@ function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
                                 esm_container=nothing)
     isempty(tests) && return
     MTK = _require_mtk()
-    solver, _solver_kind = _pick_solver()
+    solver, _solver_kind = _pick_solver(file)
 
     # For reaction_system containers, species and parameter defaults declared
     # in the ESM file are NOT propagated through the Catalyst.@species /

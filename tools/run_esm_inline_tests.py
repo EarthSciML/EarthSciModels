@@ -132,6 +132,38 @@ def _cse_for_file(file_path: str) -> bool:
     ``CSE_TRUE_OVERRIDE_FILENAMES`` opt into cse=True (see esm-wqy1)."""
     return Path(file_path).name in CSE_TRUE_OVERRIDE_FILENAMES
 
+
+# Per-file ODE-solver override (esm-4sxf). .esm basenames mapped here are
+# simulated with the named scipy method instead of ``simulate()``'s 'LSODA'
+# default. Entry criteria: the file's inline tests are an ODE integration
+# that scipy's LSODA cannot complete (it hangs, or its Fortran RHS callback
+# overflows: "Call-back cb_f_in_lsoda__user__routines failed"), AND the
+# replacement method has been verified to reproduce the file's reference
+# data within the spec §6.6.4 declared tolerances. ``simulate()``'s public
+# ``method`` argument is the sanctioned ESS API for this — no parallel
+# evaluator, single-pathway rule preserved (AGENTS.md §1).
+SOLVER_METHOD_OVERRIDE_FILENAMES: Dict[str, str] = {
+    # pollu.esm (esm-4sxf): the POLLU stiff-ODE benchmark (Verwer 1994) has
+    # rate constants spanning ~8e-7 to ~7e9 1/s. scipy's LSODA — the
+    # ``simulate()`` default — cannot integrate it: the lsoda Fortran
+    # callback overflows even with an analytic Jacobian and even for a 60 s
+    # window. scipy BDF integrates the full 3600 s benchmark in ~0.2 s and
+    # reproduces the upstream GasChem.jl Pollu() Rosenbrock23 trajectory
+    # (O3@3600 = 5.523140, matching the published POLLU reference solution).
+    # ``simulate()``'s own docstring documents the method default as 'BDF';
+    # only its signature default is 'LSODA' — once that ESS discrepancy is
+    # resolved upstream this override can be dropped.
+    "pollu.esm": "BDF",
+}
+
+
+def _method_for_file(file_path: str) -> str:
+    """Return the scipy solver method for ``simulate()`` on the given .esm.
+    'LSODA' is the ``simulate()`` default; basenames listed in
+    ``SOLVER_METHOD_OVERRIDE_FILENAMES`` opt into a different method
+    (see esm-4sxf)."""
+    return SOLVER_METHOD_OVERRIDE_FILENAMES.get(Path(file_path).name, "LSODA")
+
 # Variables we may need to identify by their bare name in the simulate()
 # output where ``vars`` is dot-namespaced (e.g. ``"SuperFast.O3"``).
 
@@ -260,6 +292,7 @@ def _run_tests_for_container(
 
     sim_vars: List[str] = []
     cse_flag = _cse_for_file(file_path)
+    method = _method_for_file(file_path)
     for t in tests:
         t_start = time.time()
         try:
@@ -271,6 +304,7 @@ def _run_tests_for_container(
                 tspan=(t.time_span.start, t.time_span.end),
                 parameters=params,
                 initial_conditions=ic,
+                method=method,
                 rtol=1e-10,
                 atol=1e-12,
                 cse=cse_flag,
