@@ -1,0 +1,616 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CloudIceUptakeLimitation",
+        "description": "Cloud ice uptake limitation on cold-cloud wet scavenging from Luo & Yu (2023), Eqs. 12-15. In cold clouds, water-soluble aerosols are captured by ice crystals via coagulation and then removed by precipitation; this component computes the cold-cloud rainout efficiency F_I from ice-crystal properties, turbulence, grid geometry, and temperature. The cloud ice uptake rate R_U is approximated by the HNO3 uptake rate of Jacob (2000) (Eq. 14); the temperature-dependent uptake efficiency gamma follows Hudson et al. (2002) (Eq. 15: gamma = 0.003 at T >= 220 K rising linearly to 0.007 at T <= 209 K); the cloudy-air refreshing rate Ki comes from turbulence kinetic energy and grid spacing (Eq. 11); the air-refreshing limited uptake rate R_AU applies the Eq. 2 refreshing-limit structure to R_U (Eq. 13); and F_I = 1 - exp(-R_AU*dt) (Eq. 12). Migrated from AtmosphericDeposition.jl@e4468c79 src/luo2023.jl:260 (`CloudIceUptakeLimitation` @component). Observed-only: the 5 equations are algebraic, so gamma, R_U, Ki, R_AU, F_I are the algebraic outputs while the 12 ice/turbulence/grid inputs and 9 module constants are parameters.",
+        "tags": [
+            "atmospheric_deposition",
+            "luo2023",
+            "wet-scavenging",
+            "cloud-ice",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-3hh9)"
+        ],
+        "references": [
+            {
+                "citation": "Luo, G., & Yu, F. (2023). Impact of air refreshing and cloud ice uptake limitations on vertical profiles and wet depositions of nitrate, ammonium, and sulfate. Geophysical Research Letters, 50, e2023GL104258. https://doi.org/10.1029/2023GL104258. Eqs. 11-15 of this paper define the cloud ice uptake limitation; the cloud ice uptake rate (Eq. 14) is taken from Jacob (2000) and the HNO3-on-ice uptake efficiency (Eq. 15) from Hudson et al. (2002), as cited therein."
+            },
+            {
+                "citation": "Jacob, D. J. (2000). Heterogeneous chemistry and tropospheric ozone. Atmospheric Environment, 34(12-14), 2131-2159. Source of the kinetic ice uptake rate R_U (Luo & Yu 2023, Eq. 14)."
+            }
+        ]
+    },
+    "models": {
+        "CloudIceUptakeLimitation": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/luo2023.jl:260\nUpstream `CloudIceUptakeLimitation` is an MTK `@component` with 12 input `@parameters` (f, TKE, Dx, Dy, Dz, Dt, N_I, S_I, r_ice, D_g, M, T) and 5 output `@variables` (gamma, R_U, Ki, R_AU, F_I) related by 5 algebraic equations (Luo & Yu 2023, Eqs. 12-15, plus the Eq. 11 cloudy-air refreshing rate). The component is observed-only -- every equation is algebraic (no time derivatives) -- so the 5 outputs are declared `type: state` and the test scenarios sample at t=0 over `time_span: [0, 1]`, mirroring the sibling barometric.esm / mean_free_path.esm migrations.\n\nThe 5 equations inline the upstream module-level helper functions verbatim:\n  - gamma ~ gamma_base + gamma_delta * max(0, min(1, (T_upper_luo - T)/(T_upper_luo - T_lower_luo)))   (Eq. 15, hno3_uptake_efficiency; Hudson et al. 2002)\n  - R_U ~ N_I*S_I / (r_ice/D_g + kinetic_prefactor_si*sqrt(M/M_ref) / (gamma*sqrt(T/T_ref)))            (Eq. 14, cloud_ice_uptake_rate; Jacob 2000)\n  - Ki ~ sqrt(2/3*TKE) * (1/(sqrt(f)*Dx) + 1/(sqrt(f)*Dy) + 1/Dz)                                      (Eq. 11, cloudy_air_refreshing_rate, with the Eq. 10 turbulence velocity sqrt(2/3*TKE) inlined)\n  - R_AU ~ f*R_U*Ki / (Ki + (1-f)*R_U)                                                                 (Eq. 13, air_refreshing_limited_ice_uptake_rate)\n  - F_I ~ 1 - exp(-R_AU*Dt)                                                                            (Eq. 12, cold_cloud_rainout_efficiency)\nEquation order matches upstream and is already a valid topological order (gamma before R_U; R_U and Ki before R_AU; R_AU before F_I).\n\nThe 9 upstream module-level `@constants` (T_upper_luo, T_lower_luo, gamma_base, gamma_delta, zero_dimless, one_dimless, kinetic_prefactor_si, M_ref, T_ref) are migrated as fixed-default `type: parameter` entries holding their evaluated numeric values, per the rig convention for translating MTK `@constants` (matches the sibling photostationary.esm / barometric.esm migrations). zero_dimless = 0.0 and one_dimless = 1.0 are the dimensionless 0/1 the upstream `max`/`min` clamp uses; they are kept as parameters rather than inlined as literals so the equation tree mirrors the upstream `hno3_uptake_efficiency` helper exactly. M_ref = 1.0 kg/mol and T_ref = 1.0 K non-dimensionalize M and T before the square roots (the upstream device for avoiding fractional unit powers); since both equal 1.0 they leave the numeric result unchanged but the structure is preserved.\n\nThe 12 input `@parameters` carry no defaults upstream (they are driven by a parent system); standalone defaults are assigned here for a representative cold-cloud GEOS-Chem-grid scenario: f=0.25, TKE=1.5 m^2/s^2, Dx=Dy=200 km, Dz=1 km, Dt=600 s, N_I=1e6 m^-3, S_I=1e-8 m^2, r_ice=1e-4 m, D_g=1e-5 m^2/s, M=0.063 kg/mol (HNO3), T=210 K. These reproduce the upstream luo2023_test.jl Eq. 11 input set (f, TKE, grid spacing yielding Ki = 1.02e-3 s^-1) and Eq. 14 input set (N_I, S_I, r_ice, D_g, M).\n\nNote on the gamma-T coupling: the upstream Eq. 14 unit test exercises the `cloud_ice_uptake_rate` helper with an artificial gamma=0.005 decoupled from T=210 K. In the assembled component gamma is computed from T via Eq. 15, so gamma=0.005 corresponds to T=214.5 K (the Eq. 15 linear midpoint); the gamma_linear_midpoint test pins R_U at that consistent gamma=0.005 operating point.\n\nTolerance rationale (model-level rel=1e-9, abs=1e-12): observed-only algebraic system (no ODE integration). The equations are chains of +, -, *, /, sqrt, exp, max, min on float64; round-off is ~1e-15 per op, so rel=1e-9 leaves comfortable headroom across the value range (gamma ~ 3e-3 to 7e-3, rates ~ 1e-4 s^-1). abs=1e-12 gates the rainout_weak_uptake F_I ~ 1.2e-7 floor case, where a pure relative tolerance would be sub-ULP."
+            },
+            "tolerance": {
+                "rel": 1.0e-9,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "f": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.25,
+                    "description": "Cloud fraction (dimensionless)"
+                },
+                "TKE": {
+                    "type": "parameter",
+                    "units": "m^2/s^2",
+                    "default": 1.5,
+                    "description": "Turbulence kinetic energy"
+                },
+                "Δx": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 200000.0,
+                    "description": "Grid spacing in x direction"
+                },
+                "Δy": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 200000.0,
+                    "description": "Grid spacing in y direction"
+                },
+                "Δz": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Grid spacing in z direction"
+                },
+                "Δt": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 600.0,
+                    "description": "Time step"
+                },
+                "N_I": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e6,
+                    "description": "Ice crystal number concentration"
+                },
+                "S_I": {
+                    "type": "parameter",
+                    "units": "m^2",
+                    "default": 1.0e-8,
+                    "description": "Ice crystal surface area"
+                },
+                "r_ice": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-4,
+                    "description": "Ice crystal radius"
+                },
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-5,
+                    "description": "Gas-phase diffusion coefficient"
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.063,
+                    "description": "Molar mass (default: HNO3, 0.063 kg/mol)"
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 210.0,
+                    "description": "Temperature"
+                },
+                "T_upper_luo": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 220.0,
+                    "description": "Upper temperature threshold for gamma (Eq. 15)"
+                },
+                "T_lower_luo": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 209.0,
+                    "description": "Lower temperature threshold for gamma (Eq. 15)"
+                },
+                "γ_base": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.0e-3,
+                    "description": "Base uptake efficiency (Eq. 15) (dimensionless)"
+                },
+                "γ_delta": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 4.0e-3,
+                    "description": "Temperature-dependent uptake coefficient (Eq. 15) (dimensionless)"
+                },
+                "zero_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Zero (dimensionless) -- lower clamp of the Eq. 15 max/min"
+                },
+                "one_dimless": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "One (dimensionless) -- upper clamp of the Eq. 15 max/min"
+                },
+                "kinetic_prefactor_si": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 0.86933051443,
+                    "description": "Kinetic theory prefactor 4*sqrt(pi/(8R)) for ice uptake in SI (Eq. 14), R = 8.314 J/(mol*K)"
+                },
+                "M_ref": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 1.0,
+                    "description": "Reference molar mass for non-dimensionalization of the square root"
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 1.0,
+                    "description": "Reference temperature for non-dimensionalization of the square root"
+                },
+                "γ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Uptake efficiency of HNO3 on ice (Eq. 15) (dimensionless)"
+                },
+                "R_U": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Cloud ice uptake rate (Eq. 14)"
+                },
+                "Kᵢ": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Cloudy air refreshing rate (Eq. 11)"
+                },
+                "R_AU": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Air refreshing limited cloud ice uptake rate (Eq. 13)"
+                },
+                "F_I": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Cold cloud rainout efficiency (Eq. 12) (dimensionless)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "γ",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "γ_base",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "γ_delta",
+                                    {
+                                        "op": "max",
+                                        "args": [
+                                            "zero_dimless",
+                                            {
+                                                "op": "min",
+                                                "args": [
+                                                    "one_dimless",
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            { "op": "-", "args": ["T_upper_luo", "T"] },
+                                                            { "op": "-", "args": ["T_upper_luo", "T_lower_luo"] }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_U",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["N_I", "S_I"] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "/", "args": ["r_ice", "D_g"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kinetic_prefactor_si",
+                                                    { "op": "sqrt", "args": [ { "op": "/", "args": ["M", "M_ref"] } ] }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "γ",
+                                                    { "op": "sqrt", "args": [ { "op": "/", "args": ["T", "T_ref"] } ] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Kᵢ",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    { "op": "*", "args": [ { "op": "/", "args": [2.0, 3.0] }, "TKE" ] }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            { "op": "/", "args": [1.0, { "op": "*", "args": [ { "op": "sqrt", "args": ["f"] }, "Δx" ] } ] },
+                                            { "op": "/", "args": [1.0, { "op": "*", "args": [ { "op": "sqrt", "args": ["f"] }, "Δy" ] } ] }
+                                        ]
+                                    },
+                                    { "op": "/", "args": [1.0, "Δz"] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_AU",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "*", "args": ["f", "R_U"] },
+                                    "Kᵢ"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "Kᵢ",
+                                    { "op": "*", "args": [ { "op": "-", "args": [1.0, "f"] }, "R_U" ] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_I",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            1.0,
+                            {
+                                "op": "exp",
+                                "args": [
+                                    { "op": "-", "args": [ { "op": "*", "args": ["R_AU", "Δt"] } ] }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_cold_cloud",
+                    "description": "Default representative cold-cloud GEOS-Chem-grid scenario (T = 210 K, f = 0.25, TKE = 1.5 m^2/s^2, 200 km x 1 km grid, Dt = 600 s, HNO3 molar mass). Pins all five outputs and re-checks gamma and F_I at t = 1 to confirm the algebraic system is time-invariant. The cloudy-air refreshing rate Ki = 1.02e-3 s^-1 reproduces the upstream luo2023_test.jl Eq. 11 case (f = 0.25, TKE = 1.5, Dx = Dy = 2e5, Dz = 1e3).",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.006636363636363636 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0008150689881718272 },
+                        { "variable": "Kᵢ", "time": 0.0, "expected": 0.00102 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 0.00012740904195932977 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.07359652878399103 },
+                        { "variable": "γ", "time": 1.0, "expected": 0.006636363636363636 },
+                        { "variable": "F_I", "time": 1.0, "expected": 0.07359652878399103 }
+                    ]
+                },
+                {
+                    "id": "gamma_warm_plateau",
+                    "description": "Eq. 15 warm plateau: at T = 250 K (well above the 220 K upper threshold) the max/min clamp saturates at 0 and gamma = gamma_base = 0.003 -- the minimum HNO3-on-ice uptake efficiency (upstream luo2023_test.jl `Eq. 15` T = 250 K case). R_U, R_AU, F_I follow from the warm-temperature gamma.",
+                    "parameter_overrides": { "T": 250.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.003 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0006849284717434525 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 0.00011387962151763193 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.06604570151675793 }
+                    ]
+                },
+                {
+                    "id": "gamma_warm_threshold",
+                    "description": "Eq. 15 upper-threshold boundary: at exactly T = 220 K the ramp argument (220 - T)/(220 - 209) = 0, so gamma = gamma_base = 0.003. Verifies the warm endpoint of the linear ramp (upstream luo2023_test.jl `Eq. 15` T >= 220 K branch).",
+                    "parameter_overrides": { "T": 220.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.003 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.000670974977179463 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.06517474310875937 }
+                    ]
+                },
+                {
+                    "id": "gamma_cold_plateau",
+                    "description": "Eq. 15 cold plateau: at T = 200 K (well below the 209 K lower threshold) the ramp argument exceeds 1, the min clamp saturates at 1, and gamma = gamma_base + gamma_delta = 0.007 -- the maximum HNO3-on-ice uptake efficiency (upstream luo2023_test.jl `Eq. 15` T = 200 K case).",
+                    "parameter_overrides": { "T": 200.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.007 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0008193930573499208 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.07383095076384805 }
+                    ]
+                },
+                {
+                    "id": "gamma_cold_threshold",
+                    "description": "Eq. 15 lower-threshold boundary: at exactly T = 209 K the ramp argument (220 - T)/(220 - 209) = 1, so gamma = gamma_base + gamma_delta = 0.007. Verifies the cold endpoint of the linear ramp (upstream luo2023_test.jl `Eq. 15` T <= 209 K branch).",
+                    "parameter_overrides": { "T": 209.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.007 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0008226271801153912 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.07400563743093802 }
+                    ]
+                },
+                {
+                    "id": "gamma_linear_midpoint",
+                    "description": "Eq. 15 linear-ramp midpoint: at T = 214.5 K the ramp argument (220 - T)/(220 - 209) = 0.5, so gamma = gamma_base + 0.5*gamma_delta = 0.005 (upstream luo2023_test.jl `Eq. 15` T = 214.5 K case). This is the consistent operating point of the upstream Eq. 14 unit test, which used an artificial gamma = 0.005; R_U is pinned here at that gamma with the matching T = 214.5 K in the sqrt(T) kinetic term.",
+                    "parameter_overrides": { "T": 214.5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.005 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0007704342363922707 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.07111749961196356 }
+                    ]
+                },
+                {
+                    "id": "gamma_lower_quarter",
+                    "description": "Eq. 15 linear ramp at the lower quarter point: T = 217.25 K gives (220 - T)/(220 - 209) = 0.25, so gamma = gamma_base + 0.25*gamma_delta = 0.004. Exercises the interior of the linear ramp between the warm threshold and the midpoint.",
+                    "parameter_overrides": { "T": 217.25 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.004 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0007298754433942737 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.06876691836830806 }
+                    ]
+                },
+                {
+                    "id": "gamma_upper_quarter",
+                    "description": "Eq. 15 linear ramp at the upper quarter point: T = 211.75 K gives (220 - T)/(220 - 209) = 0.75, so gamma = gamma_base + 0.75*gamma_delta = 0.006. Exercises the interior of the linear ramp between the midpoint and the cold threshold.",
+                    "parameter_overrides": { "T": 211.75 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "γ", "time": 0.0, "expected": 0.006 },
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0008000544348260321 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.0727747849032423 }
+                    ]
+                },
+                {
+                    "id": "high_turbulence",
+                    "description": "Strong turbulent mixing: TKE = 100 m^2/s^2 raises the cloudy-air refreshing rate Ki by a factor sqrt(100/1.5) ~ 8.16 relative to the default. The faster air refreshing relaxes the Eq. 13 limit, so R_AU and the rainout efficiency F_I both rise. gamma and R_U are unchanged (they do not depend on TKE).",
+                    "parameter_overrides": { "TKE": 100.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Kᵢ", "time": 0.0, "expected": 0.008328265125462805 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 0.00018983331995663392 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.10765280669856891 }
+                    ]
+                },
+                {
+                    "id": "weak_turbulence",
+                    "description": "Weak turbulent mixing: TKE = 0.01 m^2/s^2 lowers the cloudy-air refreshing rate Ki to sqrt(0.01/1.5) ~ 0.082 of the default. Slow air refreshing tightens the Eq. 13 limit (R_AU is throttled toward f*Ki/(1-f)), strongly suppressing the rainout efficiency F_I -- the central effect the Luo & Yu (2023) parameterization captures.",
+                    "parameter_overrides": { "TKE": 0.01 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Kᵢ", "time": 0.0, "expected": 8.328265125462806e-05 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 2.443227454961941e-05 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.014552439366250502 }
+                    ]
+                },
+                {
+                    "id": "rainout_saturation",
+                    "description": "Strong-uptake saturation limit: abundant ice surface (N_I = 1e8 m^-3, S_I = 1e-6 m^2) drives a large R_U, strong turbulence (TKE = 100 m^2/s^2) lifts Ki, and a long time step (Dt = 3600 s) lets the Eq. 12 exponential saturate, so F_I approaches 1 (complete cold-cloud rainout). Mirrors the upstream luo2023_test.jl `F_I limits` large-R_AU*Dt branch.",
+                    "parameter_overrides": { "N_I": 1.0e8, "S_I": 1.0e-6, "TKE": 100.0, "Δt": 3600.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "R_U", "time": 0.0, "expected": 8.150689881718272 },
+                        { "variable": "Kᵢ", "time": 0.0, "expected": 0.008328265125462805 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 0.002772311427858336 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.9999536978027082 }
+                    ]
+                },
+                {
+                    "id": "rainout_weak_uptake",
+                    "description": "Weak-uptake floor limit: sparse ice surface (N_I = 1e3 m^-3, S_I = 1e-10 m^2) gives a vanishingly small R_U and a short time step (Dt = 60 s) keeps R_AU*Dt tiny, so F_I -> 0 (negligible cold-cloud rainout). Mirrors the upstream luo2023_test.jl `F_I limits` small-R_AU*Dt branch; the abs=1e-12 tolerance gates this ~1.2e-7 floor value.",
+                    "parameter_overrides": { "N_I": 1.0e3, "S_I": 1.0e-10, "Δt": 60.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "R_U", "time": 0.0, "expected": 8.150689881718273e-09 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 2.037660258417178e-09 },
+                        { "variable": "F_I", "time": 0.0, "expected": 1.2225960799305824e-07 }
+                    ]
+                },
+                {
+                    "id": "heavy_species",
+                    "description": "Molar-mass dependence of the Eq. 14 kinetic term: a heavier species (M = 0.098 kg/mol, e.g. sulfuric acid) increases the kinetic resistance kinetic_prefactor_si*sqrt(M/M_ref)/(gamma*sqrt(T/T_ref)), lowering the uptake rate R_U relative to the HNO3 default (M = 0.063). Confirms the sqrt(M/M_ref) factor is wired in.",
+                    "parameter_overrides": { "M": 0.098 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0007794344280142675 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 0.0001238681130184578 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.07162623921120326 }
+                    ]
+                },
+                {
+                    "id": "large_ice_crystals",
+                    "description": "Diffusion-limited regime of Eq. 14: larger ice crystals (r_ice = 1e-3 m) with D_g = 2e-5 m^2/s make the gas-phase diffusion resistance r_ice/D_g = 50 s/m dominate over the kinetic term, sharply reducing the uptake rate R_U and hence F_I. Confirms the r_ice/D_g diffusion term is wired in.",
+                    "parameter_overrides": { "r_ice": 1.0e-3, "D_g": 2.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "R_U", "time": 0.0, "expected": 0.0001913183552482547 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 4.193094252017475e-05 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.02484472622685796 }
+                    ]
+                },
+                {
+                    "id": "coarse_grid",
+                    "description": "Grid-resolution dependence of Eq. 11: doubling the horizontal grid spacing (Dx = Dy = 400 km) and vertical spacing (Dz = 2000 m) halves the cloudy-air refreshing rate Ki to 5.1e-4 s^-1, tightening the Eq. 13 air-refreshing limit and reducing F_I. Coarser GCM grids experience stronger refreshing limitation.",
+                    "parameter_overrides": { "Δx": 400000.0, "Δy": 400000.0, "Δz": 2000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Kᵢ", "time": 0.0, "expected": 0.00051 },
+                        { "variable": "R_AU", "time": 0.0, "expected": 9.267915332699406e-05 },
+                        { "variable": "F_I", "time": 0.0, "expected": 0.05408965958524958 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "gamma_vs_temperature",
+                    "description": "HNO3-on-ice uptake efficiency gamma as a function of temperature (Eq. 15, Hudson et al. 2002). Reproduces the `HNO3 Uptake Efficiency on Ice` figure of the AtmosphericDeposition.jl luo2023 documentation: gamma is flat at 0.003 for T >= 220 K, ramps linearly down to 0.007 across 220-209 K, and is flat at 0.007 for T <= 209 K.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 190.0, "stop": 240.0, "count": 51, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "gamma_vs_T",
+                            "type": "line",
+                            "description": "Uptake efficiency gamma as a function of temperature T (Eq. 15).",
+                            "x": { "variable": "T", "label": "Temperature (K)" },
+                            "y": { "variable": "γ", "label": "HNO3 uptake efficiency γ (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "rainout_efficiency_vs_timestep",
+                    "description": "Cold-cloud rainout efficiency F_I as a function of the model time step Dt (Eq. 12). Reproduces the `Cold Cloud Rainout Efficiency` figure of the luo2023 documentation: F_I = 1 - exp(-R_AU*Dt) rises monotonically from near zero toward saturation as the time step lengthens, at the default cold-cloud R_AU.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Δt",
+                                "range": { "start": 60.0, "stop": 3600.0, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_I_vs_dt",
+                            "type": "line",
+                            "description": "Cold cloud rainout efficiency F_I as a function of time step Dt (Eq. 12).",
+                            "x": { "variable": "Δt", "label": "Time step Δt (s)" },
+                            "y": { "variable": "F_I", "label": "Cold cloud rainout efficiency F_I (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "rainout_efficiency_vs_turbulence",
+                    "description": "Cold-cloud rainout efficiency F_I as a function of turbulence kinetic energy TKE (log-spaced sweep over four decades). Illustrates the air-refreshing limitation central to Luo & Yu (2023): weak turbulence throttles the cloudy-air refreshing rate Ki and suppresses F_I, while strong turbulence relaxes the Eq. 13 limit and raises F_I.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "TKE",
+                                "range": { "start": 0.01, "stop": 100.0, "count": 41, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_I_vs_TKE",
+                            "type": "line",
+                            "description": "Cold cloud rainout efficiency F_I as a function of turbulence kinetic energy TKE.",
+                            "x": { "variable": "TKE", "label": "Turbulence kinetic energy (m²/s²)" },
+                            "y": { "variable": "F_I", "label": "Cold cloud rainout efficiency F_I (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "rainout_efficiency_heatmap",
+                    "description": "Two-dimensional sweep of the cold-cloud rainout efficiency F_I over temperature T (200-240 K, spanning the cold gamma plateau, the linear ramp, and the warm plateau) and model time step Dt (60-3600 s). Surfaces the joint dependence of F_I on the temperature-controlled uptake efficiency and on the time step in the Eq. 12 exponential.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 200.0, "stop": 240.0, "count": 15, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "Δt",
+                                "range": { "start": 60.0, "stop": 3600.0, "count": 15, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "F_I_heatmap",
+                            "type": "heatmap",
+                            "description": "Cold cloud rainout efficiency F_I as a function of temperature T and time step Dt.",
+                            "x": { "variable": "T", "label": "Temperature (K)" },
+                            "y": { "variable": "Δt", "label": "Time step Δt (s)" },
+                            "value": { "variable": "F_I", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
