@@ -1,0 +1,274 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MassTransferCoeff",
+        "description": "Gas-phase mass transfer coefficient K_c to a falling raindrop, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 20 (Wet Deposition), Eq. 20.12. K_c is computed from a Sherwood-number correlation K_c = (D_g/D_p)·[2 + 0.6·Re^(1/2)·Sc^(1/3)], where the drop Reynolds number Re = ρ_air·U_t·D_p/μ_air measures the convective flow past the falling drop and the gas Schmidt number Sc = μ_air/(ρ_air·D_g) is the ratio of the momentum to the mass boundary-layer thickness. The leading 2 is the still-air diffusive limit (Sh→2 for an isolated sphere); the 0.6·Re^(1/2)·Sc^(1/3) term is the ventilation enhancement from the drop's fall. K_c sets the gas-uptake rate at the raindrop surface and feeds the below-cloud gas scavenging coefficient computed by the sibling GasScavengingCoeff / BelowCloudGasScavenging components. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_2006_ch20.jl:60 (`MassTransferCoeff` @component). Algebraic (observed-only) system: K_c is the single algebraic output (the upstream component's lone `@variable`); D_g, D_p, U_t are input parameters and ρ_air_sp, μ_air_sp are the migrated upstream module `@constants`.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp06-ch20",
+            "wet-deposition",
+            "mass-transfer",
+            "raindrop"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-ccq8)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 20: Wet Deposition, pp. 932-979. John Wiley & Sons, Inc. Eq. 20.12 (mass transfer coefficient via the Sherwood-number correlation) and Table 20.1, p. 941 (estimation of the scavenging coefficient — the K_c reference values)."
+            }
+        ]
+    },
+    "models": {
+        "MassTransferCoeff": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 20, Eq. 20.12 and Table 20.1. John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_2006_ch20.jl:60\n\nUpstream `MassTransferCoeff` is an MTK `@component` with 3 input `@parameters` (D_g, D_p, U_t) and a single `@variable` K_c related by one equation, K_c ~ mass_transfer_coeff(D_g, D_p, U_t) (Eq. 20.12). There is no time derivative, so this is an algebraic (observed-only) system: K_c is the lone algebraic output and is serialized as `type: state` fixed by one explicit equation, following the triangular-algebraic convention of the sibling observed-only migrations (atmospheric_dynamics/sp_ch1/barometric.esm, sp_ch1/ideal_gas.esm, atmospheric_deposition/wesley1989/surface_resistance.esm). `system_kind` is left unset (the schema default `ode`); with no `D()` equation the runner evaluates K_c algebraically. This matches the upstream `MassTransferCoeff Component` testitem, which asserts the System has exactly 1 equation and 1 unknown.\n\nThe single upstream helper `mass_transfer_coeff(D_g, D_p, U_t)` is inlined into the K_c equation AST — the same helper-inlining pattern as the same-file BelowCloudGasScavenging migration. Its body computes the drop Reynolds number Re = ρ_air_sp·U_t·D_p/μ_air_sp, the gas Schmidt number Sc = μ_air_sp/(ρ_air_sp·D_g), the Sherwood number Sh = 2 + 0.6·sqrt(Re)·cbrt(Sc), and returns K_c = (D_g/D_p)·Sh. Julia's `cbrt(Sc)` is encoded as Sc^(1/3) with the exponent as the AST node {op:\"/\",args:[1,3]} = 0.333...; Sc = μ_air/(ρ_air·D_g) is strictly positive for all physical inputs, so the real cube root equals Sc^(1/3) to within float round-off (the ESS op set has no `cbrt`). `sqrt` is a native ESS op. Multi-argument `*` nodes evaluate left-to-right, matching Julia's left-associative `*`/`/`: e.g. ρ_air_sp·U_t·D_p/μ_air_sp parses as ((ρ·U_t)·D_p)/μ.\n\nTwo of the module-level `@constants` of seinfeld_pandis_2006_ch20.jl — ρ_air_sp (1.225 kg/m^3, air density at standard conditions) and μ_air_sp (1.72e-5 kg/m/s, dynamic viscosity of air, Table A.7) — are referenced by mass_transfer_coeff and are migrated as parameters carrying those constant values as defaults (the ESS schema has no dedicated constant variable type; this mirrors barometric.esm's migration of the upstream @constant P_0). The other four file constants (μ_w_sp, ρ_w_sp, g_sp, kB_sp) are not used by this component and are not migrated. All terms are dimensionally consistent: Re = (kg/m^3·m/s·m)/(kg/m/s) and Sc = (kg/m/s)/(kg/m^3·m^2/s) are dimensionless, Sh is dimensionless, and K_c = (D_g/D_p)·Sh has units (m^2/s)/m = m/s — there is no upstream `checks=false` to mirror.\n\nThe 3 input parameters carry the upstream component defaults (D_g=1.5e-5 m^2/s, D_p=1.0e-3 m, U_t=4.0 m/s). K_c has no default — it is fixed by its equation.\n\nThe inline `tests` block reproduces both numeric cases of the upstream seinfeld_pandis_2006_ch20_test.jl 'Mass Transfer Coefficient (Eq. 20.12)' testitem — table_20_1_small_drop (K_c ≈ 0.3587, upstream asserts ≈ 0.3586 rtol 0.01) and table_20_1_large_raindrop (K_c ≈ 0.0687, upstream asserts ≈ 0.0687 rtol 0.01) — and adds the other two rows of Seinfeld & Pandis Table 20.1 (p. 941), the component-default case, the U_t=0 still-air diffusive limit (closed form 2·D_g/D_p = 0.03, Sh→2), and single-parameter sensitivity sweeps that isolate the U_t, D_p, D_g and ρ_air_sp wiring. (The textbook Table 20.1 K_c column is rounded to ~1 significant figure and the migrated values differ from it by up to ~16%; the upstream Julia test pins the precise formula output, not the table value, and so do these tests.)\n\nTolerance rationale (model-level rel=1e-6): an explicit algebraic system with no ODE integration. The pinned `expected` values are computed from the same AST (native `sqrt`, `^` with exponent 1/3, left-associative products) the runner evaluates, so they agree to ~1e-15 relative; rel=1e-6 covers float64 round-off across the sqrt / cube-root / reciprocal chain with wide margin, and is loose enough to absorb the sub-ulp cbrt-vs-^(1/3) difference against a binding that evaluates the upstream Julia `cbrt` directly."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.5e-5,
+                    "description": "Gas-phase molecular diffusivity of the scavenged species"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-3,
+                    "description": "Raindrop diameter"
+                },
+                "U_t": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 4.0,
+                    "description": "Terminal velocity of the falling raindrop"
+                },
+                "ρ_air_sp": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Air density at standard conditions (Seinfeld & Pandis 2006; upstream module @constant ρ_air_sp)"
+                },
+                "μ_air_sp": {
+                    "type": "parameter",
+                    "units": "kg/m/s",
+                    "default": 1.72e-5,
+                    "description": "Dynamic viscosity of air (Seinfeld & Pandis 2006 Table A.7; upstream module @constant μ_air_sp)"
+                },
+                "K_c": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Gas-phase mass transfer coefficient to the raindrop (Eq. 20.12)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 20.12 - gas-phase mass transfer coefficient to a spherical raindrop via the Sherwood-number correlation. Inlines the single upstream helper mass_transfer_coeff(D_g, D_p, U_t): the drop Reynolds number Re = ρ_air_sp·U_t·D_p/μ_air_sp and the gas Schmidt number Sc = μ_air_sp/(ρ_air_sp·D_g) give the Sherwood number Sh = 2 + 0.6·Re^(1/2)·Sc^(1/3), and K_c = (D_g/D_p)·Sh. The leading 2 is the still-air diffusive limit (Sh→2 as U_t→0); the 0.6·Re^(1/2)·Sc^(1/3) term is the ventilation enhancement from the fall. cbrt(Sc) is encoded as Sc^(1/3) (Sc>0 always, so this equals the upstream real cube root to float round-off). Multi-argument products evaluate left-to-right, matching Julia's left-associative *.",
+                    "lhs": "K_c",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            { "op": "/", "args": ["D_g", "D_p"] },
+                            {
+                                "op": "+",
+                                "args": [
+                                    2,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            0.6,
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            { "op": "*", "args": ["ρ_air_sp", "U_t", "D_p"] },
+                                                            "μ_air_sp"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "μ_air_sp",
+                                                            { "op": "*", "args": ["ρ_air_sp", "D_g"] }
+                                                        ]
+                                                    },
+                                                    { "op": "/", "args": [1, 3] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Component defaults — D_g = 1.5e-5 m^2/s, D_p = 1 mm, U_t = 4 m/s, sea-level air. The drop Reynolds number Re ≈ 284.9 and Schmidt number Sc ≈ 0.936 give a Sherwood number Sh ≈ 11.91, so K_c = (D_g/D_p)·Sh ≈ 0.179 m/s. Anchors the migrated component at its declared default parameter set.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.17859699456057868 }
+                    ]
+                },
+                {
+                    "id": "table_20_1_fine_drizzle",
+                    "description": "Smallest drop of Seinfeld & Pandis Table 20.1 (p. 941): D_p = 10 µm (0.001 cm), U_t = 0.003 m/s (0.3 cm/s), at the table's gas diffusivity D_g = 1.26e-5 m^2/s. A drizzle/cloud droplet falling in the creeping-flow regime — Re ≈ 2.1e-3, so Sh ≈ 2.03 is barely above the diffusive floor — yet the large D_g/D_p = 1.26 prefactor makes K_c ≈ 2.556 m/s. The textbook table lists K_c ≈ 2.2 m/s (220 cm/s).",
+                    "parameter_overrides": { "D_g": 1.26e-5, "D_p": 1.0e-5, "U_t": 0.003 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 2.556229319896447 }
+                    ]
+                },
+                {
+                    "id": "table_20_1_small_drop",
+                    "description": "Second row of Seinfeld & Pandis Table 20.1: D_p = 100 µm (0.01 cm), U_t = 0.26 m/s (26 cm/s), D_g = 1.26e-5 m^2/s. Re ≈ 1.85, Sh ≈ 2.85, giving K_c ≈ 0.3587 m/s; the textbook table lists ≈ 0.32 m/s (32 cm/s). This is also the first numeric case of the upstream seinfeld_pandis_2006_ch20_test.jl 'Mass Transfer Coefficient (Eq. 20.12)' testitem, which asserts K_c ≈ 0.3586 at rtol 0.01.",
+                    "parameter_overrides": { "D_g": 1.26e-5, "D_p": 1.0e-4, "U_t": 0.26 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.3586562298917063 }
+                    ]
+                },
+                {
+                    "id": "table_20_1_typical_raindrop",
+                    "description": "Third row of Seinfeld & Pandis Table 20.1: D_p = 1 mm (0.1 cm), U_t = 3.0 m/s (300 cm/s), D_g = 1.26e-5 m^2/s — the canonical mid-range raindrop. Re ≈ 213.7, Sh ≈ 11.09, giving K_c ≈ 0.1398 m/s; the textbook table lists ≈ 0.13 m/s (13 cm/s).",
+                    "parameter_overrides": { "D_g": 1.26e-5, "D_p": 1.0e-3, "U_t": 3.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.13976716895163013 }
+                    ]
+                },
+                {
+                    "id": "table_20_1_large_raindrop",
+                    "description": "Largest drop of Seinfeld & Pandis Table 20.1: D_p = 1 cm, U_t = 10.0 m/s (1000 cm/s), D_g = 1.26e-5 m^2/s. Re ≈ 7122 and Sh ≈ 54.5, but the small D_g/D_p = 1.26e-3 prefactor pulls K_c down to ≈ 0.0687 m/s; the textbook table lists ≈ 0.06 m/s (6 cm/s). This is also the second numeric case of the upstream 'Mass Transfer Coefficient (Eq. 20.12)' testitem, which asserts K_c ≈ 0.0687 at rtol 0.01.",
+                    "parameter_overrides": { "D_g": 1.26e-5, "D_p": 1.0e-2, "U_t": 10.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.06866538583451696 }
+                    ]
+                },
+                {
+                    "id": "diffusive_limit",
+                    "description": "Still-air diffusive limit: U_t = 0 makes Re = 0, so the convective term 0.6·Re^(1/2)·Sc^(1/3) vanishes and the Sherwood number collapses to exactly 2 — the value for steady diffusion to an isolated sphere. K_c reduces to the closed form 2·D_g/D_p = 2·1.5e-5/1e-3 = 0.03 m/s, independent of air density and viscosity. Exercises the Re^(1/2) term at its lower bound.",
+                    "parameter_overrides": { "U_t": 0.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.03 }
+                    ]
+                },
+                {
+                    "id": "faster_fall",
+                    "description": "Doubling the terminal velocity to U_t = 8 m/s (from the 4 m/s default, D_g and D_p unchanged) raises Re fourfold to ≈ 569.8 and the Sherwood number to ≈ 16.0 through the Re^(1/2) ventilation term, lifting K_c to ≈ 0.240 m/s from the default 0.179 m/s. Isolates the U_t dependence of Eq. 20.12.",
+                    "parameter_overrides": { "U_t": 8.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.2401478850354514 }
+                    ]
+                },
+                {
+                    "id": "larger_raindrop",
+                    "description": "A 5-mm raindrop (D_p = 5e-3 m, 5× the 1-mm default; D_g and U_t unchanged). Re rises ∝ D_p to ≈ 1424 and Sh to ≈ 24.2, but the D_g/D_p prefactor falls ∝ 1/D_p, and the net K_c drops to ≈ 0.0725 m/s from the default 0.179 m/s — larger drops are weaker per-drop gas collectors. Isolates the D_p dependence.",
+                    "parameter_overrides": { "D_p": 5.0e-3 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.0724545962179241 }
+                    ]
+                },
+                {
+                    "id": "higher_diffusivity",
+                    "description": "Doubling the gas-phase diffusivity to D_g = 3.0e-5 m^2/s (a more mobile gas; D_p and U_t unchanged). The D_g/D_p prefactor doubles while the Schmidt number halves to ≈ 0.468 (Sc ∝ 1/D_g), which lowers Sh to ≈ 9.86; the net effect raises K_c to ≈ 0.296 m/s from the default 0.179 m/s. Isolates the D_g dependence, which enters Eq. 20.12 both through the prefactor and through Sc.",
+                    "parameter_overrides": { "D_g": 3.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.2958830254847754 }
+                    ]
+                },
+                {
+                    "id": "thin_air_aloft",
+                    "description": "Reduced air density ρ_air_sp = 0.736 kg/m^3 — roughly the mid-latitude standard-atmosphere value at 5 km altitude, versus the 1.225 kg/m^3 sea-level default — with all other inputs at default. Lower ρ_air drops Re (∝ ρ) to ≈ 171 and raises Sc (∝ 1/ρ) to ≈ 1.558; the two effects partly offset and K_c eases to ≈ 0.1665 m/s from the default 0.179 m/s. Confirms the migrated upstream @constant ρ_air_sp is wired into both the Reynolds and Schmidt numbers.",
+                    "parameter_overrides": { "ρ_air_sp": 0.736 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "K_c", "time": 0.0, "expected": 0.16650031281959754 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "kc_vs_raindrop_diameter",
+                    "description": "Mass transfer coefficient K_c as a function of raindrop diameter D_p, swept log-spaced from 10 µm to 1 cm — the drop-size range of Seinfeld & Pandis Table 20.1 (p. 941) — at the table's gas diffusivity D_g = 1.26e-5 m^2/s and a fixed terminal velocity U_t = 3 m/s. K_c falls steeply with drop size because the (D_g/D_p) prefactor dominates, so small drops are far more efficient per-drop gas collectors — the central message of Table 20.1. (In Table 20.1 the terminal velocity covaries with D_p; here U_t is held fixed to isolate the diameter dependence of Eq. 20.12.)",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_g": 1.26e-5,
+                        "U_t": 3.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-5, "stop": 1.0e-2, "count": 25, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "kc_vs_dp",
+                            "type": "line",
+                            "description": "Gas-phase mass transfer coefficient K_c as a function of raindrop diameter D_p (Eq. 20.12), at fixed D_g and U_t.",
+                            "x": { "variable": "D_p", "label": "Raindrop diameter (m)" },
+                            "y": { "variable": "K_c", "label": "Mass transfer coefficient (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "kc_vs_terminal_velocity",
+                    "description": "Mass transfer coefficient K_c as a function of raindrop terminal velocity U_t, swept linearly from 0 to 12 m/s at the component-default diffusivity and drop size (D_g = 1.5e-5 m^2/s, D_p = 1 mm). At U_t = 0 the drop is in still air and K_c sits at its diffusive floor 2·D_g/D_p = 0.03 m/s (Sh = 2); as U_t rises, the 0.6·Re^(1/2)·Sc^(1/3) ventilation term lifts K_c following the Re^(1/2) ∝ U_t^(1/2) law of Eq. 20.12.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "U_t",
+                                "range": { "start": 0.0, "stop": 12.0, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "kc_vs_ut",
+                            "type": "line",
+                            "description": "Gas-phase mass transfer coefficient K_c as a function of raindrop terminal velocity U_t (Eq. 20.12), rising from the still-air diffusive floor through the Re^(1/2) ventilation enhancement.",
+                            "x": { "variable": "U_t", "label": "Terminal velocity (m/s)" },
+                            "y": { "variable": "K_c", "label": "Mass transfer coefficient (m/s)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
