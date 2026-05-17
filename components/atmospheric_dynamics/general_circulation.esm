@@ -1,0 +1,424 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "GeneralCirculation",
+        "description": "General circulation of the atmosphere — Coriolis parameter, tangential speed, geostrophic wind, and thermal-wind relations from Seinfeld & Pandis (2006) Chapter 21. Migrated from AtmosphericDynamics.jl@816cc391 src/general_circulation.jl:60 (`GeneralCirculation` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "general-circulation",
+            "geostrophic-wind"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-izvl)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.). John Wiley & Sons, Inc. Chapter 21 (General Circulation of the Atmosphere), pp. 980-1002. Equations 21.1 (tangential speed), 21.2 (Coriolis parameter), 21.14 (geostrophic wind), and 21.22 (thermal wind)."
+            }
+        ]
+    },
+    "models": {
+        "GeneralCirculation": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/general_circulation.jl:60\n\nGeneralCirculation is an MTK `@component` implementing the diagnostic (algebraic) equations for large-scale atmospheric circulation from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 21: the Coriolis parameter (Eq. 21.2), the tangential speed of Earth's surface (Eq. 21.1), the geostrophic wind components (Eq. 21.14), and the thermal-wind relations (Eq. 21.22). All six equations are algebraic — there is no ODE integration.\n\nConstants: the upstream `@constants` Omega (Earth's angular velocity), R_earth (Earth's mean radius), and g (gravitational acceleration) are serialized as parameter-type variables with fixed defaults — the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters, mirroring the IdealGasLaw migration's treatment of R and M_air.\n\nlat default: the upstream `@parameters lat` declares no default. A default of 0.7853981633974483 rad (45 deg N = pi/4) is supplied here for standalone well-posedness; 45 deg N is the canonical mid-latitude used in the upstream docstring example and the documentation figures.\n\nOmitted parameter: the upstream component declares an air-pressure parameter `p = 101325 Pa` that appears in no equation. MTK prunes unused parameters and mtk2esm follows suit, so p is not carried here.\n\nEquatorial singularity: the Coriolis parameter f -> 0 at the equator, so the geostrophic-wind and thermal-wind equations (which divide by f) are non-finite (0/0) at exactly lat=0. A 0-D inline test cannot be simulated there because the runner's initial state would contain non-finite components; the small-f regime is therefore covered by the coriolis_near_equator test at lat = 1 deg rather than the exact equator. The latitude-sweep examples likewise use an even sample count so lat=0 is never sampled.\n\nTolerance rationale (rel=1e-6, abs=1e-9): an algebraic diagnostic system with no ODE integration. rel=1e-6 covers float64 roundoff in the closed-form trig and division expressions; abs=1e-9 covers the intended exact zeros (geostrophic / thermal-wind components when their driving gradient is zero) and the v_tan -> 0 limit at the pole, where cos(pi/2) leaves a floating-point residual of ~2.8e-14."
+            },
+            "tolerance": {
+                "rel": 1.0e-6,
+                "abs": 1.0e-9
+            },
+            "variables": {
+                "Omega": {
+                    "type": "parameter",
+                    "units": "rad/s",
+                    "default": 7.2921e-5,
+                    "description": "Earth's angular velocity"
+                },
+                "R_earth": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 6371000.0,
+                    "description": "Earth's mean radius"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.807,
+                    "description": "Gravitational acceleration"
+                },
+                "lat": {
+                    "type": "parameter",
+                    "units": "rad",
+                    "default": 0.7853981633974483,
+                    "description": "Latitude (default 45 deg N = pi/4; upstream declares no default)"
+                },
+                "rho": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Air density"
+                },
+                "dp_dx": {
+                    "type": "parameter",
+                    "units": "Pa/m",
+                    "default": 0.0,
+                    "description": "Pressure gradient in x (eastward) direction"
+                },
+                "dp_dy": {
+                    "type": "parameter",
+                    "units": "Pa/m",
+                    "default": 0.0,
+                    "description": "Pressure gradient in y (northward) direction"
+                },
+                "dT_dx": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.0,
+                    "description": "Temperature gradient in x direction at constant pressure"
+                },
+                "dT_dy": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.0,
+                    "description": "Temperature gradient in y direction at constant pressure"
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 288.15,
+                    "description": "Air temperature"
+                },
+                "f": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Coriolis parameter"
+                },
+                "v_tan": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Tangential speed at latitude due to Earth rotation"
+                },
+                "u_g": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Zonal (eastward) geostrophic wind component"
+                },
+                "v_g": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Meridional (northward) geostrophic wind component"
+                },
+                "du_g_dz": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Thermal wind: vertical gradient of zonal geostrophic wind"
+                },
+                "dv_g_dz": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Thermal wind: vertical gradient of meridional geostrophic wind"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "f",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            2,
+                            "Omega",
+                            { "op": "sin", "args": ["lat"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "v_tan",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "Omega",
+                            { "op": "cos", "args": ["lat"] },
+                            "R_earth"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "u_g",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": [-1, "dp_dy"] },
+                            { "op": "*", "args": ["f", "rho"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "v_g",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "dp_dx",
+                            { "op": "*", "args": ["f", "rho"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "du_g_dz",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": [-1, "dT_dy", "g"] },
+                            { "op": "*", "args": ["f", "T"] }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dv_g_dz",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["dT_dx", "g"] },
+                            { "op": "*", "args": ["f", "T"] }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "coriolis_near_equator",
+                    "description": "Coriolis parameter and tangential speed near the equator (lat = 1 deg N). f = 2 Omega sin(1 deg) is small (~2.5e-6 s^-1) and v_tan = Omega R_earth cos(1 deg) is near its equatorial maximum (~464.5 m/s). The exact equator (lat=0) is a singularity of this model: the geostrophic and thermal-wind components divide by f, so they are non-finite (0/0) when f=0 and the model cannot be simulated there as a 0-D inline test. lat = 1 deg exercises the small-f regime instead.",
+                    "parameter_overrides": { "lat": 0.017453292519943295 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 2.545293859626302e-6 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 464.50893326281846 }
+                    ]
+                },
+                {
+                    "id": "coriolis_30N",
+                    "description": "Coriolis parameter at 30 deg N (lat=pi/6). f = 2 Omega sin(pi/6) = Omega (Seinfeld & Pandis Eq. 21.2).",
+                    "parameter_overrides": { "lat": 0.5235987755982988 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 7.292099999999999e-5 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 402.3378144883248 }
+                    ]
+                },
+                {
+                    "id": "coriolis_45N",
+                    "description": "Coriolis parameter at 45 deg N (lat=pi/4). f = 2 Omega sin(pi/4) ~ sqrt(2) Omega (Eq. 21.2).",
+                    "parameter_overrides": { "lat": 0.7853981633974483 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 0.00010312586718180846 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 328.5074499076509 }
+                    ]
+                },
+                {
+                    "id": "coriolis_pole",
+                    "description": "Coriolis parameter and tangential speed at the North Pole (lat=pi/2). f = 2 Omega is maximal; v_tan = Omega R_earth cos(pi/2) = 0.",
+                    "parameter_overrides": { "lat": 1.5707963267948966 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 0.000145842 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "coriolis_45S",
+                    "description": "Coriolis parameter at 45 deg S (lat=-pi/4). f is negative in the Southern Hemisphere with the same magnitude as 45 deg N; v_tan is unchanged because cos is even (physical-consistency check, upstream test).",
+                    "parameter_overrides": { "lat": -0.7853981633974483 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": -0.00010312586718180846 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 328.5074499076509 }
+                    ]
+                },
+                {
+                    "id": "geostrophic_wind_40N",
+                    "description": "Geostrophic wind at 40 deg N for a meridional pressure gradient dp/dy = -0.002 Pa/m with rho = 1.0 kg/m^3 (Seinfeld & Pandis Problem 21.1A, p. 1000). A northward pressure decrease drives a positive (westerly) zonal wind u_g; v_g = 0 because dp/dx = 0.",
+                    "parameter_overrides": { "lat": 0.6981317007977318, "dp_dy": -0.002, "dp_dx": 0.0, "rho": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 9.374543057190427e-5 },
+                        { "variable": "u_g", "time": 0.0, "expected": 21.33437318276508 },
+                        { "variable": "v_g", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "geostrophic_wind_45S",
+                    "description": "Geostrophic wind at 45 deg S for a meridional pressure gradient dp/dy = -0.001 Pa/m with rho = 1.0 kg/m^3. With f < 0 in the Southern Hemisphere the same northward pressure decrease drives a negative (easterly) zonal wind, the hemispheric mirror of geostrophic_wind_40N.",
+                    "parameter_overrides": { "lat": -0.7853981633974483, "dp_dy": -0.001, "dp_dx": 0.0, "rho": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": -0.00010312586718180846 },
+                        { "variable": "u_g", "time": 0.0, "expected": -9.696888155490841 },
+                        { "variable": "v_g", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "thermal_wind",
+                    "description": "Thermal-wind relation (Eq. 21.22) for a zonal temperature gradient dT/dx = -4e-5 K/m at the latitude where f = 1e-4 s^-1, with T = 248 K (Seinfeld & Pandis example, pp. 995-996). dv_g/dz = (g / (f T)) dT/dx; du_g/dz = 0 because dT/dy = 0.",
+                    "parameter_overrides": { "lat": 0.7555285998340915, "dT_dx": -4.0e-5, "dT_dy": 0.0, "T": 248.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 0.0001 },
+                        { "variable": "dv_g_dz", "time": 0.0, "expected": -0.01581774193548387 },
+                        { "variable": "du_g_dz", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "buys_ballot_meridional",
+                    "description": "Buys Ballot's law at 45 deg N: a northward pressure decrease (dp/dy < 0) drives a westerly wind (u_g > 0), placing low pressure to the left of the wind in the Northern Hemisphere. v_g = 0 because dp/dx = 0.",
+                    "parameter_overrides": { "lat": 0.7853981633974483, "dp_dy": -0.001, "dp_dx": 0.0, "rho": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "u_g", "time": 0.0, "expected": 9.696888155490841 },
+                        { "variable": "v_g", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "buys_ballot_zonal",
+                    "description": "Buys Ballot's law at 45 deg N: an eastward pressure decrease (dp/dx < 0) drives a southward wind (v_g < 0). u_g = 0 because dp/dy = 0.",
+                    "parameter_overrides": { "lat": 0.7853981633974483, "dp_dy": 0.0, "dp_dx": -0.001, "rho": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "u_g", "time": 0.0, "expected": 0.0 },
+                        { "variable": "v_g", "time": 0.0, "expected": -9.696888155490841 }
+                    ]
+                },
+                {
+                    "id": "full_circulation",
+                    "description": "Comprehensive check exercising all six outputs at 45 deg N with every driving gradient nonzero: dp/dx = -0.0015, dp/dy = -0.002 Pa/m, dT/dx = -3e-5, dT/dy = 2e-5 K/m, rho = 1.1 kg/m^3, T = 270 K.",
+                    "parameter_overrides": { "lat": 0.7853981633974483, "dp_dx": -0.0015, "dp_dy": -0.002, "dT_dx": -3.0e-5, "dT_dy": 2.0e-5, "rho": 1.1, "T": 270.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 0.00010312586718180846 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 328.5074499076509 },
+                        { "variable": "u_g", "time": 0.0, "expected": 17.630705737256072 },
+                        { "variable": "v_g", "time": 0.0, "expected": -13.223029302942054 },
+                        { "variable": "du_g_dz", "time": 0.0, "expected": -0.007044250528955458 },
+                        { "variable": "dv_g_dz", "time": 0.0, "expected": -0.010566375793433187 }
+                    ]
+                },
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (lat = pi/4 = 45 deg N, all pressure and temperature gradients zero). Verifies the declared defaults are wired correctly: f and v_tan take their 45 deg N values, and every wind component is zero because its driving gradient is zero.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "f", "time": 0.0, "expected": 0.00010312586718180846 },
+                        { "variable": "v_tan", "time": 0.0, "expected": 328.5074499076509 },
+                        { "variable": "u_g", "time": 0.0, "expected": 0.0 },
+                        { "variable": "v_g", "time": 0.0, "expected": 0.0 },
+                        { "variable": "du_g_dz", "time": 0.0, "expected": 0.0 },
+                        { "variable": "dv_g_dz", "time": 0.0, "expected": 0.0 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "coriolis_parameter_vs_latitude",
+                    "description": "Coriolis parameter f as a function of latitude over the full -90 to +90 deg range. Reproduces the 'Coriolis Parameter vs. Latitude (Eq. 21.2)' figure from the AtmosphericDynamics.jl documentation: f = 2 Omega sin(phi) is antisymmetric about the equator — zero there, +/- 2 Omega at the poles. The sweep uses an even point count so the equatorial singularity at lat=0 is not sampled.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "lat",
+                                "range": { "start": -1.5707963267948966, "stop": 1.5707963267948966, "count": 90, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "f_vs_lat",
+                            "type": "line",
+                            "description": "Coriolis parameter f as a function of latitude.",
+                            "x": { "variable": "lat", "label": "Latitude (rad)" },
+                            "y": { "variable": "f", "label": "Coriolis parameter f (s^-1)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "tangential_speed_vs_latitude",
+                    "description": "Tangential (rotational) speed of Earth's surface as a function of latitude. Reproduces the 'Earth Surface Speed vs. Latitude (Eq. 21.1)' documentation figure: v_tan = Omega R_earth cos(phi) is maximal (~465 m/s) at the equator and zero at the poles.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "lat",
+                                "range": { "start": -1.5707963267948966, "stop": 1.5707963267948966, "count": 90, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "v_tan_vs_lat",
+                            "type": "line",
+                            "description": "Tangential speed v_tan as a function of latitude.",
+                            "x": { "variable": "lat", "label": "Latitude (rad)" },
+                            "y": { "variable": "v_tan", "label": "Tangential speed (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "geostrophic_wind_vs_pressure_gradient",
+                    "description": "Zonal geostrophic wind at 45 deg N as a function of the meridional pressure gradient. Reproduces the 'Geostrophic Wind at 45 deg N (Eq. 21.14)' documentation figure: u_g = -(1 / (rho f)) (dp/dy) — a northward pressure decrease drives a westerly wind (Buys Ballot's law).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "lat": 0.7853981633974483, "rho": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dp_dy",
+                                "range": { "start": -0.005, "stop": 0.005, "count": 90, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_g_vs_dp_dy",
+                            "type": "line",
+                            "description": "Zonal geostrophic wind u_g as a function of the meridional pressure gradient at 45 deg N.",
+                            "x": { "variable": "dp_dy", "label": "Meridional pressure gradient dp/dy (Pa/m)" },
+                            "y": { "variable": "u_g", "label": "Zonal geostrophic wind u_g (m/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "thermal_wind_vs_temperature_gradient",
+                    "description": "Thermal-wind shear of the zonal geostrophic wind at 45 deg N as a function of the meridional temperature gradient, at a mid-troposphere temperature T = 250 K. Reproduces the 'Thermal Wind Relation at 45 deg N (Eq. 21.22)' documentation figure: du_g/dz = -(g / (f T)) (dT/dy) — a poleward temperature decrease strengthens westerlies with height.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "lat": 0.7853981633974483, "T": 250.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dT_dy",
+                                "range": { "start": -5.0e-5, "stop": 5.0e-5, "count": 90, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "du_g_dz_vs_dT_dy",
+                            "type": "line",
+                            "description": "Thermal-wind shear du_g/dz as a function of the meridional temperature gradient at 45 deg N.",
+                            "x": { "variable": "dT_dy", "label": "Meridional temperature gradient dT/dy (K/m)" },
+                            "y": { "variable": "du_g_dz", "label": "Thermal wind shear du_g/dz (s^-1)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
