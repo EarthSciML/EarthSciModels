@@ -1,0 +1,910 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HeavisideBoundaryCondition",
+        "description": "Smoothed Heaviside surface boundary condition for coupling surface and subsurface water flow, from Wang et al. (2020) (Advances in Water Resources 137, 103499), Eqs. 3 and 5. The component switches a single surface node continuously between a ponded (saturated) boundary and an unsaturated boundary as the pressure head h crosses zero, replacing a hard step with the smooth approximations eta_omega(h) = (1/pi)*atan(h/omega) + 1/2 (smoothed Heaviside, Eq. 5a) and delta_omega(h) = (1/pi)*omega/(omega^2 + h^2) (smoothed Dirac delta, Eq. 5b; delta_omega = d eta_omega/dh). The head obeys the boundary condition d/dt[eta_omega(h)*h] = P - I_infil (Eq. 3), stated as the explicit ODE D(h) = (P - I_infil)/(delta_omega*h + eta_omega). h is the single integrated state; eta_omega and delta_omega are algebraic (observed). Migrated from EnvironmentalTransport.jl@a48559c4 src/surface_runoff.jl:232 (`HeavisideBoundaryCondition` @component). Because the head equation conserves eta_omega(h)*h - (P - I_infil)*t, every ODE-integration test below is checked against the exact conservation law, not merely against a prior solver run.",
+        "tags": [
+            "environmental-transport",
+            "surface-runoff",
+            "boundary-condition",
+            "smoothed-heaviside",
+            "saint-venant",
+            "wang-2020"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "EnvironmentalTransport.jl contributors",
+            "EarthSciModels migration (esm-5prg)"
+        ],
+        "references": [
+            {
+                "citation": "Wang, Z., Timlin, D., Kouznetsov, M., Fleisher, D., Li, S., Tully, K., & Reddy, V. (2020). Coupled model of surface runoff and surface-subsurface water movement. Advances in Water Resources, 137, 103499. Eqs. 3 and 5 -- the surface boundary condition d/dt[eta(h)*h] = P - I and the smoothed Heaviside / Dirac delta approximations eta_omega and delta_omega.",
+                "doi": "10.1016/j.advwatres.2019.103499",
+                "url": "https://doi.org/10.1016/j.advwatres.2019.103499"
+            }
+        ]
+    },
+    "models": {
+        "HeavisideBoundaryCondition": {
+            "reference": {
+                "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/surface_runoff.jl:232 (`HeavisideBoundaryCondition` @component)\n\nUpstream `HeavisideBoundaryCondition` is an MTK `@component` building a raw `System(eqs, t)` from two `@constants` (one_over_pi = 1/pi, one_half = 0.5), three `@parameters` (omega, P, I_infil), three time-indexed `@variables` (h, eta_omega, delta_omega) and three equations. It implements the smoothed Heaviside surface boundary condition of Wang et al. (2020) -- the coupling device that lets a single surface node switch continuously between a ponded (saturated) boundary and an unsaturated boundary as the pressure head h crosses zero, without a hard `ifelse` branch.\n\nPhysics. Eq. 5a defines the smoothed Heaviside step eta_omega = (1/pi)*atan(h/omega) + 1/2, and Eq. 5b the smoothed Dirac delta delta_omega = (1/pi)*omega/(omega^2 + h^2). These converge to the true unit step and Dirac delta as omega -> 0+, and delta_omega is exactly d(eta_omega)/dh. The surface boundary condition Eq. 3 is d/dt[eta_omega(h)*h] = P - I_infil; expanding the time derivative with the product rule, (eta_omega'(h)*h + eta_omega(h))*dh/dt = P - I_infil, and since eta_omega'(h) = delta_omega(h) the component states the head equation as the explicit ODE D(h) = (P - I_infil)/(delta_omega*h + eta_omega).\n\nVariable classification. h is the single genuine state -- the only variable with a D(.) derivative. eta_omega and delta_omega are algebraic functions of h (no derivative); the bead's `features` list is `variables, parameters, observed` and these two are the `observed` quantities. All three are encoded as `type: state` with a defining entry in the `equations` array (eta_omega and delta_omega via plain lhs = rhs algebraic equations, h via a D(.) equation). This preserves the upstream pre-`mtkcompile` structure exactly: the raw `System(eqs, t)` has three unknowns and three equations -- the invariant the upstream structural test 'HeavisideBoundaryCondition - Structural Verification' (test/surface_runoff_test.jl:223-240) asserts (`length(equations(hbc)) == 3`; h, eta_omega, delta_omega all in `unknowns`). The encoding matches the verified sibling migrations whose algebraically-defined outputs are likewise `type: state` + `equations` entries (species_lifetime.esm, oh_production.esm). When the ESS runner compiles the model it eliminates the two algebraic equations, leaving h as the sole integrated state and eta_omega/delta_omega as observed -- exactly the upstream 'HeavisideBoundaryCondition - Compilation' test (test/surface_runoff_test.jl:242-249), which asserts `length(unknowns(mtkcompile(hbc))) == 1`.\n\nConstants. one_over_pi (1/pi) and one_half (0.5) are upstream MTK `@constants`. They are encoded as `type: parameter` with fixed defaults -- the rig-wide treatment of MTK constants, matching the verified sibling photostationary.esm (its `one` constant). They are mathematical constants, not tunable inputs. one_over_pi's default is the Float64 nearest 1/pi; every inline-test expected value below is evaluated with that exact Float64, as the runner evaluates the AST. No variable name collides with the ESS validator's reserved physical-constant registry {R, k_B, N_A}, so no rename was needed.\n\nConserved quantity -- exact ODE reference values. The head equation is, by construction, D(h) = (P - I_infil)/(d/dh[eta_omega(h)*h]), so d/dt[eta_omega(h(t))*h(t)] = P - I_infil exactly. The quantity Phi(h) := eta_omega(h)*h therefore evolves linearly in time: Phi(h(t)) = Phi(h0) + (P - I_infil)*t. Phi is strictly increasing in h (Phi'(h) = delta_omega*h + eta_omega lies in (0, 1) for all real h), so h(t) is the unique root of Phi(h) = Phi(h0) + (P - I_infil)*t. Every ODE-integration test below pins h(t) (and the algebraic eta_omega, delta_omega evaluated at it) to that root, computed by Newton iteration on the closed-form Phi -- an analytic reference, not a value read back from a prior solver run. The inline tests therefore check the runner's time integration against the exact conservation law of the model.\n\nDefault scenario. The upstream `@variables`/`@parameters` carry no defaults except omega = 1.0e-4 m. The `.esm` defaults assemble one self-consistent canonical scenario from the upstream test values: h = 0.01 m (1 cm ponded), P = 2.0e-6 m/s (~7.2 mm/hr), I_infil = 1.0e-6 m/s (~3.6 mm/hr), omega = 1.0e-4 m -- the exact configuration of the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:293-309). The net flux P - I_infil = 1.0e-6 m/s > 0, so the default scenario ponds: the head rises slowly from 1 cm.\n\nUpstream test reproduction. The Julia suite (test/surface_runoff_test.jl) has six `@testitem`s for this component; all are reproduced:\n- 'Structural Verification' and 'Compilation' -- reproduced structurally: the file declares three `equations` entries and three `state` variables, and the runner loads + compiles it (eliminating eta_omega/delta_omega to observed) before any assertion is checked.\n- 'Smoothed Heaviside properties' (eta_omega(0) = 0.5; eta_omega -> 1 for h >> omega; eta_omega -> 0 for h << -omega) -- reproduced and tightened from the upstream atol 1e-10 / 1e-3 by tests `heaviside_at_transition_zero_flux`, `heaviside_deep_ponding`, `heaviside_deep_unsaturated`, plus the exact intermediate point `heaviside_head_equals_smoothing_scale` (h = omega gives eta_omega = (1/pi)*atan(1) + 1/2 = 0.75).\n- 'Smoothed delta function' (delta_omega(0) = 1/(pi*omega); delta_omega << its peak far from h = 0) -- reproduced and tightened from the upstream rtol 1e-6 by `delta_peak_at_transition` and `delta_decay_far_field`.\n- 'Net positive flux increases head' (P > I_infil ponds the surface) -- reproduced quantitatively by `default_ponding_100s` and `net_precipitation_raises_head`, which pin the integrated head to the conserved-quantity root rather than only asserting h(end) > h(0).\n- 'Transition from unsaturated to saturated' (h starts negative, precipitation drives it positive) -- reproduced by `unsaturated_to_saturated_transition` (h: -0.05 m -> +0.10 m over 10000 s), which pins both the zero-crossing midpoint and the endpoint.\nThe remaining tests extend coverage: the zero-net-flux equilibrium (P = I_infil holds h, eta_omega, delta_omega exactly constant), net infiltration draining the head, and the algebraic vars sampled across the ponded, transition and unsaturated regimes.\n\nTolerance rationale. Model-level default rel = 1.0e-6. Assertions at t = 0 and on the zero-net-flux equilibrium tests are tightened to rel = 1.0e-9 (or abs = 1.0e-12 where the expected value is exactly 0): at t = 0 there is no integration drift, and when P = I_infil the head derivative is exactly 0.0 so h -- and the algebraic eta_omega, delta_omega -- stay pinned to their initial values. eta_omega/delta_omega evaluate atan and a rational expression, correctly-rounded to ~1 ULP, leaving ample headroom under rel = 1.0e-9. ODE-integration endpoints keep rel = 1.0e-6 (the analytic conserved-quantity root vs. the runner's adaptive Tsit5/Rosenbrock23 integration at reltol 1e-10); the stiff fast-transient test `unsaturated_to_saturated_transition` uses rel = 1.0e-5. No assertion expects a non-finite value -- delta_omega*h + eta_omega = Phi'(h) > 0 for all real h, so the head ODE never divides by zero.\n\nUnit balance (verified). h, omega in m; P, I_infil in m/s; eta_omega, one_over_pi, one_half dimensionless; delta_omega in m^-1.\n  eta_omega   `one_over_pi*atan(h/omega) + one_half`: atan of (m/m) is dimensionless, [1]*[1] + [1] = [1].\n  delta_omega `one_over_pi*omega/(omega^2 + h^2)`: [1]*[m]/([m^2]) = [m^-1].\n  D(h)        `(P - I_infil)/(delta_omega*h + eta_omega)`: [m/s]/([m^-1]*[m] + [1]) = [m/s]/[1] = [m/s] = d[h]/d[t]. SI throughout; no unit conversion at parse or runtime.\n\nProvenance. Structural scaffold (variables, the three-equation AST) generated by EarthSciSerialization.mtk2esm walking the actual MTK `System` built by `HeavisideBoundaryCondition()`; metadata, units, reference, tolerances, tests and examples hand-authored. The scaffolder emitted no unresolved schema-gap markers; the bead's `blocking_gap` field is `none`."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-12
+            },
+            "variables": {
+                "h": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 0.01,
+                    "description": "Soil water pressure head at the surface node [m] (Wang et al. 2020, Eq. 3). h is the single genuine time-dependent unknown of the component: the only variable carrying a D(.) derivative. Its sign is the ponding indicator -- h >= 0 is the ponded (saturated) state where surface water has accumulated, h < 0 is the unsaturated state where the surface can still accept infiltration. The smoothed Heaviside eta_omega(h) and Dirac delta_omega(h) below switch the surface boundary condition continuously across h = 0 instead of with a hard branch. The default 0.01 m (1 cm of ponded water) places the canonical scenario in the ponded regime, matching the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:293-309)."
+                },
+                "η_ω": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Smoothed Heaviside step function eta_omega(h) [dimensionless] (Wang et al. 2020, Eq. 5a): eta_omega = (1/pi)*atan(h/omega) + 1/2. A continuous approximation to the unit step H(h) that converges to it as omega -> 0+. eta_omega(0) = 1/2 exactly; eta_omega -> 1 as h/omega -> +inf (fully ponded) and -> 0 as h/omega -> -inf (fully unsaturated). It is the fraction by which the surface behaves as a ponded (Dirichlet-head) boundary. eta_omega has no D(.) derivative -- it is an algebraic function of h, encoded as `type: state` with a defining entry in `equations` (see notes); the ESS runner eliminates it to an observed variable at compile time."
+                },
+                "δ_ω": {
+                    "type": "state",
+                    "units": "m^-1",
+                    "description": "Smoothed Dirac delta function delta_omega(h) [m^-1] (Wang et al. 2020, Eq. 5b): delta_omega = (1/pi)*omega/(omega^2 + h^2). delta_omega is exactly the derivative of the smoothed Heaviside with respect to head, delta_omega = d(eta_omega)/dh -- a Lorentzian that converges to the Dirac delta as omega -> 0+. It peaks at h = 0 with delta_omega(0) = 1/(pi*omega) and decays as 1/h^2 far from the transition. Like eta_omega it is algebraic in h (no D(.) derivative), encoded as `type: state` with a defining `equations` entry and eliminated to observed at compile time."
+                },
+                "ω": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0001,
+                    "description": "Smoothing parameter for the Heaviside/Dirac approximation [m] (Wang et al. 2020, Eq. 5). omega sets the head scale over which the surface boundary condition switches between the ponded and unsaturated states: the transition width of eta_omega and the half-width of the delta_omega Lorentzian are both O(omega). Smaller omega -> sharper switch (eta_omega -> true step, delta_omega -> true Dirac delta); larger omega -> smoother but less accurate. The upstream default 1.0e-4 m (0.1 mm) is small relative to typical ponded depths so the approximation is tight while keeping the ODE non-stiff."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2e-06,
+                    "description": "Precipitation / irrigation flux density at the surface [m/s] (Wang et al. 2020, Eq. 3). An externally-supplied forcing -- the rate at which water arrives at the surface node. Encoded as `type: parameter` because the component has no governing equation for it. The default 2.0e-6 m/s (~7.2 mm/hr, a moderate rain rate) is the value used in the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:302). The surface boundary condition is driven by the net flux P - I_infil; with the defaults P - I_infil = 1.0e-6 m/s > 0, so the head rises."
+                },
+                "I_infil": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1e-06,
+                    "description": "Infiltration flux density at the surface [m/s] (Wang et al. 2020, Eq. 3). An externally-supplied sink -- the rate at which water leaves the surface node into the subsurface. Encoded as `type: parameter` for the same reason as P. The default 1.0e-6 m/s (~3.6 mm/hr) is the value used in the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:302). Only the net flux P - I_infil enters the head equation: P > I_infil ponds the surface (dh/dt > 0), P < I_infil drains it (dh/dt < 0), and P = I_infil holds the head fixed (dh/dt = 0)."
+                },
+                "one_over_pi": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.3183098861837907,
+                    "description": "The constant 1/pi [dimensionless]. Declared upstream as an MTK `@constants` entry (one_over_pi = 1.0/pi) so that Eqs. 5a and 5b read in their textbook form; encoded here as `type: parameter` with a fixed default, the rig-wide treatment of MTK constants (cf. the sibling photostationary.esm `one`). It is a mathematical constant, not a tunable input -- leave it at its default. The default is the Float64 nearest 1/pi."
+                },
+                "one_half": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "The constant 1/2 [dimensionless]. Declared upstream as an MTK `@constants` entry (one_half = 0.5) -- the additive offset that centres the smoothed Heaviside eta_omega on 1/2 at h = 0. Encoded as `type: parameter` with a fixed default, as for one_over_pi; it is a mathematical constant, not a tunable input."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "η_ω",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "atan",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "h",
+                                                    "ω"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "one_over_pi"
+                                ]
+                            },
+                            "one_half"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "δ_ω",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "ω",
+                                    "one_over_pi"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "ω",
+                                            2
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "h",
+                                            2
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "h"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            -1,
+                                            "I_infil"
+                                        ]
+                                    },
+                                    "P"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "η_ω",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "δ_ω",
+                                            "h"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_ponding_initial_state",
+                    "description": "All variables at their declared defaults (h = 0.01 m, omega = 1.0e-4 m, P = 2.0e-6 m/s, I_infil = 1.0e-6 m/s) sampled at t = 0. Pins the head and the two algebraic variables at the start of the canonical ponding scenario: with h/omega = 100 the surface is well into the ponded regime, so the smoothed Heaviside eta_omega = (1/pi)*atan(100) + 1/2 is close to 1, and the smoothed Dirac delta_omega = (1/pi)*omega/(omega^2 + h^2) is far down its tail. Tolerance tightened to rel = 1e-9 because at t = 0 there is no integration drift -- only the parser->Float64 conversion and the first algebraic evaluation.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "tolerance": {
+                        "rel": 1e-09
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.01
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.9968170072350918
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 0.31827805837795287
+                        }
+                    ]
+                },
+                {
+                    "id": "default_ponding_100s",
+                    "description": "Default scenario integrated for 100 s. Reproduces the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:293-309) quantitatively: with the net flux P - I_infil = 1.0e-6 m/s > 0 the surface ponds and the head rises. The expected h(100) is the exact root of the conserved quantity eta_omega(h)*h = eta_omega(0.01)*0.01 + (P - I_infil)*100 -- the head increases from 1.00 cm to ~1.01 cm. The endpoint eta_omega confirms the surface stays in the ponded regime throughout. The t = 0 assertion keeps rel = 1e-9; the integrated endpoints use the model-level rel = 1e-6.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.01,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 100.0,
+                            "expected": 0.010100000020904063
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 100.0,
+                            "expected": 0.9968485199517559
+                        }
+                    ]
+                },
+                {
+                    "id": "heaviside_at_transition_zero_flux",
+                    "description": "Head pinned at the ponding/unsaturated transition (h = 0) with zero net flux (P = I_infil = 1.0e-6 m/s). Reproduces the upstream 'Smoothed Heaviside properties' check eta_omega(h = 0) = 0.5 (test/surface_runoff_test.jl:266) -- atan(0) = 0 so eta_omega = (1/pi)*0 + 1/2 = 0.5 exactly -- and simultaneously exercises the zero-net-flux equilibrium: P - I_infil = 0 makes D(h) exactly 0.0, so h, eta_omega and delta_omega stay fixed for all time. The same values are asserted at t = 0 and t = 50 to confirm the head does not drift. At h = 0 the smoothed Dirac delta is at its peak delta_omega = 1/(pi*omega).",
+                    "initial_conditions": {
+                        "h": 0.0
+                    },
+                    "parameter_overrides": {
+                        "P": 1e-06,
+                        "I_infil": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 50.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 3183.0988618379065,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 50.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 50.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 50.0,
+                            "expected": 3183.0988618379065,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "heaviside_deep_ponding",
+                    "description": "Deep-ponding limit: h = 1.0 m, far above the smoothing scale (h/omega = 1.0e4), with zero flux (P = I_infil = 0). Reproduces the upstream 'Smoothed Heaviside properties' check that eta_omega -> 1 for h >> omega (test/surface_runoff_test.jl:278, upstream atol 1e-3) -- here pinned to the exact value eta_omega = (1/pi)*atan(1.0e4) + 1/2 = 0.99996817..., a far tighter check than the upstream approximate bound. delta_omega is correspondingly far down its 1/h^2 tail. With zero flux the head holds at 1.0 m, so the values repeat at t = 0 and t = 10.",
+                    "initial_conditions": {
+                        "h": 1.0
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.9999681690114877,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 3.183098830006919e-05,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 10.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 10.0,
+                            "expected": 0.9999681690114877,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "heaviside_deep_unsaturated",
+                    "description": "Deep-unsaturated limit: h = -1.0 m, far below the smoothing scale (h/omega = -1.0e4), with zero flux (P = I_infil = 0). Reproduces the upstream 'Smoothed Heaviside properties' check that eta_omega -> 0 for h << -omega (test/surface_runoff_test.jl:290, upstream atol 1e-3) -- pinned to the exact eta_omega = (1/pi)*atan(-1.0e4) + 1/2 = 3.18e-5. delta_omega is even in h, so it takes the same small value as in the deep-ponding test. With zero flux the head holds at -1.0 m.",
+                    "initial_conditions": {
+                        "h": -1.0
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": -1.0,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 3.18309885122825e-05,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 3.183098830006919e-05,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 10.0,
+                            "expected": 3.18309885122825e-05,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "heaviside_head_equals_smoothing_scale",
+                    "description": "Exact intermediate point: h set equal to the smoothing scale (h = omega = 1.0e-4 m), zero flux. The Heaviside argument is atan(h/omega) = atan(1) = pi/4, so eta_omega = (1/pi)*(pi/4) + 1/2 = 0.75 exactly -- the cleanest non-trivial check of Eq. 5a, halfway in transition between the unsaturated (0) and ponded (1) limits. At h = omega the smoothed Dirac delta is delta_omega = (1/pi)*omega/(2*omega^2) = 1/(2*pi*omega). With zero flux the head holds, so the values repeat at t = 0 and t = 10.",
+                    "initial_conditions": {
+                        "h": 0.0001
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.0001,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.75,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 1591.5494309189532,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 10.0,
+                            "expected": 0.75,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 10.0,
+                            "expected": 0.0001,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "delta_peak_at_transition",
+                    "description": "Smoothed Dirac delta at its peak: h = 0 with omega = 1.0e-3 m and zero flux. Reproduces the upstream 'Smoothed delta function' check delta_omega(h = 0) = 1/(pi*omega) (test/surface_runoff_test.jl:350-351, upstream rtol 1e-6) -- here pinned to the exact (1/pi)*omega/omega^2 = 318.31 m^-1. eta_omega = 0.5 exactly at the transition. With zero flux the head holds at 0, so the peak value repeats at t = 0 and t = 10.",
+                    "initial_conditions": {
+                        "h": 0.0
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 0.0,
+                        "ω": 0.001
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 318.3098861837907,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 10.0,
+                            "expected": 318.3098861837907,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "delta_decay_far_field",
+                    "description": "Smoothed Dirac delta far from the transition: h = 1.0 m with omega = 1.0e-3 m and zero flux. Reproduces the upstream 'Smoothed delta function' check that delta_omega is negligible compared with its peak away from h = 0 (test/surface_runoff_test.jl:363, upstream bound delta_omega < 0.01 of the peak) -- here pinned to the exact value (1/pi)*omega/(omega^2 + 1) ~ 3.18e-4 m^-1, about 1e-6 of the 318.31 m^-1 peak. eta_omega is near 1 (deep ponding).",
+                    "initial_conditions": {
+                        "h": 1.0
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 0.0,
+                        "ω": 0.001
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 0.00031830956787422287,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.9996816902199195,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "net_precipitation_raises_head",
+                    "description": "Strong net precipitation: h0 = 0.005 m, P = 5.0e-6 m/s, I_infil = 1.0e-6 m/s (net flux +4.0e-6 m/s), integrated 200 s. The head rises from 5.0 mm; the expected h(200) is the exact root of eta_omega(h)*h = eta_omega(0.005)*0.005 + 4.0e-6*200. delta_omega at the endpoint reflects the new (deeper) head. Confirms the ponding response scales with the net flux -- a stronger precipitation deficit than the default scenario drives a larger head rise over a longer window.",
+                    "initial_conditions": {
+                        "h": 0.005
+                    },
+                    "parameter_overrides": {
+                        "P": 5e-06,
+                        "I_infil": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 200.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.005,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.9936346508990272,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 200.0,
+                            "expected": 0.005800001089595826
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 200.0,
+                            "expected": 0.9945124432549188
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 200.0,
+                            "expected": 0.9459428428621579
+                        }
+                    ]
+                },
+                {
+                    "id": "net_infiltration_lowers_head",
+                    "description": "Net infiltration with no precipitation: h0 = 0.02 m, P = 0, I_infil = 2.0e-6 m/s (net flux -2.0e-6 m/s), integrated 100 s. The ponded head drains: the expected h(100) is the exact root of eta_omega(h)*h = eta_omega(0.02)*0.02 - 2.0e-6*100, a decrease from 20.0 mm to ~19.8 mm. The mirror of the ponding tests -- I_infil > P drives D(h) < 0. The head stays well in the ponded regime, so eta_omega remains near 1 and delta_omega small.",
+                    "initial_conditions": {
+                        "h": 0.02
+                    },
+                    "parameter_overrides": {
+                        "P": 0.0,
+                        "I_infil": 2e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": 0.02,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "δ_ω",
+                            "time": 0.0,
+                            "expected": 0.07957548215889369,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 100.0,
+                            "expected": 0.019799999994614348
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 100.0,
+                            "expected": 0.9983923879804484
+                        }
+                    ]
+                },
+                {
+                    "id": "unsaturated_to_saturated_transition",
+                    "description": "Reproduces the upstream test 'Transition from unsaturated to saturated' (test/surface_runoff_test.jl:311-331): the head starts negative (h0 = -0.05 m, unsaturated), precipitation P = 1.0e-5 m/s with no infiltration drives it positive over 10000 s, with omega = 1.0e-3 m. The conserved quantity gives the trajectory exactly: at t = 5000 s the head reaches +0.05 m (by the wetting symmetry Phi(h) - Phi(-h) = h, the midpoint of the +-0.05 m swing lands precisely at +0.05 m) and at t = 10000 s it reaches +0.10 m, with eta_omega ~ 1 confirming the surface has switched fully into the ponded regime. The early head excursion through the near-singular denominator (delta_omega*h + eta_omega -> small as h -> negative) is a fast transient; tolerance is relaxed to rel = 1e-5 for the integrated points, rel = 1e-9 at t = 0.",
+                    "initial_conditions": {
+                        "h": -0.05
+                    },
+                    "parameter_overrides": {
+                        "P": 1e-05,
+                        "I_infil": 0.0,
+                        "ω": 0.001
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10000.0
+                    },
+                    "tolerance": {
+                        "rel": 1e-05
+                    },
+                    "assertions": [
+                        {
+                            "variable": "h",
+                            "time": 0.0,
+                            "expected": -0.05,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 0.0,
+                            "expected": 0.006365349100972806,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "h",
+                            "time": 5000.0,
+                            "expected": 0.049999999999999996
+                        },
+                        {
+                            "variable": "h",
+                            "time": 10000.0,
+                            "expected": 0.10000003182144894
+                        },
+                        {
+                            "variable": "η_ω",
+                            "time": 10000.0,
+                            "expected": 0.9968170082478984
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ponding_head_rise",
+                    "description": "Headline run: the canonical ponding scenario (defaults -- h0 = 0.01 m, P = 2.0e-6 m/s, I_infil = 1.0e-6 m/s, omega = 1.0e-4 m) integrated for 100 s. With a positive net flux the surface ponds and the pressure head rises slowly and almost linearly (the smoothed Heaviside eta_omega is near 1 in the ponded regime, so d/dt[eta_omega*h] = P - I_infil reduces to dh/dt ~ P - I_infil). Plots the head h(t) and the smoothed Heaviside indicator eta_omega(t) over the run.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "plots": [
+                        {
+                            "id": "head_vs_time",
+                            "type": "line",
+                            "description": "Surface pressure head h over 100 s, rising from 1.00 cm under the net precipitation flux P - I_infil = 1.0e-6 m/s.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "h",
+                                "label": "pressure head h (m)"
+                            }
+                        },
+                        {
+                            "id": "heaviside_vs_time",
+                            "type": "line",
+                            "description": "Smoothed Heaviside indicator eta_omega over 100 s -- stays just below 1 throughout, confirming the surface remains in the ponded state.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "η_ω",
+                                "label": "smoothed Heaviside eta_omega"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "wetting_transition_over_time",
+                    "description": "A wetting run that carries the surface across the full transition: starting unsaturated at h0 = -0.05 m, precipitation P = 1.0e-5 m/s (no infiltration) drives the head to +0.10 m over 10000 s, with omega = 1.0e-3 m. This reproduces the upstream test 'Transition from unsaturated to saturated' as a time series. The head h(t) climbs through zero near t = 5000 s; the smoothed Heaviside eta_omega(t) rises from ~0 (unsaturated) through 0.5 at the crossing to ~1 (ponded); and the smoothed Dirac delta_omega(t) spikes sharply to its peak 1/(pi*omega) exactly as the head crosses h = 0, then decays -- the continuous switch firing as the boundary condition flips.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "h": -0.05
+                        }
+                    },
+                    "parameters": {
+                        "P": 1e-05,
+                        "I_infil": 0.0,
+                        "ω": 0.001
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10000.0
+                    },
+                    "plots": [
+                        {
+                            "id": "head_vs_time",
+                            "type": "line",
+                            "description": "Surface pressure head h over 10000 s, climbing from -0.05 m (unsaturated) through zero near t = 5000 s to +0.10 m (ponded) under steady precipitation.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "h",
+                                "label": "pressure head h (m)"
+                            }
+                        },
+                        {
+                            "id": "heaviside_vs_time",
+                            "type": "line",
+                            "description": "Smoothed Heaviside eta_omega over the wetting run -- an S-curve in time rising from ~0 through 0.5 (at the h = 0 crossing) toward 1 as the surface switches into the ponded state.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "η_ω",
+                                "label": "smoothed Heaviside eta_omega"
+                            }
+                        },
+                        {
+                            "id": "dirac_vs_time",
+                            "type": "line",
+                            "description": "Smoothed Dirac delta delta_omega over the wetting run: near zero while the head is far from the transition, spiking to its peak 1/(pi*omega) = 318 m^-1 as h crosses zero, then decaying -- the switch firing in time.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "δ_ω",
+                                "label": "smoothed Dirac delta delta_omega (m^-1)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "smoothing_parameter_sweep",
+                    "description": "Sweep of the smoothing parameter omega across three orders of magnitude (1.0e-5 to 1.0e-2 m, logarithmic) at a fixed ponded head (h = 0.01 m) and zero net flux (P = I_infil = 1.0e-6 m/s, so the head -- and hence eta_omega, delta_omega -- stays constant through each run). Surfaces how the smoothing parameter controls the approximation: as omega -> 0 the smoothed Heaviside eta_omega(h = 0.01) -> 1 (a sharp step) and the off-peak smoothed Dirac delta_omega -> 0; as omega grows the step softens and eta_omega relaxes toward 0.5.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "P": 1e-06,
+                        "I_infil": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "ω",
+                                "range": {
+                                    "start": 1e-05,
+                                    "stop": 0.01,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "heaviside_vs_omega",
+                            "type": "line",
+                            "description": "Smoothed Heaviside eta_omega at the fixed head h = 0.01 m as a function of the smoothing parameter omega (log x axis). Decreases monotonically from ~1 (sharp step, h >> omega) toward 0.5 (omega comparable to or larger than h).",
+                            "x": {
+                                "variable": "ω",
+                                "label": "smoothing parameter omega (m)"
+                            },
+                            "y": {
+                                "variable": "η_ω",
+                                "label": "smoothed Heaviside eta_omega"
+                            }
+                        },
+                        {
+                            "id": "dirac_vs_omega",
+                            "type": "line",
+                            "description": "Smoothed Dirac delta delta_omega at the fixed head h = 0.01 m as a function of omega (log x axis). delta_omega = (1/pi)*omega/(omega^2 + h^2) rises with omega while omega << h, peaks where omega = h = 0.01 m, then falls.",
+                            "x": {
+                                "variable": "ω",
+                                "label": "smoothing parameter omega (m)"
+                            },
+                            "y": {
+                                "variable": "δ_ω",
+                                "label": "smoothed Dirac delta delta_omega (m^-1)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "final_head_vs_precipitation",
+                    "description": "Sweep of the precipitation flux P from 0 to 4.0e-6 m/s at fixed infiltration (I_infil = 1.0e-6 m/s, the default) and the default ponded head (h0 = 0.01 m, omega = 1.0e-4 m), each run integrated 500 s. Surfaces the surface-runoff flux balance: the final head is governed by the net flux P - I_infil. For P < I_infil the surface drains and the head ends below its 1 cm start; at P = I_infil = 1.0e-6 m/s the net flux is zero and the head is unchanged; for P > I_infil the surface ponds and the head ends above 1 cm. The final-head-versus-P curve is the equilibrium response of the boundary condition to the precipitation rate.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "I_infil": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 500.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "P",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 4e-06,
+                                    "count": 50,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "final_head_vs_P",
+                            "type": "line",
+                            "description": "Final surface pressure head h after 500 s as a function of the precipitation flux P (infiltration fixed at I_infil = 1.0e-6 m/s). A monotonically increasing line crossing the unchanged-head level h = 0.01 m at P = I_infil: draining for P below that point, ponding above.",
+                            "x": {
+                                "variable": "P",
+                                "label": "precipitation flux P (m/s)"
+                            },
+                            "y": {
+                                "variable": "h",
+                                "label": "final pressure head h (m)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
