@@ -1,0 +1,290 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "WitchOfAgnesi",
+        "description": "\"Witch of Agnesi\" bell-shaped mountain topography from Clark (1977) \"A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation\", Equation 7.1 — the canonical idealized terrain for mountain-wave simulations. Algebraic component: from the mountain half-width a, peak height h_mtn, and horizontal position x relative to the mountain center it computes the terrain surface height z_s = a^2 h_mtn / (a^2 + x^2) (Eq. 7.1) and the terrain slope dz_s_dx = d(z_s)/dx. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:107 (`WitchOfAgnesi` @component); z_s and dz_s_dx are upstream `@variables` bound by algebraic equations and migrate as state-typed variables.",
+        "tags": [
+            "atmospheric_dynamics",
+            "clark-1977",
+            "topography",
+            "mountain-wave",
+            "witch-of-agnesi",
+            "terrain"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-xv9k)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215 — Eq. 7.1, the \"Witch of Agnesi\" bell-shaped mountain profile z_s = a^2 h / (a^2 + x^2) used as the idealized topography for the paper's mountain-wave test cases."
+            }
+        ]
+    },
+    "models": {
+        "WitchOfAgnesi": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/clark1977.jl:107\n\nWitchOfAgnesi is a ModelingToolkit `@component` implementing the \"Witch of Agnesi\" mountain profile of Clark (1977), Eq. 7.1 — the bell-shaped ridge z_s = a^2 h / (a^2 + x^2) used as the idealized terrain for the paper's mountain-wave test cases. Both equations are algebraic (no time derivative): z_s and dz_s_dx are `@variables` each bound by one `~` equation; a, h_mtn, and x are `@parameters`.\n\nState-typed outputs: z_s (terrain surface height) and dz_s_dx (terrain slope d(z_s)/dx) are upstream `@variables` and are serialized as `state` variables fixed by their algebraic equations — the same pattern as the sibling diagnostic_pressure.esm and anelastic_thermo.esm migrations, where MTK reduces such algebraically-determined variables to observed quantities at compile time. The component carries no true ODE state; both outputs are constant in time.\n\nDimensional consistency: the upstream `System(eqs, t; name)` declares no `checks = false`, so the equations are dimensionally consistent — z_s = a^2 h_mtn / (a^2 + x^2) has dimension m (m^3 / m^2) and dz_s_dx = -2 a^2 h_mtn x / (a^2 + x^2)^2 is dimensionless (m^4 / m^4). The slope dz_s_dx carries no `unit` on its upstream `@variable` and is recorded here with units \"1\".\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): a closed-form algebraic component — every output is an exact rational function of the parameters and is constant in time. rel=1e-6 covers float64 roundoff in the +, *, /, ^ expressions; abs=1e-9 covers the intended exact zeros (dz_s_dx vanishes at the mountain peak x = 0, where its equation multiplies by x = 0 exactly).\n\nTests: the upstream clark1977_test.jl `WitchOfAgnesi` testset carries a structure test (2 unknowns, 2 equations) plus numeric checks of the peak (z_s = h_mtn and dz_s_dx = 0 at x = 0), the half-width property (z_s = h_mtn/2 at x = a), symmetry/antisymmetry about x = 0, far-field decay, and a 1 km mountain. The .esm tests below reproduce those numeric checks and add narrow- and wide-mountain cases (varying a), an off-peak slope check, and a combined case sampled at two times to confirm time-invariance. Every test asserts both outputs."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-09
+            },
+            "variables": {
+                "a": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 3000.0,
+                    "description": "Mountain half-width"
+                },
+                "h_mtn": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 100.0,
+                    "description": "Mountain peak height"
+                },
+                "x": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Horizontal position relative to the mountain center"
+                },
+                "z_s": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Terrain surface height (Eq. 7.1)"
+                },
+                "dz_s_dx": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Terrain slope d(z_s)/dx (dimensionless)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "z_s",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    { "op": "^", "args": ["a", 2] },
+                                    "h_mtn"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    { "op": "^", "args": ["a", 2] },
+                                    { "op": "^", "args": ["x", 2] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dz_s_dx",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    -2,
+                                    { "op": "^", "args": ["a", 2] },
+                                    "h_mtn",
+                                    "x"
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            { "op": "^", "args": ["a", 2] },
+                                            { "op": "^", "args": ["x", 2] }
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (a = 3000 m, h_mtn = 100 m, x = 0). At the mountain center the profile is at its peak: z_s = a^2 h_mtn / (a^2 + x^2) = h_mtn = 100 m, and the slope dz_s_dx = -2 a^2 h_mtn x / (a^2 + x^2)^2 vanishes because x = 0. Guards the serialized parameter defaults.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 100.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "half_width",
+                    "description": "Half-width property of the Witch of Agnesi profile: at x = a (one half-width from the center) the terrain height drops to exactly half the peak, z_s = a^2 h_mtn / (a^2 + a^2) = h_mtn / 2 = 50 m. The slope there is dz_s_dx = -h_mtn / (2 a) = -100 / 6000 = -0.0166667 (downhill, since x > 0).",
+                    "parameter_overrides": { "x": 3000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 50.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -0.016666666666666666 }
+                    ]
+                },
+                {
+                    "id": "negative_position_symmetry",
+                    "description": "Symmetry about the mountain center: at x = -a the terrain height equals its value at x = +a (z_s is even in x), z_s = 50 m, while the slope reverses sign (dz_s_dx is odd in x), dz_s_dx = +h_mtn / (2 a) = +0.0166667 — uphill on the windward side. Compare with the half_width test at x = +3000 m.",
+                    "parameter_overrides": { "x": -3000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 50.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": 0.016666666666666666 }
+                    ]
+                },
+                {
+                    "id": "tall_mountain",
+                    "description": "1 km mountain (h_mtn = 1000 m), the taller case from Clark (1977). At the peak x = 0 the terrain height equals the full peak height, z_s = 1000 m, and the slope is zero. Confirms z_s scales linearly with h_mtn.",
+                    "parameter_overrides": { "h_mtn": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 1000.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "narrow_mountain",
+                    "description": "Narrow mountain (half-width a = 1000 m, one third of the default) evaluated at x = a = 1000 m. The half-width property still holds — z_s = h_mtn / 2 = 50 m — but the narrower ridge is steeper: dz_s_dx = -h_mtn / (2 a) = -100 / 2000 = -0.05, three times the default-width slope at its half-width point.",
+                    "parameter_overrides": { "a": 1000.0, "x": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 50.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -0.05 }
+                    ]
+                },
+                {
+                    "id": "wide_mountain",
+                    "description": "Wide mountain (half-width a = 6000 m, double the default) sampled at x = 3000 m, i.e. half a half-width from the center. z_s = a^2 h_mtn / (a^2 + x^2) = 36e6 * 100 / (36e6 + 9e6) = 80 m — the broad ridge is still high this close in — and the slope is the gentle dz_s_dx = -0.0106667.",
+                    "parameter_overrides": { "a": 6000.0, "x": 3000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 80.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -0.010666666666666666 }
+                    ]
+                },
+                {
+                    "id": "near_peak_slope",
+                    "description": "Off-peak slope at the default width: x = 1000 m (one third of a half-width down-slope of the center). z_s = a^2 h_mtn / (a^2 + x^2) = 9e6 * 100 / (9e6 + 1e6) = 90 m, and the terrain slopes downhill, dz_s_dx = -2 a^2 h_mtn x / (a^2 + x^2)^2 = -0.018. Exercises both equations away from the peak and the half-width point.",
+                    "parameter_overrides": { "x": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 90.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -0.018 }
+                    ]
+                },
+                {
+                    "id": "far_field",
+                    "description": "Far-field decay: at x = 100 km (more than 30 half-widths from the center) the Witch of Agnesi ridge has essentially flattened — z_s = a^2 h_mtn / (a^2 + x^2) = 0.0899 m falls toward zero as 1/x^2, and the slope dz_s_dx = -1.797e-6 decays as 1/x^3. Confirms the profile's compact, decaying tail.",
+                    "parameter_overrides": { "x": 100000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 0.089919072834449 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -1.7967643687570986e-06 }
+                    ]
+                },
+                {
+                    "id": "combined_time_invariance",
+                    "description": "Combined check with every parameter off its default (a = 2000 m, h_mtn = 500 m, x = 1000 m): z_s = a^2 h_mtn / (a^2 + x^2) = 4e6 * 500 / (4e6 + 1e6) = 400 m and dz_s_dx = -2 a^2 h_mtn x / (a^2 + x^2)^2 = -0.16. Sampled at t = 0 and t = 1 to confirm the algebraic component is time-invariant — both outputs are functions of the parameters alone.",
+                    "parameter_overrides": { "a": 2000.0, "h_mtn": 500.0, "x": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "z_s", "time": 0.0, "expected": 400.0 },
+                        { "variable": "dz_s_dx", "time": 0.0, "expected": -0.16 },
+                        { "variable": "z_s", "time": 1.0, "expected": 400.0 },
+                        { "variable": "dz_s_dx", "time": 1.0, "expected": -0.16 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "mountain_profile",
+                    "description": "Witch of Agnesi mountain profile (Clark 1977, Eq. 7.1): terrain surface height z_s swept across the horizontal coordinate x from -15 km to +15 km at the default half-width a = 3000 m and peak height h_mtn = 100 m. Traces the symmetric bell-shaped ridge — peak h_mtn at x = 0, half height at x = +/-a, decaying tails.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "x",
+                                "range": { "start": -15000.0, "stop": 15000.0, "count": 61, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "z_s_vs_x",
+                            "type": "line",
+                            "description": "Terrain surface height vs horizontal position — the Witch of Agnesi bell-shaped mountain profile (Eq. 7.1).",
+                            "x": { "variable": "x", "label": "Horizontal position x (m)" },
+                            "y": { "variable": "z_s", "label": "Terrain surface height z_s (m)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "terrain_slope_profile",
+                    "description": "Terrain slope dz_s_dx = d(z_s)/dx swept across x from -15 km to +15 km at the default mountain (a = 3000 m, h_mtn = 100 m). The slope is antisymmetric about the center: zero at the peak x = 0, positive (uphill) on the windward side x < 0, negative (downhill) on the lee side x > 0, with the steepest descent near x = +/-a/sqrt(3).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "x",
+                                "range": { "start": -15000.0, "stop": 15000.0, "count": 61, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "dz_s_dx_vs_x",
+                            "type": "line",
+                            "description": "Terrain slope vs horizontal position — antisymmetric about the mountain center, zero at the peak.",
+                            "x": { "variable": "x", "label": "Horizontal position x (m)" },
+                            "y": { "variable": "dz_s_dx", "label": "Terrain slope d(z_s)/dx (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "half_width_sensitivity",
+                    "description": "Effect of the mountain half-width: terrain height z_s at a fixed observation point x = 3000 m as the half-width a is swept from 1 to 8 km, with the peak height held at h_mtn = 100 m. A narrow ridge (small a) leaves the point on its decaying tail (z_s small); as a grows the point falls increasingly under the broad crest and z_s rises toward the peak height.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "x": 3000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "a",
+                                "range": { "start": 1000.0, "stop": 8000.0, "count": 30, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "z_s_vs_a",
+                            "type": "line",
+                            "description": "Terrain height at a fixed point x = 3000 m vs mountain half-width a.",
+                            "x": { "variable": "a", "label": "Mountain half-width a (m)" },
+                            "y": { "variable": "z_s", "label": "Terrain surface height z_s (m)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
