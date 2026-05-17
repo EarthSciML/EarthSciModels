@@ -1,0 +1,297 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "BelowCloudGasScavenging",
+        "description": "Irreversible below-cloud (washout) scavenging of a gas-phase species by falling raindrops, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 20 (Wet Deposition), Eqs. 20.22, 20.24, 20.25. The gas scavenging coefficient Λ_gas = 6·p₀·K_c/(D_p·U_t) (Eq. 20.25) for monodisperse drops is constant in time, so the below-cloud gas concentration decays exponentially via dC_g/dt = −Λ_gas·C_g (Eq. 20.24) and the below-cloud scavenging flux is F_bc = Λ_gas·h·C_g (Eq. 20.22). 'Irreversible' means the gas is assumed to be taken up and not re-released — the limiting case opposite to the reversible (Henry's-law-equilibrium) treatment of the sibling ReversibleGasScavenging component. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_2006_ch20.jl:234 (`BelowCloudGasScavenging` @component). ODE system: C_g is the single differential state; Λ_gas and F_bc are algebraic outputs (upstream `@variables`, serialized as type `state` with explicit algebraic equations); K_c, U_t, D_p, h, p₀ are input parameters.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp06-ch20",
+            "wet-deposition",
+            "below-cloud-scavenging",
+            "washout"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-mzdf)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 20: Wet Deposition, pp. 932-979. John Wiley & Sons, Inc. Eqs. 20.22 (below-cloud flux), 20.24 (irreversible concentration decay), and 20.25 (gas scavenging coefficient for monodisperse drops)."
+            }
+        ]
+    },
+    "models": {
+        "BelowCloudGasScavenging": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 20, Eqs. 20.22, 20.24, 20.25. John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_2006_ch20.jl:234\nUpstream `BelowCloudGasScavenging` is an MTK `@component` with 5 input `@parameters` (K_c, U_t, D_p, h, p₀) and 3 `@variables` (C_g, Λ_gas, F_bc) related by 3 equations. C_g is a true differential state — the upstream equation `D(C_g) ~ -Λ_gas*C_g` carries the time derivative — so this is an ODE system; `system_kind` is left unset because `ode` is the schema default. Λ_gas and F_bc are algebraic (their upstream equations have no time derivative); following the rig convention for ODE components (matches the sibling Aerosol.jl diameter_growth.esm migration) they are serialized as `type: state` with explicit algebraic equations in the `equations` array rather than as `observed` variables, preserving 1:1 symmetry with the upstream `@variables` block. The ESS Python runner topologically substitutes the algebraic states into the ODE right-hand side and recovers their trajectories, and overrides their t=0 sample from the algebraic body, so tests need only supply an `initial_conditions` value for the differential state C_g.\n\nThe single upstream helper function `gas_scavenging_coeff(K_c, U_t, D_p, p₀_SI)` is inlined into the Λ_gas equation AST: its body is `Λ = 6 * p₀_SI * K_c / (D_p * U_t)` (Eq. 20.25), encoded as the numerator `6*p₀*K_c` over the denominator `D_p*U_t`, matching Julia's left-associative `6*p₀*K_c/(D_p*U_t)`. The three equations are kept in upstream order — Λ_gas (Eq. 20.25), D(C_g) (Eq. 20.24), F_bc (Eq. 20.22) — which is already a valid topological order (Λ_gas before the two equations that consume it). The factor 6 is the dimensionless monodisperse-drop prefactor derived upstream from the drop number density N_D = 6·p₀/(π·D_p³·U_t) (Eq. 20.56); it carries no units.\n\nThe module-level `@constants` of seinfeld_pandis_2006_ch20.jl (μ_air_sp, ρ_air_sp, μ_w_sp, ρ_w_sp, g_sp, kB_sp) are NOT referenced by `BelowCloudGasScavenging` or by `gas_scavenging_coeff` — both use only the component's own parameters — so no constants are migrated. All three equations are dimensionally consistent (Λ_gas: [m/s]·[m/s]/([m]·[m/s]) = s⁻¹; D(C_g): [s⁻¹]·[mol/m³] = mol/m³/s; F_bc: [s⁻¹]·[m]·[mol/m³] = mol/m²/s), so there is no upstream `checks=false` to mirror.\n\nThe 5 parameters carry the upstream component defaults (K_c=0.13 m/s, U_t=3.0 m/s, D_p=1.0e-3 m, h=1000.0 m, p₀=2.778e-7 m/s ≈ 1 mm/h). C_g, Λ_gas, F_bc have no upstream default; C_g is given its initial value per-test via `initial_conditions` (the upstream test uses C_g0 = 1.0e-5 mol/m³).\n\nTolerance rationale (model-level rel=1e-6): the system has a closed-form solution — Λ_gas is constant, so C_g(t) = C_g0·exp(−Λ_gas·t) (Eq. 20.24) exactly and F_bc(t) = Λ_gas·h·C_g(t). The expected values pinned in the tests are this analytic solution. The ESS Python runner integrates the ODE with scipy LSODA at rtol=1e-10/atol=1e-12; rel=1e-6 comfortably absorbs the integrator-vs-analytic gap (which is < 1e-8 relative for this non-stiff scalar exponential over the tested ≤ 2-hour windows) plus float64 round-off in the algebraic Λ_gas and F_bc expressions."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "K_c": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.13,
+                    "description": "Gas-phase mass transfer coefficient to the raindrop"
+                },
+                "U_t": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 3.0,
+                    "description": "Terminal velocity of the raindrop"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-3,
+                    "description": "Raindrop diameter"
+                },
+                "h": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Cloud base height (depth of the below-cloud layer)"
+                },
+                "p₀": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 2.778e-7,
+                    "description": "Precipitation rate (2.778e-7 m/s = 1 mm/h)"
+                },
+                "C_g": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Gas-phase concentration below cloud"
+                },
+                "Λ_gas": {
+                    "type": "state",
+                    "units": "s^-1",
+                    "description": "Gas scavenging coefficient (Eq. 20.25)"
+                },
+                "F_bc": {
+                    "type": "state",
+                    "units": "mol/m^2/s",
+                    "description": "Below-cloud scavenging flux (Eq. 20.22)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 20.25 - gas scavenging coefficient for monodisperse raindrops: Λ_gas = 6·p₀·K_c/(D_p·U_t). Inlines the upstream helper gas_scavenging_coeff(K_c, U_t, D_p, p₀). Depends only on parameters, so Λ_gas is constant in time.",
+                    "lhs": "Λ_gas",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": [6, "p₀", "K_c"] },
+                            { "op": "*", "args": ["D_p", "U_t"] }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 20.24 - irreversible below-cloud decay of the gas concentration: dC_g/dt = -Λ_gas·C_g. The single differential equation of the system.",
+                    "lhs": { "op": "D", "args": ["C_g"], "wrt": "t" },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            { "op": "-", "args": ["Λ_gas"] },
+                            "C_g"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 20.22 - below-cloud scavenging flux: F_bc = Λ_gas·h·C_g, the column-integrated removal rate over the below-cloud layer of depth h.",
+                    "lhs": "F_bc",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["Λ_gas", "h", "C_g"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "canonical_decay",
+                    "description": "Canonical irreversible below-cloud scavenging at the component defaults — the reference case of the upstream AtmosphericDeposition.jl seinfeld_pandis_2006_ch20_test.jl `BelowCloudGasScavenging Component` test (K_c=0.13 m/s, U_t=3 m/s, D_p=1 mm, h=1 km, p₀=2.778e-7 m/s ≈ 1 mm/h, C_g0=1e-5 mol/m³). The scavenging coefficient Λ_gas = 6·p₀·K_c/(D_p·U_t) ≈ 7.22e-5 s⁻¹ (Eq. 20.25) is constant, so the gas concentration decays exponentially C_g(t) = C_g0·exp(−Λ_gas·t) (Eq. 20.24) and the below-cloud flux F_bc = Λ_gas·h·C_g (Eq. 20.22) tracks it. Λ_gas is re-checked at t=3600 s to confirm it is time-invariant.",
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 7.2228e-5 },
+                        { "variable": "Λ_gas", "time": 3600.0, "expected": 7.2228e-5 },
+                        { "variable": "C_g", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "C_g", "time": 1800.0, "expected": 8.780862987755671e-6 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 7.710355480973744e-6 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 7.2228e-7 },
+                        { "variable": "F_bc", "time": 3600.0, "expected": 5.569035556797716e-7 }
+                    ]
+                },
+                {
+                    "id": "heavy_precipitation",
+                    "description": "Heavy rainfall: p₀ = 2.778e-6 m/s (≈ 10 mm/h) raises the scavenging coefficient Λ_gas tenfold to ≈ 7.22e-4 s⁻¹ (Λ_gas ∝ p₀, Eq. 20.25). The gas concentration is depleted rapidly — C_g falls to ~7% of C_g0 within one hour — and the below-cloud flux peaks high then collapses as C_g is consumed.",
+                    "parameter_overrides": { "p₀": 2.778e-6 },
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 7.2228e-4 },
+                        { "variable": "C_g", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "C_g", "time": 1800.0, "expected": 2.7250345120133797e-6 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 7.425813091663997e-7 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 7.2228e-6 },
+                        { "variable": "F_bc", "time": 3600.0, "expected": 5.363516279847071e-7 }
+                    ]
+                },
+                {
+                    "id": "light_drizzle",
+                    "description": "Light drizzle: p₀ = 2.778e-8 m/s (≈ 0.1 mm/h) lowers Λ_gas tenfold to ≈ 7.22e-6 s⁻¹. Over a 2-hour window the gas concentration barely moves — C_g stays above 94% of C_g0 — the weak-scavenging regime where washout is a minor sink.",
+                    "parameter_overrides": { "p₀": 2.778e-8 },
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 7200.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 7.2228e-6 },
+                        { "variable": "C_g", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 9.743330629938707e-6 },
+                        { "variable": "C_g", "time": 7200.0, "expected": 9.49324917643018e-6 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 7.222800000000002e-8 }
+                    ]
+                },
+                {
+                    "id": "large_raindrops",
+                    "description": "Larger raindrops: doubling the drop diameter D_p to 2 mm halves the scavenging coefficient to ≈ 3.61e-5 s⁻¹ (Λ_gas ∝ 1/D_p, Eq. 20.25) — larger drops present less collecting surface per unit rainfall volume, so washout is slower. Checked over a 2-hour window.",
+                    "parameter_overrides": { "D_p": 2.0e-3 },
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 7200.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 3.6114e-5 },
+                        { "variable": "C_g", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 8.780862987755671e-6 },
+                        { "variable": "C_g", "time": 7200.0, "expected": 7.710355480973744e-6 },
+                        { "variable": "F_bc", "time": 7200.0, "expected": 2.784517778398858e-7 }
+                    ]
+                },
+                {
+                    "id": "fast_falling_drops",
+                    "description": "Faster-falling drops: raising the terminal velocity U_t from 3 to 4.5 m/s lowers Λ_gas to ≈ 4.82e-5 s⁻¹ (Λ_gas ∝ 1/U_t, Eq. 20.25) — drops collect gas over less time per unit fall distance. The initial concentration C_g0 = 2e-5 mol/m³ is double the canonical value; because Eq. 20.24 is linear in C_g the normalized decay C_g(t)/C_g0 is independent of C_g0.",
+                    "parameter_overrides": { "U_t": 4.5 },
+                    "initial_conditions": { "C_g": 2.0e-5 },
+                    "time_span": { "start": 0.0, "end": 7200.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 4.8152e-5 },
+                        { "variable": "C_g", "time": 0.0, "expected": 2.0e-5 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 1.681691245115087e-5 },
+                        { "variable": "C_g", "time": 7200.0, "expected": 1.4140427219483657e-5 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 9.6304e-7 }
+                    ]
+                },
+                {
+                    "id": "enhanced_mass_transfer",
+                    "description": "Enhanced gas-phase mass transfer: doubling the mass transfer coefficient K_c to 0.26 m/s doubles the scavenging coefficient to ≈ 1.44e-4 s⁻¹ (Λ_gas ∝ K_c, Eq. 20.25). A larger K_c represents more efficient gas uptake at the drop surface and accelerates the concentration decay.",
+                    "parameter_overrides": { "K_c": 0.26 },
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 1.44456e-4 },
+                        { "variable": "C_g", "time": 0.0, "expected": 1.0e-5 },
+                        { "variable": "C_g", "time": 1800.0, "expected": 7.710355480973744e-6 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 5.9449581642981845e-6 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 1.44456e-6 }
+                    ]
+                },
+                {
+                    "id": "tall_cloud_base",
+                    "description": "Doubled cloud base height h = 2000 m. The cloud base height enters only the flux Eq. 20.22 (F_bc = Λ_gas·h·C_g), not the scavenging coefficient Eq. 20.25 or the decay Eq. 20.24 — so Λ_gas and the C_g trajectory are identical to the canonical_decay case while F_bc is doubled at every time. Confirms h is wired into F_bc alone.",
+                    "parameter_overrides": { "h": 2000.0 },
+                    "initial_conditions": { "C_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "Λ_gas", "time": 0.0, "expected": 7.2228e-5 },
+                        { "variable": "C_g", "time": 3600.0, "expected": 7.710355480973744e-6 },
+                        { "variable": "F_bc", "time": 0.0, "expected": 1.44456e-6 },
+                        { "variable": "F_bc", "time": 3600.0, "expected": 1.1138071113595431e-6 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "concentration_decay",
+                    "description": "Below-cloud gas concentration decay at the component defaults (p₀ ≈ 1 mm/h, Λ_gas ≈ 7.22e-5 s⁻¹) over a 5-hour rain event, starting from C_g0 = 1e-5 mol/m³. Reproduces the `Below-Cloud Gas Concentration Decay (Eq. 20.24)` figure of the AtmosphericDeposition.jl seinfeld_pandis_2006_ch20 documentation (the Λ ≈ 0.26 h⁻¹ curve). The companion plot shows the below-cloud scavenging flux F_bc declining as the gas reservoir is depleted.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": { "C_g": 1.0e-5 }
+                    },
+                    "time_span": { "start": 0.0, "end": 18000.0 },
+                    "plots": [
+                        {
+                            "id": "c_g_vs_time",
+                            "type": "line",
+                            "description": "Gas-phase concentration C_g as a function of time — exponential washout decay (Eq. 20.24).",
+                            "x": { "variable": "t", "label": "Time (s)" },
+                            "y": { "variable": "C_g", "label": "Gas-phase concentration (mol/m^3)" }
+                        },
+                        {
+                            "id": "f_bc_vs_time",
+                            "type": "line",
+                            "description": "Below-cloud scavenging flux F_bc as a function of time (Eq. 20.22); declines as C_g is depleted.",
+                            "x": { "variable": "t", "label": "Time (s)" },
+                            "y": { "variable": "F_bc", "label": "Below-cloud scavenging flux (mol/m^2/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "decay_across_precipitation_rates",
+                    "description": "Below-cloud gas concentration decay over a 5-hour window for a family of precipitation rates, p₀ swept log-spaced from 2.778e-8 m/s (≈ 0.1 mm/h drizzle) to 2.778e-6 m/s (≈ 10 mm/h heavy rain). Each rate drives a separate integration of Eq. 20.24; the resulting family of C_g(t) curves spans the near-flat weak-scavenging regime to the rapid washout of heavy rain. Reproduces the spirit of the `Below-Cloud Gas Concentration Decay (Eq. 20.24)` figure of the AtmosphericDeposition.jl seinfeld_pandis_2006_ch20 documentation, which overlays decay curves for several scavenging coefficients.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": { "C_g": 1.0e-5 }
+                    },
+                    "time_span": { "start": 0.0, "end": 18000.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p₀",
+                                "range": { "start": 2.778e-8, "stop": 2.778e-6, "count": 7, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "c_g_decay_family",
+                            "type": "line",
+                            "description": "Gas-phase concentration C_g vs time for a family of precipitation rates — washout accelerates with rain intensity (Eq. 20.24).",
+                            "x": { "variable": "t", "label": "Time (s)" },
+                            "y": { "variable": "C_g", "label": "Gas-phase concentration (mol/m^3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "scavenging_coefficient_vs_precipitation",
+                    "description": "Gas scavenging coefficient Λ_gas as a function of precipitation rate p₀, swept log-spaced over the drizzle-to-heavy-rain range (≈ 0.1-10 mm/h) at the default drop size and mass transfer coefficient. Λ_gas rises linearly with p₀ — Λ_gas = 6·p₀·K_c/(D_p·U_t), Eq. 20.25 — so the curve visualizes the monodisperse-drop scavenging law directly. Λ_gas is time-invariant, so the final-time value plotted against the swept rate traces Eq. 20.25 exactly.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": { "C_g": 1.0e-5 }
+                    },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p₀",
+                                "range": { "start": 2.778e-8, "stop": 2.778e-6, "count": 15, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_gas_vs_p0",
+                            "type": "line",
+                            "description": "Gas scavenging coefficient Λ_gas as a function of precipitation rate p₀ (Eq. 20.25).",
+                            "x": { "variable": "p₀", "label": "Precipitation rate (m/s)" },
+                            "y": { "variable": "Λ_gas", "label": "Gas scavenging coefficient (s^-1)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
