@@ -1,0 +1,374 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "NOxPhotochemistry",
+        "description": "The NOx (NO + NO₂) photochemical cycle that governs tropospheric ozone — Seinfeld & Pandis (2006) Ch. 6 §6.2, Eqs. 6.5-6.8, pp. 207-212. During daytime three reactions cycle rapidly between NO, NO₂ and O₃: NO₂ + hν → NO + O (λ < 424 nm), O + O₂ + M → O₃ + M, and NO + O₃ → NO₂ + O₂. In the absence of other oxidants this cycle reaches a photostationary state (the Leighton relationship). Implements four algebraic diagnostic relations: (Eq. 6.5) ground-state O-atom steady-state concentration O = j_NO2·[NO₂] / (k_O_O2_M·[O₂]·[M]), (Eq. 6.6) photostationary-state ozone O3_pss = j_NO2·[NO₂] / (k_NO_O3·[NO]) — the Leighton relationship, (Eq. 6.7) the photostationary-state parameter Φ = j_NO2·[NO₂] / (k_NO_O3·[NO]·[O₃]) which is 1 at exact PSS and deviates when peroxy radicals perturb the cycle, and (Eq. 6.8) the net ozone production rate P_O3 = j_NO2·[NO₂] − k_NO_O3·[NO]·[O₃]. Observed-only algebraic system (no time derivatives): nine variables (five inputs NO/NO2/O3/O2/M encoded as parameters, four outputs O/O3_pss/Φ/P_O3 encoded as state) plus three rate-constant parameters (j_NO2, k_O_O2_M, k_NO_O3). Migrated from GasChem.jl@8c12c048 src/nox_photochemistry.jl:88 (`NOxPhotochemistry` @component). Sibling component PhotostationaryState (src/nox_photochemistry.jl:145) migrates separately to photostationary.esm.",
+        "tags": [
+            "gaschem",
+            "nox-photochemistry",
+            "tropospheric-ozone",
+            "photostationary-state",
+            "leighton-relationship",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-nw73)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 6 §6.2, Eqs. 6.5-6.8, pp. 207-212. The NO-NO₂-O₃ photochemical cycle, the photostationary-state (Leighton) relationship, the photostationary-state parameter Φ, and the net ozone production rate. Rate constants from Table B.1; j_NO2 typical midday value from Figure 4.x photolysis-rate discussion."
+            }
+        ]
+    },
+    "models": {
+        "NOxPhotochemistry": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/nox_photochemistry.jl:88\n\nUpstream `NOxPhotochemistry` is an MTK `@component` with 9 `@variables` (5 inputs NO/NO2/O3/O2/M + 4 outputs O/O3_pss/Φ/P_O3), 3 `@parameters` (j_NO2, k_O_O2_M, k_NO_O3), 0 `@constants`, and 4 algebraic equations from S&P §6.2 (Eqs. 6.5-6.8). It returns `System(eqs, t; name)` — a system carrying the time independent variable `t` but with no `D(·)` time-derivative operator in any equation; the upstream tests and doc page compile it with `mtkcompile(sys; inputs=[NO, NO2, O3, O2, M])` and solve it as a `NonlinearProblem` with the five inputs pinned to user-supplied concentrations.\n\nVariable-classification convention: the five input @variables (NO, NO2, O3, O2, M) are encoded here as `type: parameter` because they have no defining equation within the NOxPhotochemistry component itself — they are externally-supplied inputs that the upstream compile treats via `inputs=[...]` to NonlinearProblem. This mirrors the rig-wide convention applied by sibling oh_production.esm (the upstream input @variables O₃/H₂O/M are encoded as parameters) and typical.esm/urban.esm/remote.esm (upstream air-composition species encoded as parameters). The four output @variables (O, O3_pss, Φ, P_O3) are encoded as `type: state` because each has exactly one defining algebraic equation that the inline-test runner solves as part of the post-mtkcompile observed-binding layer. The upstream structural test `NOxPhotochemistry: Structural Verification` (test/test_nox_photochemistry.jl:4-31) asserts `length(unknowns(sys)) == 9`, `length(equations(sys)) == 4`, and `length(parameters(sys)) == 3` — the .esm preserves this with the 9 declared variables (5 parameter + 4 state), 4 entries in the `equations` array, and 3 rate-constant parameters.\n\nObservability classification: this component is purely algebraic — every output variable is the LHS of one algebraic equation in the inputs and rate-constant parameters (no derivative; the `(t)` time index has no role since there is no `D(·)` operator in any equation). Test scenarios use `time_span: [0.0, 1.0]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files (oh_production.esm, gwp.esm, photon_energy.esm, stefan_boltzmann.esm, wien.esm). For an algebraic-only system the trajectory is constant in time and converges to the same fixed point in one nonlinear-solver step regardless of the sampling time.\n\nRate-constant CGS→SI translation: the upstream Julia declares the rate constants as SI-converted CGS values via explicit multiplication:\n  j_NO2     = 8.0e-3 s⁻¹                  (typical midday NO₂ photolysis rate, S&P §6.2; first-order, no conversion)\n  k_O_O2_M  = 6.0e-34 · 1.0e-12 m⁶/s      (O + O₂ + M → O₃ termolecular; CGS 6.0e-34 cm⁶/molec²/s × 1e-12 cm⁶→m⁶ factor)\n  k_NO_O3   = 1.9e-14 · 1.0e-6  m³/s      (NO + O₃ → NO₂ + O₂ bimolecular; CGS 1.9e-14 cm³/molec/s × 1e-6 cm³→m³ factor, S&P p. 211)\nThe products evaluate in IEEE-754 Float64 to exactly the clean literals: `6.0e-34 * 1.0e-12 == 6.0e-46` and `1.9e-14 * 1.0e-6 == 1.9e-20` (both bit-identical — verified), so the .esm encodes the SI defaults directly as 6.0e-46 and 1.9e-20.\n\nInput-variable defaults: the five input @variables carry no upstream default (MTK @variables, unlike @parameters, have no `= value`). The .esm assigns each input a `default` taken from the upstream test's typical-midday scenario (test/test_nox_photochemistry.jl `NOxPhotochemistry: Eq 6.5/6.6` testitems, lines 54-111): NO = 2.5e16 m⁻³ (~1 ppb at STP), NO2 = 5.0e16 m⁻³ (~2 ppb), O3 = 1.0e18 m⁻³ (~40 ppb tropospheric background), O2 = 5.25e24 m⁻³ (21% of STP air number density), M = 2.5e25 m⁻³ (STP total air number density). This matches the rig convention used by sibling oh_production.esm (input defaults from the upstream test typical scenario).\n\nEquation structure: the four outputs are mutually independent — each depends only on inputs and rate-constant parameters, with no inter-output references (unlike the oh_production.esm cascade where P_OH references ε_OH). All four share the numerator j_NO2·NO2. Eq. 6.5 (O) and Eqs. 6.6/6.7/6.8 use distinct denominators. O3_pss (Eq. 6.6) is independent of the O3 input; Φ (Eq. 6.7) and P_O3 (Eq. 6.8) depend on O3. At the typical-midday defaults O3_pss = 8.42e17 m⁻³, which is below the default O3 input of 1.0e18 m⁻³, so the default Φ = 0.842 < 1 and P_O3 = -7.5e13 m⁻³/s < 0 (net ozone loss — the default O3 sits above its photostationary value).\n\nNumerical defaults (S&P typical-midday surface conditions, SI):\n  At NO=2.5e16, NO2=5.0e16, O3=1.0e18, O2=5.25e24, M=2.5e25:\n  O      = 8.0e-3·5.0e16 / (6.0e-46·5.25e24·2.5e25) = 5.079365e9 m⁻³  (short-lived ground-state O atom)\n  O3_pss = 8.0e-3·5.0e16 / (1.9e-20·2.5e16)        = 8.421053e17 m⁻³ (~34 ppb — the Leighton value; S&P hand-calc ≈ 8.42e17)\n  Φ      = 8.0e-3·5.0e16 / (1.9e-20·2.5e16·1.0e18)  = 0.8421053       (< 1: default O3 exceeds its PSS value)\n  P_O3   = 8.0e-3·5.0e16 − 1.9e-20·2.5e16·1.0e18    = -7.5e13 m⁻³/s   (< 0: net ozone loss at the default state)\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the four algebraic equations are small expression trees (2-4 IEEE-754 ops each — Eq. 6.5 is two multiplications + one division for the numerator/denominator plus the joining division; Eq. 6.8 is two multiplications + one subtraction). Each output is correctly-rounded to within ~1 ULP ≈ 1e-16 relative; rel=1.0e-10 leaves 6 orders of magnitude of headroom over the IEEE-754 floor and is comfortably tighter than the upstream rtol bounds (rtol=0.05 for the Eq. 6.6 hand-calc cross-check, rtol=1.0e-6 for the Φ-at-PSS and O3_pss-linearity identities). The abs=1.0e-12 floor handles the P_O3-at-photostationary-state boundary case where the j_NO2·NO2 − k_NO_O3·NO·O3 near-cancellation collapses to IEEE-754 exact zero. Matches the convention used by sibling observed-only ESM files: oh_production.esm at rel=1e-10/abs=1e-12, stefan_boltzmann.esm at rel=1e-10/abs=1e-12, wien.esm at rel=1e-10, gwp.esm at rel=1e-10.\n\nUnit balance (verified): all four equations balance dimensionally.\n  Eq. 6.5 `O ~ j_NO2·NO2 / (k_O_O2_M·O2·M)`: (s⁻¹·m⁻³) / ((m⁶/s)·m⁻³·m⁻³) = (m⁻³/s) / (s⁻¹) = m⁻³ ✓\n  Eq. 6.6 `O3_pss ~ j_NO2·NO2 / (k_NO_O3·NO)`: (s⁻¹·m⁻³) / ((m³/s)·m⁻³) = (m⁻³/s) / (s⁻¹) = m⁻³ ✓\n  Eq. 6.7 `Φ ~ j_NO2·NO2 / (k_NO_O3·NO·O3)`: (s⁻¹·m⁻³) / ((m³/s)·m⁻³·m⁻³) = (m⁻³/s) / (m⁻³/s) = dimensionless ✓\n  Eq. 6.8 `P_O3 ~ j_NO2·NO2 − k_NO_O3·NO·O3`: (s⁻¹·m⁻³) − ((m³/s)·m⁻³·m⁻³) = m⁻³·s⁻¹ − m⁻³·s⁻¹ = m⁻³·s⁻¹ ✓\nThe migrated .esm preserves the upstream units verbatim — all concentrations in SI m⁻³, j_NO2 in s⁻¹, k_NO_O3 in m³/s (bimolecular), k_O_O2_M in m⁶/s (termolecular), Φ dimensionless, P_O3 in m⁻³·s⁻¹. SI throughout; no unit conversion at parse or runtime.\n\nUpstream test reproduction (test/test_nox_photochemistry.jl):\n- `NOxPhotochemistry: Structural Verification` (lines 4-31): 9 unknowns / 4 equations / 3 parameters and required output names O3_pss, P_O3 — reproduced by the .esm structural shape (5 parameter + 4 state variables under `variables`, 4 entries in `equations`).\n- `NOxPhotochemistry: Eq 6.5 O Atom Steady-State` (lines 54-79): asserts 0 < O < 1.0e12 at the typical scenario — reproduced and tightened by `typical_midday_all_outputs` pinning the exact O = 5079365079.365079 m⁻³ (well inside the 0..1e12 band), and by `o_atom_linear_in_j_no2` / `o_atom_inverse_in_air_density` exercising Eq. 6.5's structural linearity in j_NO2 and inverse dependence on M.\n- `NOxPhotochemistry: Eq 6.6 Leighton Relationship` (lines 81-111): asserts 1.0e17 < O3_pss < 1.0e19 and O3_pss ≈ 8.42e17 at rtol=0.05 — reproduced and tightened by `typical_midday_all_outputs` pinning the exact O3_pss = 8.421052631578948e17 m⁻³ at rel=1e-10.\n- `NOxPhotochemistry: Eq 6.7 Photostationary State Parameter` (lines 113-148): asserts Φ ≈ 1.0 at O3 = O3_pss (rtol=1e-6), Φ > 1 below PSS, Φ < 1 above PSS — reproduced by `phi_unity_at_photostationary_state` (Φ = 1.0 at O3 = O3_pss), `phi_above_unity_below_pss` (Φ = 2.0 at O3 = 0.5·O3_pss), `phi_below_unity_above_pss` (Φ = 0.5 at O3 = 2·O3_pss).\n- `NOxPhotochemistry: Eq 6.8 Net O3 Production` (lines 150-184): asserts |P_O3|/(j_NO2·NO2) < 1e-6 at PSS, P_O3 > 0 below PSS, P_O3 < 0 above PSS — reproduced by `phi_unity_at_photostationary_state` (P_O3 = 0 at O3 = O3_pss), `phi_above_unity_below_pss` (P_O3 = +2.0e14 below PSS), `phi_below_unity_above_pss` (P_O3 = -4.0e14 above PSS).\n- `NOxPhotochemistry: Rate Constants at 298 K` (lines 189-200): asserts the default values of j_NO2, k_O_O2_M, k_NO_O3 — implicitly covered by the `default` fields declared on each parameter; the structural-test gate verifies they are bit-identical to the upstream Julia values.\n- `NOxPhotochemistry: O3_pss Scales with NO2/NO Ratio` (lines 205-228): asserts O3_pss(NO2=2e16)/O3_pss(NO2=1e16) ≈ 2.0 at rtol=1e-6 — reproduced by `o3_pss_linear_in_no2_baseline` and `o3_pss_linear_in_no2_doubled` pinning both endpoints (4.210526315789474e17 and 8.421052631578948e17) at rel=1e-10 so the ratio is exact by IEEE-754 multiplication-by-2 reproducibility; `o3_pss_inverse_in_no` additionally pins the 1/[NO] dependence and `o3_pss_independent_of_o3_input` confirms Eq. 6.6's independence of the O3 input.\nThe upstream tests pin only qualitative bounds and one rtol=0.05 hand-calc; the migrated .esm tests upgrade these to quantitative value pins at rel=1e-10, a strict tightening — every upstream qualitative assertion is implied by the more-specific pinned value. Additional regime tests (`polluted_urban_high_nox`, `clean_remote_low_nox`) exercise all four outputs across the urban-to-remote NOx range for full regression coverage."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 8.0e-3,
+                    "description": "NO₂ photolysis rate j_{NO₂} [s⁻¹] for NO₂ + hν → NO + O (λ < 424 nm). The upstream default 8.0e-3 s⁻¹ is the canonical typical-midday surface value (S&P §6.2) — clear-sky, solar zenith angle near noon. j_NO2 is the engine of the whole NOx cycle: it sets the rate of O-atom production (Eq. 6.5) and, together with k_NO_O3, fixes the photostationary-state ozone level (Eq. 6.6). Highly variable in practice — it drops to zero at night, scales with sec(SZA) through the day, and increases with altitude as the overhead O₃ column thins. Overridable for diurnal, seasonal, or altitude scenarios; in the full TroposphericChemistrySystem it is supplied by the upstream FastJX photolysis subsystem via param_to_var coupling."
+                },
+                "k_O_O2_M": {
+                    "type": "parameter",
+                    "units": "m^6/s",
+                    "default": 6.0e-46,
+                    "description": "Termolecular rate constant for O + O₂ + M → O₃ + M [m⁶ s⁻¹]. The upstream default is the SI-converted CGS value 6.0e-34 cm⁶ molec⁻² s⁻¹ × 1e-12 (cm⁶→m⁶) = 6.0e-46 m⁶/s (the upstream Julia writes the literal product `6.0e-34 * 1.0e-12`, which evaluates to exactly 6.0e-46 in IEEE-754 Float64). This is the recombination step that converts the O atom from NO₂ photolysis into ozone; it appears only in Eq. 6.5 as part of the O-atom loss denominator k_O_O2_M·[O₂]·[M]. The very large quenching rate k_O_O2_M·[O₂]·[M] ≈ 7.9e4 s⁻¹ at STP makes the ground-state O atom extremely short-lived (~13 µs), which is why Eq. 6.5 is a valid steady-state relation."
+                },
+                "k_NO_O3": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.9e-20,
+                    "description": "Bimolecular rate constant for NO + O₃ → NO₂ + O₂ [m³ s⁻¹]. The upstream default is the SI-converted CGS value 1.9e-14 cm³ molec⁻¹ s⁻¹ × 1e-6 (cm³→m³) = 1.9e-20 m³/s (S&P p. 211; the upstream Julia writes the literal product `1.9e-14 * 1.0e-6`, exactly 1.9e-20 in Float64). This is the ozone-titration step that closes the NOx cycle by reconverting NO to NO₂. It sets the photostationary-state ozone level (Eq. 6.6: O3_pss ∝ j_NO2/k_NO_O3) and the ozone-loss term of the net production rate (Eq. 6.8). Weakly temperature-dependent in reality (Arrhenius); the upstream uses the temperature-independent ~298 K value for the algebraic system."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e16,
+                    "description": "Nitric oxide number density [m⁻³] (externally-supplied input). The default 2.5e16 m⁻³ ≈ 1 ppb at STP is the upstream test's typical-midday value (test/test_nox_photochemistry.jl:59). NO appears in the denominators of Eqs. 6.6/6.7 and the loss term of Eq. 6.8 — higher NO lowers the photostationary-state ozone (O3_pss ∝ 1/[NO]) and raises the O₃-titration loss. Encoded as `type: parameter` (not `type: state`) because NOxPhotochemistry has no governing equation for NO — it is purely an input. In the full TroposphericChemistrySystem NO is provided by the upstream NOx-emission and chemistry subsystems; in standalone tests it is overridden via `parameter_overrides`. Tropospheric range ~2.5e14 (remote, 0.01 ppb) to ~2.5e18 (polluted urban, 100 ppb)."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.0e16,
+                    "description": "Nitrogen dioxide number density [m⁻³] (externally-supplied input). The default 5.0e16 m⁻³ ≈ 2 ppb at STP is the upstream test's typical-midday value (test/test_nox_photochemistry.jl:60). NO₂ is the photolytic source of the cycle: it appears in the numerator j_NO2·[NO₂] of all four equations, so every output scales linearly with NO₂. The photostationary-state ozone is proportional to the [NO₂]/[NO] ratio (Eq. 6.6, the Leighton relationship). Encoded as `type: parameter` for the same reason as NO — it is an external input with no defining equation in this component."
+                },
+                "O3": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e18,
+                    "description": "Ozone number density [m⁻³] (externally-supplied input — the measured/ambient O₃, distinct from the diagnostic O3_pss output). The default 1.0e18 m⁻³ ≈ 40 ppb at STP is the upstream test's typical tropospheric background (test/test_nox_photochemistry.jl:61). O3 enters Eq. 6.7 (Φ) and Eq. 6.8 (P_O3) — comparing the ambient O3 against the photostationary value O3_pss is exactly what Φ measures: Φ = O3_pss/O3, so Φ > 1 when ambient O3 is below its PSS value (net production) and Φ < 1 when above (net loss). O3 does NOT enter Eq. 6.6 — O3_pss is independent of the ambient O3 input. Encoded as `type: parameter`: an external input with no governing equation here."
+                },
+                "O2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 5.25e24,
+                    "description": "Molecular oxygen number density [m⁻³] (externally-supplied input). The default 5.25e24 m⁻³ is 21% of the STP total air number density (2.5e25), i.e. the well-mixed atmospheric O₂ fraction. O₂ appears only in Eq. 6.5 as part of the O-atom quenching denominator k_O_O2_M·[O₂]·[M] (the O₂ is the reactant that recombines with the O atom to form O₃). Encoded as `type: parameter`: an external input. Like M it decreases with altitude in lockstep with total air density (the mixing ratio stays ~constant below the homopause)."
+                },
+                "M": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e25,
+                    "description": "Total air number density [m⁻³] (externally-supplied input). The default 2.5e25 m⁻³ is the STP value used by the upstream test (test/test_nox_photochemistry.jl:63) and by sibling typical.esm. M is the third body in the O + O₂ + M → O₃ recombination and appears only in Eq. 6.5's O-atom quenching denominator. M decreases roughly exponentially with altitude (scale height ~8 km in the troposphere): ~1e25 at 12 km, ~1e24 at 30 km. Encoded as `type: parameter`: an external input supplied by the upstream transport/thermodynamics module."
+                },
+                "O": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Ground-state atomic oxygen O(³P) steady-state number density [m⁻³] (Eq. 6.5). Algebraic balance between production from NO₂ photolysis (j_NO2·[NO₂]) and loss by recombination with O₂ (k_O_O2_M·[O₂]·[M]): O = j_NO2·[NO₂] / (k_O_O2_M·[O₂]·[M]). At the typical-midday default conditions O ≈ 5.08e9 m⁻³ — extremely low, because the O atom is consumed within ~13 µs by the fast three-body recombination. The 'steady-state' label reflects the quasi-equilibrium assumption: the O-atom lifetime is far shorter than any other timescale in the cycle, so its concentration tracks the instantaneous NO₂ photolysis rate. Linear in j_NO2 and in [NO₂]; inversely proportional to [O₂] and [M]."
+                },
+                "O3_pss": {
+                    "type": "state",
+                    "units": "m^-3",
+                    "description": "Photostationary-state ozone number density [m⁻³] (Eq. 6.6 — the Leighton relationship). The ozone concentration the NO-NO₂-O₃ cycle would reach in pure photochemical equilibrium: O3_pss = j_NO2·[NO₂] / (k_NO_O3·[NO]). Proportional to the [NO₂]/[NO] ratio and to j_NO2/k_NO_O3. At the typical-midday defaults O3_pss ≈ 8.42e17 m⁻³ (~34 ppb). Independent of the ambient O3 input — O3_pss is what the cycle predicts, not what is measured. In real urban air the measured O3 deviates from O3_pss because peroxy radicals (HO₂, RO₂) provide an extra NO→NO₂ pathway beyond NO + O₃; that deviation is quantified by Φ."
+                },
+                "Φ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Photostationary-state parameter Φ, dimensionless (Eq. 6.7). The ratio of the NO₂-photolysis ozone source to the NO+O₃ ozone sink: Φ = j_NO2·[NO₂] / (k_NO_O3·[NO]·[O₃]) = O3_pss/O3. Φ = 1 marks exact photostationary state (pure NO-NO₂-O₃ cycling, no net ozone change). Φ > 1 means the ambient O₃ is below its photostationary value — additional oxidants (HO₂, RO₂ peroxy radicals) are converting NO to NO₂ without consuming O₃, driving net ozone production; typical urban daytime measurements show Φ ≈ 1.5-3. Φ < 1 means ambient O₃ exceeds its PSS value — net ozone loss. At the typical-midday defaults Φ ≈ 0.842 (the default O3 input of 40 ppb sits above the 34 ppb photostationary value)."
+                },
+                "P_O3": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Net ozone production rate [m⁻³ s⁻¹] (Eq. 6.8). The difference between the NO₂-photolysis ozone source and the NO+O₃ ozone sink: P_O3 = j_NO2·[NO₂] − k_NO_O3·[NO]·[O₃]. Positive when the system is below photostationary state (ambient O₃ < O3_pss → net production), negative when above (net loss), and zero at exact PSS — P_O3 and Φ are two views of the same departure from equilibrium (P_O3 = j_NO2·[NO₂]·(1 − 1/Φ)). At the typical-midday defaults P_O3 ≈ -7.5e13 m⁻³/s (net loss, since the default O3 exceeds O3_pss). This is the chemical tendency the NO-NO₂-O₃ cycle alone would impose on ozone; the full tropospheric tendency adds the peroxy-radical channels that NOxPhotochemistry deliberately omits."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "O",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["j_NO2", "NO2"]},
+                            {"op": "*", "args": ["k_O_O2_M", "O2", "M"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "O3_pss",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["j_NO2", "NO2"]},
+                            {"op": "*", "args": ["k_NO_O3", "NO"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Φ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["j_NO2", "NO2"]},
+                            {"op": "*", "args": ["k_NO_O3", "NO", "O3"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "P_O3",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {"op": "*", "args": ["j_NO2", "NO2"]},
+                            {"op": "*", "args": ["k_NO_O3", "NO", "O3"]}
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "typical_midday_all_outputs",
+                    "description": "Anchor test at the upstream typical-midday scenario (NO=2.5e16 ~1 ppb, NO2=5.0e16 ~2 ppb, O3=1.0e18 ~40 ppb, O2=5.25e24, M=2.5e25 — test/test_nox_photochemistry.jl:59-63). Reproduces and tightens two upstream testitems at once: `Eq 6.5 O Atom Steady-State` (asserts 0 < O < 1.0e12 — here O = 5.08e9, well inside the band) and `Eq 6.6 Leighton Relationship` (asserts 1e17 < O3_pss < 1e19 and O3_pss ≈ 8.42e17 at rtol=0.05 — here O3_pss pinned exactly at 8.421052631578948e17). All four outputs are pinned at rel=1e-10. Note O3_pss = 8.42e17 < O3 = 1.0e18, so Φ = 0.842 < 1 and P_O3 < 0 — the default ambient ozone sits above its photostationary value.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O", "time": 0.0, "expected": 5079365079.365079},
+                        {"variable": "O3_pss", "time": 0.0, "expected": 8.421052631578948e+17},
+                        {"variable": "Φ", "time": 0.0, "expected": 0.8421052631578947},
+                        {"variable": "P_O3", "time": 0.0, "expected": -75000000000000.0}
+                    ]
+                },
+                {
+                    "id": "phi_unity_at_photostationary_state",
+                    "description": "Reproduces the upstream `Eq 6.7 Photostationary State Parameter` and `Eq 6.8 Net O3 Production` at-PSS cases (test/test_nox_photochemistry.jl:127-137, 164-173). The ambient O3 is overridden to the photostationary value O3_pss = j_NO2·NO2/(k_NO_O3·NO) = 8.421052631578948e17 m⁻³ computed at the default NO/NO2. At exact photostationary state Φ = O3_pss/O3 = 1.0 and the net ozone production P_O3 = j_NO2·NO2 − k_NO_O3·NO·O3 = 0.0 (the source exactly balances the sink). The upstream asserts Φ ≈ 1.0 at rtol=1e-6 and |P_O3|/(j_NO2·NO2) < 1e-6; this test pins Φ = 1.0 exactly and P_O3 = 0.0 with an abs tolerance of 1.0 (the IEEE-754 near-cancellation residual is sub-ULP — far below the upstream's 4e8 'effectively zero' threshold).",
+                    "parameter_overrides": {"O3": 8.421052631578948e+17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 1.0},
+                        {"variable": "P_O3", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0}}
+                    ]
+                },
+                {
+                    "id": "phi_above_unity_below_pss",
+                    "description": "Reproduces the upstream `Eq 6.7`/`Eq 6.8` below-PSS cases (test/test_nox_photochemistry.jl:140-142, 176-178). The ambient O3 is overridden to half the photostationary value (0.5·O3_pss = 4.210526315789474e17 m⁻³). Below photostationary state the NO₂-photolysis source outruns the NO+O₃ sink: Φ = O3_pss/O3 = 2.0 > 1 (the upstream asserts Φ > 1) and the net ozone production P_O3 = +2.0e14 m⁻³/s > 0 (the upstream asserts P_O3 > 0). Physically this is the regime where peroxy-radical chemistry would be driving ozone formation. Both outputs pinned at rel=1e-10.",
+                    "parameter_overrides": {"O3": 4.210526315789474e+17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 2.0},
+                        {"variable": "P_O3", "time": 0.0, "expected": 200000000000000.0}
+                    ]
+                },
+                {
+                    "id": "phi_below_unity_above_pss",
+                    "description": "Reproduces the upstream `Eq 6.7`/`Eq 6.8` above-PSS cases (test/test_nox_photochemistry.jl:145-147, 181-183). The ambient O3 is overridden to twice the photostationary value (2.0·O3_pss = 1.6842105263157896e18 m⁻³). Above photostationary state the NO+O₃ sink outruns the NO₂-photolysis source: Φ = O3_pss/O3 = 0.5 < 1 (the upstream asserts Φ < 1) and the net ozone production P_O3 = -4.0e14 m⁻³/s < 0 (the upstream asserts P_O3 < 0) — net ozone loss. Both outputs pinned at rel=1e-10.",
+                    "parameter_overrides": {"O3": 1.6842105263157896e+18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Φ", "time": 0.0, "expected": 0.5},
+                        {"variable": "P_O3", "time": 0.0, "expected": -400000000000000.0}
+                    ]
+                },
+                {
+                    "id": "o3_pss_linear_in_no2_baseline",
+                    "description": "Baseline endpoint of the upstream `O3_pss Scales with NO2/NO Ratio` test (test/test_nox_photochemistry.jl:205-228). At NO=1.0e16, NO2=1.0e16 (NO2/NO ratio = 1), the Leighton relationship gives O3_pss = j_NO2·NO2/(k_NO_O3·NO) = 4.210526315789474e17 m⁻³. Pinned at rel=1e-10. Pairs with `o3_pss_linear_in_no2_doubled` to reproduce the upstream ratio assertion O3_pss(NO2=2e16)/O3_pss(NO2=1e16) ≈ 2.0 (upstream rtol=1e-6): Eq. 6.6 is exactly linear in NO2, so the ratio is exact by IEEE-754 multiplication-by-2 reproducibility once both endpoints are pinned.",
+                    "parameter_overrides": {"NO": 1.0e16, "NO2": 1.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O3_pss", "time": 0.0, "expected": 4.210526315789474e+17}
+                    ]
+                },
+                {
+                    "id": "o3_pss_linear_in_no2_doubled",
+                    "description": "Doubled endpoint of the upstream `O3_pss Scales with NO2/NO Ratio` test. With NO2 doubled to 2.0e16 m⁻³ (NO held at 1.0e16, NO2/NO ratio = 2), O3_pss doubles to exactly 8.421052631578948e17 m⁻³ — exactly 2× the baseline 4.210526315789474e17. Pinned at rel=1e-10. Together with `o3_pss_linear_in_no2_baseline` reproduces the upstream linearity assertion O3_pss(2·NO2) = 2·O3_pss(NO2), which follows structurally from Eq. 6.6's linear numerator j_NO2·NO2.",
+                    "parameter_overrides": {"NO": 1.0e16, "NO2": 2.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O3_pss", "time": 0.0, "expected": 8.421052631578948e+17}
+                    ]
+                },
+                {
+                    "id": "o3_pss_inverse_in_no",
+                    "description": "Complements the upstream NO2/NO-ratio test by exercising the 1/[NO] dependence of Eq. 6.6. With NO doubled to 5.0e16 m⁻³ (NO2 held at the default 5.0e16), O3_pss = j_NO2·NO2/(k_NO_O3·NO) = 4.210526315789474e17 m⁻³ — exactly half the typical-midday default O3_pss of 8.421052631578948e17 (doubling NO halves the photostationary ozone). Pinned at rel=1e-10. This gates the regression where [NO] is accidentally moved out of the Eq. 6.6 denominator.",
+                    "parameter_overrides": {"NO": 5.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O3_pss", "time": 0.0, "expected": 4.210526315789474e+17}
+                    ]
+                },
+                {
+                    "id": "o3_pss_independent_of_o3_input",
+                    "description": "Structural test: O3_pss (Eq. 6.6) depends only on j_NO2, NO2, k_NO_O3 and NO — it is independent of the ambient O3 input. With O3 overridden to 5.0e18 m⁻³ (5× the default) and all other inputs at their defaults, O3_pss is unchanged at 8.421052631578948e17 m⁻³ (identical to the `typical_midday_all_outputs` value). Pinned at rel=1e-10. This gates the regression where the ambient O3 input is accidentally wired into the Eq. 6.6 expression — a confusion between the measured O3 and the diagnostic O3_pss.",
+                    "parameter_overrides": {"O3": 5.0e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O3_pss", "time": 0.0, "expected": 8.421052631578948e+17}
+                    ]
+                },
+                {
+                    "id": "o_atom_linear_in_j_no2",
+                    "description": "Exercises Eq. 6.5's linear dependence of the O-atom steady state on the photolysis rate. With j_NO2 doubled to 1.6e-2 s⁻¹ (all concentrations at their typical-midday defaults), O = j_NO2·NO2/(k_O_O2_M·O2·M) = 10158730158.730158 m⁻³ — exactly 2× the default O of 5079365079.365079. Pinned at rel=1e-10. Confirms the O atom tracks the instantaneous NO₂ photolysis rate, the basis of the quasi-steady-state assumption underlying Eq. 6.5.",
+                    "parameter_overrides": {"j_NO2": 1.6e-2},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O", "time": 0.0, "expected": 10158730158.730158}
+                    ]
+                },
+                {
+                    "id": "o_atom_inverse_in_air_density",
+                    "description": "Exercises Eq. 6.5's inverse dependence of the O-atom steady state on the total air number density M (the third body in O + O₂ + M → O₃). With M doubled to 5.0e25 m⁻³ (all other inputs at their typical-midday defaults), the O-atom quenching denominator doubles, so O = 2539682539.6825395 m⁻³ — exactly half the default O of 5079365079.365079. Pinned at rel=1e-10. Physically this is why the ground-state O atom is more abundant per unit photolysis at high altitude (low M): the recombination sink weakens faster than the source.",
+                    "parameter_overrides": {"M": 5.0e25},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O", "time": 0.0, "expected": 2539682539.6825395}
+                    ]
+                },
+                {
+                    "id": "polluted_urban_high_nox",
+                    "description": "Polluted-urban regime: NO=2.5e17 m⁻³ (~10 ppb), NO2=7.5e17 m⁻³ (~30 ppb), O3=2.5e18 m⁻³ (~100 ppb), O2/M at defaults. Exercises all four outputs at the high-NOx end of the tropospheric range. O3_pss = 1.2631578947368422e18 m⁻³ (~50 ppb — the photostationary value implied by the NO2/NO = 3 ratio). The ambient O3 of 100 ppb sits well above O3_pss, so Φ = 0.505 < 1 and P_O3 = -5.875e15 m⁻³/s < 0 (strong net ozone loss by the pure cycle — in reality offset by the peroxy-radical production this component omits). O = 7.62e10 m⁻³. All pinned at rel=1e-10.",
+                    "parameter_overrides": {"NO": 2.5e17, "NO2": 7.5e17, "O3": 2.5e18},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O", "time": 0.0, "expected": 76190476190.4762},
+                        {"variable": "O3_pss", "time": 0.0, "expected": 1.2631578947368422e+18},
+                        {"variable": "Φ", "time": 0.0, "expected": 0.505263157894737},
+                        {"variable": "P_O3", "time": 0.0, "expected": -5874999999999998.0}
+                    ]
+                },
+                {
+                    "id": "clean_remote_low_nox",
+                    "description": "Clean-remote regime: NO=2.5e15 m⁻³ (~0.1 ppb), NO2=2.5e15 m⁻³ (~0.1 ppb), O3=7.5e17 m⁻³ (~30 ppb), O2/M at defaults. Exercises all four outputs at the low-NOx end of the tropospheric range. With NO2/NO = 1 the photostationary ozone O3_pss = 4.210526315789474e17 m⁻³ (~17 ppb); the ambient O3 of 30 ppb is above it, so Φ = 0.561 < 1 and P_O3 = -1.5625e13 m⁻³/s < 0 (weak net loss). O = 2.54e8 m⁻³ — two orders of magnitude below the typical-midday O because NO2 is 20× smaller. All pinned at rel=1e-10.",
+                    "parameter_overrides": {"NO": 2.5e15, "NO2": 2.5e15, "O3": 7.5e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "O", "time": 0.0, "expected": 253968253.96825397},
+                        {"variable": "O3_pss", "time": 0.0, "expected": 4.210526315789474e+17},
+                        {"variable": "Φ", "time": 0.0, "expected": 0.5614035087719298},
+                        {"variable": "P_O3", "time": 0.0, "expected": -15625000000000.0}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "photostationary_o3_vs_no2_no_ratio",
+                    "description": "Photostationary-state ozone O3_pss as a function of the NO₂/NO ratio — reproduces the GasChem.jl doc-page figure `nox_pss_o3.svg` (docs/src/nox_photochemistry.md, lines 94-135). NO is held fixed at 2.5e16 m⁻³ (~1 ppb) and NO2 is swept from 2.5e15 to 2.5e17 m⁻³, spanning a NO₂/NO ratio of 0.1 to 10. The Leighton relationship (Eq. 6.6) predicts O3_pss ∝ [NO₂]/[NO], so the curve is an exact straight line through the origin — higher NO₂/NO ratios (more polluted conditions) give higher photostationary ozone.",
+                    "parameters": {"NO": 2.5e16, "O3": 1.0e18, "O2": 5.25e24, "M": 2.5e25},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 2.5e15, "stop": 2.5e17, "count": 200, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "o3_pss_vs_no2",
+                            "type": "line",
+                            "description": "Photostationary-state ozone O3_pss vs NO₂ number density at fixed NO = 2.5e16 m⁻³. A straight line through the origin (the Leighton relationship Eq. 6.6), O3_pss rising from ~8e16 m⁻³ at NO2/NO = 0.1 to ~8e18 m⁻³ at NO2/NO = 10.",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³)"},
+                            "y": {"variable": "O3_pss", "label": "Photostationary-state O₃ (m⁻³)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "phi_vs_measured_o3",
+                    "description": "Photostationary-state parameter Φ as a function of the measured/ambient ozone — reproduces the GasChem.jl doc-page figure `nox_phi.svg` (docs/src/nox_photochemistry.md, lines 149-183). NO and NO2 are held at 2.5e16 and 5.0e16 m⁻³ (1 and 2 ppb) and the ambient O3 is swept from 5.0e17 to 3.0e18 m⁻³ (~20 to ~120 ppb). Φ = O3_pss/O3 falls as a 1/O3 hyperbola, crossing Φ = 1 exactly at the photostationary value O3_pss ≈ 8.42e17 m⁻³ (~34 ppb). Φ > 1 to the left (measured O3 below PSS → net ozone production, peroxy radicals active); Φ < 1 to the right (measured O3 above PSS → net loss).",
+                    "parameters": {"NO": 2.5e16, "NO2": 5.0e16, "O2": 5.25e24, "M": 2.5e25},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "O3",
+                                "range": {"start": 5.0e17, "stop": 3.0e18, "count": 200, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phi_vs_o3",
+                            "type": "line",
+                            "description": "Photostationary-state parameter Φ vs measured O₃ number density at NO = 1 ppb, NO₂ = 2 ppb. A 1/O3 hyperbola crossing Φ = 1 at O3 = O3_pss ≈ 8.42e17 m⁻³. Φ > 1 below the crossing (net O₃ production), Φ < 1 above it (net O₃ loss).",
+                            "x": {"variable": "O3", "label": "Measured O₃ number density (m⁻³)"},
+                            "y": {"variable": "Φ", "label": "Photostationary-state parameter Φ (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "net_o3_production_vs_o3",
+                    "description": "Net ozone production rate P_O3 (Eq. 6.8) as a function of the ambient ozone, at the typical-midday NO/NO2 (2.5e16 and 5.0e16 m⁻³). The ambient O3 is swept from 5.0e17 to 3.0e18 m⁻³. P_O3 = j_NO2·NO2 − k_NO_O3·NO·O3 is an exact straight line decreasing in O3, crossing zero at the photostationary value O3_pss ≈ 8.42e17 m⁻³: net ozone production to the left of the crossing, net loss to the right. This is the linear (Eq. 6.8) companion to the `phi_vs_measured_o3` hyperbola — the same departure from photostationary state viewed as a rate rather than a ratio.",
+                    "parameters": {"NO": 2.5e16, "NO2": 5.0e16, "O2": 5.25e24, "M": 2.5e25},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "O3",
+                                "range": {"start": 5.0e17, "stop": 3.0e18, "count": 200, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "p_o3_vs_o3",
+                            "type": "line",
+                            "description": "Net ozone production rate P_O3 vs measured O₃ number density at NO = 1 ppb, NO₂ = 2 ppb. A straight line decreasing in O3, crossing zero at O3 = O3_pss ≈ 8.42e17 m⁻³ — positive (net production) to the left, negative (net loss) to the right.",
+                            "x": {"variable": "O3", "label": "Measured O₃ number density (m⁻³)"},
+                            "y": {"variable": "P_O3", "label": "Net O₃ production rate (m⁻³ s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_pss_heatmap_no_no2",
+                    "description": "Photostationary-state ozone O3_pss as a joint function of NO and NO₂ (2-D log-log sweep), surfacing the full Leighton-relationship surface O3_pss = (j_NO2/k_NO_O3)·([NO₂]/[NO]). NO ∈ [1e15, 1e18] m⁻³ and NO2 ∈ [1e15, 1e18] m⁻³ each span three decades (clean-remote to heavily-polluted). O3_pss is constant along the diagonals of constant NO₂/NO ratio: the top-left corner (high NO₂, low NO) gives the highest photostationary ozone, the bottom-right (low NO₂, high NO) the lowest. The realistic urban band sits near the NO₂/NO ≈ 1-5 diagonal.",
+                    "parameters": {"O3": 1.0e18, "O2": 5.25e24, "M": 2.5e25},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 1.0e15, "stop": 1.0e18, "count": 25, "scale": "log"}
+                            },
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 1.0e15, "stop": 1.0e18, "count": 25, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "o3_pss_heatmap",
+                            "type": "heatmap",
+                            "description": "Photostationary-state O₃ as a function of (NO, NO₂) on log-log axes. O3_pss is constant along constant-NO₂/NO diagonals; highest in the high-NO₂/low-NO corner, lowest in the low-NO₂/high-NO corner.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³, log)"},
+                            "y": {"variable": "NO2", "label": "NO₂ number density (m⁻³, log)"},
+                            "value": {"variable": "O3_pss", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
