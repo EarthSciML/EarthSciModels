@@ -1,0 +1,376 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "OzoneProductionEfficiency",
+        "description": "Ozone Production Efficiency (OPE) diagnostic from Seinfeld & Pandis (2006) Ch. 6 §6.3 Eqs. 6.21-6.24, pp. 212-219. OPE = Δ[O₃]/Δ[NOx] is the number of ozone molecules produced per molecule of NOx consumed — a central diagnostic for the NOx-VOC-O₃ regime structure of tropospheric photochemistry. This observed-only algebraic component implements three relations: gross ozone production rate P_O3 = k_HO2_NO·[HO₂]·[NO] + k_RO2_NO·[RO₂]·[NO] (the two peroxy-radical + NO channels — each peroxy+NO reaction makes an NO₂ whose photolysis yields an O₃), NOx loss rate L_NOx = k_OH_NO2·[OH]·[NO₂] (the OH + NO₂ + M → HNO₃ termination, the dominant daytime NOx sink), and OPE = P_O3 / L_NOx. High OPE (low-NOx, NOx-limited regime) means each NOx molecule cycles through many O₃-producing reactions before it is lost as nitric acid; low OPE (high-NOx, VOC-limited regime) means NOx is removed before it can drive much O₃ production. Observed-only algebraic system (no time derivatives): eight variables (five inputs OH/HO₂/RO₂/NO/NO₂ encoded as parameters, three outputs P_O3/L_NOx/OPE as state) plus three rate-constant parameters (k_HO2_NO, k_RO2_NO, k_OH_NO2) and three algebraic equations. Migrated from GasChem.jl@280ee50f src/co_oxidation.jl:183 (`OzoneProductionEfficiency` @component).",
+        "tags": [
+            "gaschem",
+            "ozone-production-efficiency",
+            "co-oxidation",
+            "nox-chemistry",
+            "tropospheric-chemistry",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-16T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-6us9)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 6 §6.3, Eqs. 6.21-6.24, pp. 212-219. Ozone Production Efficiency (OPE = ΔO₃/ΔNOx) for the CO/HOx-NOx oxidation cycle — the moles of O₃ produced per mole of NOx consumed, and its dependence on the NOx regime. Rate constants from Table B.1."
+            }
+        ]
+    },
+    "models": {
+        "OzoneProductionEfficiency": {
+            "reference": {
+                "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/co_oxidation.jl:183\n\nUpstream `OzoneProductionEfficiency` is an MTK `@component` with 8 `@variables` (5 inputs OH/HO₂/RO₂/NO/NO₂ + 3 outputs P_O3/L_NOx/OPE), 3 `@parameters` (k_HO2_NO, k_RO2_NO, k_OH_NO2), 0 `@constants`, and 3 algebraic equations from S&P §6.3 Eqs. 6.21-6.24. The upstream test compiles the system with `compile_with_inputs(sys, [:OH, :HO2, :RO2, :NO, :NO2])` and solves it as a `NonlinearProblem` with the five inputs pinned to user-supplied concentrations.\n\nVariable-classification convention: the five input @variables (OH, HO₂, RO₂, NO, NO₂) are encoded here as `type: parameter` because they have no defining equation within the OzoneProductionEfficiency component itself — they are externally-supplied inputs that the upstream compile treats via `compile_with_inputs(...)` (i.e. `mtkcompile` with `inputs=[...]`). This mirrors the rig-wide convention applied by sibling oh_production.esm (its three input @variables O₃/H₂O/M are encoded as `type: parameter`) and stefan_boltzmann.esm/typical.esm. The three output @variables (P_O3, L_NOx, OPE) are encoded as `type: state` because each has exactly one defining algebraic equation. The upstream structural test `OzoneProductionEfficiency: Structural Verification` (test/test_co_oxidation.jl:34-55) asserts `length(unknowns(sys)) == 8`, `length(equations(sys)) == 3`, and `length(parameters(sys)) == 3` — the .esm preserves this with the 8 declared variables (5 parameter + 3 state), 3 entries in `equations`, and 3 rate-constant parameter entries.\n\nRate-constant CGS→SI translation: the upstream Julia declares the three rate constants as the SI-converted CGS values via explicit multiplication by 1e-6 (the cm³/molec/s → m³/s factor for bimolecular rate coefficients):\n  k_HO2_NO = 8.1e-12 · 1.0e-6 = 8.1e-18 m³/s   (HO₂ + NO → OH + NO₂, S&P §6.3 R6.11 — the O₃-producing chain-propagation step)\n  k_RO2_NO = 8.0e-12 · 1.0e-6 = 8.0e-18 m³/s   (RO₂ + NO → RO + NO₂ — the organic-peroxy analog of HO₂+NO)\n  k_OH_NO2 = 1.0e-11 · 1.0e-6 = 1.0e-17 m³/s   (OH + NO₂ + M → HNO₃ — the dominant daytime NOx sink)\nThe .esm encodes the clean SI literals 8.1e-18, 8.0e-18, 1.0e-17 directly — matching the SI-literal convention of sibling oh_production.esm (which encodes 2.6e-17/4.0e-17/2.2e-16/6.0e-5 as literals). For k_HO2_NO the literal 8.1e-18 is bit-identical to the Julia product 8.1e-12·1.0e-6; for k_RO2_NO and k_OH_NO2 the clean literal differs from the Julia product by exactly one ULP (8.0e-12·1.0e-6 evaluates to 7.999999999999999e-18, 1.0e-11·1.0e-6 to 9.999999999999999e-18 — a ~1.1e-16 relative difference). Every inline-test expected value below is computed from the .esm's own declared literal defaults, so the file is internally exact at the rel=1e-10 inline-test tolerance regardless of that choice; the 1-ULP literal-vs-product difference is ~6 orders of magnitude below rel=1e-10 and far below the upstream tests' own rtol=0.01 acceptance bounds.\n\nObservability classification: this component is purely algebraic — every output variable is the LHS of one algebraic equation in the inputs, parameters, and (for OPE) the other two outputs. No equation contains a `D(·)` operator, so the `(t)` time index has no role and the trajectory is constant in time. Test and example scenarios use `time_span: [0.0, 1.0]` and sample at t=0, mirroring the convention used by sibling observed-only ESM files (oh_production.esm, gwp.esm, photon_energy.esm).\n\nEquation cascade: the three equations form a topologically-ordered cascade — P_O3 and L_NOx depend only on inputs/parameters; OPE depends on P_O3 and L_NOx. OPE's equation is written `OPE ~ P_O3 / L_NOx` (referencing the two output variables) rather than fully inlined — this preserves the upstream symbolic structure (OPE = P(O₃)/L(NOx) as S&P writes it in §6.3) instead of the fully-expanded OPE = NO·(k_HO2_NO·HO₂ + k_RO2_NO·RO₂)/(k_OH_NO2·OH·NO₂), mirroring the gwp.esm / oh_production.esm cascade convention.\n\nNumerical defaults: the upstream input @variables carry no defaults — the .esm defaults are taken from the canonical upstream test scenario `OzoneProductionEfficiency: OPE Calculation` (test/test_co_oxidation.jl:233-237), all in SI m⁻³:\n  OH  = 1.0e12 m⁻³  (~1e6 molec/cm³, typical daytime tropospheric OH)\n  HO₂ = 1.0e14 m⁻³  (~1e8 molec/cm³, typical daytime HO₂)\n  RO₂ = 1.0e14 m⁻³  (lumped organic peroxy radical, comparable to HO₂)\n  NO  = 2.5e15 m⁻³  (~0.1 ppb at STP air number density 2.5e25 m⁻³)\n  NO₂ = 2.5e16 m⁻³  (~1 ppb at STP)\nAt these defaults: P_O3 = 4.025e12 m⁻³·s⁻¹, L_NOx = 2.5e11 m⁻³·s⁻¹, OPE = 16.1 (≈ 16 O₃ molecules produced per NOx molecule consumed).\n\nUpstream test reproduction:\n- `OzoneProductionEfficiency: Structural Verification` (test_co_oxidation.jl:34-55) — reproduced by the .esm structural shape (8 variables = 5 parameter + 3 state, 3 equations, 3 rate-constant parameters).\n- `OzoneProductionEfficiency: Rate Constants` (test_co_oxidation.jl:213-224, asserts the k_HO2_NO/k_RO2_NO/k_OH_NO2 defaults) — reproduced implicitly by the declared rate-constant defaults; `upstream_ope_calculation_defaults` pins P_O3/L_NOx, which are computed from all three rate constants, so any wrong default shifts a pinned value.\n- `OzoneProductionEfficiency: OPE Calculation` (test_co_oxidation.jl:229-267, upstream rtol=0.01 on P_O3≈4.025e12 / L_NOx≈2.5e11 / OPE≈16.1) — reproduced and tightened by `upstream_ope_calculation_defaults` at rel=1e-10.\n- `OzoneProductionEfficiency: High NOx - Low OPE` (test_co_oxidation.jl:305-332, upstream asserts OPE invariant to the absolute NOx level at fixed NO/NO₂ ratio, rtol=1e-6) — reproduced by `upstream_high_nox_low_ope_low_nox` and `upstream_high_nox_low_ope_high_nox`, which pin both endpoints at rel=1e-10 (the two pinned OPE values agree to one ULP, making the invariance structural rather than approximate).\nThe remaining tests extend coverage beyond the upstream suite: channel isolation (zero_ro2 / zero_ho2), the NO→0 boundary, single-input scaling (OH, NO, NO₂), and the NOx-limited / VOC-limited / VOC-rich regimes.\n\nTolerance rationale (model-level rel=1.0e-10 / abs=1.0e-12): the three algebraic equations are small expression trees — P_O3 is two 3-factor products plus one addition (≈7 IEEE-754 ops), L_NOx is one 3-factor product (2 ops), OPE is one division (1 op). Each output is correctly-rounded to within ~1-3 ULP ≈ 1e-15 relative; rel=1e-10 leaves ~5 orders of magnitude of headroom and is far tighter than the upstream rtol=0.01. The abs=1.0e-12 floor handles the NO=0 boundary case (P_O3 and OPE collapse to exact IEEE-754 zero), gating the stuck-at-non-zero failure mode. Matches sibling observed-only ESM tolerance: oh_production.esm rel=1e-10/abs=1e-12, gwp.esm rel=1e-10.\n\nUnit balance (verified): all three equations balance dimensionally.\n  P_O3  `k_HO2_NO·HO₂·NO + k_RO2_NO·RO₂·NO`: (m³/s)·(m⁻³)·(m⁻³) = m⁻³·s⁻¹ ✓\n  L_NOx `k_OH_NO2·OH·NO₂`: (m³/s)·(m⁻³)·(m⁻³) = m⁻³·s⁻¹ ✓\n  OPE   `P_O3 / L_NOx`: (m⁻³·s⁻¹)/(m⁻³·s⁻¹) = dimensionless ✓\nAll concentrations in SI m⁻³, rate constants in SI m³/s, production/loss rates in m⁻³·s⁻¹, OPE dimensionless. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-10,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "k_HO2_NO": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8.1e-18,
+                    "description": "HO₂ + NO → OH + NO₂ rate constant (S&P §6.3 R6.11, Table B.1, 298 K). The upstream default 8.1e-18 m³/s is the SI-converted form of the CGS value 8.1e-12 cm³/molec/s. This is the O₃-producing chain-propagation step of the HOx cycle: it regenerates OH (sustaining the catalytic cycle) and converts NO to NO₂, whose subsequent photolysis (NO₂ + hν → NO + O, O + O₂ + M → O₃ + M) yields one O₃ molecule. Together with k_RO2_NO it sets the gross O₃ production rate P_O3."
+                },
+                "k_RO2_NO": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 8.0e-18,
+                    "description": "RO₂ + NO → RO + NO₂ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 8.0e-18 m³/s is the SI-converted form of the CGS value 8.0e-12 cm³/molec/s — the organic-peroxy-radical analog of the HO₂ + NO reaction, with a nearly identical rate coefficient. Each RO₂ + NO event also produces an NO₂ and hence (after photolysis) an O₃, so the RO₂ channel adds to gross O₃ production alongside the HO₂ channel. The clean literal 8.0e-18 differs from the upstream Julia product 8.0e-12·1.0e-6 = 7.999999999999999e-18 by exactly one ULP (see model reference notes)."
+                },
+                "k_OH_NO2": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.0e-17,
+                    "description": "OH + NO₂ + M → HNO₃ rate constant (S&P §6.3, Table B.1, 298 K). The upstream default 1.0e-17 m³/s is the SI-converted form of the CGS value 1.0e-11 cm³/molec/s. This termolecular reaction is the dominant daytime NOx sink: it removes both an OH radical and an NO₂ molecule, terminating the HOx chain and permanently converting reactive NOx into nitric acid. It is the sole term in the NOx loss rate L_NOx and hence the denominator of OPE. The clean literal 1.0e-17 differs from the upstream Julia product 1.0e-11·1.0e-6 = 9.999999999999999e-18 by exactly one ULP (see model reference notes)."
+                },
+                "OH": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e12,
+                    "description": "Hydroxyl radical number density [m⁻³] (externally-supplied input from the coupled HOx chemistry). The default 1.0e12 m⁻³ ≈ 1e6 molec/cm³ is the typical daytime tropospheric OH concentration and matches the upstream test scenario `OzoneProductionEfficiency: OPE Calculation` (test_co_oxidation.jl:233). OH appears only in the NOx loss term L_NOx = k_OH_NO2·OH·NO₂ — a higher OH concentration accelerates the OH+NO₂→HNO₃ NOx sink and therefore lowers OPE. Encoded as `type: parameter` (not `type: state`) because OzoneProductionEfficiency has no governing equation for OH — it is purely an input, set via `parameter_overrides` in tests and `parameters`/`parameter_sweep` in examples."
+                },
+                "HO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e14,
+                    "description": "Hydroperoxyl radical number density [m⁻³] (externally-supplied input). The default 1.0e14 m⁻³ ≈ 1e8 molec/cm³ is the typical daytime tropospheric HO₂ concentration and matches the upstream test scenario. HO₂ drives one of the two gross-O₃-production channels via k_HO2_NO·HO₂·NO. Encoded as `type: parameter` (externally-supplied input with no governing equation in this component)."
+                },
+                "RO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e14,
+                    "description": "Organic peroxy radical (lumped RO₂) number density [m⁻³] (externally-supplied input). The default 1.0e14 m⁻³ is comparable to HO₂, representing a moderately VOC-influenced air mass; it matches the upstream test scenario. RO₂ drives the second gross-O₃-production channel via k_RO2_NO·RO₂·NO. Setting RO₂=0 recovers the pure CO-oxidation case (the upstream documentation's Figure 6.3 reproduction uses RO₂=0, since the CO mechanism has no organic peroxy radicals — see docs/src/co_oxidation.md:138). Encoded as `type: parameter`."
+                },
+                "NO": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e15,
+                    "description": "Nitric oxide number density [m⁻³] (externally-supplied input). The default 2.5e15 m⁻³ ≈ 0.1 ppb at STP air number density (2.5e25 m⁻³) and matches the upstream test scenario. NO is a factor in both P_O3 channels (k_HO2_NO·HO₂·NO and k_RO2_NO·RO₂·NO), so P_O3 — and hence OPE — is exactly linear in NO. Encoded as `type: parameter`."
+                },
+                "NO2": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 2.5e16,
+                    "description": "Nitrogen dioxide number density [m⁻³] (externally-supplied input). The default 2.5e16 m⁻³ ≈ 1 ppb at STP and matches the upstream test scenario (NO/NO₂ ratio 0.1, the canonical daytime photostationary partitioning). NO₂ is the sole NOx-dependent factor in the loss term L_NOx = k_OH_NO2·OH·NO₂; OPE is therefore inversely proportional to NO₂. Encoded as `type: parameter`."
+                },
+                "P_O3": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "Gross ozone production rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.21-6.24). Sum of the two peroxy-radical + NO channels: P_O3 = k_HO2_NO·HO₂·NO + k_RO2_NO·RO₂·NO. Each peroxy radical + NO reaction converts an NO to an NO₂; the NO₂ then photolyzes and the liberated O atom forms O₃ — so P_O3 counts the O₃ molecules produced per unit volume per unit time. At the default scenario P_O3 ≈ 4.03e12 m⁻³·s⁻¹ (2.025e12 from the HO₂ channel + 2.0e12 from the RO₂ channel). Linear in NO and in each of HO₂, RO₂."
+                },
+                "L_NOx": {
+                    "type": "state",
+                    "units": "m^-3*s^-1",
+                    "description": "NOx loss rate [m⁻³·s⁻¹] (S&P §6.3, Eqs. 6.21-6.24). The rate at which reactive nitrogen is permanently removed from the catalytic cycle, dominated by the OH + NO₂ + M → HNO₃ termination: L_NOx = k_OH_NO2·OH·NO₂. At the default scenario L_NOx ≈ 2.5e11 m⁻³·s⁻¹. Linear in OH and in NO₂; independent of NO, HO₂, RO₂."
+                },
+                "OPE": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Ozone Production Efficiency [dimensionless] (S&P §6.3, Eqs. 6.21-6.24): OPE = P_O3 / L_NOx — the number of O₃ molecules produced per NOx molecule consumed. At the default scenario OPE ≈ 16.1. High OPE characterizes the low-NOx / NOx-limited regime (NOx termination by OH+NO₂ is suppressed, so each NOx molecule drives many O₃-production cycles before being lost as HNO₃ — the left edge of S&P Figure 6.3); low OPE characterizes the high-NOx / VOC-limited regime (NOx is removed before it can drive much O₃ production — the right edge of Figure 6.3). Because P_O3 ∝ NO and L_NOx ∝ NO₂, OPE is proportional to the NO/NO₂ ratio and independent of the absolute NOx level at fixed partitioning."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "P_O3",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {"op": "*", "args": ["k_HO2_NO", "HO2", "NO"]},
+                            {"op": "*", "args": ["k_RO2_NO", "RO2", "NO"]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "L_NOx",
+                    "rhs": {"op": "*", "args": ["k_OH_NO2", "OH", "NO2"]}
+                },
+                {
+                    "lhs": "OPE",
+                    "rhs": {"op": "/", "args": ["P_O3", "L_NOx"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_ope_calculation_defaults",
+                    "description": "Reproduces and tightens the upstream `OzoneProductionEfficiency: OPE Calculation` test (GasChem.jl test/test_co_oxidation.jl:229-267). At the canonical scenario OH=1e12, HO₂=1e14, RO₂=1e14, NO=2.5e15 (~0.1 ppb), NO₂=2.5e16 (~1 ppb) — every input and rate constant at its declared default — the upstream asserts P_O3 ≈ 4.025e12, L_NOx ≈ 2.5e11, OPE ≈ 16.1 (each at rtol=0.01) and OPE > 1. This test pins the exact IEEE-754 values P_O3=4025000000000.0, L_NOx=250000000000.00003, OPE=16.099999999999998 at rel=1e-10 — 8 orders of magnitude tighter than upstream. Because nothing is overridden, this test also implicitly reproduces the upstream `OzoneProductionEfficiency: Rate Constants` test (test_co_oxidation.jl:213-224, which checks the k_HO2_NO/k_RO2_NO/k_OH_NO2 defaults): any wrong rate-constant or input default would shift P_O3 or L_NOx off its pinned value.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 4025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 16.099999999999998}
+                    ]
+                },
+                {
+                    "id": "upstream_high_nox_low_ope_low_nox",
+                    "description": "Low-NOx endpoint of the upstream `OzoneProductionEfficiency: High NOx - Low OPE` test (GasChem.jl test/test_co_oxidation.jl:305-332). NO=2.5e14, NO₂=5.0e14 (NO/NO₂ ratio 0.5), radicals at defaults. Pins P_O3=402500000000.0, L_NOx=5000000000.0, OPE=80.5 at rel=1e-10. Pairs with `upstream_high_nox_low_ope_high_nox` to reproduce the upstream invariance assertion OPE(low NOx) ≈ OPE(high NOx) at rtol=1e-6: OPE depends only on the NO/NO₂ ratio (and the radical concentrations), not on the absolute NOx level, because scaling NO and NO₂ together by the same factor scales P_O3 and L_NOx by that factor and leaves their ratio unchanged.",
+                    "parameter_overrides": {"NO": 2.5e14, "NO2": 5.0e14},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 402500000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 5000000000.0},
+                        {"variable": "OPE", "time": 0.0, "expected": 80.5}
+                    ]
+                },
+                {
+                    "id": "upstream_high_nox_low_ope_high_nox",
+                    "description": "High-NOx endpoint of the upstream `OzoneProductionEfficiency: High NOx - Low OPE` test (test_co_oxidation.jl:305-332). NO=2.5e16, NO₂=5.0e16 — 100× the low-NOx endpoint at the same NO/NO₂=0.5 ratio. Pins P_O3=40250000000000.0, L_NOx=500000000000.00006, OPE=80.49999999999999 at rel=1e-10. The pinned OPE matches the low-NOx endpoint's 80.5 to a relative difference of 1.8e-16 (one ULP) — reproducing the upstream rtol=1e-6 NOx-level-invariance assertion as a structural identity rather than an approximate bound.",
+                    "parameter_overrides": {"NO": 2.5e16, "NO2": 5.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 40250000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 500000000000.00006},
+                        {"variable": "OPE", "time": 0.0, "expected": 80.49999999999999}
+                    ]
+                },
+                {
+                    "id": "zero_no_collapses_o3_production",
+                    "description": "Boundary case NO=0 → P_O3=0 and OPE=0 exactly: with no NO neither the HO₂+NO nor the RO₂+NO channel produces any NO₂, so no O₃ is made. L_NOx = k_OH_NO2·OH·NO₂ is unaffected (it has no NO dependence) and stays at the default 2.5e11. The zero-valued P_O3 and OPE assertions use abs=1e-12 to gate the stuck-at-non-zero failure mode (a regression adding an NO-independent bias term to P_O3); L_NOx is pinned at the model rel=1e-10. Physically the NO→0 limit is the fully NO-titrated nighttime / fresh-plume-edge condition.",
+                    "parameter_overrides": {"NO": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                    ]
+                },
+                {
+                    "id": "zero_ro2_ho2_channel_only",
+                    "description": "RO₂=0 isolates the HO₂+NO channel of gross O₃ production: P_O3 = k_HO2_NO·HO₂·NO only. Pins P_O3=2025000000000.0, L_NOx=250000000000.00003, OPE=8.1 at rel=1e-10. This is the condition used in the upstream documentation's S&P Figure 6.3 reproduction (docs/src/co_oxidation.md:138 sets RO₂=0, because the CO-oxidation mechanism has no organic peroxy radicals). Together with `zero_ho2_ro2_channel_only` it verifies the two P_O3 channels are independently wired — a regression collapsing both into a single term would break exactly one of the two tests.",
+                    "parameter_overrides": {"RO2": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 2025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 8.1}
+                    ]
+                },
+                {
+                    "id": "zero_ho2_ro2_channel_only",
+                    "description": "HO₂=0 isolates the RO₂+NO channel: P_O3 = k_RO2_NO·RO₂·NO only. Pins P_O3=2000000000000.0, L_NOx=250000000000.00003, OPE=7.999999999999999 at rel=1e-10. Paired with `zero_ro2_ho2_channel_only`: the two channel-isolation tests sum to the default-scenario P_O3 (2.025e12 + 2.0e12 = 4.025e12), confirming P_O3 is the linear sum of the HO₂ and RO₂ peroxy-radical contributions.",
+                    "parameter_overrides": {"HO2": 0.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 2000000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 7.999999999999999}
+                    ]
+                },
+                {
+                    "id": "oh_tripled_thirds_ope",
+                    "description": "OH tripled to 3.0e12 m⁻³ (3× default). L_NOx = k_OH_NO2·OH·NO₂ scales linearly with OH → L_NOx triples to 7.5e11; P_O3 is unaffected (it has no OH dependence) → OPE falls to one third, 5.366666666666666. Verifies the inverse-OH dependence of OPE: more OH radicals accelerate the OH+NO₂→HNO₃ NOx sink, removing NOx faster and lowering the O₃-per-NOx yield.",
+                    "parameter_overrides": {"OH": 3.0e12},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 4025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 750000000000.0},
+                        {"variable": "OPE", "time": 0.0, "expected": 5.366666666666666}
+                    ]
+                },
+                {
+                    "id": "no2_doubled_halves_ope",
+                    "description": "NO₂ doubled to 5.0e16 m⁻³ (2× default). L_NOx = k_OH_NO2·OH·NO₂ doubles to 5.0e11; P_O3 is unaffected → OPE halves to 8.049999999999999. This is the within-component analog of the high-NOx end of S&P Figure 6.3: raising the NO₂ available for the OH+NO₂→HNO₃ termination shortens the effective HOx/NOx chain and suppresses ozone production efficiency.",
+                    "parameter_overrides": {"NO2": 5.0e16},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 4025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 500000000000.00006},
+                        {"variable": "OPE", "time": 0.0, "expected": 8.049999999999999}
+                    ]
+                },
+                {
+                    "id": "no_doubled_doubles_ope",
+                    "description": "NO doubled to 5.0e15 m⁻³ (2× default). Both P_O3 channels are linear in NO → P_O3 doubles to 8.05e12; L_NOx is unaffected (no NO dependence) → OPE doubles to 32.199999999999996. Verifies the linear-in-NO scaling of both P_O3 and OPE — each additional NO molecule drives one more peroxy+NO→NO₂ O₃-producing reaction.",
+                    "parameter_overrides": {"NO": 5.0e15},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 8050000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 32.199999999999996}
+                    ]
+                },
+                {
+                    "id": "ro2_dominated_voc_rich_regime",
+                    "description": "VOC-rich regime: RO₂ raised to 1.0e15 and HO₂ lowered to 1.0e13 (an order of magnitude each way from the 1e14 default), modeling an environment where organic peroxy radicals dominate the radical pool. The RO₂ channel now dominates gross O₃ production → P_O3=20202500000000.0 (20.0e12 from RO₂ + 0.2025e12 from HO₂), OPE=80.80999999999999. Exercises a simultaneous two-input perturbation to catch cross-wiring between the HO₂ and RO₂ slots of P_O3.",
+                    "parameter_overrides": {"RO2": 1.0e15, "HO2": 1.0e13},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 20202500000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 250000000000.00003},
+                        {"variable": "OPE", "time": 0.0, "expected": 80.80999999999999}
+                    ]
+                },
+                {
+                    "id": "nox_limited_low_no2_high_ope",
+                    "description": "NOx-limited regime: NO₂ lowered to 2.5e15 m⁻³ (one tenth of default). L_NOx drops 10× to 2.5e10 → OPE rises 10× to 160.99999999999997. The low-NOx / NOx-limited end of the O₃-NOx-VOC regime diagram, where NOx termination by OH+NO₂ is suppressed and each NOx molecule participates in many O₃-production cycles (high OPE) — the regime S&P Figure 6.3 shows at its left edge.",
+                    "parameter_overrides": {"NO2": 2.5e15},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 4025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 25000000000.000004},
+                        {"variable": "OPE", "time": 0.0, "expected": 160.99999999999997}
+                    ]
+                },
+                {
+                    "id": "voc_limited_high_no2_low_ope",
+                    "description": "VOC-limited regime: NO₂ raised to 2.5e17 m⁻³ (10× default). L_NOx rises 10× to 2.5e12 → OPE falls 10× to 1.61. The high-NOx / VOC-limited end of the regime diagram, where the OH+NO₂→HNO₃ reaction removes NOx before it can drive much O₃ production (low OPE) — the right edge of S&P Figure 6.3, where OPE approaches zero.",
+                    "parameter_overrides": {"NO2": 2.5e17},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "P_O3", "time": 0.0, "expected": 4025000000000.0},
+                        {"variable": "L_NOx", "time": 0.0, "expected": 2500000000000.0},
+                        {"variable": "OPE", "time": 0.0, "expected": 1.61}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ope_vs_no2_nox_loss_sweep",
+                    "description": "Ozone Production Efficiency and NOx loss rate as functions of NO₂, swept logarithmically from 5e15 to 2.5e17 m⁻³ (~0.2 to ~10 ppb at STP) with all other inputs at their defaults (OH=1e12, HO₂=1e14, RO₂=1e14, NO=2.5e15). As NO₂ rises, the OH+NO₂→HNO₃ termination accelerates: L_NOx grows linearly with NO₂ while gross O₃ production P_O3 is unchanged, so OPE falls as 1/NO₂. This is the within-component analog of the high-NOx branch of S&P Figure 6.3 (docs/src/co_oxidation.md) — the full Figure 6.3 additionally couples the HO₂/OH radical concentrations to NOx through a quadratic HOx-balance solve that is upstream of this diagnostic component.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 5.0e15, "stop": 2.5e17, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ope_vs_no2",
+                            "type": "line",
+                            "description": "OPE vs NO₂ number density on log-log axes. Monotonically falling curve (OPE ∝ 1/NO₂): higher NO₂ accelerates NOx termination by OH+NO₂→HNO₃, lowering the O₃-per-NOx yield from ~80 at NO₂=5e15 toward ~1.6 at NO₂=2.5e17.",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³)"},
+                            "y": {"variable": "OPE", "label": "Ozone Production Efficiency (dimensionless)"}
+                        },
+                        {
+                            "id": "l_nox_vs_no2",
+                            "type": "line",
+                            "description": "NOx loss rate L_NOx vs NO₂ number density. Straight line through the origin (L_NOx = k_OH_NO2·OH·NO₂ is exactly linear in NO₂) — the rising NOx sink that drives the OPE decline.",
+                            "x": {"variable": "NO2", "label": "NO₂ number density (m⁻³)"},
+                            "y": {"variable": "L_NOx", "label": "NOx loss rate L_NOx (m⁻³·s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "ope_vs_no_o3_production_sweep",
+                    "description": "Gross O₃ production rate and OPE as functions of NO, swept logarithmically from 2.5e14 to 2.5e16 m⁻³ (~0.01 to ~1 ppb at STP) with all other inputs at their defaults. Both peroxy + NO channels (HO₂+NO and RO₂+NO) are linear in NO, so P_O3 and OPE both rise linearly with NO — each added NO molecule converts one more peroxy radical to NO₂ and hence, after photolysis, one more O₃.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 2.5e14, "stop": 2.5e16, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "p_o3_vs_no",
+                            "type": "line",
+                            "description": "Gross O₃ production rate P_O3 vs NO number density. Straight line through the origin (P_O3 = NO·(k_HO2_NO·HO₂ + k_RO2_NO·RO₂) is exactly linear in NO).",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³)"},
+                            "y": {"variable": "P_O3", "label": "Gross O₃ production rate P_O3 (m⁻³·s⁻¹)"}
+                        },
+                        {
+                            "id": "ope_vs_no",
+                            "type": "line",
+                            "description": "OPE vs NO number density. Linear rise — at fixed NO₂ the NOx loss rate is constant, so OPE inherits the exact NO-linearity of P_O3, climbing from ~1.6 at NO=2.5e14 to ~161 at NO=2.5e16.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³)"},
+                            "y": {"variable": "OPE", "label": "Ozone Production Efficiency (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "ope_vs_oh_radical_sweep",
+                    "description": "Ozone Production Efficiency and NOx loss rate as functions of the OH radical concentration, swept logarithmically from 1e11 to 1e13 m⁻³ with all other inputs at their defaults. Higher OH accelerates the OH+NO₂→HNO₃ NOx sink (L_NOx ∝ OH) while leaving gross O₃ production unchanged, so OPE falls as 1/OH. Illustrates that a more oxidizing (higher-OH) atmosphere converts NOx to nitric acid faster and therefore extracts fewer O₃ molecules per NOx molecule consumed.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "OH",
+                                "range": {"start": 1.0e11, "stop": 1.0e13, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ope_vs_oh",
+                            "type": "line",
+                            "description": "OPE vs OH number density on log-log axes. Monotonically falling curve (OPE ∝ 1/OH) — the more-oxidizing atmosphere drains NOx into HNO₃ faster, dropping OPE from ~161 at OH=1e11 to ~1.6 at OH=1e13.",
+                            "x": {"variable": "OH", "label": "OH number density (m⁻³)"},
+                            "y": {"variable": "OPE", "label": "Ozone Production Efficiency (dimensionless)"}
+                        },
+                        {
+                            "id": "l_nox_vs_oh",
+                            "type": "line",
+                            "description": "NOx loss rate L_NOx vs OH number density. Straight line through the origin (L_NOx = k_OH_NO2·OH·NO₂ is exactly linear in OH) — the rising NOx sink behind the OPE decline.",
+                            "x": {"variable": "OH", "label": "OH number density (m⁻³)"},
+                            "y": {"variable": "L_NOx", "label": "NOx loss rate L_NOx (m⁻³·s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "ope_heatmap_no_no2_regime",
+                    "description": "OPE as a joint function of NO and NO₂ (2-D log-log sweep), surfacing the NOx-partitioning regime structure that underlies S&P Figure 6.3. NO ∈ [2.5e14, 2.5e16] m⁻³ × NO₂ ∈ [2.5e15, 2.5e17] m⁻³, with OH/HO₂/RO₂ at their defaults. Because OPE = NO·(k_HO2_NO·HO₂ + k_RO2_NO·RO₂)/(k_OH_NO2·OH·NO₂) is proportional to the NO/NO₂ ratio, the iso-OPE contours are straight lines of constant NO/NO₂: the high-OPE corner (high NO, low NO₂) is the NOx-limited regime, the low-OPE corner (low NO, high NO₂) is the VOC-limited regime.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "NO",
+                                "range": {"start": 2.5e14, "stop": 2.5e16, "count": 25, "scale": "log"}
+                            },
+                            {
+                                "parameter": "NO2",
+                                "range": {"start": 2.5e15, "stop": 2.5e17, "count": 20, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ope_heatmap_no_no2",
+                            "type": "heatmap",
+                            "description": "OPE as a function of (NO, NO₂) on log-log axes. The iso-OPE contours run diagonally as lines of constant NO/NO₂ ratio: the upper-left region (low NO, high NO₂) is the low-OPE VOC-limited regime, the lower-right region (high NO, low NO₂) is the high-OPE NOx-limited regime.",
+                            "x": {"variable": "NO", "label": "NO number density (m⁻³, log)"},
+                            "y": {"variable": "NO2", "label": "NO₂ number density (m⁻³, log)"},
+                            "value": {"variable": "OPE", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
