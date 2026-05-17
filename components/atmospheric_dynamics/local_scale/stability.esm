@@ -1,0 +1,362 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AtmosphericStability",
+        "description": "Atmospheric static-stability diagnostics from Seinfeld & Pandis (2006) Ch. 16 (Meteorology of the Local Scale). Given the air temperature T and pressure p at a height z, the air temperature T_below one layer below, and the layer spacing delta_z, the component computes the potential temperature theta = T*(p_0/p)^(R_air/c_p) (Eq. 16.14), the actual temperature lapse rate dT_dz = (T - T_below)/delta_z, the potential-temperature gradient dtheta_dz = dT_dz + Gamma_d (Eqs. 16.16-16.18), and the static-stability parameter S = dtheta_dz: S > 0 stable, S = 0 neutral, S < 0 unstable. Four purely-algebraic equations, no time integration. Migrated from AtmosphericDynamics.jl@816cc391 src/local_scale_meteorology.jl:32 (`AtmosphericStability` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "boundary-layer",
+            "potential-temperature",
+            "static-stability",
+            "lapse-rate",
+            "observed-only",
+            "ch16"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-yrni)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 16 (Meteorology of the Local Scale), pp. 720-760 — Eq. 16.8 (dry adiabatic lapse rate Gamma = g/c_p), Eq. 16.14 (potential temperature theta = T*(p_0/p)^(R/c_p)), Eqs. 16.16-16.18 (static stability from the potential-temperature gradient). ISBN 978-0-471-72018-8."
+            }
+        ]
+    },
+    "models": {
+        "AtmosphericStability": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/local_scale_meteorology.jl:32\n\nUpstream `AtmosphericStability` is an MTK `@component` implementing the atmospheric static-stability diagnostics of Seinfeld & Pandis (2006) Ch. 16 (Meteorology of the Local Scale, pp. 720-760): the potential temperature (Eq. 16.14), the dry adiabatic lapse rate (Eq. 16.8), and the static-stability classification from the potential-temperature gradient (Eqs. 16.16-16.18). It declares 5 `@constants` (g, c_p, R_air, p_0, Gamma_d), 4 `@parameters` (T, T_below, p, delta_z), 4 `@variables` (theta, dT_dz, dtheta_dz, S) and 4 equations, returning `System(eqs, t)`.\n\nSystem kind: all 4 equations are explicit algebraic assignments (theta ~ ..., dT_dz ~ ..., dtheta_dz ~ ..., S ~ ...) with no `D(.)` operator — each output is a closed-form expression of the inputs, with no implicit or coupled solve. `system_kind` is therefore left unset (default 'ode'): the four equations resolve to observed quantities and the compiled system has zero differential states, exactly as for the sibling explicit-algebraic AtmosphericDynamics components atmospheric_diffusion.esm, ideal_gas.esm and scale_height.esm. This is deliberately NOT the blocked `system_kind: nonlinear` class — AtmosphericStability needs no implicit Newton solve, which is why docs/migration-tracker.md marks it `blocking_gap: none`.\n\nVariable classification. (1) T, T_below, p, delta_z: upstream MTK `@parameters` — the external inputs — encoded `type: parameter` with their upstream defaults. (2) theta, dT_dz, dtheta_dz, S: upstream `@variables`, each the LHS of exactly one purely-algebraic equation — observed algebraic outputs with no time derivative and hence no initial condition — encoded `type: state` with no `default` (the convention of u_wind/K_zz/K_yy in sibling atmospheric_diffusion.esm and H in scale_height.esm). (3) c_p, R_air, p_0, Gamma_d: upstream MTK `@constants`; the ESS schema has no `constant` variable type, so each is encoded `type: parameter` carrying its upstream value as `default` — the same treatment scale_height.esm applies to its upstream @constants R/M_air/g and atmospheric_diffusion.esm to kappa/Kzz_zero.\n\nOmitted constant `g`. Upstream declares a fifth `@constant` g = 9.807 m/s^2 (gravitational acceleration), but no equation references it — the dry adiabatic lapse rate is supplied directly as the constant Gamma_d = 9.76e-3 K/m rather than computed as g/c_p. An unreferenced MTK `@constant` is excluded from the built `System` (the upstream `AtmosphericStability structure` testitem checks `parameters(sys)` is exactly {T, T_below, p, delta_z} and never mentions g). The migration represents the compiled system, so g is omitted; the conceptual identity Gamma_d ~ g/c_p (Eq. 16.8: 9.807/1005 = 9.76 K/km) is recorded here and in the Gamma_d variable description.\n\nkappa_exp local. Upstream binds a plain Julia local `kappa_exp = R_air / c_p` (~ 0.286, the Poisson exponent R/cp) and uses it as the exponent of Eq. 16.14. It is not an MTK variable — MTK inlines it into the theta equation when `System(eqs, t)` is built. The .esm mirrors this: equation 1's exponent is the sub-expression `R_air / c_p`, keeping both constants as named parameters (so the physics stays visible and overridable) exactly as the upstream symbolic tree carries `R_air/c_p`.\n\nASCII identifier renaming. The upstream uses Unicode identifiers; this migration renames them to ASCII for consistency with the sibling AtmosphericDynamics .esm files (atmospheric_diffusion.esm renamed the von Karman kappa likewise): upstream `c-circumflex_p` -> `c_p`, `p-subscript-0` -> `p_0`, `Gamma_d` -> `Gamma_d`, `theta` -> `theta`, `dtheta_dz` -> `dtheta_dz`, `Delta-z` -> `delta_z`. The already-ASCII upstream names T, T_below, p, dT_dz, S, R_air are carried verbatim. R_air is the dry-air specific gas constant R*/M_air in J/(kg*K) (not the universal gas constant); it is named R_air rather than the schema-reserved bare name R, which is correct since it is dimensionally J/(kg*K), not J/(mol*K).\n\nEquation faithfulness. The 4 upstream equations (src/local_scale_meteorology.jl:59-72) are preserved verbatim: theta ~ T*(p_0/p)^(R_air/c_p) (Eq. 16.14); dT_dz ~ (T - T_below)/delta_z (the finite-difference actual lapse rate); dtheta_dz ~ dT_dz + Gamma_d (Eqs. 16.16-16.18, the linearized potential-temperature gradient valid for small layer thickness); S ~ dtheta_dz (the static-stability parameter). The S ~ dtheta_dz equation is a trivial pass-through copy; it is kept as a distinct equation/variable to preserve the upstream four-variable structure.\n\nUnits. The upstream declares T, T_below in u\"K\"; p, p_0 in u\"Pa\"; delta_z in u\"m\"; c_p, R_air in u\"J/(kg*K)\"; Gamma_d, dT_dz, dtheta_dz, S in u\"K/m\"; theta in u\"K\". All are SI-coherent and carried verbatim; no unit conversion is applied at migration time. Unit balance (verified): theta ~ T*(p_0/p)^(R_air/c_p) is K*(Pa/Pa)^(dimensionless) = K; dT_dz ~ (K - K)/m = K/m; dtheta_dz ~ K/m + K/m = K/m; S ~ K/m. The `^` operator acts on a dimensionless base (Pa/Pa) and a dimensionless exponent (J/(kg*K) divided by J/(kg*K)), so it is well-typed.\n\nTolerance rationale (model-level rel=1.0e-6). The system is a closed-form algebraic evaluation — no ODE integration, no implicit solve — so there is no integrator error to bound; rel=1.0e-6 covers float64 round-off in the multiply/divide/power chain and matches the sibling explicit-algebraic components atmospheric_diffusion.esm / ideal_gas.esm / scale_height.esm. Three near-zero / exact-zero assertions carry a per-assertion absolute tolerance abs=1.0e-12: dT_dz = 0 in `defaults_baseline` (T = T_below), S = dtheta_dz ~ 1.79e-6 in `dry_adiabatic_neutral`, and S = dtheta_dz = 0 in `neutral_adiabatic_exact`, since a relative tolerance cannot gate a value at or near zero.\n\nTest reproduction. The 11 inline tests reproduce every AtmosphericStability scenario of test/local_scale_meteorology_test.jl: the `Dry adiabatic lapse rate` testitem (`dry_adiabatic_neutral` — T set to the upstream T_surface - (g/c_p)*delta_z; the resulting S ~ 1.79e-6 reproduces the upstream `@test S approx 0 atol=1e-5`, the residual arising because the upstream test's reference rate g/c_p = 9.7582e-3 differs slightly from the model constant Gamma_d = 9.76e-3); the `Atmospheric stability classification` testitem (`stable_atmosphere` S > 0, `unstable_atmosphere` S < 0); and the `Potential temperature` / `Physical constraints` testitems, whose theta checks (theta = T at sea level, theta > T at lower pressure, theta > 0 for cold low-pressure air) carry over since the theta equation is shared with the LocalScaleMeteorology composite (`potential_temp_sea_level_identity`, `potential_temp_850hPa`, `potential_temp_cold_low_pressure`). `defaults_baseline` exercises all four outputs at the declared defaults, covering the upstream `AtmosphericStability structure` testitem. Coverage beyond the upstream suite: `neutral_adiabatic_exact` reproduces the docs `Neutral (adiabatic)` example case (T = T_surface - Gamma_d*delta_z, S collapsing exactly to 0); `potential_temp_high_pressure` (theta < T for p > p_0); `lapse_rate_inversion` (temperature increasing with height -> strongly stable); `gradient_custom_spacing` (non-default delta_z in the finite-difference gradient). Expected values are the exact float64 results of the upstream formulas.\n\nExamples. The 2 examples reproduce the two AtmosphericStability figures of the upstream docs page (docs/src/local_scale_meteorology.md): `potential_temperature_profile` sweeps pressure p over 50000-101325 Pa at fixed T (the `Potential Temperature Profile` figure, Eq. 16.14), and `stability_classification` sweeps the upper-layer temperature T over 285.15-291.15 K at fixed T_below = 288.15 K (the `Atmospheric Stability Classification` figure — S crossing from unstable through neutral to stable as the lapse rate weakens)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 288.15,
+                    "description": "Air temperature at height z [K]. Upstream MTK @parameter. Default 288.15 K (sea-level standard atmosphere). The warmer/cooler input of the lapse-rate finite difference (paired with T_below) and the temperature carried into the potential-temperature relation (Eq. 16.14)."
+                },
+                "T_below": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 288.15,
+                    "description": "Air temperature at the height z - delta_z one layer below [K], used with T to form the finite-difference actual lapse rate dT_dz = (T - T_below)/delta_z. Upstream MTK @parameter. Default 288.15 K (equal to T, giving a zero actual lapse rate at the defaults)."
+                },
+                "p": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Air pressure at height z [Pa]. Sets the (p_0/p) compression ratio of the potential-temperature relation (Eq. 16.14): theta equals T at p = p_0 and exceeds T for p < p_0. Upstream MTK @parameter. Default 101325 Pa (sea-level standard pressure)."
+                },
+                "delta_z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 100.0,
+                    "description": "Vertical layer spacing for the finite-difference lapse-rate calculation [m] — the height difference between the z and z - delta_z levels. Upstream MTK @parameter (Unicode Delta-z, renamed to ASCII). Default 100 m."
+                },
+                "c_p": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 1005.0,
+                    "description": "Specific heat of dry air at constant pressure [J/(kg*K)]. Default 1005. Appears in the Poisson exponent R_air/c_p of the potential-temperature relation (Eq. 16.14). Upstream MTK @constant (Unicode c-circumflex_p, renamed to ASCII); encoded type: parameter because the ESS schema has no constant variable type."
+                },
+                "R_air": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 287.0,
+                    "description": "Specific gas constant for dry air [J/(kg*K)] — the universal gas constant divided by the molar mass of dry air. Default 287. Appears in the Poisson exponent R_air/c_p (~ 0.286) of the potential-temperature relation (Eq. 16.14). Upstream MTK @constant; encoded type: parameter because the ESS schema has no constant variable type. Named R_air (not the schema-reserved bare name R) — it is the dry-air specific gas constant in J/(kg*K), not the universal gas constant in J/(mol*K)."
+                },
+                "p_0": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Reference pressure for the potential-temperature definition [Pa] — the sea-level standard pressure to which an air parcel is notionally brought adiabatically (Eq. 16.14). Default 101325. Upstream MTK @constant (Unicode p-subscript-0, renamed to ASCII); encoded type: parameter because the ESS schema has no constant variable type."
+                },
+                "Gamma_d": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.00976,
+                    "description": "Dry adiabatic lapse rate [K/m] — the rate at which an unsaturated air parcel cools as it rises adiabatically (Seinfeld & Pandis Eq. 16.8: Gamma = g/c_p = 9.807/1005 ~ 9.76 K/km). Default 9.76e-3 K/m. Added to the actual lapse rate dT_dz to obtain the potential-temperature gradient dtheta_dz. Upstream MTK @constant (Unicode Gamma_d); encoded type: parameter because the ESS schema has no constant variable type."
+                },
+                "theta": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Potential temperature [K] (Seinfeld & Pandis Eq. 16.14) — the temperature an air parcel would have if brought adiabatically to the reference pressure p_0. An observed (algebraic) output: the LHS of exactly one purely-algebraic equation theta ~ T*(p_0/p)^(R_air/c_p), with no time derivative and hence no initial condition. Equals T at sea level (p = p_0) and exceeds T at lower pressure."
+                },
+                "dT_dz": {
+                    "type": "state",
+                    "units": "K/m",
+                    "description": "Actual temperature lapse rate [K/m] — the finite-difference vertical temperature gradient (T - T_below)/delta_z. Negative when temperature decreases with height (the usual tropospheric case). An observed (algebraic) output; the LHS of one purely-algebraic equation, no time derivative, no initial condition."
+                },
+                "dtheta_dz": {
+                    "type": "state",
+                    "units": "K/m",
+                    "description": "Potential-temperature gradient [K/m] (Seinfeld & Pandis Eqs. 16.16-16.18) — the actual lapse rate plus the dry adiabatic lapse rate, dT_dz + Gamma_d (the linearization valid for a small layer thickness). An observed (algebraic) output; the LHS of one purely-algebraic equation, no time derivative, no initial condition. Its sign is the static-stability criterion."
+                },
+                "S": {
+                    "type": "state",
+                    "units": "K/m",
+                    "description": "Static-stability parameter [K/m] — equals the potential-temperature gradient dtheta_dz. S > 0 marks a stable atmosphere (a vertically displaced parcel returns to its origin), S = 0 a neutral atmosphere (a displaced parcel stays), S < 0 an unstable atmosphere (a displaced parcel accelerates away). An observed (algebraic) output; the LHS of the pass-through equation S ~ dtheta_dz, no time derivative, no initial condition."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "theta",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "T",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": ["p_0", "p"]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": ["R_air", "c_p"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dT_dz",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": ["T", "T_below"]
+                            },
+                            "delta_z"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "dtheta_dz",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["dT_dz", "Gamma_d"]
+                    }
+                },
+                {
+                    "lhs": "S",
+                    "rhs": "dtheta_dz"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "defaults_baseline",
+                    "description": "Baseline run at the declared defaults (T = T_below = 288.15 K, p = 101325 Pa, delta_z = 100 m). Pins all four outputs at once: at sea level (p = p_0) the potential temperature theta equals T = 288.15 K; with T = T_below the actual lapse rate dT_dz is exactly zero; dtheta_dz = dT_dz + Gamma_d collapses to the dry adiabatic lapse rate Gamma_d = 9.76e-3 K/m; the stability parameter S equals dtheta_dz. Exercises every output variable, reproducing the upstream `AtmosphericStability structure` testitem.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta", "time": 0.0, "expected": 288.15 },
+                        { "variable": "dT_dz", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "dtheta_dz", "time": 0.0, "expected": 0.00976 },
+                        { "variable": "S", "time": 0.0, "expected": 0.00976 }
+                    ]
+                },
+                {
+                    "id": "potential_temp_sea_level_identity",
+                    "description": "Potential temperature at the sea-level reference pressure (p = p_0 = 101325 Pa): the compression ratio (p_0/p) is exactly 1, so theta = T*(1)^(R_air/c_p) = T independent of the exponent. Evaluated at a non-default T = 300 K to show the identity holds for arbitrary temperature. Reproduces the sea-level assertion of the upstream `Potential temperature` testitem (theta = T at p = p_0).",
+                    "parameter_overrides": {
+                        "T": 300.0,
+                        "p": 101325.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta", "time": 0.0, "expected": 300.0 }
+                    ]
+                },
+                {
+                    "id": "potential_temp_850hPa",
+                    "description": "Potential temperature at the 850 hPa level (p = 85000 Pa, T = 280 K): theta = 280*(101325/85000)^(287/1005) ~ 294.4 K. Because p < p_0 the (p_0/p) adiabatic-compression factor exceeds 1, so theta > T. Reproduces the lower-pressure assertion of the upstream `Potential temperature` testitem (theta > T at 850 hPa).",
+                    "parameter_overrides": {
+                        "T": 280.0,
+                        "p": 85000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta", "time": 0.0, "expected": 294.40591070177146 }
+                    ]
+                },
+                {
+                    "id": "potential_temp_cold_low_pressure",
+                    "description": "Potential temperature for cold air at low pressure (T = 200 K, p = 50000 Pa): theta = 200*(101325/50000)^(287/1005) ~ 244.7 K, which stays strictly positive. Reproduces the upstream `Physical constraints` testitem assertion that the potential temperature is always positive.",
+                    "parameter_overrides": {
+                        "T": 200.0,
+                        "p": 50000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta", "time": 0.0, "expected": 244.6967948244097 }
+                    ]
+                },
+                {
+                    "id": "potential_temp_high_pressure",
+                    "description": "Potential temperature above the reference pressure (p = 105000 Pa > p_0, T = 290 K): the (p_0/p) compression factor is less than 1, so theta = 290*(101325/105000)^(287/1005) ~ 287.06 K < T. Complements potential_temp_850hPa by exercising the p > p_0 branch of Eq. 16.14.",
+                    "parameter_overrides": {
+                        "T": 290.0,
+                        "p": 105000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "theta", "time": 0.0, "expected": 287.0644610907044 }
+                    ]
+                },
+                {
+                    "id": "dry_adiabatic_neutral",
+                    "description": "Dry adiabatic (neutral) atmosphere — reproduces the upstream `Dry adiabatic lapse rate` testitem. The upper temperature is set to T = T_surface - (g/c_p)*delta_z = 288.15 - (9.807/1005)*100 K, with T_below = T_surface = 288.15 K and delta_z = 100 m, so the actual lapse rate dT_dz equals -(g/c_p) ~ -9.7582e-3 K/m. The stability parameter S = dT_dz + Gamma_d ~ 1.79e-6 K/m reproduces the upstream `@test S approx 0 atol=1e-5`; the small residual arises because the upstream reference rate g/c_p = 9.7582e-3 differs slightly from the model constant Gamma_d = 9.76e-3.",
+                    "parameter_overrides": {
+                        "T": 287.1741791044776,
+                        "T_below": 288.15,
+                        "p": 101325.0,
+                        "delta_z": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": -0.009758208955223608 },
+                        { "variable": "dtheta_dz", "time": 0.0, "expected": 1.7910447763919146e-06, "tolerance": { "abs": 1.0e-12 } },
+                        { "variable": "S", "time": 0.0, "expected": 1.7910447763919146e-06, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "neutral_adiabatic_exact",
+                    "description": "Exact-neutral atmosphere — reproduces the docs `Neutral (adiabatic)` example case (docs/src/local_scale_meteorology.md), where the upper temperature is T = T_surface - Gamma_d*delta_z = 288.15 - 0.00976*100 K with T_below = 288.15 K, delta_z = 100 m. The actual lapse rate dT_dz then equals -Gamma_d, so dtheta_dz = dT_dz + Gamma_d and the stability parameter S collapse exactly to 0 (a floating-point residual below 1e-17). This is the precise neutral condition for this model, in contrast to dry_adiabatic_neutral which uses the textbook g/c_p rate.",
+                    "parameter_overrides": {
+                        "T": 287.174,
+                        "T_below": 288.15,
+                        "delta_z": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": -0.009759999999999991 },
+                        { "variable": "S", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                    ]
+                },
+                {
+                    "id": "stable_atmosphere",
+                    "description": "Stable atmosphere — reproduces the first case of the upstream `Atmospheric stability classification` testitem. The layer cools with height more slowly than the dry adiabatic rate: T = T_surface - 0.005*delta_z = 287.65 K, T_below = 288.15 K, delta_z = 100 m, giving dT_dz = -0.005 K/m. The stability parameter S = dT_dz + Gamma_d = 4.76e-3 K/m is positive, marking a stable atmosphere.",
+                    "parameter_overrides": {
+                        "T": 287.65,
+                        "T_below": 288.15,
+                        "delta_z": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": -0.005 },
+                        { "variable": "dtheta_dz", "time": 0.0, "expected": 0.0047599999999999995 },
+                        { "variable": "S", "time": 0.0, "expected": 0.0047599999999999995 }
+                    ]
+                },
+                {
+                    "id": "unstable_atmosphere",
+                    "description": "Unstable (superadiabatic) atmosphere — reproduces the second case of the upstream `Atmospheric stability classification` testitem. The layer cools with height faster than the dry adiabatic rate: T = T_surface - 0.015*delta_z = 286.65 K, T_below = 288.15 K, delta_z = 100 m, giving dT_dz = -0.015 K/m. The stability parameter S = dT_dz + Gamma_d = -5.24e-3 K/m is negative, marking an unstable atmosphere.",
+                    "parameter_overrides": {
+                        "T": 286.65,
+                        "T_below": 288.15,
+                        "delta_z": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": -0.015 },
+                        { "variable": "dtheta_dz", "time": 0.0, "expected": -0.00524 },
+                        { "variable": "S", "time": 0.0, "expected": -0.00524 }
+                    ]
+                },
+                {
+                    "id": "lapse_rate_inversion",
+                    "description": "Temperature inversion — temperature increasing with height (T = 290.15 K above T_below = 288.15 K over delta_z = 100 m) gives a positive actual lapse rate dT_dz = 0.02 K/m. The stability parameter S = dT_dz + Gamma_d = 2.976e-2 K/m is strongly positive, the very-stable regime characteristic of a surface inversion. Extends coverage beyond the upstream suite, exercising the dT_dz > 0 branch.",
+                    "parameter_overrides": {
+                        "T": 290.15,
+                        "T_below": 288.15,
+                        "delta_z": 100.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": 0.02 },
+                        { "variable": "S", "time": 0.0, "expected": 0.02976 }
+                    ]
+                },
+                {
+                    "id": "gradient_custom_spacing",
+                    "description": "Finite-difference lapse rate with a non-default layer spacing (delta_z = 50 m, T = 287 K, T_below = 288 K): dT_dz = (T - T_below)/delta_z = -1/50 = -0.02 K/m. The stability parameter S = dT_dz + Gamma_d = -1.024e-2 K/m is negative (superadiabatic, unstable). Extends coverage by exercising delta_z away from its 100 m default.",
+                    "parameter_overrides": {
+                        "T": 287.0,
+                        "T_below": 288.0,
+                        "delta_z": 50.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "dT_dz", "time": 0.0, "expected": -0.02 },
+                        { "variable": "S", "time": 0.0, "expected": -0.01024 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "potential_temperature_profile",
+                    "description": "Potential temperature profile (Seinfeld & Pandis Eq. 16.14): theta = T*(p_0/p)^(R_air/c_p) swept over pressure p from 50000 to 101325 Pa at the default temperature T = 288.15 K. Reproduces the docs `Potential Temperature Profile` figure (docs/src/local_scale_meteorology.md) — at fixed temperature the potential temperature rises as pressure falls, equalling the actual temperature at the sea-level reference pressure p_0 and exceeding it aloft where the (p_0/p) adiabatic-compression factor is greater than one.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p",
+                                "range": { "start": 50000.0, "stop": 101325.0, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "theta_vs_p",
+                            "type": "line",
+                            "description": "Potential temperature theta as a function of pressure p (Eq. 16.14).",
+                            "x": { "variable": "p", "label": "Pressure p (Pa)" },
+                            "y": { "variable": "theta", "label": "Potential temperature theta (K)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "stability_classification",
+                    "description": "Static-stability classification swept over the upper-layer temperature T from 285.15 to 291.15 K, with the lower-layer temperature held at the default T_below = 288.15 K and the layer spacing at the default delta_z = 100 m. The stability parameter S = (T - T_below)/delta_z + Gamma_d crosses from negative (unstable / superadiabatic — the layer cools with height faster than the dry adiabatic rate) through zero (neutral) to positive (stable) as the upper layer warms. Reproduces the docs `Atmospheric Stability Classification` figure (docs/src/local_scale_meteorology.md), which contrasts stable, neutral and unstable cases.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 285.15, "stop": 291.15, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_vs_T",
+                            "type": "line",
+                            "description": "Static-stability parameter S as a function of the upper-layer temperature T.",
+                            "x": { "variable": "T", "label": "Upper-layer temperature T (K)" },
+                            "y": { "variable": "S", "label": "Stability parameter S (K/m)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
