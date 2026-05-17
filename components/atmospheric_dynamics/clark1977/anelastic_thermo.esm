@@ -1,0 +1,347 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AnelasticThermodynamics",
+        "description": "Anelastic thermodynamics equation (the first law of thermodynamics) with Smagorinsky turbulent heat flux, from Clark (1977), 'A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation'. Given the base-state air density rho_bar, the eddy heat diffusivity K_H, and the potential-temperature gradients, the component computes the three turbulent heat-flux components H1, H2, H3 = rho_bar*K_H*grad(theta) (Eq. 2.19), the heat-flux divergence term div_H = -div(H), and the residual of the anelastic thermodynamic equation rho_bar*dtheta/dt = -div(H) (Eq. 2.14) — which vanishes for an energy-conserving solution. Five purely-algebraic equations, no time integration. Migrated from AtmosphericDynamics.jl@816cc391 src/clark1977.jl:426 (`AnelasticThermodynamics` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "clark-1977",
+            "mountain-wave",
+            "anelastic",
+            "thermodynamics",
+            "turbulent-heat-flux",
+            "smagorinsky",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-h9la)"
+        ],
+        "references": [
+            {
+                "citation": "Clark, T. L. (1977). A Small-Scale Dynamic Model Using a Terrain-Following Coordinate Transformation. Journal of Computational Physics, 24(2), 186-215. Equation 2.14 (anelastic thermodynamic equation, the first law of thermodynamics with turbulent heat flux) and Equation 2.19 (turbulent heat-flux components from the Smagorinsky closure, K_H = K_M)."
+            },
+            {
+                "citation": "Smagorinsky, J. (1963). General Circulation Experiments with the Primitive Equations: I. The Basic Experiment. Monthly Weather Review, 91(3), 99-164. Origin of the subgrid-scale eddy-diffusivity closure; Clark (1977) Eq. 2.19 sets the turbulent heat diffusivity K_H equal to the Smagorinsky eddy viscosity K_M."
+            }
+        ]
+    },
+    "models": {
+        "AnelasticThermodynamics": {
+            "reference": {
+                "citation": "Clark, T. L. (1977), J. Comput. Phys. 24(2), 186-215, Eqs. 2.14 and 2.19.",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/clark1977.jl:426\n\nUpstream `AnelasticThermodynamics` is an MTK `@component` returning `System(eqs, t; name)` that implements the anelastic thermodynamic equation of Clark (1977), Sec. 2: the turbulent heat-flux components (Eq. 2.19) and the residual form of the first law of thermodynamics (Eq. 2.14). It is one of the eight building-block components of the paper's full `Clark1977AnelasticSystem`. All five equations are algebraic — there is no ODE integration and no `D(.)` operator.\n\nSystem classification. MTK reports `length(unknowns(AnelasticThermodynamics())) == 5` and `length(equations(AnelasticThermodynamics())) == 5` (upstream test `AnelasticThermodynamics Structure`, test/clark1977_test.jl:232-237). The .esm preserves this exactly: 5 `type: state` variables and 5 entries in `equations`. Each of the five equations is an explicit algebraic assignment (lhs ~ closed-form expression of parameters and previously-defined outputs) with no implicit/coupled solve, so the migration leaves `system_kind` unset (default 'ode'): after `mtkcompile` the five equations resolve to observed quantities and the compiled system has zero differential states — exactly as for the sibling explicit-algebraic component atmospheric_diffusion.esm. This is deliberately NOT the `system_kind: nonlinear` class (Mogi, Isorropia): those need an implicit Newton solve with initial guesses; AnelasticThermodynamics needs none.\n\nOmitted parameter. The upstream `@parameters` block declares an air potential-temperature parameter `theta = 300.0 K` that appears in no equation (the equations use only the gradients dtheta_dt, dtheta_dx, dtheta_dy, dtheta_dz). The 2-argument `System(eqs, t)` constructor collects parameters by introspecting `eqs`, so `theta` is not part of the system — `parameters(AnelasticThermodynamics())` has exactly 9 entries (K_H, dH1_dx, dH2_dy, dH3_dz, dtheta_dt, dtheta_dx, dtheta_dy, dtheta_dz, rho_bar) and `theta` is absent. mtk2esm follows suit, so `theta` is not carried here — the same treatment general_circulation.esm applies to its unused upstream parameter `p`.\n\nVariable classification. (1) H1, H2, H3, div_H, thermo_residual: encoded `type: state` (no `default`) — each is the LHS of exactly one purely-algebraic equation, an observed quantity with no time derivative and hence no initial condition (the convention of u_wind/K_zz/K_yy in sibling atmospheric_diffusion.esm and of the algebraic flux states in carbon.esm). div_H additionally feeds the thermo_residual equation; the canonical runners resolve that algebraic dependency by topological substitution. (2) The 9 upstream `@parameters` are encoded `type: parameter` with their upstream defaults. The Greek-named upstream symbols (rho_bar, dtheta_dt, dtheta_dx, dtheta_dy, dtheta_dz) are carried with their exact Unicode names, as carbon.esm does for its Greek-named parameters.\n\nEquation faithfulness. The five upstream equations (src/clark1977.jl:463-473) are preserved verbatim: H1 ~ rho_bar*K_H*dtheta_dx, H2 ~ rho_bar*K_H*dtheta_dy, H3 ~ rho_bar*K_H*dtheta_dz (Eq. 2.19, the three turbulent heat-flux components); div_H ~ -dH1_dx - dH2_dy - dH3_dz (the heat-flux divergence term -div(H)); thermo_residual ~ rho_bar*dtheta_dt - div_H (Eq. 2.14, the first-law residual, zero for an exact energy-conserving solution). The upstream products rho_bar*K_H*dtheta_di are carried as n-ary `*` nodes in source order. The upstream `div_H` right-hand side is the negation of a three-term sum (every term subtracted); it is encoded as `-1 * (dH1_dx + dH2_dy + dH3_dz)` — a single negation of the heat-flux-divergence sum, matching the variable's physical definition (div_H is -div(H), the negative of the flux divergence) and avoiding a unary-minus node.\n\nUnits. The upstream declares rho_bar in u\"kg/m^3\"; dtheta_dt in u\"K/s\"; dtheta_dx/dtheta_dy/dtheta_dz in u\"K/m\"; K_H in u\"m^2/s\"; dH1_dx/dH2_dy/dH3_dz in u\"K*kg/(m^3*s)\"; H1/H2/H3 in u\"K*kg/(m^2*s)\"; div_H and thermo_residual in u\"K*kg/(m^3*s)\". All are SI-coherent and carried verbatim into the .esm; no unit conversion is applied at migration time. Unit balance (verified): H_i ~ rho_bar*K_H*dtheta_di is (kg/m^3)*(m^2/s)*(K/m) = K*kg/(m^2*s) ✓; div_H ~ -(dH1_dx+dH2_dy+dH3_dz) is K*kg/(m^3*s) ✓; thermo_residual ~ rho_bar*dtheta_dt - div_H is (kg/m^3)*(K/s) - K*kg/(m^3*s) = K*kg/(m^3*s) ✓. The upstream component uses a plain `System(eqs, t; name)` with no `checks = false`, so all five equations are dimensionally consistent (unlike the sibling DiagnosticPressure component, which carries `checks = false`).\n\nTolerance rationale (model-level rel=1e-6, abs=1e-12). The system is a closed-form algebraic evaluation — no ODE integration, no implicit solve — so there is no integrator error to bound. rel=1e-6 covers float64 round-off in the multiply/add chains and the associativity difference between the migration's source-order n-ary products and the canonical runner's fold order (a few ULP); it matches the sibling explicit-algebraic component atmospheric_diffusion.esm. abs=1e-12 covers the intended exact zeros (every heat-flux output when its driving gradient is zero; every divergence/residual output when its driving terms are zero) and the energy-conserving residual: in the thermodynamic_balance test rho_bar*dtheta_dt and div_H are constructed to cancel, leaving thermo_residual at a float-noise residual of ~5.4e-20 that abs=1e-12 absorbs.\n\nTest reproduction. The upstream package provides only a structural test for this component (`AnelasticThermodynamics Structure`: it is a `System` with 5 unknowns and 5 equations); it asserts no numeric behavior. The 8 inline tests here reproduce that structural check (default_state_zero exercises all 5 outputs at once) and add behavioral coverage the upstream suite lacks, with every `expected` value pinned from a run of the upstream `AnelasticThermodynamics()` MTK system itself (`mtkcompile` + `NonlinearProblem` + `NewtonRaphson`, the pattern the upstream Clark-1977 tests use for the algebraic IsentropicBaseState/WitchOfAgnesi components) — not from re-loading this .esm. Coverage: default_state_zero (all outputs vanish at the declared defaults); zonal_heat_flux / vertical_heat_flux (each heat-flux component isolated by a single potential-temperature gradient); all_heat_flux_components (all three gradients at once, with div_H and thermo_residual confirmed independent of them); heat_flux_divergence (div_H and thermo_residual driven by the dH_i divergence inputs, heat fluxes confirmed unaffected); thermodynamic_balance (an energy-conserving solution where rho_bar*dtheta_dt cancels div_H so thermo_residual collapses to zero — the exact first law); thermodynamic_imbalance (a non-conserving solution with a nonzero residual); density_and_diffusivity_scaling (heat flux scaling jointly with the base-state density rho_bar and the eddy diffusivity K_H)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "ρ_bar": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Base-state (anelastic reference) air density. Default 1.225 kg/m^3 (sea-level standard atmosphere); lower aloft. The anelastic approximation density-weights the heat fluxes and the thermodynamic tendency."
+                },
+                "dθ_dt": {
+                    "type": "parameter",
+                    "units": "K/s",
+                    "default": 0.0,
+                    "description": "Material derivative of potential temperature, dtheta/dt — the local potential-temperature tendency. Default 0 (steady state)."
+                },
+                "dθ_dx": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.0,
+                    "description": "Potential-temperature gradient in the x (zonal) direction, ∂theta/∂x. Drives the x-component turbulent heat flux H1. Default 0."
+                },
+                "dθ_dy": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.0,
+                    "description": "Potential-temperature gradient in the y (meridional) direction, ∂theta/∂y. Drives the y-component turbulent heat flux H2. Default 0."
+                },
+                "dθ_dz": {
+                    "type": "parameter",
+                    "units": "K/m",
+                    "default": 0.0,
+                    "description": "Potential-temperature gradient in the z (vertical) direction, ∂theta/∂z — the static-stability lapse rate (positive = stable). Drives the z-component turbulent heat flux H3. Default 0."
+                },
+                "K_H": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 20.0,
+                    "description": "Eddy heat diffusivity from the Smagorinsky subgrid-scale closure (Clark 1977 Eq. 2.19, K_H = K_M). Default 20 m^2/s (upstream @parameter default)."
+                },
+                "dH1_dx": {
+                    "type": "parameter",
+                    "units": "K*kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Divergence component ∂H1/∂x of the x turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                },
+                "dH2_dy": {
+                    "type": "parameter",
+                    "units": "K*kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Divergence component ∂H2/∂y of the y turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                },
+                "dH3_dz": {
+                    "type": "parameter",
+                    "units": "K*kg/(m^3*s)",
+                    "default": 0.0,
+                    "description": "Divergence component ∂H3/∂z of the z turbulent heat flux. An externally-supplied input to the heat-flux divergence term div_H. Default 0."
+                },
+                "H1": {
+                    "type": "state",
+                    "units": "K*kg/(m^2*s)",
+                    "description": "x-component turbulent heat flux, H1 = rho_bar*K_H*(∂theta/∂x) (Clark 1977 Eq. 2.19). An observed (algebraic) output — the LHS of exactly one purely-algebraic equation, with no time derivative and hence no initial condition. Downgradient: positive for a positive zonal potential-temperature gradient."
+                },
+                "H2": {
+                    "type": "state",
+                    "units": "K*kg/(m^2*s)",
+                    "description": "y-component turbulent heat flux, H2 = rho_bar*K_H*(∂theta/∂y) (Eq. 2.19). An observed (algebraic) output; no time derivative, no initial condition."
+                },
+                "H3": {
+                    "type": "state",
+                    "units": "K*kg/(m^2*s)",
+                    "description": "z-component turbulent heat flux, H3 = rho_bar*K_H*(∂theta/∂z) (Eq. 2.19). An observed (algebraic) output; no time derivative, no initial condition. The vertical turbulent heat flux down the static-stability gradient."
+                },
+                "div_H": {
+                    "type": "state",
+                    "units": "K*kg/(m^3*s)",
+                    "description": "Heat-flux divergence term, div_H = -div(H) = -(∂H1/∂x + ∂H2/∂y + ∂H3/∂z) (Clark 1977 Eq. 2.14). An observed (algebraic) output; the convergence of the turbulent heat flux that heats a fluid parcel. No time derivative, no initial condition."
+                },
+                "thermo_residual": {
+                    "type": "state",
+                    "units": "K*kg/(m^3*s)",
+                    "description": "Residual of the anelastic thermodynamic equation (Clark 1977 Eq. 2.14), thermo_residual = rho_bar*(dtheta/dt) - div_H. An observed (algebraic) output that is zero for an exact, energy-conserving solution of the first law; a nonzero value measures the imbalance between the potential-temperature tendency and the turbulent heat-flux convergence. No time derivative, no initial condition."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Clark 1977 Eq. 2.19 — x-component turbulent heat flux, H1 = rho_bar*K_H*(d(theta)/dx).",
+                    "lhs": "H1",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "K_H", "dθ_dx"]
+                    }
+                },
+                {
+                    "_comment": "Clark 1977 Eq. 2.19 — y-component turbulent heat flux, H2 = rho_bar*K_H*(d(theta)/dy).",
+                    "lhs": "H2",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "K_H", "dθ_dy"]
+                    }
+                },
+                {
+                    "_comment": "Clark 1977 Eq. 2.19 — z-component turbulent heat flux, H3 = rho_bar*K_H*(d(theta)/dz).",
+                    "lhs": "H3",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["ρ_bar", "K_H", "dθ_dz"]
+                    }
+                },
+                {
+                    "_comment": "Heat-flux divergence term div_H = -div(H) = -(dH1/dx + dH2/dy + dH3/dz).",
+                    "lhs": "div_H",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1,
+                            {
+                                "op": "+",
+                                "args": ["dH1_dx", "dH2_dy", "dH3_dz"]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Clark 1977 Eq. 2.14 — first-law residual rho_bar*(d(theta)/dt) - div_H; zero for an exact energy-conserving solution.",
+                    "lhs": "thermo_residual",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["ρ_bar", "dθ_dt"]
+                            },
+                            "div_H"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_state_zero",
+                    "description": "All parameters at their declared defaults (rho_bar = 1.225 kg/m^3, K_H = 20 m^2/s, every potential-temperature gradient, tendency, and heat-flux divergence input zero). Every output vanishes: the three heat fluxes H1/H2/H3 (zero potential-temperature gradients), div_H (zero dH_i inputs), and thermo_residual (zero tendency and zero div_H). Reproduces the upstream `AnelasticThermodynamics Structure` testitem by exercising all five outputs at once.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.0 },
+                        { "variable": "div_H", "time": 0.0, "expected": 0.0 },
+                        { "variable": "thermo_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "zonal_heat_flux",
+                    "description": "x-component turbulent heat flux (Eq. 2.19) isolated by a single zonal potential-temperature gradient dtheta/dx = 1e-4 K/m, all other gradients zero. H1 = rho_bar*K_H*dtheta_dx = 1.225*20*1e-4; H2 and H3 stay zero because their gradients are zero.",
+                    "parameter_overrides": { "dθ_dx": 1.0e-4 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0024500000000000004 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "vertical_heat_flux",
+                    "description": "z-component turbulent heat flux (Eq. 2.19) isolated by a single vertical potential-temperature gradient dtheta/dz = 3e-3 K/m — the stable lapse rate of 3 K/km cited in Clark (1977) for the mountain-wave stratification. H3 = rho_bar*K_H*dtheta_dz = 1.225*20*3e-3; H1 and H2 stay zero.",
+                    "parameter_overrides": { "dθ_dz": 3.0e-3 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.07350000000000001 }
+                    ]
+                },
+                {
+                    "id": "all_heat_flux_components",
+                    "description": "All three turbulent heat-flux components (Eq. 2.19) exercised at once with distinct potential-temperature gradients dtheta/dx = 1e-4, dtheta/dy = 5e-5, dtheta/dz = 3e-3 K/m. H1/H2/H3 each equal rho_bar*K_H times their gradient; div_H and thermo_residual remain zero, confirming the heat-flux block is independent of the divergence inputs.",
+                    "parameter_overrides": { "dθ_dx": 1.0e-4, "dθ_dy": 5.0e-5, "dθ_dz": 3.0e-3 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0024500000000000004 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0012250000000000002 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.07350000000000001 },
+                        { "variable": "div_H", "time": 0.0, "expected": 0.0 },
+                        { "variable": "thermo_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "heat_flux_divergence",
+                    "description": "Heat-flux divergence term div_H driven by the three divergence inputs dH1/dx = 1e-4, dH2/dy = 5e-5, dH3/dz = 2e-4 K*kg/(m^3*s). div_H = -(dH1_dx + dH2_dy + dH3_dz) = -3.5e-4. With the potential-temperature tendency zero, thermo_residual = rho_bar*0 - div_H = +3.5e-4. The three heat fluxes stay zero, confirming the divergence block is independent of the heat-flux block.",
+                    "parameter_overrides": { "dH1_dx": 1.0e-4, "dH2_dy": 5.0e-5, "dH3_dz": 2.0e-4 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.0 },
+                        { "variable": "div_H", "time": 0.0, "expected": -0.00035 },
+                        { "variable": "thermo_residual", "time": 0.0, "expected": 0.00035 }
+                    ]
+                },
+                {
+                    "id": "thermodynamic_balance",
+                    "description": "An energy-conserving solution of the first law (Eq. 2.14). With rho_bar = 1 kg/m^3, a potential-temperature tendency dtheta/dt = 3e-4 K/s, and converging heat flux dH1/dx = dH2/dy = dH3/dz = -1e-4 K*kg/(m^3*s), the divergence term is div_H = -(-3e-4) = +3e-4 and rho_bar*dtheta_dt = 3e-4 exactly cancels it: thermo_residual collapses to zero (to float precision; the ~5e-20 round-off residual is absorbed by the model abs tolerance). This is the exact thermodynamic equation rho_bar*dtheta/dt = -div(H).",
+                    "parameter_overrides": { "ρ_bar": 1.0, "dθ_dt": 3.0e-4, "dH1_dx": -1.0e-4, "dH2_dy": -1.0e-4, "dH3_dz": -1.0e-4 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_H", "time": 0.0, "expected": 0.00030000000000000003 },
+                        { "variable": "thermo_residual", "time": 0.0, "expected": 0.0 }
+                    ]
+                },
+                {
+                    "id": "thermodynamic_imbalance",
+                    "description": "A non-conserving solution with a nonzero first-law residual. With rho_bar = 1.225 kg/m^3, dtheta/dt = 2e-4 K/s, and diverging heat flux dH1/dx = dH2/dy = dH3/dz = 1e-4 K*kg/(m^3*s), div_H = -(3e-4) = -3e-4 and thermo_residual = rho_bar*dtheta_dt - div_H = 2.45e-4 + 3e-4 = 5.45e-4 — the potential-temperature tendency and the turbulent heat-flux convergence do not balance.",
+                    "parameter_overrides": { "ρ_bar": 1.225, "dθ_dt": 2.0e-4, "dH1_dx": 1.0e-4, "dH2_dy": 1.0e-4, "dH3_dz": 1.0e-4 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "div_H", "time": 0.0, "expected": -0.00030000000000000003 },
+                        { "variable": "thermo_residual", "time": 0.0, "expected": 0.0005450000000000001 }
+                    ]
+                },
+                {
+                    "id": "density_and_diffusivity_scaling",
+                    "description": "Turbulent heat flux scaling jointly with the base-state density and the eddy diffusivity. At rho_bar = 0.7 kg/m^3 (mid-troposphere) and K_H = 50 m^2/s with a vertical gradient dtheta/dz = 3e-3 K/m, H3 = rho_bar*K_H*dtheta_dz = 0.7*50*3e-3 = 0.105 K*kg/(m^2*s) — larger than the default-density, default-K_H case despite the lower density, because of the higher eddy diffusivity. H1 and H2 stay zero.",
+                    "parameter_overrides": { "ρ_bar": 0.7, "K_H": 50.0, "dθ_dz": 3.0e-3 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H1", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H2", "time": 0.0, "expected": 0.0 },
+                        { "variable": "H3", "time": 0.0, "expected": 0.105 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "vertical_heat_flux_vs_lapse",
+                    "description": "Vertical turbulent heat flux H3 as a function of the vertical potential-temperature gradient dtheta/dz, at the default base-state density and eddy diffusivity. Illustrates Clark (1977) Eq. 2.19: H3 = rho_bar*K_H*(∂theta/∂z) is linear in the lapse rate — a positive (stable) gradient gives a positive downgradient flux, a negative (unstable) gradient reverses it, and the flux vanishes for a neutral profile.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dθ_dz",
+                                "range": { "start": -0.005, "stop": 0.01, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "H3_vs_dtheta_dz",
+                            "type": "line",
+                            "description": "Vertical turbulent heat flux H3 as a function of the vertical potential-temperature gradient dtheta/dz (Eq. 2.19).",
+                            "x": { "variable": "dθ_dz", "label": "Vertical potential-temperature gradient dtheta/dz (K/m)" },
+                            "y": { "variable": "H3", "label": "Vertical turbulent heat flux H3 (K*kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "heat_flux_vs_eddy_diffusivity",
+                    "description": "Vertical turbulent heat flux H3 as a function of the eddy heat diffusivity K_H, at a fixed stable lapse rate dtheta/dz = 3e-3 K/m. Illustrates the Smagorinsky-closure dependence of Eq. 2.19: the turbulent flux scales linearly with the eddy diffusivity K_H = K_M, passing through the origin (no turbulent transport when K_H = 0).",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "dθ_dz": 3.0e-3 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "K_H",
+                                "range": { "start": 0.0, "stop": 100.0, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "H3_vs_K_H",
+                            "type": "line",
+                            "description": "Vertical turbulent heat flux H3 as a function of the eddy heat diffusivity K_H (Eq. 2.19).",
+                            "x": { "variable": "K_H", "label": "Eddy heat diffusivity K_H (m^2/s)" },
+                            "y": { "variable": "H3", "label": "Vertical turbulent heat flux H3 (K*kg/(m^2*s))" }
+                        }
+                    ]
+                },
+                {
+                    "id": "thermodynamic_residual_vs_heating_rate",
+                    "description": "Residual of the anelastic thermodynamic equation (Clark 1977 Eq. 2.14) as the potential-temperature tendency dtheta/dt is swept, with the heat-flux divergence held fixed (dH1/dx = dH2/dy = dH3/dz = -1e-4 K*kg/(m^3*s), so div_H = +3e-4, and rho_bar = 1 kg/m^3). thermo_residual = rho_bar*(dtheta/dt) - div_H rises linearly through zero, crossing it at the energy-conserving heating rate dtheta/dt = div_H/rho_bar = 3e-4 K/s where the first law rho_bar*dtheta/dt = -div(H) is exactly satisfied.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": { "ρ_bar": 1.0, "dH1_dx": -1.0e-4, "dH2_dy": -1.0e-4, "dH3_dz": -1.0e-4 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "dθ_dt",
+                                "range": { "start": 0.0, "stop": 0.0006, "count": 31, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "thermo_residual_vs_dtheta_dt",
+                            "type": "line",
+                            "description": "Thermodynamic-equation residual thermo_residual as a function of the potential-temperature tendency dtheta/dt, crossing zero at the energy-conserving heating rate (Eq. 2.14).",
+                            "x": { "variable": "dθ_dt", "label": "Potential-temperature tendency dtheta/dt (K/s)" },
+                            "y": { "variable": "thermo_residual", "label": "Thermodynamic residual (K*kg/(m^3*s))" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
