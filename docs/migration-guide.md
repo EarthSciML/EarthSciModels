@@ -4,7 +4,8 @@ This guide is for polecats migrating an existing ModelingToolkit
 (MTK) / Catalyst component into an `.esm` file under this repo. It covers:
 
 1. Wiring `EarthSciSerialization.jl` (the `mtk2esm` provider) into your
-   polecat's Julia environment.
+   polecat's Julia environment, and resolving a local checkout of the
+   upstream source repo.
 2. Invoking `mtk2esm` to scaffold an `.esm` from an MTK `System` /
    `ReactionSystem`.
 3. Running the round-trip validator (`scripts/roundtrip.jl` in the
@@ -19,7 +20,13 @@ guide pairs with that tool's reference docs, not replaces them.
 
 ---
 
-## 1. Wire `EarthSciSerialization` into your env
+## 1. Set up your migration environment
+
+A fresh worktree needs two things wired up before any migration work: the
+`mtk2esm` provider (§1.1) and a local checkout of the upstream **source
+repo** the component is being migrated *from* (§1.2).
+
+### 1.1 Wire `EarthSciSerialization` into your env
 
 `EarthSciSerialization.jl` is **not** in the Julia General registry. ESM's
 `Project.toml` declares it as a dep, but `Pkg.instantiate` cannot resolve
@@ -54,6 +61,58 @@ If you see a `pathof` printed, you're set. If you get
 `ArgumentError: Package EarthSciSerialization not found`, the script
 either didn't run or none of its resolution paths existed — re-run with
 `EARTHSCI_SERIALIZATION_PATH` pointing at a valid checkout.
+
+### 1.2 Resolve the migration source repo
+
+Your bead's `source_path` metadata — e.g. `src/methane_oxidation.jl:213` —
+is a path **relative to the root of the upstream repo**, plus a line number.
+For the GasChem migration burst that repo is
+[`GasChem.jl`](https://github.com/EarthSciML/GasChem.jl). You need it checked
+out locally to read the component's definition, its upstream `test/` suite
+(§6.1), and its `docs/` pages (§6.2).
+
+> **Never** locate that file with `bfs /`, `find /`, or any search rooted at
+> `/`. A filesystem-wide walk traverses tens of GB of unrelated worktrees and
+> Dolt data, runs for *hours*, balloons to GB-scale RSS, and orphans when your
+> session ends — it is the exact failure this section exists to kill
+> (`esm-gp47`). If you must search for a file at all, scope it to a bounded
+> root: the rig directory at most, never `/`.
+
+Resolve the checkout once per worktree with the helper script — it does no
+filesystem search:
+
+```bash
+GASCHEM_SRC=$(scripts/resolve_gaschem_src.sh)
+```
+
+`resolve_gaschem_src.sh` picks the first source that works, mirroring §1.1's
+resolution model:
+
+1. `$GASCHEM_SRC` — explicit override: an existing checkout you point it at.
+2. `~/.julia/dev/GasChem` — a `Pkg.develop("GasChem")` checkout, if present.
+3. Clone fallback: `git clone` `GasChem.jl` at the commit pinned in
+   `docs/migration-tracker.md` ("Pinned commit SHAs") into a per-user cache
+   (`$XDG_CACHE_HOME/earthsci-migration-src/GasChem.jl`), checked out at that
+   SHA. The clone is cached — the first polecat pays for it, the rest reuse it.
+
+The script prints the resolved absolute path on stdout (diagnostics go to
+stderr), so the command substitution above captures just the path. It is
+idempotent and concurrency-safe — safe to run from every polecat, including
+the ~9 that may migrate in parallel.
+
+The pinned SHA matters: the tracker's `source_path:LINE` numbers are relative
+to it. Resolving against a different revision still works, but the script
+warns that line numbers may have drifted — open the file and confirm you are
+looking at the right component.
+
+With `$GASCHEM_SRC` set, the bead's `source_path` resolves directly — no
+search:
+
+```bash
+cat "$GASCHEM_SRC/src/methane_oxidation.jl"   # the component definition
+ls  "$GASCHEM_SRC/test"                       # upstream test suite — see §6.1
+ls  "$GASCHEM_SRC/docs/src"                   # upstream doc pages   — see §6.2
+```
 
 ---
 
@@ -115,13 +174,15 @@ to `EarthSciSerialization.load(path)` and pick the entry yourself.
 The validator confirms `mtk → mtk2esm → file → load → mtk` preserves
 trajectories within tolerance. It lives in the `EarthSciSerialization.jl`
 package at `scripts/roundtrip.jl`. Resolve the path via the env var the
-setup script honors, or invoke it from the workspace checkout:
+setup script honors, or invoke it from the workspace checkout. The MTK
+`.jl` file you pass it is the component's upstream source — resolve it
+under `$GASCHEM_SRC` (§1.2), never by searching the filesystem:
 
 ```bash
 ESS_DIR=$(julia --project=. -e 'using EarthSciSerialization; print(dirname(dirname(pathof(EarthSciSerialization))))')
 
 julia --project=. "$ESS_DIR/scripts/roundtrip.jl" \
-    path/to/MyModel.jl \
+    "$GASCHEM_SRC/src/MyModel.jl" \
     --tol rel=1e-6 \
     --atol 1e-9 \
     --tspan 0.0,10.0 \
@@ -216,7 +277,8 @@ is an incomplete migration even if the round-trip validator passes.
 The `tests` block should **thoroughly exercise the behavior of the
 model component**, not just smoke-test that it runs. Build it by
 reading the upstream Julia test suite of the component you're
-migrating and translating those tests into `.esm` form.
+migrating — under `test/` in the §1.2 source checkout — and
+translating those tests into `.esm` form.
 
 Minimum coverage:
 
@@ -262,10 +324,11 @@ Draw from two upstream sources:
   entry with the appropriate `initial_state`, `time_span`, parameter
   overrides, and `Plot` block(s).
 - **The upstream Julia package's documentation pages** (typically
-  under `docs/src/` or the rendered Documenter.jl site). Doc pages
-  are already distilled, often with runnable scripts that map almost
-  one-to-one to `.esm` examples. They may also cover runs the paper
-  did not include (updated parameters, extended time horizons, etc.).
+  under `docs/src/` in the §1.2 source checkout, or the rendered
+  Documenter.jl site). Doc pages are already distilled, often with
+  runnable scripts that map almost one-to-one to `.esm` examples.
+  They may also cover runs the paper did not include (updated
+  parameters, extended time horizons, etc.).
 
 Practical workflow:
 
