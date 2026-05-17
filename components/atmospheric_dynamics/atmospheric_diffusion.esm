@@ -1,0 +1,1780 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AtmosphericDiffusion",
+        "description": "Atmospheric eddy-diffusivity and wind-profile parameterizations from Seinfeld & Pandis (2006) Ch. 18, Sec. 18.12. Given a height z above ground, the component computes the mean wind speed u_wind from a power-law profile (Eq. 18.118) and the vertical and horizontal eddy diffusivities K_zz, K_yy that govern turbulent transport of trace species in the planetary boundary layer. K_zz is selected by atmospheric stability from the Monin-Obukhov length L_MO: an unstable four-piece convective profile (Eq. 18.121, Lamb & Duran 1977), a neutral profile (Eq. 18.122, Myrup & Ranzieri 1976), or a stable profile (Eq. 18.125, Businger & Arya 1974). K_yy is 0.1*w_star*z_i under unstable conditions (Eq. 18.128) and equals K_zz otherwise. Three purely-algebraic equations, no time integration. Migrated from AtmosphericDynamics.jl@816cc391 src/atmospheric_diffusion.jl:30 (`AtmosphericDiffusion` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "seinfeld-pandis",
+            "boundary-layer",
+            "eddy-diffusivity",
+            "turbulent-transport",
+            "wind-profile",
+            "observed-only",
+            "ch18"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-98a0)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 18 (Atmospheric Diffusion), Section 18.12, Eqs. 18.118-18.129 — power-law wind profile and the unstable / neutral / stable eddy-diffusivity parameterizations. ISBN 978-0-471-72018-8."
+            },
+            {
+                "citation": "Lamb, R. G., & Duran, D. R. (1977). Eddy diffusivities derived from a numerical model of the convective planetary boundary layer. Il Nuovo Cimento C, 1(1), 1-17. Source of the unstable K_zz profile (Seinfeld & Pandis Eq. 18.121)."
+            },
+            {
+                "citation": "Myrup, L. O., & Ranzieri, A. J. (1976). A consistent scheme for estimating diffusivities to be used in air quality models. California Department of Transportation, Report CA-DOT-TL-7169-3-76-32. Source of the neutral K_zz profile (Seinfeld & Pandis Eq. 18.122)."
+            },
+            {
+                "citation": "Businger, J. A., & Arya, S. P. S. (1974). Height of the mixed layer in the stably stratified planetary boundary layer. Advances in Geophysics, 18A, 73-92. Source of the stable K_zz profile (Seinfeld & Pandis Eq. 18.125)."
+            }
+        ]
+    },
+    "models": {
+        "AtmosphericDiffusion": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/atmospheric_diffusion.jl:30\n\nUpstream `AtmosphericDiffusion` is an MTK `@component` implementing the atmospheric diffusion parameterizations of Seinfeld & Pandis (2006) Ch. 18, Sec. 18.12: the power-law wind profile (Eq. 18.118) and the vertical/horizontal eddy diffusivities K_zz, K_yy across the unstable, neutral and stable boundary-layer regimes (Eqs. 18.119-18.129). It declares 2 `@constants` (kappa, Kzz_zero), 7 `@parameters` (u_r, z_r, p_wind, z_i, L_MO, u_star, f_cor), 4 `@variables` (z, u_wind, K_zz, K_yy) and 3 equations, returning `System(eqs, t)`. The upstream test (test/atmospheric_diffusion_test.jl) compiles it with `mtkcompile(sys; inputs = [z])` and exercises it through a `NonlinearProblem` — there is no time derivative, so the system is purely algebraic.\n\nSystem kind: all 3 equations are explicit algebraic assignments (u_wind ~ ..., K_zz ~ ..., K_yy ~ ...) with no `D(.)` operator. Each output is given directly as a closed-form expression of the inputs — there is no implicit/coupled solve. The migration therefore leaves `system_kind` unset (default 'ode'): the three equations resolve to observed quantities and the compiled system has zero differential states, exactly as for the sibling explicit-algebraic components ideal_gas.esm and scale_height.esm. This is deliberately NOT the blocked `system_kind: nonlinear` class (Mogi, Isorropia) — those need an implicit Newton solve with initial guesses (gap gt-ebuq); AtmosphericDiffusion needs none, which is why docs/migration-tracker.md marks it `blocking_gap: none`.\n\nVariable classification. (1) z: upstream an MTK `@variable` carrying no defining equation; the upstream test pins it as an `mtkcompile` input. It is encoded as `type: parameter` (the ESS analog of an MTK input) — the same convention sibling ideal_gas.esm/scale_height.esm apply to their input @variables. (2) u_wind, K_zz, K_yy: encoded `type: state` (no `default`) — each is the LHS of exactly one purely-algebraic equation, an observed quantity with no time derivative and hence no initial condition (the convention of net_transport / net_chemistry in sibling atmospheric_budget.esm and of H in scale_height.esm). (3) kappa and Kzz_zero: upstream MTK `@constants`; the ESS schema has no `constant` variable type, so both are encoded `type: parameter` — the same treatment scale_height.esm applies to its upstream @constants R, M_air, g. The upstream Greek symbol for the von Karman constant is written here with the ASCII name `kappa`.\n\nabs() wrapping of two fractional-power bases (the one substantive migration adjustment). The upstream convective velocity scale is w_star = u_star*(-z_i/(kappa*L_MO))^(1/3) and the unstable K_zz surface piece carries a factor (1 - 15*z/L_MO)^(1/4). Both fractional powers have bases that are positive whenever the expression is actually *selected* (w_star and the unstable pieces are only reached for L_MO < 0, where -z_i/(kappa*L_MO) > 0 and 1 - 15*z/L_MO = 1 + positive > 0) but go negative in the dead neutral/stable `ifelse` branches (L_MO > 0). The canonical ESS Python runner lowers `ifelse` to `sympy.Piecewise`, which lambdifies to `numpy.select` — and `numpy.select` evaluates every branch eagerly. A negative base under a non-integer power is a complex number, and a single complex branch promotes the whole `numpy.select` result to complex dtype, contaminating even the correctly selected real branch (verified: with the literal upstream base, stable-regime K_zz comes back as `5+0j` instead of `5.0`). Both bases are therefore wrapped in `abs(...)`: in the live regime (L_MO < 0) the bases are already positive so `abs(...)` is the identity and every selected value is bit-identical to the upstream; in the dead branches `abs(...)` keeps the value real and finite so `numpy.select` stays on float64. This is a faithful encoding of the upstream's intent — the upstream relies on `ifelse` never *selecting* the negative-base branches; the .esm additionally ensures those branches never *poison* the eager all-branch evaluation of the ESS runner. No selected output value is changed.\n\nEquation faithfulness. The 3 upstream equations (src/atmospheric_diffusion.jl:135-139) are preserved verbatim: u_wind ~ u_r*(z/z_r)^p_wind (Eq. 18.118); K_zz ~ regime-selected diffusivity (Eqs. 18.119-18.125); K_yy ~ unstable Eq. 18.128 value or K_zz. The upstream Julia locals (w_star, zn, wzi, the four Kzz_unstable pieces, Kzz_unstable / Kzz_neutral / Kzz_stable, L_MO_norm, K_yy_unstable, the u_wind/K_zz/K_yy `_expr` bindings) are not MTK variables — they are plain Julia values holding symbolic expressions, which MTK inlines into the 3 equations when `System(eqs, t)` is built. The .esm mirrors this exactly: the locals are fully inlined into the 3 `equations` entries (so e.g. the w_star sub-tree appears in every Kzz_unstable piece and in K_yy, and the entire K_zz right-hand side reappears inside K_yy), matching what `equations(sys)` shows after the upstream component is built. Subtraction uses the binary `-` op; the unstable piece-2 polynomial 0.021 + 0.408 zn + 1.351 zn^2 - 4.096 zn^3 + 2.56 zn^4 is written as a flat n-ary `+` with the cubic term carrying a negative coefficient. The (4/3), (1/3), (1/4) exponents are encoded as `/` nodes over float literals, mirroring the upstream `(4.0/3.0)`, `(1.0/3.0)`, `(1.0/4.0)`; the integer exponents 2, 3, 4 are integer literals.\n\nUnits. The upstream declares z, z_r, z_i in u\"m\"; u_wind, u_r, u_star in u\"m/s\"; K_zz, K_yy, Kzz_zero in u\"m^2/s\"; f_cor in u\"1/s\"; p_wind and kappa dimensionless (u\"1\"). All are SI-coherent and carried verbatim into the .esm; no unit conversion is applied at migration time. Unit balance (verified): u_wind ~ u_r*(z/z_r)^p_wind is (m/s)*(m/m)^1 = m/s; K_zz ~ w_star*z_i*(dimensionless) and kappa*u_star*z are (m/s)*m = m^2/s; the stable branch kappa*u_star*z/(0.74 + 4.7 z/L)*exp(...) is (m^2/s)/(dimensionless)*(dimensionless) = m^2/s; K_yy ~ 0.1*w_star*z_i = m^2/s. The ifelse branch arguments are dimensionally consistent (m^2/s throughout K_zz; Kzz_zero supplies the m^2/s above-BL fallback).\n\nTolerance rationale (model-level rel=1.0e-6). The system is a closed-form algebraic evaluation — no ODE integration, no implicit solve — so there is no integrator error to bound; rel=1.0e-6 covers float64 round-off in the multiply/divide/exp/power chains and the associativity difference between the migration's left-folded products and sympy's canonical `Mul`/`Add` ordering (a few ULP). This matches the sibling explicit-algebraic components ideal_gas.esm and scale_height.esm (both rel=1.0e-6). The two exact-zero assertions in `neutral_kzz_above_bl_zero` (K_zz and K_yy collapsing to the Kzz_zero fallback) use a per-assertion absolute tolerance abs=1.0e-12, since a relative tolerance cannot gate a true zero.\n\nTest reproduction. The 14 inline tests reproduce every upstream testitem of test/atmospheric_diffusion_test.jl: `Wind Profile (Eq. 18.118)` (z = z_r, z = 50), `Unstable K_zz (Eq. 18.121)` (all four z/z_i pieces at z = 30/300/800/1200), `Neutral K_zz (Eq. 18.122)` (all three branches at z = 50/500/1200), `Stable K_zz (Eq. 18.125)` (z = 50/200), and `Horizontal Diffusivity K_yy` (unstable K_yy = 0.1 w_star z_i, and K_yy = K_zz under stable conditions). `defaults_unstable_z100` additionally exercises all three outputs at once, covering the upstream `AtmosphericDiffusion Structure` and `Qualitative Properties` testitems. Expected values are the exact float64 results of the upstream formulas."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 100.0,
+                    "description": "Height above ground [m] (Seinfeld & Pandis Ch. 18). The spatial input of the parameterization: the wind speed u_wind and the eddy diffusivities K_zz, K_yy are all evaluated at this height. Upstream `AtmosphericDiffusion` declares z as an MTK `@variable` carrying no defining equation; the upstream test compiles the system with `mtkcompile(sys; inputs = [z])`, pinning z as an externally-supplied input. It is therefore encoded here as `type: parameter` (the ESS analog of an MTK compile-time input), overridable per scenario via `parameter_overrides` and `parameter_sweep` — the same convention sibling AtmosphericDynamics components ideal_gas.esm and scale_height.esm apply to their input @variables T, p. The default 100 m is the canonical probe height used in the upstream test setup (`NonlinearProblem(ssys, Dict(ssys.z => 100.0))`) and the docs examples."
+                },
+                "u_wind": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Mean wind speed at height z [m/s] (Seinfeld & Pandis Eq. 18.118, power-law profile). An observed (algebraic) output — the LHS of exactly one purely-algebraic equation u_wind ~ u_r*(z/z_r)^p_wind, with no time derivative and hence no initial condition. Increases monotonically with height for p_wind > 0."
+                },
+                "K_zz": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Vertical eddy diffusivity [m^2/s] (Seinfeld & Pandis Eqs. 18.119-18.125). An observed (algebraic) output: the value is selected by the atmospheric stability regime — unstable (Eq. 18.121, Lamb & Duran 1977), neutral (Eq. 18.122, Myrup & Ranzieri 1976), or stable (Eq. 18.125, Businger & Arya 1974) — using the Monin-Obukhov length L_MO. The LHS of one purely-algebraic equation; no time derivative, no initial condition."
+                },
+                "K_yy": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Horizontal eddy diffusivity [m^2/s] (Seinfeld & Pandis Eqs. 18.126-18.129). An observed (algebraic) output: under unstable conditions K_yy = 0.1*w_star*z_i (Eq. 18.128, roughly constant with height); under neutral and stable conditions K_yy is approximated by K_zz (the common assumption of Sec. 18.12.3). The LHS of one purely-algebraic equation; no time derivative, no initial condition."
+                },
+                "u_r": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 5.0,
+                    "description": "Reference wind speed [m/s] anchoring the power-law wind profile (Eq. 18.118): u_wind equals u_r at the reference height z_r. Default 5 m/s (upstream @parameter default)."
+                },
+                "z_r": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 10.0,
+                    "description": "Reference height [m] for the power-law wind profile (Eq. 18.118) — the height at which u_wind equals the reference wind speed u_r. Default 10 m (upstream @parameter default), the standard meteorological anemometer height."
+                },
+                "p_wind": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.15,
+                    "description": "Power-law exponent (dimensionless) of the wind profile u_wind/u_r = (z/z_r)^p_wind (Eq. 18.118). Default 0.15 (upstream @parameter default), a typical value for near-neutral flow over moderately rough terrain."
+                },
+                "z_i": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Mixed-layer (inversion) height [m] — the depth of the convective boundary layer. Sets the normalized height z/z_i that selects the piecewise branches of the unstable and neutral K_zz profiles. Default 1000 m (upstream @parameter default)."
+                },
+                "L_MO": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -100.0,
+                    "description": "Monin-Obukhov length [m]. Sets the atmospheric stability regime: L_MO < 0 is unstable (convective), L_MO > 0 is stable, and the limit |L_MO| -> infinity is neutral. The regime is selected from the dimensionless ratio L_MO/z_i: |L_MO/z_i| > 10 picks the neutral profile, otherwise L_MO/z_i < 0 picks unstable and L_MO/z_i > 0 picks stable. Default -100 m (upstream @parameter default), an unstable boundary layer."
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.3,
+                    "description": "Friction velocity [m/s] — the surface-layer turbulence velocity scale. Appears in the convective velocity scale w_star and in all three K_zz regime formulas. Default 0.3 m/s (upstream @parameter default)."
+                },
+                "f_cor": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.0001,
+                    "description": "Coriolis parameter [1/s] — the exponential height-decay rate of the stable K_zz profile (Eq. 18.125). Default 1.0e-4 1/s (upstream @parameter default), a mid-latitude value."
+                },
+                "kappa": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "von Karman constant (dimensionless). Default 0.4. Upstream this is an MTK `@constant` (it is excluded from `parameters(sys)`); the ESS schema has no `constant` variable type, so it is encoded here as `type: parameter` — the same treatment sibling scale_height.esm applies to its upstream @constants R, M_air, g. The upstream symbol is the Greek letter kappa; this migration uses the ASCII name `kappa` for it."
+                },
+                "Kzz_zero": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 0.0,
+                    "description": "Zero diffusivity [m^2/s], the above-boundary-layer fallback value of the neutral K_zz profile for z/z_i > 1.1 (Eq. 18.122). Default 0.0. Upstream an MTK `@constant` declared with explicit m^2/s units precisely so the neutral-regime `ifelse` branches are unit-consistent; encoded here as `type: parameter` for the same schema reason as kappa."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "u_wind",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "u_r",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "z",
+                                            "z_r"
+                                        ]
+                                    },
+                                    "p_wind"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_zz",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    {
+                                        "op": "abs",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "L_MO",
+                                                    "z_i"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    10.0
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z",
+                                                    "z_i"
+                                                ]
+                                            },
+                                            0.1
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "kappa",
+                                            "u_star",
+                                            "z"
+                                        ]
+                                    },
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<=",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z_i"
+                                                        ]
+                                                    },
+                                                    1.1
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star",
+                                                    "z",
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1.1,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "z_i"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "Kzz_zero"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "L_MO",
+                                                    "z_i"
+                                                ]
+                                            },
+                                            0.0
+                                        ]
+                                    },
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z_i"
+                                                        ]
+                                                    },
+                                                    0.05
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "u_star",
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "abs",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            "z_i",
+                                                                                            {
+                                                                                                "op": "*",
+                                                                                                "args": [
+                                                                                                    "kappa",
+                                                                                                    "L_MO"
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    1.0,
+                                                                                    3.0
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "z_i"
+                                                        ]
+                                                    },
+                                                    2.5,
+                                                    "kappa",
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    4.0,
+                                                                    3.0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "abs",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "-",
+                                                                        "args": [
+                                                                            1.0,
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [
+                                                                                            15.0,
+                                                                                            "z"
+                                                                                        ]
+                                                                                    },
+                                                                                    "L_MO"
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    1.0,
+                                                                    4.0
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "ifelse",
+                                                "args": [
+                                                    {
+                                                        "op": "<=",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            0.6
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "u_star",
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "abs",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z_i",
+                                                                                                    {
+                                                                                                        "op": "*",
+                                                                                                        "args": [
+                                                                                                            "kappa",
+                                                                                                            "L_MO"
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            1.0,
+                                                                                            3.0
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    0.021,
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            0.408,
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    "z",
+                                                                                    "z_i"
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            1.351,
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            "z",
+                                                                                            "z_i"
+                                                                                        ]
+                                                                                    },
+                                                                                    2
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            -4.096,
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            "z",
+                                                                                            "z_i"
+                                                                                        ]
+                                                                                    },
+                                                                                    3
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            2.56,
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            "z",
+                                                                                            "z_i"
+                                                                                        ]
+                                                                                    },
+                                                                                    4
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "ifelse",
+                                                        "args": [
+                                                            {
+                                                                "op": "<=",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            "z",
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    1.1
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    "u_star",
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "abs",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            "z_i",
+                                                                                                            {
+                                                                                                                "op": "*",
+                                                                                                                "args": [
+                                                                                                                    "kappa",
+                                                                                                                    "L_MO"
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            },
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    1.0,
+                                                                                                    3.0
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    0.2,
+                                                                    {
+                                                                        "op": "exp",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "-",
+                                                                                "args": [
+                                                                                    6.0,
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [
+                                                                                            10.0,
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z",
+                                                                                                    "z_i"
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    "u_star",
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "abs",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            "z_i",
+                                                                                                            {
+                                                                                                                "op": "*",
+                                                                                                                "args": [
+                                                                                                                    "kappa",
+                                                                                                                    "L_MO"
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            },
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    1.0,
+                                                                                                    3.0
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    0.0013
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "kappa",
+                                                            "u_star",
+                                                            "z"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            0.74,
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            4.7,
+                                                                            "z"
+                                                                        ]
+                                                                    },
+                                                                    "L_MO"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -8.0,
+                                                                    "f_cor",
+                                                                    "z"
+                                                                ]
+                                                            },
+                                                            "u_star"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_yy",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "L_MO",
+                                            "z_i"
+                                        ]
+                                    },
+                                    0.0
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "u_star",
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "abs",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z_i",
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "kappa",
+                                                                            "L_MO"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            1.0,
+                                                            3.0
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "z_i"
+                                ]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": ">",
+                                        "args": [
+                                            {
+                                                "op": "abs",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "L_MO",
+                                                            "z_i"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            10.0
+                                        ]
+                                    },
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z_i"
+                                                        ]
+                                                    },
+                                                    0.1
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star",
+                                                    "z"
+                                                ]
+                                            },
+                                            {
+                                                "op": "ifelse",
+                                                "args": [
+                                                    {
+                                                        "op": "<=",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            1.1
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "kappa",
+                                                            "u_star",
+                                                            "z",
+                                                            {
+                                                                "op": "-",
+                                                                "args": [
+                                                                    1.1,
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            "z",
+                                                                            "z_i"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "Kzz_zero"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "ifelse",
+                                        "args": [
+                                            {
+                                                "op": "<",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "L_MO",
+                                                            "z_i"
+                                                        ]
+                                                    },
+                                                    0.0
+                                                ]
+                                            },
+                                            {
+                                                "op": "ifelse",
+                                                "args": [
+                                                    {
+                                                        "op": "<",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "z",
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            0.05
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "u_star",
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "abs",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z_i",
+                                                                                                    {
+                                                                                                        "op": "*",
+                                                                                                        "args": [
+                                                                                                            "kappa",
+                                                                                                            "L_MO"
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            1.0,
+                                                                                            3.0
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    "z_i"
+                                                                ]
+                                                            },
+                                                            2.5,
+                                                            "kappa",
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            "z",
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            4.0,
+                                                                            3.0
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "abs",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "-",
+                                                                                "args": [
+                                                                                    1.0,
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "*",
+                                                                                                "args": [
+                                                                                                    15.0,
+                                                                                                    "z"
+                                                                                                ]
+                                                                                            },
+                                                                                            "L_MO"
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            1.0,
+                                                                            4.0
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "ifelse",
+                                                        "args": [
+                                                            {
+                                                                "op": "<=",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            "z",
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    0.6
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    "u_star",
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "abs",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            "z_i",
+                                                                                                            {
+                                                                                                                "op": "*",
+                                                                                                                "args": [
+                                                                                                                    "kappa",
+                                                                                                                    "L_MO"
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            },
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    1.0,
+                                                                                                    3.0
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            "z_i"
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            0.021,
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    0.408,
+                                                                                    {
+                                                                                        "op": "/",
+                                                                                        "args": [
+                                                                                            "z",
+                                                                                            "z_i"
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    1.351,
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z",
+                                                                                                    "z_i"
+                                                                                                ]
+                                                                                            },
+                                                                                            2
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    -4.096,
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z",
+                                                                                                    "z_i"
+                                                                                                ]
+                                                                                            },
+                                                                                            3
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            },
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    2.56,
+                                                                                    {
+                                                                                        "op": "^",
+                                                                                        "args": [
+                                                                                            {
+                                                                                                "op": "/",
+                                                                                                "args": [
+                                                                                                    "z",
+                                                                                                    "z_i"
+                                                                                                ]
+                                                                                            },
+                                                                                            4
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "ifelse",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "<=",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    "z",
+                                                                                    "z_i"
+                                                                                ]
+                                                                            },
+                                                                            1.1
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [
+                                                                                            "u_star",
+                                                                                            {
+                                                                                                "op": "^",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "abs",
+                                                                                                        "args": [
+                                                                                                            {
+                                                                                                                "op": "/",
+                                                                                                                "args": [
+                                                                                                                    "z_i",
+                                                                                                                    {
+                                                                                                                        "op": "*",
+                                                                                                                        "args": [
+                                                                                                                            "kappa",
+                                                                                                                            "L_MO"
+                                                                                                                        ]
+                                                                                                                    }
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            1.0,
+                                                                                                            3.0
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    "z_i"
+                                                                                ]
+                                                                            },
+                                                                            0.2,
+                                                                            {
+                                                                                "op": "exp",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "-",
+                                                                                        "args": [
+                                                                                            6.0,
+                                                                                            {
+                                                                                                "op": "*",
+                                                                                                "args": [
+                                                                                                    10.0,
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            "z",
+                                                                                                            "z_i"
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    {
+                                                                                        "op": "*",
+                                                                                        "args": [
+                                                                                            "u_star",
+                                                                                            {
+                                                                                                "op": "^",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "abs",
+                                                                                                        "args": [
+                                                                                                            {
+                                                                                                                "op": "/",
+                                                                                                                "args": [
+                                                                                                                    "z_i",
+                                                                                                                    {
+                                                                                                                        "op": "*",
+                                                                                                                        "args": [
+                                                                                                                            "kappa",
+                                                                                                                            "L_MO"
+                                                                                                                        ]
+                                                                                                                    }
+                                                                                                                ]
+                                                                                                            }
+                                                                                                        ]
+                                                                                                    },
+                                                                                                    {
+                                                                                                        "op": "/",
+                                                                                                        "args": [
+                                                                                                            1.0,
+                                                                                                            3.0
+                                                                                                        ]
+                                                                                                    }
+                                                                                                ]
+                                                                                            }
+                                                                                        ]
+                                                                                    },
+                                                                                    "z_i"
+                                                                                ]
+                                                                            },
+                                                                            0.0013
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    "kappa",
+                                                                    "u_star",
+                                                                    "z"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    0.74,
+                                                                    {
+                                                                        "op": "/",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    4.7,
+                                                                                    "z"
+                                                                                ]
+                                                                            },
+                                                                            "L_MO"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            -8.0,
+                                                                            "f_cor",
+                                                                            "z"
+                                                                        ]
+                                                                    },
+                                                                    "u_star"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "defaults_unstable_z100",
+                    "description": "Baseline run at the declared defaults (z = 100 m, L_MO = -100 m unstable, z_i = 1000, u_star = 0.3, u_r = 5, z_r = 10, p_wind = 0.15). z/z_i = 0.1 places K_zz on Eq. 18.121 unstable piece 2 (0.05 <= z/z_i <= 0.6). Pins all three outputs at once: the power-law wind speed u_wind = 5*(100/10)^0.15, the vertical diffusivity K_zz, and the unstable horizontal diffusivity K_yy = 0.1*w_star*z_i. Reproduces the upstream `AtmosphericDiffusion Structure` testitem by exercising every output variable.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "u_wind",
+                            "time": 0.0,
+                            "expected": 7.062687723113772
+                        },
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 62.69386432502207
+                        },
+                        {
+                            "variable": "K_yy",
+                            "time": 0.0,
+                            "expected": 87.72053214638598
+                        }
+                    ]
+                },
+                {
+                    "id": "wind_profile_reference_height",
+                    "description": "Wind profile (Eq. 18.118) at the reference height z = z_r = 10 m: u_wind/u_r = (z_r/z_r)^p_wind = 1, so u_wind equals the reference wind speed u_r = 5 m/s exactly. Reproduces the first assertion of the upstream `Wind Profile (Eq. 18.118)` testitem.",
+                    "parameter_overrides": {
+                        "z": 10.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "u_wind",
+                            "time": 0.0,
+                            "expected": 5.0
+                        }
+                    ]
+                },
+                {
+                    "id": "wind_profile_z50",
+                    "description": "Wind profile (Eq. 18.118) at z = 50 m: u_wind = u_r*(z/z_r)^p_wind = 5*(50/10)^0.15 = 5*5^0.15. Reproduces the z=50 assertion of the upstream `Wind Profile (Eq. 18.118)` testitem.",
+                    "parameter_overrides": {
+                        "z": 50.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "u_wind",
+                            "time": 0.0,
+                            "expected": 6.365250577732118
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_kzz_piece1_surface_layer",
+                    "description": "Unstable K_zz (Eq. 18.121, Lamb & Duran 1977), piece 1 — surface layer z/z_i < 0.05. At z = 30 m, L_MO = -100 m (z/z_i = 0.03) K_zz follows the 2.5*kappa*(z/z_i)^(4/3)*(1-15z/L)^(1/4) branch. Reproduces piece 1 of the upstream `Unstable K_zz (Eq. 18.121)` testitem.",
+                    "parameter_overrides": {
+                        "z": 30.0,
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 12.522381662879011
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_kzz_piece2_mixed_layer",
+                    "description": "Unstable K_zz (Eq. 18.121), piece 2 — mixed layer 0.05 <= z/z_i <= 0.6. At z = 300 m, L_MO = -100 m (z/z_i = 0.3) K_zz follows the quartic-polynomial branch. Reproduces piece 2 of the upstream `Unstable K_zz (Eq. 18.121)` testitem.",
+                    "parameter_overrides": {
+                        "z": 300.0,
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 153.6284767692516
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_kzz_piece3_upper_bl",
+                    "description": "Unstable K_zz (Eq. 18.121), piece 3 — upper boundary layer 0.6 < z/z_i <= 1.1. At z = 800 m, L_MO = -100 m (z/z_i = 0.8) K_zz follows the 0.2*exp(6-10 z/z_i) decay branch. Reproduces piece 3 of the upstream `Unstable K_zz (Eq. 18.121)` testitem.",
+                    "parameter_overrides": {
+                        "z": 800.0,
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 23.74336612739507
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_kzz_piece4_above_bl",
+                    "description": "Unstable K_zz (Eq. 18.121), piece 4 — above the boundary layer z/z_i > 1.1. At z = 1200 m, L_MO = -100 m (z/z_i = 1.2) K_zz collapses to the residual constant wzi*0.0013. Reproduces piece 4 of the upstream `Unstable K_zz (Eq. 18.121)` testitem.",
+                    "parameter_overrides": {
+                        "z": 1200.0,
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 1.1403669179030176
+                        }
+                    ]
+                },
+                {
+                    "id": "neutral_kzz_surface_layer",
+                    "description": "Neutral K_zz (Eq. 18.122, Myrup & Ranzieri 1976), surface-layer branch z/z_i < 0.1. L_MO = 1.0e6 m gives |L_MO/z_i| = 1000 > 10, selecting the neutral profile; at z = 50 m (z/z_i = 0.05) K_zz = kappa*u_star*z = 0.4*0.3*50 = 6.0 m^2/s. Reproduces the surface-layer assertion of the upstream `Neutral K_zz (Eq. 18.122)` testitem.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "L_MO": 1000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 6.0
+                        }
+                    ]
+                },
+                {
+                    "id": "neutral_kzz_mixed_layer",
+                    "description": "Neutral K_zz (Eq. 18.122), mixed-layer branch 0.1 <= z/z_i <= 1.1. L_MO = 1.0e6 m selects the neutral profile; at z = 500 m (z/z_i = 0.5) K_zz = kappa*u_star*z*(1.1 - z/z_i) = 0.4*0.3*500*0.6 = 36 m^2/s. Reproduces the mixed-layer assertion of the upstream `Neutral K_zz (Eq. 18.122)` testitem.",
+                    "parameter_overrides": {
+                        "z": 500.0,
+                        "L_MO": 1000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 36.00000000000001
+                        }
+                    ]
+                },
+                {
+                    "id": "neutral_kzz_above_bl_zero",
+                    "description": "Neutral K_zz (Eq. 18.122), above-boundary-layer branch z/z_i > 1.1. L_MO = 1.0e6 m selects the neutral profile; at z = 1200 m (z/z_i = 1.2) K_zz collapses to the Kzz_zero fallback (exactly 0). K_yy = K_zz under neutral conditions, so it is 0 as well. Reproduces the above-BL assertion of the upstream `Neutral K_zz (Eq. 18.122)` testitem (`@test sol3[K_zz] approx 0.0 atol = 1e-6`); both assertions use an absolute tolerance to gate the exact-zero output.",
+                    "parameter_overrides": {
+                        "z": 1200.0,
+                        "L_MO": 1000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "K_yy",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "stable_kzz_surface",
+                    "description": "Stable K_zz (Eq. 18.125, Businger & Arya 1974) near the surface. L_MO = 200 m gives L_MO/z_i = 0.2 (0 < |L_MO/z_i| <= 10 and L_MO/z_i > 0), selecting the stable profile K_zz = kappa*u_star*z/(0.74 + 4.7 z/L) * exp(-8 f z/u_star). Evaluated at z = 50 m. Reproduces the z=50 assertion of the upstream `Stable K_zz (Eq. 18.125)` testitem.",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "L_MO": 200.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 2.742057396479209
+                        }
+                    ]
+                },
+                {
+                    "id": "stable_kzz_aloft",
+                    "description": "Stable K_zz (Eq. 18.125) higher in the stable boundary layer. L_MO = 200 m selects the stable profile; evaluated at z = 200 m, where the (0.74 + 4.7 z/L) denominator growth and the exp(-8 f z/u_star) decay together hold K_zz well below its surface value. Reproduces the z=200 assertion of the upstream `Stable K_zz (Eq. 18.125)` testitem.",
+                    "parameter_overrides": {
+                        "z": 200.0,
+                        "L_MO": 200.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 2.5881450860736694
+                        }
+                    ]
+                },
+                {
+                    "id": "horizontal_diffusivity_unstable",
+                    "description": "Horizontal eddy diffusivity K_yy under unstable conditions (Eq. 18.128): K_yy = 0.1*w_star*z_i, independent of height. At z = 200 m, L_MO = -100 m K_yy = 87.72 m^2/s while the vertical diffusivity K_zz (Eq. 18.121 piece 2, z/z_i = 0.2) is larger — the test pins both, reproducing the unstable assertion of the upstream `Horizontal Diffusivity K_yy` testitem.",
+                    "parameter_overrides": {
+                        "z": 200.0,
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_yy",
+                            "time": 0.0,
+                            "expected": 87.72053214638598
+                        },
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 112.25421057708722
+                        }
+                    ]
+                },
+                {
+                    "id": "horizontal_equals_vertical_stable",
+                    "description": "Under stable conditions the horizontal diffusivity degenerates to the vertical one: K_yy = K_zz (Sec. 18.12.3 approximation). At z = 50 m, L_MO = 200 m both equal the stable-profile value 2.742 m^2/s. Reproduces the stable assertion of the upstream `Horizontal Diffusivity K_yy` testitem (`@test sol_stable[K_yy] approx sol_stable[K_zz]`).",
+                    "parameter_overrides": {
+                        "z": 50.0,
+                        "L_MO": 200.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "K_yy",
+                            "time": 0.0,
+                            "expected": 2.742057396479209
+                        },
+                        {
+                            "variable": "K_zz",
+                            "time": 0.0,
+                            "expected": 2.742057396479209
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "wind_speed_profile",
+                    "description": "Power-law wind profile (Eq. 18.118): mean wind speed u_wind = u_r*(z/z_r)^p_wind swept over height z from 10 to 1500 m at the default parameters. Reproduces the classic logarithmic-looking wind profile that anchors the docs `Wind Speed Profile` figure — wind speed rising monotonically with height, passing through the reference point (u_r, z_r) = (5 m/s, 10 m).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 1500.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "u_wind_vs_z",
+                            "type": "line",
+                            "description": "Mean wind speed u_wind as a function of height z (Eq. 18.118).",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "u_wind",
+                                "label": "Wind speed u_wind (m/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "unstable_eddy_diffusivity_profile",
+                    "description": "Vertical and horizontal eddy diffusivity profiles under unstable (convective) conditions (L_MO = -100 m), swept over height z from 10 to 1500 m. K_zz follows the four-piece Eq. 18.121 profile of Lamb & Duran (1977) — rising through the surface and mixed layers, peaking near z/z_i ~ 0.3, then decaying toward the residual constant above the boundary layer — while K_yy = 0.1*w_star*z_i (Eq. 18.128) stays constant with height. Reproduces the docs `Vertical Eddy Diffusivity Profiles` and `Horizontal vs Vertical Diffusivity` figures for the unstable case.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "L_MO": -100.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 1500.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "K_zz_vs_z_unstable",
+                            "type": "line",
+                            "description": "Vertical eddy diffusivity K_zz vs height z, unstable regime (Eq. 18.121).",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "K_zz",
+                                "label": "Vertical diffusivity K_zz (m^2/s)"
+                            }
+                        },
+                        {
+                            "id": "K_yy_vs_z_unstable",
+                            "type": "line",
+                            "description": "Horizontal eddy diffusivity K_yy vs height z, unstable regime (Eq. 18.128) — nearly constant with height.",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "K_yy",
+                                "label": "Horizontal diffusivity K_yy (m^2/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "neutral_eddy_diffusivity_profile",
+                    "description": "Vertical eddy diffusivity profile under neutral conditions (L_MO = 1.0e6 m, so |L_MO/z_i| = 1000 >> 10 selects the neutral branch), swept over height z from 10 to 1500 m. K_zz follows the Myrup & Ranzieri (1976) profile of Eq. 18.122 — linear growth kappa*u_star*z through the surface layer, the kappa*u_star*z*(1.1 - z/z_i) roll-off through the mixed layer, and zero above z/z_i = 1.1. Reproduces the docs `Figure 18.7: Neutral K_zz Profile`.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "L_MO": 1000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z",
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 1500.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "K_zz_vs_z_neutral",
+                            "type": "line",
+                            "description": "Vertical eddy diffusivity K_zz vs height z, neutral regime (Eq. 18.122).",
+                            "x": {
+                                "variable": "z",
+                                "label": "Height z (m)"
+                            },
+                            "y": {
+                                "variable": "K_zz",
+                                "label": "Vertical diffusivity K_zz (m^2/s)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
