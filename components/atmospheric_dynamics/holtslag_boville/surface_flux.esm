@@ -1,0 +1,716 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HoltslagBovilleSurfaceFlux",
+        "description": "Parameterized atmospheric-boundary-layer surface fluxes following Holtslag & Boville (1993), 'Local Versus Nonlocal Boundary-Layer Diffusion in a Global Climate Model', J. Climate 6, 1825-1842. A diagnostic (purely algebraic) bulk-aerodynamic scheme: from the lowest-model-level wind (u₁, v₁), the surface and lowest-level potential and virtual potential temperatures (θ₀/θ₁, θᵥ₀/θᵥ₁), and specific humidities (q₀, q₁), it computes the kinematic surface fluxes of momentum (wu₀, wv₀; Eqs. 2.1-2.2), heat (wθ₀; Eq. 2.3) and moisture (wq₀; Eq. 2.4). The stability-dependent exchange coefficients Cₘ and Cₕ (Eqs. 2.5-2.6) are the neutral coefficient Cₙ (Eq. 2.7, a logarithmic function of the roughness ratio) modulated by the stability functions fₘ and fₕ, which switch on the sign of the surface bulk Richardson number Ri₀ (Eq. 2.8): the unstable branch uses the Louis et al. (1982) forms (Eqs. 2.9-2.10) and the stable branch the Holtslag & Beljaars (1989) form (Eq. 2.11). The model has 11 algebraic variables (no time integration), 11 equations, and 15 parameters (4 physical constants + 11 inputs). All quantities are SI. Migrated from AtmosphericDynamics.jl@816cc391 src/holtslag_boville_1993.jl:35 (`HoltslagBovilleSurfaceFlux` @component).",
+        "tags": [
+            "atmospheric_dynamics",
+            "boundary-layer",
+            "surface-flux",
+            "holtslag-boville-1993",
+            "bulk-aerodynamic",
+            "algebraic-system"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDynamics.jl contributors",
+            "EarthSciModels migration (esm-0h5l)"
+        ],
+        "references": [
+            {
+                "citation": "Holtslag, A. A. M., & Boville, B. A. (1993). Local Versus Nonlocal Boundary-Layer Diffusion in a Global Climate Model. Journal of Climate, 6(10), 1825-1842 — surface-flux parameterization (Section 2): bulk-aerodynamic momentum/heat/moisture fluxes (Eqs. 2.1-2.4), stability-dependent exchange coefficients (Eqs. 2.5-2.6), neutral exchange coefficient (Eq. 2.7), surface bulk Richardson number (Eq. 2.8), and the stability functions for unstable (Eqs. 2.9-2.10) and stable (Eq. 2.11) stratification."
+            },
+            {
+                "citation": "Louis, J.-F., Tiedtke, M., & Geleyn, J.-F. (1982). A short history of the operational PBL parameterization at ECMWF. Workshop on Planetary Boundary Layer Parameterization, ECMWF, 59-79 — source of the unstable-branch stability functions fₘ (Eq. 2.9) and fₕ (Eq. 2.10)."
+            },
+            {
+                "citation": "Holtslag, A. A. M., & Beljaars, A. C. M. (1989). Surface flux parameterization schemes: Developments and experiences at KNMI. ECMWF Workshop on Parameterization of Fluxes over Land Surface — source of the stable-branch stability function (Eq. 2.11), fₘ = fₕ = 1/(1 + 10·Ri₀·(1 + 8·Ri₀))."
+            }
+        ]
+    },
+    "models": {
+        "HoltslagBovilleSurfaceFlux": {
+            "reference": {
+                "citation": "Holtslag, A. A. M., & Boville, B. A. (1993). Local Versus Nonlocal Boundary-Layer Diffusion in a Global Climate Model. Journal of Climate, 6(10), 1825-1842, Section 2 (Eqs. 2.1-2.11).",
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc3918e1eef2c2ee6d8fa8dd73c8f13a85a47:src/holtslag_boville_1993.jl:35\n\nUpstream `HoltslagBovilleSurfaceFlux` is an MTK `@component` returning `System(eqs, t; name)` with 4 `@constants` (g, κ, V_min_sq, zero_Ri), 11 `@parameters` (z₁, z₀ₘ, u₁, v₁, θ₀, θ₁, θᵥ₀, θᵥ₁, q₀, q₁, Dw), 11 `@variables` (V₁, Ri₀, Cₙ, fₘ, fₕ, Cₘ, Cₕ, wu₀, wv₀, wθ₀, wq₀), and 11 equations. Every equation is algebraic — there is no `D(...)` time derivative anywhere — so the system is a diagnostic surface-flux scheme: given the lowest-model-level state it returns the surface fluxes by direct substitution.\n\nStructural shape (matches upstream test `SurfaceFlux structure`, test/holtslag_boville_1993_test.jl:14-43): `length(equations()) == 11`, `length(unknowns()) == 11`, `length(parameters()) == 15`. The .esm preserves this exactly. All 11 `@variables` are encoded as `type: state` and carry no `default`: each is the LHS of one non-differential equation — an algebraic state determined by its equation, not initial-valued. After `mtkcompile` the upstream system moves all 11 to its `observed` set; the canonical Python runner resolves them through its topological algebraic-state substitution loop (the equation set is a DAG: V₁ and Cₙ depend only on parameters, Ri₀ on V₁, fₘ/fₕ on Ri₀ and Cₙ, Cₘ/Cₕ on Cₙ and fₘ/fₕ, and the four fluxes on Cₘ/Cₕ and V₁). The 4 MTK `@constants` and the 11 `@parameters` together appear in `ModelingToolkit.parameters(sys)`, so all 15 are encoded as `type: parameter`; the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters — the same treatment used in the sibling general_circulation.esm migration (Omega, R_earth, g).\n\nLocal intermediate (not a variable): the upstream component defines a plain Julia local `z_ratio = (z₁ + z₀ₘ) / z₀ₘ` — the dimensionless roughness ratio (z₁+z₀ₘ)/z₀ₘ. It is neither a `@variable` nor a `@parameter`, so it is NOT carried as a 12th variable (that would break the `length(equations()) == 11` / `length(unknowns()) == 11` structural invariant). It is inlined verbatim as the sub-expression `(z₁ + z₀ₘ) / z₀ₘ` everywhere it appears — in the Cₙ equation and in the unstable branch of both the fₘ and fₕ equations.\n\nEquation set (matches src/holtslag_boville_1993.jl:110-150 verbatim):\n  V₁  = sqrt(u₁² + v₁² + V_min_sq)                         — horizontal wind speed with the V_min_sq = 1 m²/s² floor that keeps the Ri₀ and flux denominators away from 0 in calm conditions.\n  Cₙ  = κ² / (log((z₁+z₀ₘ)/z₀ₘ))²                          — Eq. 2.7, neutral exchange coefficient.\n  Ri₀ = g·z₁·(θᵥ₁ − θᵥ₀) / (θ₁·V₁²)                        — Eq. 2.8, surface bulk Richardson number; negative for unstable (θᵥ₁ < θᵥ₀), positive for stable.\n  fₘ  = ifelse(Ri₀ < zero_Ri, 1 − 10·Ri₀/(1 + 75·Cₙ·sqrt((z₁+z₀ₘ)/z₀ₘ·|Ri₀|)), 1/(1 + 10·Ri₀·(1 + 8·Ri₀)))   — Eq. 2.9 (unstable, Louis et al. 1982) / Eq. 2.11 (stable, Holtslag & Beljaars 1989).\n  fₕ  = ifelse(Ri₀ < zero_Ri, 1 − 15·Ri₀/(1 + 75·Cₙ·sqrt((z₁+z₀ₘ)/z₀ₘ·|Ri₀|)), 1/(1 + 10·Ri₀·(1 + 8·Ri₀)))   — Eq. 2.10 (unstable) / Eq. 2.11 (stable); the only difference from fₘ is the numerator coefficient 15 vs 10, so heat mixing is more strongly enhanced than momentum in unstable air.\n  Cₘ  = Cₙ·fₘ                                              — Eq. 2.5, momentum exchange coefficient.\n  Cₕ  = Cₙ·fₕ                                              — Eq. 2.6, heat exchange coefficient.\n  wu₀ = −Cₘ·V₁·u₁                                          — Eq. 2.1, surface momentum flux (u-component); opposes the wind.\n  wv₀ = −Cₘ·V₁·v₁                                          — Eq. 2.2, surface momentum flux (v-component); opposes the wind.\n  wθ₀ = Cₕ·V₁·(θ₀ − θ₁)                                    — Eq. 2.3, surface heat flux; up (positive) when the surface is warmer than the air.\n  wq₀ = Dw·Cₕ·V₁·(q₀ − q₁)                                 — Eq. 2.4, surface moisture flux, scaled by the water-availability factor Dw.\nThe `ifelse`, `sqrt`, `abs`, `log`, `<`, `^` ops are all first-class ESS expression ops (esm-schema.json ExpressionNode op enum). zero_Ri (= 0) is the upstream `@constants` comparison threshold; the strict `Ri₀ < zero_Ri` test sends exactly-neutral conditions (Ri₀ = 0) into the stable branch, where 1/(1 + 0) = 1, so fₘ = fₕ = 1 — the correct neutral limit.\n\nWell-posedness (no singularities): V₁ ≥ sqrt(V_min_sq) = 1 m/s always, so the V₁² denominator of Ri₀ is bounded away from 0; z₁ > 0 and z₀ₘ > 0 give (z₁+z₀ₘ)/z₀ₘ > 1, so log(·) > 0 and Cₙ is finite and positive; the unstable-branch denominator 1 + 75·Cₙ·sqrt(·) ≥ 1; the stable-branch denominator 1 + 10·Ri₀·(1 + 8·Ri₀) = 1 + 10·Ri₀ + 80·Ri₀² has discriminant 100 − 320 < 0 and is therefore strictly positive for every real Ri₀. Every variable is a finite closed-form function of the parameters at every test point, so all inline tests are simulated directly (unlike general_circulation.esm, this model has no equatorial-style 0/0 point to avoid).\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): a diagnostic algebraic system with no ODE integration — the assertion values are the closed-form evaluation of the upstream equations in IEEE-754 double precision. rel=1e-6 covers float64 round-off in the trig-free closed-form expressions (log, sqrt, ^, divisions) and any sub-ULP libm difference between the Julia walker and the Python gate-of-record; abs=1e-9 covers the intended exact zeros — Ri₀ = 0 and wθ₀ = 0 under exactly-neutral stratification (θᵥ₁ = θᵥ₀, θ₀ = θ₁), and wv₀ = 0 when the meridional wind v₁ = 0 — for which a pure relative bound is undefined. This rel/abs pair is the same one used by the sibling algebraic migration general_circulation.esm.\n\nUpstream test reproduction (test/holtslag_boville_1993_test.jl). The 9 inline tests pin all 11 variables for each distinct parameter configuration exercised by the upstream `@testitem`s; assertion values are the closed-form evaluation of the upstream equations:\n- `SurfaceFlux structure` (lines 14-43) — reproduced by the structural shape: 11 `type: state` variables, 15 `type: parameter` variables, 11 entries in `equations`.\n- `SurfaceFlux neutral conditions` (lines 105-143) — reproduced by `neutral_conditions`: θᵥ₁ = θᵥ₀ gives Ri₀ = 0, fₘ = fₕ = 1, Cₘ = Cₕ = Cₙ; the pinned Cₙ = 0.0075119… matches the upstream hand-computed κ²/(log(101))² check.\n- `SurfaceFlux stable conditions` (lines 145-180) and `SurfaceFlux stable stability function numerical Eq. 2.11` (lines 1057-1082) — reproduced by `stable_conditions` and `stable_stability_function`: Ri₀ > 0, fₘ = fₕ < 1, wθ₀ < 0 (downward heat flux).\n- `SurfaceFlux unstable conditions` (lines 182-215) and `SurfaceFlux unstable stability function numerical Eq. 2.9-2.10` (lines 1021-1055) — reproduced by `unstable_conditions`: Ri₀ < 0, fₘ > 1, fₕ > 1, fₕ > fₘ, wθ₀ > 0 (upward heat flux).\n- `SurfaceFlux momentum flux direction` (lines 217-242) — reproduced by `momentum_flux_direction`: with u₁ = 5, v₁ = 3 both wu₀ < 0 and wv₀ < 0, the flux opposing the wind.\n- `SurfaceFlux Ri₀ numerical verification Eq. 2.8` (lines 244-270) — reproduced by `richardson_number`: u₁ = 3, v₁ = 4, z₁ = 20, z₀ₘ = 0.01 give the pinned Ri₀ = 0.12576…, matching g·z₁·(θᵥ₁−θᵥ₀)/(θ₁·V₁²) with V₁ = sqrt(26).\n- `SurfaceFlux moisture flux Eq. 2.4` (lines 272-304) — reproduced by `moisture_flux`: q₀ = 0.015, q₁ = 0.01, Dw = 0.8 give wq₀ = Dw·Cₕ·V₁·(q₀−q₁) > 0 (evaporation).\n- `SurfaceFlux numerical flux values Eq. 2.1-2.3` (lines 306-337) — reproduced by `numerical_flux_values`: neutral wind/virtual-temperature setup with θ₀ = 305 > θ₁ = 300 gives wu₀ = −Cₘ·V₁·u₁ and wθ₀ = Cₕ·V₁·5.\nThe `default_parameters` test additionally pins all 11 variables at the declared defaults (u₁ = 1, v₁ = 0, θᵥ₀ = 300 > θᵥ₁ = 299 — slightly unstable), verifying the default wiring.\n\nUnit balance (verified): V₁ is sqrt(m²/s²) = m/s; (z₁+z₀ₘ)/z₀ₘ is m/m = 1, so Cₙ = κ²/(log 1)² is dimensionless; Ri₀ = (m/s²)·m·K/(K·m²/s²) = 1, dimensionless; fₘ/fₕ are dimensionless (the sqrt argument (z₁+z₀ₘ)/z₀ₘ·|Ri₀| is dimensionless); Cₘ/Cₕ are dimensionless; wu₀/wv₀ = 1·(m/s)·(m/s) = m²/s²; wθ₀ = 1·(m/s)·K = K·m/s; wq₀ = 1·1·(m/s)·1 = m/s. SI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-6,
+                "abs": 1.0e-9
+            },
+            "variables": {
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration. Upstream MTK `@constants`; appears in the surface bulk Richardson number Ri₀ (Eq. 2.8)."
+                },
+                "κ": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "Von Karman constant (dimensionless). Upstream MTK `@constants`; sets the neutral exchange coefficient Cₙ = κ²/[ln((z₁+z₀ₘ)/z₀ₘ)]² (Eq. 2.7)."
+                },
+                "V_min_sq": {
+                    "type": "parameter",
+                    "units": "m^2/s^2",
+                    "default": 1.0,
+                    "description": "Minimum wind speed squared. Upstream MTK `@constants`; the floor added inside V₁ = sqrt(u₁² + v₁² + V_min_sq) so the Richardson-number and flux denominators stay finite in calm conditions."
+                },
+                "zero_Ri": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Zero Richardson number, the stability-branch threshold (dimensionless). Upstream MTK `@constants`; the stability functions use the unstable branch when Ri₀ < zero_Ri and the stable branch otherwise (so exactly-neutral Ri₀ = 0 takes the stable branch, giving fₘ = fₕ = 1)."
+                },
+                "z₁": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 10.0,
+                    "description": "Height of the lowest model level."
+                },
+                "z₀ₘ": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-4,
+                    "description": "Roughness length for momentum. Enters the neutral exchange coefficient through the roughness ratio (z₁+z₀ₘ)/z₀ₘ (Eq. 2.7)."
+                },
+                "u₁": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "Zonal (eastward) wind component at the lowest model level."
+                },
+                "v₁": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Meridional (northward) wind component at the lowest model level."
+                },
+                "θ₀": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Potential temperature at the surface. Drives the surface heat flux wθ₀ (Eq. 2.3)."
+                },
+                "θ₁": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 299.0,
+                    "description": "Potential temperature at the lowest model level. Appears in the surface heat flux (Eq. 2.3) and as the denominator reference temperature of the bulk Richardson number (Eq. 2.8)."
+                },
+                "θᵥ₀": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 300.0,
+                    "description": "Virtual potential temperature at the surface. Sets the surface-air buoyancy contrast in the bulk Richardson number (Eq. 2.8)."
+                },
+                "θᵥ₁": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 299.0,
+                    "description": "Virtual potential temperature at the lowest model level. With θᵥ₁ < θᵥ₀ the air is unstable (Ri₀ < 0); with θᵥ₁ > θᵥ₀ it is stable (Ri₀ > 0)."
+                },
+                "q₀": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.01,
+                    "description": "Specific humidity at the surface (dimensionless mass mixing ratio). Drives the surface moisture flux wq₀ (Eq. 2.4)."
+                },
+                "q₁": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.008,
+                    "description": "Specific humidity at the lowest model level (dimensionless mass mixing ratio)."
+                },
+                "Dw": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Water availability factor (dimensionless). Scales the surface moisture flux wq₀ (Eq. 2.4); 1 for a saturated surface, smaller for a moisture-limited one."
+                },
+                "V₁": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Horizontal wind speed at the lowest model level: V₁ = sqrt(u₁² + v₁² + V_min_sq). The V_min_sq floor keeps V₁ ≥ 1 m/s so the bulk-aerodynamic denominators stay finite in calm conditions."
+                },
+                "Ri₀": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Surface bulk Richardson number (Eq. 2.8), dimensionless. Negative for unstable stratification (θᵥ₁ < θᵥ₀), positive for stable; its sign selects the unstable vs stable branch of the stability functions."
+                },
+                "Cₙ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Neutral exchange coefficient (Eq. 2.7), dimensionless: Cₙ = κ²/[ln((z₁+z₀ₘ)/z₀ₘ)]². The drag coefficient that would apply under neutral stratification; increases with surface roughness."
+                },
+                "fₘ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Momentum stability function (dimensionless), Eq. 2.9 (unstable) / Eq. 2.11 (stable). fₘ > 1 enhances mixing in unstable air, fₘ < 1 suppresses it in stable air."
+                },
+                "fₕ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Heat stability function (dimensionless), Eq. 2.10 (unstable) / Eq. 2.11 (stable). Differs from fₘ only by the unstable-branch coefficient 15 vs 10, so heat mixing is more strongly enhanced than momentum (fₕ > fₘ when unstable); fₕ = fₘ when stable."
+                },
+                "Cₘ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Momentum exchange coefficient (Eq. 2.5), dimensionless: Cₘ = Cₙ·fₘ."
+                },
+                "Cₕ": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Heat exchange coefficient (Eq. 2.6), dimensionless: Cₕ = Cₙ·fₕ."
+                },
+                "wu₀": {
+                    "type": "state",
+                    "units": "m^2/s^2",
+                    "description": "Surface kinematic momentum flux, u-component (Eq. 2.1): wu₀ = −Cₘ·V₁·u₁. Negative for a positive zonal wind — the flux removes momentum from the flow (surface drag)."
+                },
+                "wv₀": {
+                    "type": "state",
+                    "units": "m^2/s^2",
+                    "description": "Surface kinematic momentum flux, v-component (Eq. 2.2): wv₀ = −Cₘ·V₁·v₁. Negative for a positive meridional wind; zero when v₁ = 0."
+                },
+                "wθ₀": {
+                    "type": "state",
+                    "units": "K*m/s",
+                    "description": "Surface kinematic heat flux (Eq. 2.3): wθ₀ = Cₕ·V₁·(θ₀ − θ₁). Positive (upward) when the surface is warmer than the air, negative (downward) when it is cooler."
+                },
+                "wq₀": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Surface kinematic moisture flux (Eq. 2.4): wq₀ = Dw·Cₕ·V₁·(q₀ − q₁). Positive (evaporation) when the surface is moister than the air."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Horizontal wind speed at the lowest model level, with the V_min_sq floor (prevents a zero flux/Richardson-number denominator in calm conditions).",
+                    "lhs": "V₁",
+                    "rhs": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "^", "args": ["u₁", 2.0]},
+                                    {"op": "^", "args": ["v₁", 2.0]},
+                                    "V_min_sq"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.7 — neutral exchange coefficient Cₙ = κ²/[ln((z₁+z₀ₘ)/z₀ₘ)]². The roughness ratio (z₁+z₀ₘ)/z₀ₘ is an upstream Julia local, inlined here.",
+                    "lhs": "Cₙ",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "^", "args": ["κ", 2.0]},
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {"op": "+", "args": ["z₁", "z₀ₘ"]},
+                                                    "z₀ₘ"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    2.0
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.8 — surface bulk Richardson number Ri₀ = g·z₁·(θᵥ₁−θᵥ₀)/(θ₁·V₁²). Negative when the air is unstable (θᵥ₁ < θᵥ₀).",
+                    "lhs": "Ri₀",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "g",
+                                    "z₁",
+                                    {"op": "-", "args": ["θᵥ₁", "θᵥ₀"]}
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "θ₁",
+                                    {"op": "^", "args": ["V₁", 2.0]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.9 (unstable, Ri₀ < 0) / Eq. 2.11 (stable) — momentum stability function fₘ. The roughness ratio (z₁+z₀ₘ)/z₀ₘ is inlined inside the unstable-branch sqrt.",
+                    "lhs": "fₘ",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {"op": "<", "args": ["Ri₀", "zero_Ri"]},
+                            {
+                                "op": "-",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {"op": "*", "args": [10.0, "Ri₀"]},
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1.0,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            75.0,
+                                                            "Cₙ",
+                                                            {
+                                                                "op": "sqrt",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    {"op": "+", "args": ["z₁", "z₀ₘ"]},
+                                                                                    "z₀ₘ"
+                                                                                ]
+                                                                            },
+                                                                            {"op": "abs", "args": ["Ri₀"]}
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    10.0,
+                                                    "Ri₀",
+                                                    {"op": "+", "args": [1.0, {"op": "*", "args": [8.0, "Ri₀"]}]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.10 (unstable, Ri₀ < 0) / Eq. 2.11 (stable) — heat stability function fₕ. Identical to fₘ except the unstable-branch numerator coefficient is 15 instead of 10.",
+                    "lhs": "fₕ",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {"op": "<", "args": ["Ri₀", "zero_Ri"]},
+                            {
+                                "op": "-",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {"op": "*", "args": [15.0, "Ri₀"]},
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1.0,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            75.0,
+                                                            "Cₙ",
+                                                            {
+                                                                "op": "sqrt",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "/",
+                                                                                "args": [
+                                                                                    {"op": "+", "args": ["z₁", "z₀ₘ"]},
+                                                                                    "z₀ₘ"
+                                                                                ]
+                                                                            },
+                                                                            {"op": "abs", "args": ["Ri₀"]}
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    10.0,
+                                                    "Ri₀",
+                                                    {"op": "+", "args": [1.0, {"op": "*", "args": [8.0, "Ri₀"]}]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.5 — momentum exchange coefficient.",
+                    "lhs": "Cₘ",
+                    "rhs": {"op": "*", "args": ["Cₙ", "fₘ"]}
+                },
+                {
+                    "_comment": "Eq. 2.6 — heat exchange coefficient.",
+                    "lhs": "Cₕ",
+                    "rhs": {"op": "*", "args": ["Cₙ", "fₕ"]}
+                },
+                {
+                    "_comment": "Eq. 2.1 — surface momentum flux, u-component (kinematic). Opposes the wind.",
+                    "lhs": "wu₀",
+                    "rhs": {"op": "*", "args": [-1.0, "Cₘ", "V₁", "u₁"]}
+                },
+                {
+                    "_comment": "Eq. 2.2 — surface momentum flux, v-component (kinematic). Opposes the wind.",
+                    "lhs": "wv₀",
+                    "rhs": {"op": "*", "args": [-1.0, "Cₘ", "V₁", "v₁"]}
+                },
+                {
+                    "_comment": "Eq. 2.3 — surface heat flux (kinematic). Up when the surface is warmer than the air.",
+                    "lhs": "wθ₀",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "Cₕ",
+                            "V₁",
+                            {"op": "-", "args": ["θ₀", "θ₁"]}
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 2.4 — surface moisture flux (kinematic), scaled by the water-availability factor Dw.",
+                    "lhs": "wq₀",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "Dw",
+                            "Cₕ",
+                            "V₁",
+                            {"op": "-", "args": ["q₀", "q₁"]}
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "neutral_conditions",
+                    "description": "Reproduces the upstream `SurfaceFlux neutral conditions` test (test/holtslag_boville_1993_test.jl:105-143). Equal surface and lowest-level virtual potential temperatures (θᵥ₀ = θᵥ₁ = 300 K) give a surface bulk Richardson number of exactly Ri₀ = 0; the stability functions take their neutral value fₘ = fₕ = 1, so the exchange coefficients reduce to the neutral coefficient Cₘ = Cₕ = Cₙ. The pinned Cₙ = 0.0075119… equals κ²/[ln((10+0.1)/0.1)]² = 0.16/ln(101)², the value the upstream test verifies by hand. Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 300.0, "θᵥ₁": 300.0, "θ₀": 300.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.0},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.0},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.1915184278809028},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wq₀", "time": 0.0, "expected": 7.660737115236112e-05}
+                    ]
+                },
+                {
+                    "id": "stable_conditions",
+                    "description": "Reproduces the upstream `SurfaceFlux stable conditions` test (test/holtslag_boville_1993_test.jl:145-180). Warm air over a cooler surface (θᵥ₁ = 295 K > θᵥ₀ = 290 K) gives a positive surface bulk Richardson number Ri₀ > 0. In stable stratification both stability functions take the same Holtslag & Beljaars (1989) form (Eq. 2.11), so fₘ = fₕ, both below 1 (mixing suppressed), and the surface heat flux wθ₀ < 0 (downward, into the cooler surface). Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 290.0, "θᵥ₁": 295.0, "θ₀": 290.0, "θ₁": 295.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.06395045632333769},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 0.5084717928577003},
+                        {"variable": "fₕ", "time": 0.0, "expected": 0.5084717928577003},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.003819625248748082},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.003819625248748082},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.09738171838989082},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": -0.09738171838989082},
+                        {"variable": "wq₀", "time": 0.0, "expected": 3.895268735595633e-05}
+                    ]
+                },
+                {
+                    "id": "unstable_conditions",
+                    "description": "Reproduces the upstream `SurfaceFlux unstable conditions` and `SurfaceFlux unstable stability function numerical Eq. 2.9-2.10` tests (test/holtslag_boville_1993_test.jl:182-215, 1021-1055). Cool air over a warmer surface (θᵥ₁ = 300 K < θᵥ₀ = 305 K) gives a negative surface bulk Richardson number Ri₀ < 0. The unstable-branch Louis et al. (1982) stability functions exceed 1 (enhanced mixing) and, because the heat numerator coefficient (15) is larger than the momentum one (10), fₕ > fₘ. The surface heat flux wθ₀ > 0 (upward, off the warm surface). Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 305.0, "θᵥ₁": 300.0, "θ₀": 305.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": -0.0628846153846154},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.259867931537484},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.389801897306226},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.00946409108427246},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.010440151238034321},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.24128792558562384},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.26617267443798437},
+                        {"variable": "wq₀", "time": 0.0, "expected": 0.00010646906977519375}
+                    ]
+                },
+                {
+                    "id": "momentum_flux_direction",
+                    "description": "Reproduces the upstream `SurfaceFlux momentum flux direction` test (test/holtslag_boville_1993_test.jl:217-242). With both wind components positive (u₁ = 5 m/s, v₁ = 3 m/s) and neutral stratification, both momentum-flux components are negative — wu₀ < 0 and wv₀ < 0 — confirming that the surface stress (Eqs. 2.1-2.2) opposes the wind. Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 300.0, "θᵥ₁": 300.0, "θ₀": 300.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 3.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.916079783099616},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.0},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.0},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.2222070922177916},
+                        {"variable": "wv₀", "time": 0.0, "expected": -0.133324255330675},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wq₀", "time": 0.0, "expected": 8.888283688711665e-05}
+                    ]
+                },
+                {
+                    "id": "richardson_number",
+                    "description": "Reproduces the upstream `SurfaceFlux Ri₀ numerical verification Eq. 2.8` test (test/holtslag_boville_1993_test.jl:244-270). A distinct configuration (u₁ = 3, v₁ = 4 m/s so V₁ = sqrt(26); z₁ = 20 m, z₀ₘ = 0.01 m; θᵥ₁ = 300 K > θᵥ₀ = 295 K, stable) verifies the surface bulk Richardson number Ri₀ = g·z₁·(θᵥ₁−θᵥ₀)/(θ₁·V₁²) = 9.81·20·5/(300·26) = 0.12576…. Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 295.0, "θᵥ₁": 300.0, "θ₀": 295.0, "θ₁": 300.0, "u₁": 3.0, "v₁": 4.0, "z₁": 20.0, "z₀ₘ": 0.01},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.1257692307692308},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.0027690611265885298},
+                        {"variable": "fₘ", "time": 0.0, "expected": 0.2838389810012629},
+                        {"variable": "fₕ", "time": 0.0, "expected": 0.2838389810012629},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.0007859674885010974},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.0007859674885010974},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.012022990682749824},
+                        {"variable": "wv₀", "time": 0.0, "expected": -0.016030654243666433},
+                        {"variable": "wθ₀", "time": 0.0, "expected": -0.02003831780458304},
+                        {"variable": "wq₀", "time": 0.0, "expected": 8.015327121833216e-06}
+                    ]
+                },
+                {
+                    "id": "moisture_flux",
+                    "description": "Reproduces the upstream `SurfaceFlux moisture flux Eq. 2.4` test (test/holtslag_boville_1993_test.jl:272-304). Neutral stratification with a moister surface than air (q₀ = 0.015 > q₁ = 0.01) and a water-availability factor Dw = 0.8 gives a positive surface moisture flux wq₀ = Dw·Cₕ·V₁·(q₀−q₁) > 0 (evaporation). Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 300.0, "θᵥ₁": 300.0, "θ₀": 300.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1, "q₀": 0.015, "q₁": 0.01, "Dw": 0.8},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.0},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.0},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.1915184278809028},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wq₀", "time": 0.0, "expected": 0.00015321474230472223}
+                    ]
+                },
+                {
+                    "id": "numerical_flux_values",
+                    "description": "Reproduces the upstream `SurfaceFlux numerical flux values Eq. 2.1-2.3` test (test/holtslag_boville_1993_test.jl:306-337). Neutral virtual-temperature stratification (θᵥ₀ = θᵥ₁ = 300 K) but with a warmer surface than air (θ₀ = 305 K > θ₁ = 300 K) verifies the momentum flux wu₀ = −Cₘ·V₁·u₁ and the upward heat flux wθ₀ = Cₕ·V₁·(θ₀−θ₁). Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 300.0, "θᵥ₁": 300.0, "θ₀": 305.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.0},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.0},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.1915184278809028},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.1915184278809028},
+                        {"variable": "wq₀", "time": 0.0, "expected": 7.660737115236112e-05}
+                    ]
+                },
+                {
+                    "id": "stable_stability_function",
+                    "description": "Reproduces the upstream `SurfaceFlux stable stability function numerical Eq. 2.11` test (test/holtslag_boville_1993_test.jl:1057-1082). A second stable configuration (θᵥ₁ = 300 K > θᵥ₀ = 295 K) verifies the Holtslag & Beljaars (1989) stable-branch stability function fₘ = fₕ = 1/(1 + 10·Ri₀·(1 + 8·Ri₀)) — equal for momentum and heat, and below 1. Pins all 11 variables.",
+                    "parameter_overrides": {"θᵥ₀": 295.0, "θᵥ₁": 300.0, "θ₀": 295.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 5.0990195135927845},
+                        {"variable": "Ri₀", "time": 0.0, "expected": 0.0628846153846154},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.007511970776748738},
+                        {"variable": "fₘ", "time": 0.0, "expected": 0.5140848605050503},
+                        {"variable": "fₕ", "time": 0.0, "expected": 0.5140848605050503},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.0038617904488828896},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.0038617904488828896},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.09845672428130046},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": -0.09845672428130046},
+                        {"variable": "wq₀", "time": 0.0, "expected": 3.9382689712520186e-05}
+                    ]
+                },
+                {
+                    "id": "default_parameters",
+                    "description": "All parameters at their declared defaults (u₁ = 1 m/s, v₁ = 0, z₁ = 10 m, z₀ₘ = 1e-4 m, θ₀ = 300 K, θ₁ = 299 K, θᵥ₀ = 300 K, θᵥ₁ = 299 K, q₀ = 0.01, q₁ = 0.008, Dw = 1). With θᵥ₁ = 299 K < θᵥ₀ = 300 K the default state is mildly unstable (Ri₀ < 0, fₘ and fₕ above 1). Verifies the declared defaults are wired correctly and the unstable branch is reached without any override. Pins all 11 variables.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "V₁", "time": 0.0, "expected": 1.4142135623730951},
+                        {"variable": "Ri₀", "time": 0.0, "expected": -0.1640468227424749},
+                        {"variable": "Cₙ", "time": 0.0, "expected": 0.0012071127639142537},
+                        {"variable": "fₘ", "time": 0.0, "expected": 1.1302408302016616},
+                        {"variable": "fₕ", "time": 0.0, "expected": 1.1953612453024924},
+                        {"variable": "Cₘ", "time": 0.0, "expected": 0.0013643281324334684},
+                        {"variable": "Cₕ", "time": 0.0, "expected": 0.0014429358166930758},
+                        {"variable": "wu₀", "time": 0.0, "expected": -0.0019294513484145674},
+                        {"variable": "wv₀", "time": 0.0, "expected": 0.0},
+                        {"variable": "wθ₀", "time": 0.0, "expected": 0.002040619401601246},
+                        {"variable": "wq₀", "time": 0.0, "expected": 4.081238803202493e-06}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "stability_functions",
+                    "description": "Reproduces the documented 'Surface Layer Stability Functions (Eq. 2.9-2.11)' figure from the AtmosphericDynamics.jl Holtslag & Boville (1993) page. The lowest-level virtual potential temperature θᵥ₁ is swept from 290 to 310 K with the surface value held at θᵥ₀ = 300 K, carrying the surface bulk Richardson number Ri₀ from unstable (negative) through neutral (0) to stable (positive). Plotting the momentum and heat stability functions against Ri₀ shows the asymmetric response: in unstable air (Ri₀ < 0) both functions exceed 1 and fₕ rises faster than fₘ (numerator coefficient 15 vs 10); in stable air (Ri₀ > 0) the two coincide and decay below 1. θ₁ is held at 300 K (the stability functions depend on the inputs only through Ri₀, so the curves are independent of how Ri₀ is generated).",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {"θᵥ₀": 300.0, "θ₀": 300.0, "θ₁": 300.0, "u₁": 5.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "θᵥ₁",
+                                "range": {"start": 290.0, "stop": 310.0, "count": 41, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "fm_vs_Ri",
+                            "type": "line",
+                            "description": "Momentum stability function fₘ as a function of the surface bulk Richardson number Ri₀ — enhanced (> 1) in unstable air, suppressed (< 1) in stable air.",
+                            "x": {"variable": "Ri₀", "label": "Surface bulk Richardson number Ri₀"},
+                            "y": {"variable": "fₘ", "label": "Momentum stability function fₘ"}
+                        },
+                        {
+                            "id": "fh_vs_Ri",
+                            "type": "line",
+                            "description": "Heat stability function fₕ as a function of the surface bulk Richardson number Ri₀. In unstable air fₕ rises above fₘ; in stable air fₕ = fₘ.",
+                            "x": {"variable": "Ri₀", "label": "Surface bulk Richardson number Ri₀"},
+                            "y": {"variable": "fₕ", "label": "Heat stability function fₕ"}
+                        }
+                    ]
+                },
+                {
+                    "id": "surface_fluxes_vs_wind",
+                    "description": "Surface momentum and heat fluxes as a function of the lowest-level wind speed. The zonal wind u₁ is swept from 0 to 20 m/s under neutral virtual-temperature stratification (θᵥ₀ = θᵥ₁ = 300 K) with a 2 K surface-air potential-temperature contrast (θ₀ = 302 K, θ₁ = 300 K). The momentum flux wu₀ = −Cₘ·V₁·u₁ grows in magnitude roughly with the square of the wind speed, and the heat flux wθ₀ = Cₕ·V₁·(θ₀−θ₁) grows linearly with V₁ — the bulk-aerodynamic ventilation effect, stronger wind drawing more flux from the surface.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {"θᵥ₀": 300.0, "θᵥ₁": 300.0, "θ₀": 302.0, "θ₁": 300.0, "v₁": 0.0, "z₁": 10.0, "z₀ₘ": 0.1},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u₁",
+                                "range": {"start": 0.0, "stop": 20.0, "count": 41, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "wu0_vs_wind",
+                            "type": "line",
+                            "description": "Surface momentum flux wu₀ versus the lowest-level zonal wind u₁ — increasingly negative (stronger drag) as the wind strengthens.",
+                            "x": {"variable": "u₁", "label": "Lowest-level zonal wind u₁ (m/s)"},
+                            "y": {"variable": "wu₀", "label": "Surface momentum flux wu₀ (m^2/s^2)"}
+                        },
+                        {
+                            "id": "wth0_vs_wind",
+                            "type": "line",
+                            "description": "Surface heat flux wθ₀ versus the lowest-level zonal wind u₁ — rising with wind speed through the bulk-aerodynamic ventilation factor V₁.",
+                            "x": {"variable": "u₁", "label": "Lowest-level zonal wind u₁ (m/s)"},
+                            "y": {"variable": "wθ₀", "label": "Surface heat flux wθ₀ (K*m/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "neutral_coefficient_vs_roughness",
+                    "description": "The neutral exchange coefficient Cₙ = κ²/[ln((z₁+z₀ₘ)/z₀ₘ)]² as a function of the momentum roughness length z₀ₘ. The roughness length is swept logarithmically from 1e-5 m (very smooth, e.g. open water) to 1e-1 m (rough, e.g. tall vegetation), with the lowest model level held at z₁ = 10 m. As the surface roughens the logarithmic roughness ratio shrinks and Cₙ rises — the surface couples more strongly to the atmosphere (Eq. 2.7).",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {"z₁": 10.0},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z₀ₘ",
+                                "range": {"start": 1.0e-5, "stop": 1.0e-1, "count": 41, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Cn_vs_z0m",
+                            "type": "line",
+                            "description": "Neutral exchange coefficient Cₙ as a function of the momentum roughness length z₀ₘ — monotonically increasing with surface roughness.",
+                            "x": {"variable": "z₀ₘ", "label": "Momentum roughness length z₀ₘ (m)"},
+                            "y": {"variable": "Cₙ", "label": "Neutral exchange coefficient Cₙ"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
