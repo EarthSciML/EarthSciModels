@@ -1,0 +1,162 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ParticleMobility",
+        "description": "Particle mechanical mobility for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:230 (`ParticleMobility` @component). Computes the particle mobility B, which relates an external force on a particle to the steady drift velocity it produces; via the Einstein relation D = B k T it also fixes the Brownian diffusivity (Seinfeld & Pandis 2006, Chapter 9, Eq. 9.78).",
+        "tags": [
+            "aerosol",
+            "particle-dynamics",
+            "particle-mobility"
+        ],
+        "created": "2026-05-18T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-aw8)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Eq. 9.78 (particle mechanical mobility)."
+            }
+        ]
+    },
+    "models": {
+        "ParticleMobility": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:230\nUpstream `ParticleMobility` is an MTK `@component` with one constant (π_val), three `@parameters` (D_p, μ, C_c) and one variable (B). The single equation is:\n  • B ~ C_c / (3 * π_val * μ * D_p)  (Eq. 9.78 — particle mechanical mobility)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only — the single output B is given by one algebraic equation in which B appears only on the LHS. B migrates as `type: state` with an explicit `equations` entry, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm, electrical_mobility.esm, stokes.esm and aerodynamic_diameter.esm. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nConstant π_val (3.141592653589793) migrates as `type: parameter` carrying its numeric default, consistent with the sibling single_particle_dynamics.jl migrations (π_val is a `type: parameter` in mean_free_path.esm and electrical_mobility.esm). The name is not one of the ESS schema's reserved physical-constant names (R, k_B, N_A), so it is preserved verbatim from the source.\n\nAll three `@parameters` and the constant appear in the equation, so `parameters(sys)` collects the full set — no unused-parameter pruning is needed.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the B equation is a single division of C_c by a product of parameters (with π in the denominator). Expected values are computed in float64 with the same arithmetic; floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Pi (dimensionless)"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-6,
+                    "description": "Particle diameter"
+                },
+                "μ": {
+                    "type": "parameter",
+                    "units": "kg/(m*s)",
+                    "default": 1.8e-5,
+                    "description": "Dynamic viscosity of air"
+                },
+                "C_c": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Slip correction factor (dimensionless)"
+                },
+                "B": {
+                    "type": "state",
+                    "units": "s/kg",
+                    "description": "Particle mobility"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "B",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "C_c",
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "*", "args": [3, "π_val"] },
+                                            "μ"
+                                        ]
+                                    },
+                                    "D_p"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default conditions: D_p = 1.0e-6 m (1 μm particle), μ = 1.8e-5 kg/(m·s), C_c = 1.0. The mechanical mobility B = C_c/(3π μ D_p) ≈ 5.8946e9 s/kg — the steady drift velocity per unit applied force.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "B", "time": 0.0, "expected": 5894627521.9220495 }
+                    ]
+                },
+                {
+                    "id": "slip_corrected_micron",
+                    "description": "1 μm particle with the physically appropriate slip correction C_c = 1.164 (the Cunningham value for D_p = 1 μm at λ ≈ 6.5e-8 m) at default viscosity. B = C_c/(3π μ D_p) ≈ 6.8613e9 s/kg. Mirrors the upstream `ParticleMobility B = C_c/(3πμD_p)` test, which uses exactly D_p = 1.0e-6 m, μ = 1.8e-5 kg/(m·s) and C_c = 1.164.",
+                    "parameter_overrides": { "C_c": 1.164 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "B", "time": 0.0, "expected": 6861346435.517265 }
+                    ]
+                },
+                {
+                    "id": "large_particle",
+                    "description": "Large particle (D_p = 1.0e-5 m = 10 μm) in the near-continuum regime, with the lower slip correction C_c = 1.016 appropriate to that size. B ∝ 1/D_p, so the 10× larger diameter drops the mobility roughly tenfold to ≈ 5.9889e8 s/kg. Mirrors the large-particle case of the upstream `ParticleMobility size dependence` test.",
+                    "parameter_overrides": { "D_p": 1.0e-5, "C_c": 1.016 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "B", "time": 0.0, "expected": 598894156.2272801 }
+                    ]
+                },
+                {
+                    "id": "small_particle",
+                    "description": "Small particle (D_p = 1.0e-7 m = 100 nm), with the larger slip correction C_c = 2.85 appropriate to that size. B ∝ 1/D_p and C_c is well above unity, so the mobility rises to ≈ 1.6800e11 s/kg — more than two decades above the large-particle value, confirming that mechanical mobility decreases with particle size (the comparison made by the upstream `ParticleMobility size dependence` test).",
+                    "parameter_overrides": { "D_p": 1.0e-7, "C_c": 2.85 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "B", "time": 0.0, "expected": 167996884374.77844 }
+                    ]
+                },
+                {
+                    "id": "high_viscosity",
+                    "description": "Doubled dynamic viscosity (μ = 3.6e-5 kg/(m·s)) at default particle size and slip correction. B ∝ 1/μ, so doubling the viscosity halves the mobility to ≈ 2.9473e9 s/kg — exactly half the default-conditions value.",
+                    "parameter_overrides": { "μ": 3.6e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "B", "time": 0.0, "expected": 2947313760.9610248 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "size_dependence",
+                    "description": "Sweep particle diameter D_p from 10 nm to 10 μm (log scale) at default viscosity (μ = 1.8e-5 kg/(m·s)) and slip correction held at unity (C_c = 1.0) to isolate the geometric dependence. The mechanical mobility B = C_c/(3π μ D_p) ∝ 1/D_p falls by three decades across the range — smaller particles are mechanically more mobile, drifting faster under a given applied force. This is the size-dependence behavior exercised by the upstream `ParticleMobility size dependence` test.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-8, "stop": 1.0e-5, "count": 50, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "mobility_vs_diameter",
+                            "type": "line",
+                            "description": "Particle mechanical mobility B vs particle diameter (log x-axis) — B ∝ 1/D_p, so the curve drops three decades from ≈ 5.9e11 s/kg at 10 nm to ≈ 5.9e8 s/kg at 10 μm at fixed slip correction.",
+                            "x": { "variable": "D_p", "label": "D_p (m)" },
+                            "y": { "variable": "B", "label": "B (s/kg)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
