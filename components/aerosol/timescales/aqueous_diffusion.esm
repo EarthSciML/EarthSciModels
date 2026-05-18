@@ -1,0 +1,332 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AqueousDiffusionTimescale",
+        "description": "Characteristic timescale for aqueous-phase diffusion within a droplet — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12, Eq. 12.75. The aqueous-phase diffusion timescale τ_da = R_p²/(π²D_aq) is the characteristic time for a dissolved species to diffuse throughout the interior of a droplet of radius R_p with aqueous-phase diffusivity D_aq. It is the e-folding decay time of the fundamental (slowest) mode of the spherical diffusion equation, whose lowest eigenvalue contributes the π² factor. Migrated from Aerosol.jl AqueousDiffusionTimescale.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch12",
+            "timescales",
+            "mass-transfer"
+        ]
+    },
+    "models": {
+        "AqueousDiffusionTimescale": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Aqueous-phase diffusion timescale: Eq. 12.75.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:42\n\nUpstream `AqueousDiffusionTimescale` is an MTK `@component` (no parameterization). It declares two scalar `@parameters` — `R_p` (droplet radius, m) and `D_aq` (aqueous-phase diffusivity, m^2/s) — and one scalar `@variable` `τ_da` (aqueous-phase diffusion timescale, s). The single equation is `τ_da ~ R_p^2 / (π^2 * D_aq)` — Eq. 12.75 of Seinfeld & Pandis (2006) Ch. 12: the characteristic time for a dissolved species to diffuse throughout the interior of a droplet of radius R_p. The π² factor is the squared lowest eigenvalue of the diffusion equation on a sphere — the fundamental diffusion mode of a sphere relaxes as exp(-π²D_aq·t/R_p²), so the e-folding time is R_p²/(π²D_aq).\n\nπ handling — inline numeric literal, not a parameter: the upstream equation uses Julia's built-in `π` (an `Irrational{:π}`), which is NOT declared in an `@constants` or `@parameters` block. `π^2` is therefore a literal numeric coefficient — in `π^2 * D_aq`, with `π` non-symbolic, Julia folds `π^2` to the Float64 `9.869604401089358` before the symbolic multiplication, so `parameters(AqueousDiffusionTimescale())` is exactly `[R_p, D_aq]` and π is not a parameter. The migration encodes π faithfully as the inline numeric literal `3.141592653589793` (= `Float64(π)`, the IEEE-754 double of π) inside a `^` node — `{\"op\":\"^\",\"args\":[3.141592653589793,2]}` — preserving the visible π² structure of Eq. 12.75 without inventing a named symbol the upstream System does not have. This deliberately differs from the sibling migrations blackbody.esm and mean_free_path.esm, whose upstreams DO declare `π_val = Float64(π)` as an `@constants` and so carry π as a fixed-default `type: parameter`; here there is no upstream π symbol to carry.\n\nObserved classification: AqueousDiffusionTimescale has no `D()` time-derivative anywhere — it is a purely-algebraic component. `τ_da` is an algebraic output (`τ_da ~ R_p²/(π²·D_aq)`). After MTK `mtkcompile` / `structural_simplify` the compiled system has zero ODE states and `τ_da` becomes an observed quantity. It is therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the direct sibling pure-algebraic Aerosol.jl migration aqueous_eq.esm (same source file, src/timescales.jl).\n\nUnicode identifier `τ_da` is kept verbatim from the upstream `@variables` declaration; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migrations (aqueous_eq.esm: `τ_a`, `τ_s`; kelvin.esm: `σ`, `ρ_l`) keep Greek symbols, so no ASCII rename is applied.\n\nTests authored from physics: the upstream `timescales.jl` carries no test file (`has_tests: N` in the migration tracker). The inline `tests` block is authored from the closed-form Eq. 12.75 — pinning the exact analytic value of `τ_da = R_p²/(π²D_aq)` at the upstream default parameterization, exercising the exact quadratic dependence on droplet radius R_p and the exact inverse dependence on aqueous diffusivity D_aq, sampling the large-cloud-droplet and fine-aerosol-particle radius regimes and a slow-diffusivity (large-solute) regime, and checking the R_p = 0 limiting case where the timescale vanishes.\n\nNot migrated: `timescales.jl` defines six independent `@component`s — `GasDiffusionTimescale`, `AqueousDiffusionTimescale`, `InterfacialTimescale`, `ReactionTimescale`, `SolidEquilibrationTimescale`, and `AqueousEquilibrationTimescale`. Only `AqueousDiffusionTimescale` (src/timescales.jl:42) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/timescales/` (AqueousEquilibrationTimescale is already migrated as aqueous_eq.esm).\n\nTolerance rationale (model-level rel=1e-8): the model is a single closed-form algebraic expression — two squarings, one multiplication and one division — so float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel=1e-8 leaves ample headroom while still catching a structural regression, matching the direct sibling aqueous_eq.esm. The `zero_radius_zero_timescale` test adds a tight per-assertion abs=1e-20: with R_p = 0 the numerator R_p² is exactly 0.0 and τ_da = 0.0 exactly, so the absolute floor guards against a stuck-nonzero regression without a false negative on the relative branch."
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Droplet radius — the radius of the aqueous droplet within which the dissolved species diffuses (Eq. 12.75 term R_p). The diffusion timescale scales as R_p². Default 1e-5 m is a 10 μm cloud droplet."
+                },
+                "D_aq": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-9,
+                    "description": "Aqueous-phase diffusivity — the molecular diffusion coefficient of the dissolved species in the droplet's liquid water (Eq. 12.75 term D_aq). A larger diffusivity shortens the time to homogenize the droplet interior. Default 1e-9 m²/s is a typical small-solute aqueous molecular diffusivity."
+                },
+                "τ_da": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Aqueous-phase diffusion timescale (Eq. 12.75): τ_da = R_p²/(π²D_aq). The characteristic time for a dissolved species to diffuse throughout the interior of a droplet of radius R_p — the e-folding decay time of the fundamental (slowest) mode of the spherical diffusion equation, which relaxes as exp(-π²D_aq·t/R_p²).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    "R_p",
+                                    2
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            3.141592653589793,
+                                            2
+                                        ]
+                                    },
+                                    "D_aq"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-08
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eq. 12.75 at the upstream default parameterization (R_p = 1e-5 m, a 10 μm cloud droplet; D_aq = 1e-9 m²/s, a typical small-solute aqueous molecular diffusivity). τ_da = R_p²/(π²D_aq) = (1e-5)²/(π²·1e-9) = 1.0132e-2 s — a 10 μm droplet homogenizes its interior by aqueous diffusion in about 10 ms. The output is algebraic and time-invariant, so the same value is asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 0.01013211836423378
+                        },
+                        {
+                            "variable": "τ_da",
+                            "time": 1.0,
+                            "expected": 0.01013211836423378
+                        }
+                    ]
+                },
+                {
+                    "id": "quadratic_in_droplet_radius",
+                    "description": "Eq. 12.75 scales with the square of the droplet radius. Doubling R_p from the 1e-5 m default to 2e-5 m raises the aqueous-phase diffusion timescale fourfold, from 1.0132e-2 to τ_da = (2e-5)²/(π²·1e-9) = 4.0528e-2 s — diffusion across a larger droplet takes a time proportional to R_p².",
+                    "parameter_overrides": {
+                        "R_p": 2.0e-5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 0.04052847345693512
+                        }
+                    ]
+                },
+                {
+                    "id": "inverse_in_aqueous_diffusivity",
+                    "description": "Eq. 12.75 varies inversely with the aqueous-phase diffusivity. Doubling D_aq from the 1e-9 m²/s default to 2e-9 m²/s halves the diffusion timescale, from 1.0132e-2 to τ_da = (1e-5)²/(π²·2e-9) = 5.0661e-3 s — a faster-diffusing species homogenizes the droplet interior proportionally sooner.",
+                    "parameter_overrides": {
+                        "D_aq": 2.0e-9
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 0.00506605918211689
+                        }
+                    ]
+                },
+                {
+                    "id": "large_cloud_droplet",
+                    "description": "A large 100 μm droplet (R_p = 1e-4 m, drizzle-drop scale) at the default aqueous diffusivity. By the R_p² scaling the diffusion timescale rises to τ_da = (1e-4)²/(π²·1e-9) = 1.0132 s — interior homogenization of a drizzle drop takes of order one second, a hundredfold longer than the 10 μm cloud-droplet default.",
+                    "parameter_overrides": {
+                        "R_p": 1.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 1.0132118364233778
+                        }
+                    ]
+                },
+                {
+                    "id": "fine_aerosol_particle",
+                    "description": "A fine 0.1 μm aqueous particle (R_p = 1e-7 m, accumulation-mode aerosol scale) at the default aqueous diffusivity. The diffusion timescale falls to τ_da = (1e-7)²/(π²·1e-9) = 1.0132e-6 s — a sub-micron aqueous particle equilibrates its interior essentially instantaneously, ten thousandfold faster than the 10 μm cloud-droplet default.",
+                    "parameter_overrides": {
+                        "R_p": 1.0e-7
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 1.0132118364233776e-06
+                        }
+                    ]
+                },
+                {
+                    "id": "slow_diffusivity_solute",
+                    "description": "A slowly-diffusing solute (D_aq = 1e-10 m²/s, an order of magnitude below the default — representative of a large or macromolecular dissolved species) in the default 10 μm droplet. The diffusion timescale rises tenfold to τ_da = (1e-5)²/(π²·1e-10) = 1.0132e-1 s.",
+                    "parameter_overrides": {
+                        "D_aq": 1.0e-10
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 0.10132118364233778
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_radius_zero_timescale",
+                    "description": "Limiting case: a point droplet (R_p = 0) has no interior to homogenize, so the numerator R_p² is exactly 0.0 and τ_da = 0 exactly. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the R_p² numerator.",
+                    "parameter_overrides": {
+                        "R_p": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_da",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-20
+                            }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "timescale_vs_droplet_radius",
+                    "description": "The aqueous-phase diffusion timescale rises as the square of the droplet radius (Eq. 12.75). Sweeping R_p over the 1e-7–1e-4 m range — from an accumulation-mode aerosol particle up to a drizzle drop — at the default aqueous diffusivity D_aq = 1e-9 m²/s traces the parabola τ_da = R_p²/(π²D_aq); the timescale spans roughly 1e-6 s at 0.1 μm to 1 s at 100 μm.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {
+                                    "start": 1.0e-7,
+                                    "stop": 1.0e-4,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_da_vs_R_p",
+                            "type": "line",
+                            "description": "Aqueous-phase diffusion timescale τ_da as a function of droplet radius R_p (at the default aqueous diffusivity D_aq).",
+                            "x": {
+                                "variable": "R_p",
+                                "label": "Droplet radius R_p (m)"
+                            },
+                            "y": {
+                                "variable": "τ_da",
+                                "label": "Aqueous-phase diffusion timescale τ_da (s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "timescale_vs_aqueous_diffusivity",
+                    "description": "The aqueous-phase diffusion timescale varies inversely with the aqueous-phase diffusivity (Eq. 12.75). With R_p at the 1e-5 m default, sweeping D_aq over the 1e-11–1e-8 m²/s range — from a slowly-diffusing macromolecular solute up to a fast small ion — traces the τ_da = R_p²/(π²D_aq) hyperbola.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_aq",
+                                "range": {
+                                    "start": 1.0e-11,
+                                    "stop": 1.0e-8,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_da_vs_D_aq",
+                            "type": "line",
+                            "description": "Aqueous-phase diffusion timescale τ_da as a function of aqueous-phase diffusivity D_aq (at the default droplet radius R_p).",
+                            "x": {
+                                "variable": "D_aq",
+                                "label": "Aqueous-phase diffusivity D_aq (m²/s)"
+                            },
+                            "y": {
+                                "variable": "τ_da",
+                                "label": "Aqueous-phase diffusion timescale τ_da (s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "timescale_radius_diffusivity_heatmap",
+                    "description": "Joint dependence of the aqueous-phase diffusion timescale on the droplet radius and the aqueous-phase diffusivity (Eq. 12.75). The heatmap of τ_da(R_p, D_aq) shows the timescale rising steeply with droplet radius (the R_p² factor) and falling with diffusivity — the R_p²/(π²D_aq) surface.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {
+                                    "start": 1.0e-7,
+                                    "stop": 1.0e-4,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "D_aq",
+                                "range": {
+                                    "start": 1.0e-11,
+                                    "stop": 1.0e-8,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_da_R_p_D_aq_heatmap",
+                            "type": "heatmap",
+                            "description": "τ_da(R_p, D_aq) heatmap over the droplet-radius and aqueous-diffusivity ranges.",
+                            "x": {
+                                "variable": "R_p",
+                                "label": "Droplet radius R_p (m)"
+                            },
+                            "y": {
+                                "variable": "D_aq",
+                                "label": "Aqueous-phase diffusivity D_aq (m²/s)"
+                            },
+                            "value": {
+                                "variable": "τ_da",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
