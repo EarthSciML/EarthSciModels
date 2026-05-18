@@ -1,0 +1,677 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DryDepositionGas",
+        "description": "ModelingToolkit implementation of the complete gas dry-deposition velocity model from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.2 (deposition velocity) and Eq. 19.1 (deposition flux). The gas dry-deposition velocity follows the resistance-in-series model: a depositing gas crosses three resistances stacked in series between the reference height and the surface -- the aerodynamic resistance r_a (turbulent transport through the surface layer, Eq. 19.14), the quasi-laminar resistance r_b (molecular diffusion across the thin stagnant sublayer in contact with the surface, Eq. 19.17), and the surface resistance r_c (uptake by the canopy along four parallel pathways, Wesely 1989, Eq. 19.50). The deposition velocity is the reciprocal of their sum, v_d = 1/(r_a + r_b + r_c), and the downward deposition flux is F = -v_d*C for a gas concentration C at the reference height. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:416 (`DryDepositionGas` @component), which composes three MTK subsystems via `System(eqs, t; systems=[aero, qlam, surf])` plus its own coupling equations. Represented here as a subsystem-composed ESS model (spec section 4.7): the `aero` subsystem inlines the already-migrated AerodynamicResistance component (aerodynamic_resistance.esm, esm-x8pg), `qlam` inlines QuasiLaminarResistanceGas (quasi_laminar_gas.esm, esm-t3wp), and `surf` inlines SurfaceResistance (surface_resistance.esm, esm-ug1i), wired together by seven top-level coupling equations. Algebraic (no time derivative): u_star, C, G and T_s are input parameters; r_t, v_d and F are algebraic state outputs.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "deposition-velocity",
+            "resistance-model",
+            "composed"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-qpkn)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 19: Dry Deposition, Eq. 19.2 (gas deposition velocity, resistance-in-series model) and Eq. 19.1 (dry-deposition flux). John Wiley & Sons, Inc."
+            }
+        ]
+    },
+    "models": {
+        "DryDepositionGas": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.2 (gas deposition velocity) and Eq. 19.1 (deposition flux). John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:416\n\nUpstream `DryDepositionGas` is an MTK `@component` that composes three subsystems -- `@named aero = AerodynamicResistance()`, `@named qlam = QuasiLaminarResistanceGas()`, `@named surf = SurfaceResistance()` -- via `System(eqs, t; systems=[aero, qlam, surf])`, with its own `@variables` (u_star, C, G, T_s, r_t, v_d, F) and seven coupling equations. Migrated as a subsystem-composed model (ESS spec section 4.7), the convention of the sibling composed migrations water_vapor_thermo.esm (esm-tfh2) and radiation_fundamentals.esm: the `aero`, `qlam` and `surf` subsystems inline the `variables` + `equations` of the already-migrated standalone components aerodynamic_resistance.esm (esm-x8pg), quasi_laminar_gas.esm (esm-t3wp) and surface_resistance.esm (esm-ug1i). The seven upstream coupling equations are carried as the model's top-level `equations`; subsystem variables are referenced by full dotted path from the model name (spec section 4.6), bare names resolve to the top-level system.\n\nRe-typing. In the standalone `.esm` files a component's connected inputs are typed `parameter` (no governing equation within the standalone component). In the composed model the parent coupling equations govern four of those inputs -- `aero.u_star` (by `aero.u_star ~ u_star`), `qlam.u_star` (by `qlam.u_star ~ u_star`), `surf.G` (by `surf.G ~ G`) and `surf.T_s` (by `surf.T_s ~ T_s`) -- so those four are re-typed `parameter` -> `state` here, because a `parameter` cannot be an equation LHS. Their upstream-test default values (u_star = 0.4 m/s, G = 300 W/m^2, T_s = 298.15 K) are kept as the state defaults. All other subsystem `parameter`s (aero.kappa/z/z_0, qlam.nu/D_g, and surf's land-use resistances and empirical constants) keep their `parameter` type and standalone-file default values. The top-level u_star, C, G and T_s are the model's input `parameter`s; r_t, v_d and F are its algebraic `state` outputs.\n\nVariable mapping. The upstream component declares 7 `@variables`: u_star, C, G, T_s are flagged `input = true` (connected, no defining equation) and migrate as top-level `type: parameter` -- the connected-input-variable convention of [[esm-input-variable-to-parameter]] and the standalone sibling files. r_t, v_d, F each carry a defining top-level equation and migrate as `type: state`. The upstream test `5.1 Gas Deposition System Compilation` confirms the input set by compiling the component with `mtkcompile(gas_dep; inputs = [u_star, C, G, T_s])`.\n\nEquations (migrated verbatim from the upstream `eqs` vector). Four coupling equations feed the inputs into the subsystems (aero.u_star ~ u_star, qlam.u_star ~ u_star, surf.G ~ G, surf.T_s ~ T_s); the remaining three are the diagnostic outputs: r_t ~ aero.r_a + qlam.r_b + surf.r_c (Eq. 19.2, the three resistances in series), v_d ~ 1/r_t (Eq. 19.2, deposition velocity), and F ~ -v_d*C (Eq. 19.1, the downward dry-deposition flux; the negative sign marks the flux as toward the surface). The subsystem equations are copied verbatim from the three standalone `.esm` files.\n\nThe flattened system is 16 algebraic equations in 16 states (the 4 coupled subsystem inputs aero.u_star/qlam.u_star/surf.G/surf.T_s, the subsystem outputs aero.r_a, qlam.Sc/r_b, surf.T_s_C/G_factor/T_factor/r_st/r_m/r_c, and the top-level r_t/v_d/F), fully explicit and triangular: each input flows to its subsystem, each subsystem computes its resistance, the three resistances sum to r_t, and v_d and F follow by direct substitution. `system_kind` is left unset (zero differential states), consistent with the composed sibling water_vapor_thermo.esm and the three standalone Ch. 19 components. No `examples` block: `tools/render_example_plots.py` resolves algebraic models on the top-level model only and does not descend into `subsystems`, so combined-diagnostic plots cannot be rendered -- matching water_vapor_thermo.esm / radiation_fundamentals.esm; verification is via the inline-test gate, which flattens subsystems.\n\nSingularities and domain. Eq. 19.14 is singular at u_star = 0 (r_a) and the stomatal temperature factor of Eq. 19.51 is singular at T_s_C = 0 (T_s = 273.15 K) and T_s_C = T_max (T_s = 313.15 K); every test keeps u_star > 0 and T_s strictly interior to the 273.15-313.15 K stomatal-function window, so r_t is finite and positive and v_d = 1/r_t is well-defined throughout.\n\nTolerance rationale (model-level rel=1e-6): an explicit triangular algebraic system with no ODE integration, matching the standalone Ch. 19 siblings and water_vapor_thermo.esm (all rel=1e-6). The pinned `expected` values are the Float64 evaluation of the same equation chain the runner walks (a logarithm, a fractional power, several reciprocal sums, two divisions); rel=1e-6 covers float64 round-off across that chain with wide margin. No assertion is near zero (r_a, r_b, r_c, r_t are O(10)-O(600) s/m and v_d is O(1e-3) m/s, all strictly positive; F is O(1e-9) and strictly negative), so a relative tolerance alone is sufficient."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.4,
+                    "description": "Friction velocity characterizing surface-layer turbulence -- input to the composite, fed to the aero and qlam subsystems by the coupling equations aero.u_star ~ u_star and qlam.u_star ~ u_star. Default 0.4 m/s (the upstream Ch. 19 test reference value)."
+                },
+                "C": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-6,
+                    "description": "Gas concentration at the reference height -- input to the composite, scales the dry-deposition flux via F = -v_d*C (Eq. 19.1). Default 1e-6 mol/m^3, a representative near-surface molar concentration of a depositing trace gas."
+                },
+                "G": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 300.0,
+                    "description": "Solar irradiance reaching the surface -- input to the composite, fed to the surf subsystem by the coupling equation surf.G ~ G. Default 300 W/m^2 (matches the surface_resistance.esm reference case)."
+                },
+                "T_s": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Surface temperature -- input to the composite, fed to the surf subsystem by the coupling equation surf.T_s ~ T_s. Default 298.15 K, 25 degC (matches the surface_resistance.esm reference case)."
+                },
+                "r_t": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Total dry-deposition resistance: the series sum r_a + r_b + r_c of the aerodynamic, quasi-laminar and surface resistances (Eq. 19.2)."
+                },
+                "v_d": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Gas dry-deposition velocity, the reciprocal of the total series resistance v_d = 1/r_t (Eq. 19.2)."
+                },
+                "F": {
+                    "type": "state",
+                    "units": "mol/(m^2*s)",
+                    "description": "Gas dry-deposition flux F = -v_d*C (Eq. 19.1); the negative sign marks the flux as downward, toward the surface."
+                }
+            },
+            "subsystems": {
+                "aero": {
+                    "variables": {
+                        "kappa": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.4,
+                            "description": "Von Karman constant (dimensionless), upstream @constant KAPPA. Sets the slope of the neutral-stability logarithmic wind profile."
+                        },
+                        "z": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 10.0,
+                            "description": "Reference height above the surface at which the resistance is evaluated. Default: 10 m (S&P upstream test 2.1 canonical case)."
+                        },
+                        "z_0": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.1,
+                            "description": "Surface roughness length. Default: 0.1 m, open cropland / tall grass (S&P upstream test 2.1 canonical case)."
+                        },
+                        "u_star": {
+                            "type": "state",
+                            "units": "m/s",
+                            "default": 0.4,
+                            "description": "Friction velocity -- coupled input, driven by the parent coupling equation aero.u_star ~ u_star (re-typed parameter -> state for the composed model)."
+                        },
+                        "r_a": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Aerodynamic resistance to dry deposition through the surface layer under neutral atmospheric stability (Eq. 19.14)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 19.14 -- neutral-stability aerodynamic resistance: r_a = (1/(kappa*u_star)) * ln(z/z_0).",
+                            "lhs": "r_a",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": ["kappa", "u_star"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": ["z", "z_0"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "qlam": {
+                    "variables": {
+                        "nu": {
+                            "type": "parameter",
+                            "units": "m^2/s",
+                            "default": 1.5e-5,
+                            "description": "Kinematic viscosity of air (upstream input @parameter; default 1.5e-5 m^2/s is the value for air near 298 K used in the upstream test suite)."
+                        },
+                        "D_g": {
+                            "type": "parameter",
+                            "units": "m^2/s",
+                            "default": 1.5e-5,
+                            "description": "Molecular diffusivity of the depositing gas in air (upstream input @parameter; default 1.5e-5 m^2/s is an O3-like diffusivity giving a Schmidt number of 1.0)."
+                        },
+                        "u_star": {
+                            "type": "state",
+                            "units": "m/s",
+                            "default": 0.4,
+                            "description": "Friction velocity -- coupled input, driven by the parent coupling equation qlam.u_star ~ u_star (re-typed parameter -> state for the composed model)."
+                        },
+                        "Sc": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Schmidt number Sc = nu/D_g, the dimensionless ratio of momentum to mass diffusivity (algebraic output)."
+                        },
+                        "r_b": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Quasi-laminar (boundary-layer) resistance for the gas, Eq. 19.17 (algebraic output)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Schmidt number Sc = nu/D_g -- the ratio of the kinematic viscosity of air to the molecular diffusivity of the depositing gas.",
+                            "lhs": "Sc",
+                            "rhs": {
+                                "op": "/",
+                                "args": ["nu", "D_g"]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.17 -- quasi-laminar resistance for gases, r_b = 5 * Sc^(2/3) / u_star. The exponent 2/3 is the AST node {op:/,args:[2,3]} (float division). Julia's left-associative `5 * Sc^(2/3) / u_star` parses as (5*Sc^(2/3))/u_star, mirrored here by the outer / node over the 5*Sc^(2/3) product.",
+                            "lhs": "r_b",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            5,
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "Sc",
+                                                    { "op": "/", "args": [2, 3] }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "u_star"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "surf": {
+                    "variables": {
+                        "T_ref": {
+                            "type": "parameter",
+                            "units": "K",
+                            "default": 273.15,
+                            "description": "Celsius-to-Kelvin offset applied to the surface temperature (upstream @constant)."
+                        },
+                        "G_ref": {
+                            "type": "parameter",
+                            "units": "W/m^2",
+                            "default": 200.0,
+                            "description": "Reference solar irradiance in the stomatal light response, Eq. 19.51 (upstream @constant)."
+                        },
+                        "G_offset": {
+                            "type": "parameter",
+                            "units": "W/m^2",
+                            "default": 0.1,
+                            "description": "Small irradiance offset that keeps the light factor finite at G = 0 (upstream @constant)."
+                        },
+                        "T_coeff": {
+                            "type": "parameter",
+                            "units": "K^2",
+                            "default": 400.0,
+                            "description": "Temperature coefficient of the stomatal temperature factor, Eq. 19.51 (upstream @constant)."
+                        },
+                        "T_max": {
+                            "type": "parameter",
+                            "units": "K",
+                            "default": 40.0,
+                            "description": "Upper temperature bound (Celsius-equivalent) of stomatal function in Eq. 19.51 (upstream @constant)."
+                        },
+                        "H_coeff": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 0.00033,
+                            "description": "Henry's-law coefficient of the mesophyll resistance, Eq. 19.52 (upstream @constant)."
+                        },
+                        "f_coeff": {
+                            "type": "parameter",
+                            "units": "m/s",
+                            "default": 100.0,
+                            "description": "Reactivity coefficient of the mesophyll resistance, Eq. 19.52 (upstream @constant)."
+                        },
+                        "H_star": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 100000.0,
+                            "description": "Effective Henry's-law constant of the depositing gas (dimensionless, normalized; S&P Table 19.4). Default: SO2."
+                        },
+                        "f_0": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.0,
+                            "description": "Chemical reactivity factor of the depositing gas, 0-1 (S&P Table 19.4). Default: SO2."
+                        },
+                        "D_ratio": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 1.9,
+                            "description": "Ratio of water-vapor to gas molecular diffusivity, D_H2O/D_gas (S&P Table 19.4). Default: SO2."
+                        },
+                        "r_i": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 70.0,
+                            "description": "Minimum bulk-canopy stomatal resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                        },
+                        "r_lu": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 2000.0,
+                            "description": "Cuticular / outer-canopy-surface resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                        },
+                        "r_dc": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 100.0,
+                            "description": "Lower-canopy buoyant-convection resistance (Wesely 1989 land-use table). Default: representative midsummer value."
+                        },
+                        "r_cl": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 2000.0,
+                            "description": "Lower-canopy exposed-surfaces uptake resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer, SO2."
+                        },
+                        "r_ac": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 2000.0,
+                            "description": "In-canopy aerodynamic resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                        },
+                        "r_gs": {
+                            "type": "parameter",
+                            "units": "s/m",
+                            "default": 500.0,
+                            "description": "Ground-surface uptake resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer, SO2."
+                        },
+                        "G": {
+                            "type": "state",
+                            "units": "W/m^2",
+                            "default": 300.0,
+                            "description": "Solar irradiance reaching the surface -- coupled input, driven by the parent coupling equation surf.G ~ G (re-typed parameter -> state for the composed model)."
+                        },
+                        "T_s": {
+                            "type": "state",
+                            "units": "K",
+                            "default": 298.15,
+                            "description": "Surface temperature -- coupled input, driven by the parent coupling equation surf.T_s ~ T_s (re-typed parameter -> state for the composed model)."
+                        },
+                        "T_s_C": {
+                            "type": "state",
+                            "units": "K",
+                            "description": "Surface temperature offset from the 273.15 K reference (Celsius-equivalent magnitude carried with a K unit)."
+                        },
+                        "G_factor": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Dimensionless irradiance factor of the stomatal resistance, 1 + (G_ref/(G+G_offset))^2 (Eq. 19.51)."
+                        },
+                        "T_factor": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Dimensionless temperature factor of the stomatal resistance, T_coeff/(T_s_C*(T_max-T_s_C)) (Eq. 19.51)."
+                        },
+                        "r_st": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Bulk-canopy stomatal resistance (Eq. 19.51)."
+                        },
+                        "r_m": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Mesophyll resistance (Eq. 19.52)."
+                        },
+                        "r_c": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Total surface (canopy) resistance to gaseous dry deposition along four parallel pathways (Eq. 19.50)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Temperature offset from the 273.15 K reference: T_s_C = T_s - T_ref.",
+                            "lhs": "T_s_C",
+                            "rhs": {
+                                "op": "-",
+                                "args": ["T_s", "T_ref"]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.51 light factor: G_factor = 1 + (G_ref/(G + G_offset))^2.",
+                            "lhs": "G_factor",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "G_ref",
+                                                    {
+                                                        "op": "+",
+                                                        "args": ["G", "G_offset"]
+                                                    }
+                                                ]
+                                            },
+                                            2
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.51 temperature factor: T_factor = T_coeff/(T_s_C*(T_max - T_s_C)).",
+                            "lhs": "T_factor",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    "T_coeff",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "T_s_C",
+                                            {
+                                                "op": "-",
+                                                "args": ["T_max", "T_s_C"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.51 stomatal resistance: r_st = D_ratio*r_i*G_factor*T_factor.",
+                            "lhs": "r_st",
+                            "rhs": {
+                                "op": "*",
+                                "args": ["D_ratio", "r_i", "G_factor", "T_factor"]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.52 mesophyll resistance: r_m = 1/(H_coeff*H_star + f_coeff*f_0).",
+                            "lhs": "r_m",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["H_coeff", "H_star"]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": ["f_coeff", "f_0"]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.50 total surface resistance: four parallel deposition pathways.",
+                            "lhs": "r_c",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "+",
+                                                        "args": ["r_st", "r_m"]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "/",
+                                                "args": [1, "r_lu"]
+                                            },
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "+",
+                                                        "args": ["r_dc", "r_cl"]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "+",
+                                                        "args": ["r_ac", "r_gs"]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Couple the input friction velocity into the aerodynamic-resistance subsystem (upstream: aero.u_star ~ u_star).",
+                    "lhs": "DryDepositionGas.aero.u_star",
+                    "rhs": "u_star"
+                },
+                {
+                    "_comment": "Couple the input friction velocity into the quasi-laminar-resistance subsystem (upstream: qlam.u_star ~ u_star).",
+                    "lhs": "DryDepositionGas.qlam.u_star",
+                    "rhs": "u_star"
+                },
+                {
+                    "_comment": "Couple the input solar irradiance into the surface-resistance subsystem (upstream: surf.G ~ G).",
+                    "lhs": "DryDepositionGas.surf.G",
+                    "rhs": "G"
+                },
+                {
+                    "_comment": "Couple the input surface temperature into the surface-resistance subsystem (upstream: surf.T_s ~ T_s).",
+                    "lhs": "DryDepositionGas.surf.T_s",
+                    "rhs": "T_s"
+                },
+                {
+                    "_comment": "Eq. 19.2 -- total resistance: the aerodynamic, quasi-laminar and surface resistances act in series, r_t = r_a + r_b + r_c.",
+                    "lhs": "r_t",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "DryDepositionGas.aero.r_a",
+                            "DryDepositionGas.qlam.r_b",
+                            "DryDepositionGas.surf.r_c"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.2 -- gas dry-deposition velocity is the reciprocal of the total series resistance, v_d = 1/r_t.",
+                    "lhs": "v_d",
+                    "rhs": {
+                        "op": "/",
+                        "args": [1, "r_t"]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.1 -- gas dry-deposition flux F = -v_d*C; the negative sign marks the flux as downward, toward the surface.",
+                    "lhs": "F",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["v_d", "C"]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Component defaults: u_star = 0.4 m/s, G = 300 W/m^2, T_s = 298.15 K, C = 1e-6 mol/m^3, with the aero subsystem at its 10 m / 0.1 m neutral-stability defaults, qlam at an O3-like diffusivity (Schmidt number 1.0) and surf at the SO2 deciduous-forest land-use defaults. The three series resistances are r_a = 28.782 s/m (Eq. 19.14), r_b = 12.5 s/m (Eq. 19.17) and r_c = 159.835 s/m (Eq. 19.50), summing to a total resistance r_t = 201.117 s/m; the deposition velocity is v_d = 1/r_t = 4.9722e-3 m/s and the flux F = -v_d*C = -4.9722e-9 mol/(m^2*s). Verifies the full coupling chain end to end. v_d and F are re-checked at t = 1 s to confirm the algebraic system is time-invariant.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.aero.r_a", "time": 0.0, "expected": 28.78231366242557 },
+                        { "variable": "DryDepositionGas.qlam.Sc", "time": 0.0, "expected": 1.0 },
+                        { "variable": "DryDepositionGas.qlam.r_b", "time": 0.0, "expected": 12.5 },
+                        { "variable": "DryDepositionGas.surf.r_c", "time": 0.0, "expected": 159.83485089186416 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 201.11716455428973 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.004972226026635629 },
+                        { "variable": "DryDepositionGas.F", "time": 0.0, "expected": -4.972226026635629e-9 },
+                        { "variable": "DryDepositionGas.v_d", "time": 1.0, "expected": 0.004972226026635629 },
+                        { "variable": "DryDepositionGas.F", "time": 1.0, "expected": -4.972226026635629e-9 }
+                    ]
+                },
+                {
+                    "id": "coherent_so2_deposition",
+                    "description": "A coherent SO2 deposition case: the surf subsystem is already at its SO2 land-use defaults, and the qlam diffusivity D_g is overridden to nu/1.3 = 1.1538e-5 m^2/s so the Schmidt number Sc = nu/D_g = 1.3 matches SO2 in air near 298 K. The quasi-laminar resistance rises to r_b = 5*1.3^(2/3)/0.4 = 14.889 s/m (above the Sc=1.0 default), so r_t = 203.506 s/m and v_d falls slightly to 4.9139e-3 m/s -- a slower-diffusing gas deposits marginally slower.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.qlam.D_g": 1.1538461538461538e-5
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.qlam.Sc", "time": 0.0, "expected": 1.3 },
+                        { "variable": "DryDepositionGas.qlam.r_b", "time": 0.0, "expected": 14.88923031495541 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 203.50639486924513 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.004913850499108443 }
+                    ]
+                },
+                {
+                    "id": "ozone_deposition",
+                    "description": "Ozone over the midsummer deciduous forest: the surf subsystem is overridden to the O3 Table 19.4 properties (D_ratio = 1.6, H_star = 0.01, f_0 = 1.0). O3 is weakly soluble but highly reactive, so the mesophyll resistance collapses and the stomatal resistance drops, giving r_c = 139.431 s/m -- below the SO2 default r_c = 159.835 s/m. The total resistance falls to r_t = 180.713 s/m and the deposition velocity rises to v_d = 5.5336e-3 m/s: a reactive gas deposits faster than a soluble-only gas over the same canopy.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.surf.D_ratio": 1.6,
+                        "DryDepositionGas.surf.H_star": 0.01,
+                        "DryDepositionGas.surf.f_0": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.surf.r_st", "time": 0.0, "expected": 172.52758312300134 },
+                        { "variable": "DryDepositionGas.surf.r_c", "time": 0.0, "expected": 139.43055397838557 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 180.71286764081114 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.005533640260679289 }
+                    ]
+                },
+                {
+                    "id": "strong_turbulence",
+                    "description": "Strong surface-layer turbulence: the input friction velocity u_star is raised to 1.0 m/s. The coupling equations carry it into both the aero and qlam subsystems, where Eq. 19.14 and Eq. 19.17 each make their resistance inversely proportional to u_star -- r_a falls to 11.513 s/m and r_b to 5.0 s/m. The surface resistance r_c is unchanged (it does not depend on u_star), so r_t drops to 176.348 s/m and the deposition velocity rises to v_d = 5.6706e-3 m/s.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.u_star": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.aero.r_a", "time": 0.0, "expected": 11.51292546497023 },
+                        { "variable": "DryDepositionGas.qlam.r_b", "time": 0.0, "expected": 5.0 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 176.3477763568344 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.005670613038956216 }
+                    ]
+                },
+                {
+                    "id": "calm_conditions",
+                    "description": "Calm, weakly turbulent conditions: u_star is lowered to 0.1 m/s. Because both r_a and r_b scale as 1/u_star, each grows fourfold relative to the 0.4 m/s default -- r_a = 115.129 s/m and r_b = 50.0 s/m -- so the aerodynamic and quasi-laminar pathways now dominate the total. r_t rises to 324.964 s/m and the deposition velocity falls to v_d = 3.0773e-3 m/s.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.u_star": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.aero.r_a", "time": 0.0, "expected": 115.12925464970228 },
+                        { "variable": "DryDepositionGas.qlam.r_b", "time": 0.0, "expected": 50.0 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 324.9641055415664 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.0030772629436517543 }
+                    ]
+                },
+                {
+                    "id": "smooth_surface",
+                    "description": "A smooth surface: the aero roughness length z_0 is overridden to 0.01 m (mown grass / snow). The smaller roughness widens the height ratio z/z_0 inside the logarithm of Eq. 19.14, raising the aerodynamic resistance to r_a = 43.173 s/m above the 0.1 m default. Only the aero subsystem is affected; r_b and r_c are unchanged. r_t rises to 215.508 s/m and v_d falls to 4.6402e-3 m/s.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.aero.z_0": 0.01
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.aero.r_a", "time": 0.0, "expected": 43.17347049363835 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 215.5083213855025 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.004640192051847475 }
+                    ]
+                },
+                {
+                    "id": "coupling_propagation",
+                    "description": "Exercises the coupling equations directly: the three top-level inputs are overridden together (u_star = 0.7 m/s, G = 500 W/m^2, T_s = 290 K) and the coupled subsystem inputs are asserted equal to them -- aero.u_star = qlam.u_star = u_star = 0.7 and surf.G = G = 500, surf.T_s = T_s = 290 -- confirming each coupling equation propagates its input correctly. The downstream resistances follow: r_a = 16.447 s/m, r_b = 7.143 s/m, r_c = 129.933 s/m, giving v_d = 6.5137e-3 m/s.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.u_star": 0.7,
+                        "DryDepositionGas.G": 500.0,
+                        "DryDepositionGas.T_s": 290.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.aero.u_star", "time": 0.0, "expected": 0.7 },
+                        { "variable": "DryDepositionGas.qlam.u_star", "time": 0.0, "expected": 0.7 },
+                        { "variable": "DryDepositionGas.surf.G", "time": 0.0, "expected": 500.0 },
+                        { "variable": "DryDepositionGas.surf.T_s", "time": 0.0, "expected": 290.0 },
+                        { "variable": "DryDepositionGas.aero.r_a", "time": 0.0, "expected": 16.4470363785289 },
+                        { "variable": "DryDepositionGas.qlam.r_b", "time": 0.0, "expected": 7.142857142857143 },
+                        { "variable": "DryDepositionGas.surf.r_c", "time": 0.0, "expected": 129.93319240743807 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.0065136783432272645 }
+                    ]
+                },
+                {
+                    "id": "flux_scales_with_concentration",
+                    "description": "The dry-deposition flux F = -v_d*C (Eq. 19.1) is linear in the gas concentration C. With C doubled to 2e-6 mol/m^3 and every resistance at its default, the deposition velocity v_d is unchanged at 4.9722e-3 m/s (it depends only on the resistances, not on C), while the flux doubles to F = -9.9445e-9 mol/(m^2*s) -- exactly twice the default-case flux. Confirms C enters only the flux equation and not the velocity.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.C": 2.0e-6
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.004972226026635629 },
+                        { "variable": "DryDepositionGas.F", "time": 0.0, "expected": -9.944452053271258e-9 }
+                    ]
+                },
+                {
+                    "id": "low_irradiance_high_canopy_resistance",
+                    "description": "Low-light conditions: the solar irradiance G is lowered to 50 W/m^2 (heavy overcast / near-dusk). The stomatal light factor of Eq. 19.51 is G_factor = 1 + (G_ref/(G+G_offset))^2 = 16.936, an order of magnitude above the 300 W/m^2 default, driving the stomatal resistance up to r_st = 2402.7 s/m and the total surface resistance to r_c = 557.9 s/m. The total resistance rises to r_t = 599.2 s/m and the deposition velocity collapses to v_d = 1.6689e-3 m/s -- stomatal closure in low light strongly suppresses gas dry deposition.",
+                    "parameter_overrides": {
+                        "DryDepositionGas.G": 50.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "DryDepositionGas.surf.G_factor", "time": 0.0, "expected": 16.936191489276933 },
+                        { "variable": "DryDepositionGas.surf.r_st", "time": 0.0, "expected": 2402.6810326120876 },
+                        { "variable": "DryDepositionGas.surf.r_c", "time": 0.0, "expected": 557.9152406948829 },
+                        { "variable": "DryDepositionGas.r_t", "time": 0.0, "expected": 599.1975543573085 },
+                        { "variable": "DryDepositionGas.v_d", "time": 0.0, "expected": 0.0016688986674396344 }
+                    ]
+                }
+            ]
+        }
+    }
+}
