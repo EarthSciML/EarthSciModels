@@ -1,0 +1,860 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "QuasiLaminarResistanceParticle",
+        "description": "Zhang et al. (2001) quasi-laminar (boundary-layer) resistance r_b for particle dry deposition, Seinfeld & Pandis (2006) Ch. 19 Eq. 19.27. r_b = 1/(3*u_star*(E_B+E_IM+E_IN)*R_1) sums three size-dependent collection mechanisms — Brownian diffusion E_B (Eq. 19.21), inertial impaction E_IM (Eq. 19.22), and interception E_IN (Eq. 19.25) — scaled by the friction velocity u_star and the rebound-correction sticking fraction R_1 (Eq. 19.26). The competition between diffusion (efficient for sub-0.1 um particles) and impaction (efficient for super-um particles) leaves a deposition minimum at accumulation-mode sizes. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:234 (`QuasiLaminarResistanceParticle` @component). The seven upstream equations are migrated verbatim and one-to-one; the five input @parameters, the @constant g, and the three externally-supplied input @variables (u_star, v_s, D_diff) are all parameters, and the seven equation-defined quantities (Sc, St, E_B, E_IM, E_IN, R_1, r_b) are the algebraic outputs.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "dry-deposition",
+            "particle-deposition",
+            "zhang-2001",
+            "ch19",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-brbr)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed., Chapter 19: Dry Deposition, pp. 900-931. John Wiley & Sons, Inc. Eq. 19.27 defines the quasi-laminar resistance for particles; Eqs. 19.21-19.26 define the collection-efficiency terms. ISBN 978-0-471-72018-8."
+            },
+            {
+                "citation": "Zhang, L., Gong, S., Padro, J., & Barrie, L. (2001). A size-segregated particle dry deposition scheme for an atmospheric aerosol module. Atmospheric Environment, 35(3), 549-560. https://doi.org/10.1016/S1352-2310(00)00326-5. Original source of the size-resolved particle collection-efficiency parameterization (Brownian diffusion, impaction, interception, and rebound) adopted as Eqs. 19.21-19.27 by Seinfeld & Pandis (2006)."
+            }
+        ]
+    },
+    "models": {
+        "QuasiLaminarResistanceParticle": {
+            "reference": {
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:234\nUpstream `QuasiLaminarResistanceParticle` is an MTK `@component` implementing the Zhang et al. (2001) quasi-laminar (boundary-layer) resistance for particle dry deposition, Seinfeld & Pandis (2006) Ch. 19 Eq. 19.27 together with the four collection-mechanism sub-equations 19.21, 19.22 (beta = 2), 19.24, 19.25 and the rebound correction 19.26. It is a flat algebraic component: `System(eqs, t; name)` with seven equations and no subsystems and no differential (D) operator.\n\nVariable typing. Upstream the component declares five input `@parameters` (nu, A, alpha, gamma, D_p), one `@constants` entry (g = G_ACCEL = 9.81 m/s^2), and ten `@variables`: three of those ten — u_star, v_s, D_diff — appear only on equation right-hand sides and have no defining equation, while the other seven — Sc, St, E_B, E_IM, E_IN, R_1, r_b — are each defined by exactly one equation. u_star, v_s and D_diff are externally-supplied inputs: in the `DryDepositionParticle` composite (src line 479) they are connected to the AerodynamicResistance and ParticleSettling subsystems (qlam.u_star ~ u_star, qlam.v_s ~ settling.v_s, qlam.D_diff ~ settling.D_diff). They are declared as `@variables` upstream only so they are connectable in that composite; within the standalone component they carry no equation and no dynamics. This standalone migration therefore types them as `parameter` — there is no defining equation and no D operator that could make them `state`, and a runner needs them as fixed inputs to evaluate the component. This follows the established rig convention for flat algebraic models, where every input is a `parameter` and every equation-defined quantity is a `state`. The closest precedent is the sibling `sp_ch19/surface_resistance.esm` (esm-ug1i), migrated from the same upstream file seinfeld_pandis_ch19.jl, which makes the identical choice for its connected input `@variables` G and T_s; particle_collection_eff.esm and wesley1989/surface_resistance.esm follow the same convention. The upstream `@constants` entry g migrates the same way — a `parameter` carrying its fixed numeric default 9.81 — per the rig convention for translating MTK `@constants` (G_ACCEL is defined at src line 35). The seven equation-defined `@variables` migrate as `type: state`; after `mtkcompile` all seven reduce to observed quantities (the component has zero differential states), so `system_kind` is left unset, consistent with the observed-only sibling particle_collection_eff.esm.\n\nEquations. All seven equations are migrated verbatim from the upstream `eqs` vector in source order (Sc, St, E_B, E_IM, E_IN, R_1, r_b), one .esm equation per upstream line, so the migration is line-checkable. The upstream `Sc^(-gamma)` is encoded as a `^` node whose exponent is a unary-minus `-` node over the parameter gamma (spec §4.2 — `-` is unary or binary); Sc = nu/D_diff is always strictly positive so the power is well-defined. `exp`, `sqrt` and `^` are all spec §4.2 elementary ops, `-sqrt(St)` is a unary minus over `sqrt`, and `St` is always >= 0 (v_s, u_star, g, A all positive) so the square root is real. The component has no `ifelse`, `min`, `max` or `Piecewise` nodes.\n\nDefaults. The upstream `@parameters` and `@variables` carry no defaults, so physically-representative values are supplied here. The three land-use parameters take the Zhang et al. (2001) Table 19.2 `LANDUSE_GRASS` row (A = 2.0e-3 m, alpha = 1.2, gamma = 0.54; src lines 51-58); D_p = 1e-6 m is a 1 um accumulation-mode particle; nu = 1.5e-5 m^2/s is the kinematic viscosity of air near 298 K; g = 9.81 m/s^2 is G_ACCEL; u_star = 0.4 m/s is a representative friction velocity (the value used in upstream test 3.1); v_s = 3.5e-5 m/s and D_diff = 2.7e-11 m^2/s are the Stokes settling velocity and Brownian diffusivity of a 1 um particle (upstream test 2.3 cites v_s ~ 3.5e-5 m/s for a 1 um particle at STP). The deciduous_forest and desert inline tests exercise the other two Table 19.2 rows (`LANDUSE_DECIDUOUS_FOREST` 5.0e-3/0.6/0.56 and `LANDUSE_DESERT` 10.0e-3/50.0/0.54).\n\nTests. Upstream provides only a structural test for this component (`1.4 QuasiLaminarResistanceParticle Structure` — it checks the variable names and that there are seven equations) plus a scalar check of the Eq. 19.26 sticking-fraction formula (`3.3 Sticking Fraction Bounds`); there are no upstream numerical assertions on the assembled component. The seven inline tests here pin exact values for all seven outputs: default_parameters / deciduous_forest / desert sweep the three Table 19.2 land-use categories; ultrafine_particle and coarse_particle exercise the diffusion-controlled (E_B-dominated) and impaction-controlled (E_IM-dominated) limbs of the Zhang et al. deposition curve and the sticking-fraction rebound; high_friction_velocity and low_friction_velocity exercise the r_b ~ 1/u_star turbulent-transport scaling. default_parameters and coarse_particle re-assert r_b at t = 1 to confirm the observed-only system is time-invariant.\n\nTolerance rationale (model-level rel=1e-6, abs=1e-12): observed-only algebraic system, no ODE integration. The seven equations form a triangular chain of +, -, *, /, ^, sqrt and exp on float64; round-off is ~1e-16 per op, so rel=1e-6 leaves wide headroom across the tested ranges (Sc ~ 3e2 to 6e6, r_b ~ 1e1 to 4e3). abs=1e-12 floors the comparison for the smallest collection-efficiency terms — E_IM and E_IN fall to ~1e-11 to ~1e-14 for the ultrafine particle and the high-alpha desert land-use — where a pure relative tolerance on a near-zero physical quantity would be needlessly brittle."
+            },
+            "tolerance": {
+                "rel": 1e-06,
+                "abs": 1e-12
+            },
+            "variables": {
+                "nu": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.5e-05,
+                    "description": "Kinematic viscosity of air"
+                },
+                "A": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.002,
+                    "description": "Characteristic radius of surface collectors (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS)"
+                },
+                "alpha": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.2,
+                    "description": "Impaction efficiency parameter of the land-use category (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS) (dimensionless)"
+                },
+                "gamma": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.54,
+                    "description": "Brownian diffusion efficiency exponent of the land-use category (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS) (dimensionless)"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1e-06,
+                    "description": "Particle (aerosol) diameter"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration (upstream @constant G_ACCEL)"
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.4,
+                    "description": "Friction velocity (external input; upstream @variable connected to the AerodynamicResistance subsystem in the DryDepositionParticle composite)"
+                },
+                "v_s": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 3.5e-05,
+                    "description": "Particle gravitational settling velocity (external input; upstream @variable connected to the ParticleSettling subsystem in the DryDepositionParticle composite)"
+                },
+                "D_diff": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.7e-11,
+                    "description": "Brownian diffusivity of the particle (external input; upstream @variable connected to the ParticleSettling subsystem in the DryDepositionParticle composite)"
+                },
+                "Sc": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Particle Schmidt number, Sc = nu/D_diff (dimensionless)"
+                },
+                "St": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Stokes number for vegetated surfaces, St = v_s*u_star/(g*A) (Eq. 19.24) (dimensionless)"
+                },
+                "E_B": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Brownian diffusion collection efficiency, E_B = Sc^(-gamma) (Eq. 19.21) (dimensionless)"
+                },
+                "E_IM": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Inertial impaction collection efficiency, E_IM = (St/(alpha+St))^2 (Eq. 19.22, beta = 2) (dimensionless)"
+                },
+                "E_IN": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Interception collection efficiency, E_IN = 0.5*(D_p/A)^2 (Eq. 19.25) (dimensionless)"
+                },
+                "R_1": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Sticking (rebound-correction) fraction, R_1 = exp(-sqrt(St)) (Eq. 19.26) (dimensionless)"
+                },
+                "r_b": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Quasi-laminar (boundary-layer) resistance for the particle, Eq. 19.27 (Zhang et al. 2001)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Particle Schmidt number (src line 270): Sc = nu/D_diff",
+                    "lhs": "Sc",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "nu",
+                            "D_diff"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.24 - Stokes number for vegetated surfaces (src line 272): St = v_s*u_star/(g*A)",
+                    "lhs": "St",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "v_s",
+                                    "u_star"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "g",
+                                    "A"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.21 - Brownian diffusion collection efficiency (src line 274): E_B = Sc^(-gamma)",
+                    "lhs": "E_B",
+                    "rhs": {
+                        "op": "^",
+                        "args": [
+                            "Sc",
+                            {
+                                "op": "-",
+                                "args": [
+                                    "gamma"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.22 - Inertial impaction collection efficiency, beta = 2 (src line 276): E_IM = (St/(alpha+St))^2",
+                    "lhs": "E_IM",
+                    "rhs": {
+                        "op": "^",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "St",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "alpha",
+                                            "St"
+                                        ]
+                                    }
+                                ]
+                            },
+                            2
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.25 - Interception collection efficiency (src line 278): E_IN = 0.5*(D_p/A)^2",
+                    "lhs": "E_IN",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "D_p",
+                                            "A"
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.26 - Sticking fraction / rebound correction (src line 280): R_1 = exp(-sqrt(St))",
+                    "lhs": "R_1",
+                    "rhs": {
+                        "op": "exp",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            "St"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.27 - Quasi-laminar resistance for particles, Zhang et al. (2001) (src line 282): r_b = 1/(3*u_star*(E_B+E_IM+E_IN)*R_1)",
+                    "lhs": "r_b",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    "u_star",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "E_B",
+                                            "E_IM",
+                                            "E_IN"
+                                        ]
+                                    },
+                                    "R_1"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Component defaults: the Zhang et al. (2001) Table 19.2 grassland land-use category (A = 2 mm, alpha = 1.2, gamma = 0.54) collecting a 1 um accumulation-mode particle (v_s = 3.5e-5 m/s, D_diff = 2.7e-11 m^2/s) in a u_star = 0.4 m/s turbulent layer. The 1 um particle sits in the Greenfield gap, where Brownian diffusion has weakened and inertial impaction has not yet switched on: E_B (~7.9e-4) dominates the three collection terms, E_IM and E_IN are ~1e-7, and the resulting quasi-laminar resistance r_b is large (~1.08e3 s/m). The model is observed-only (no differential state), so r_b is re-asserted at t = 1 to confirm time-invariance.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 555555.5555555555
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.0007135575942915391
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.0007904004025326843
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 3.531662845755827e-07
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.25e-07
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.9736411242414842
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 1082.2062495638543
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 1.0,
+                            "expected": 1082.2062495638543
+                        }
+                    ]
+                },
+                {
+                    "id": "deciduous_forest",
+                    "description": "The Zhang et al. (2001) Table 19.2 deciduous-forest land-use category (A = 5 mm, alpha = 0.6, gamma = 0.56), same 1 um particle and u_star as default_parameters. The larger collector radius A lowers both the Stokes number St (= v_s*u_star/(g*A)) and the interception term E_IN (= 0.5*(D_p/A)^2) relative to grassland, and the larger Brownian exponent gamma lowers E_B; with all three collection terms reduced, r_b rises above the grassland value.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.005,
+                        "alpha": 0.6,
+                        "gamma": 0.56,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 555555.5555555555
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.0002854230377166157
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.0006066701164541612
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 2.2608016071660284e-07
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.9999999999999997e-08
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.9832474435574972
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 1396.455820344653
+                        }
+                    ]
+                },
+                {
+                    "id": "desert",
+                    "description": "The Zhang et al. (2001) Table 19.2 desert land-use category (A = 10 mm, alpha = 50.0, gamma = 0.54), same 1 um particle and u_star as default_parameters. The very large impaction parameter alpha drives the impaction term E_IM = (St/(alpha+St))^2 to a negligible ~8e-12 (a smooth desert surface barely impacts particles), so collection is carried almost entirely by Brownian diffusion E_B; the gamma value equals grassland's so E_B is unchanged from the default case.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.01,
+                        "alpha": 50.0,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 555555.5555555555
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.00014271151885830784
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.0007904004025326843
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 8.14658454141356e-12
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 4.999999999999999e-09
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.9881248798116502
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 1066.9818084607048
+                        }
+                    ]
+                },
+                {
+                    "id": "ultrafine_particle",
+                    "description": "A 10 nm ultrafine particle over grassland: a small, slowly-settling particle (v_s = 7e-9 m/s) with a large Brownian diffusivity (D_diff = 5e-8 m^2/s). The high diffusivity gives a small Schmidt number Sc = 300, so the Brownian-diffusion efficiency E_B rises to ~0.046 and dominates collection (the diffusion-controlled limb of the deposition curve); the tiny Stokes number leaves E_IM and E_IN negligible. With strong collection the quasi-laminar resistance r_b drops to ~18 s/m.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-08,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 7e-09,
+                        "D_diff": 5e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 300.0
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 1.4271151885830784e-07
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.045957301753233475
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 1.4143453312919429e-14
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.2500000000000002e-11
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.999622299565327
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 18.13962462093789
+                        }
+                    ]
+                },
+                {
+                    "id": "coarse_particle",
+                    "description": "A 10 um coarse particle over grassland: a large, fast-settling particle (v_s = 3e-3 m/s) with a small Brownian diffusivity (D_diff = 2.5e-12 m^2/s). The fast settling raises the Stokes number to St ~ 0.061, so inertial impaction E_IM (~2.4e-3) now exceeds the Brownian term E_B (~2.2e-4) — the impaction-controlled limb — while the sticking fraction R_1 falls to ~0.78 as larger Stokes numbers bring particle rebound. r_b is re-asserted at t = 1 to confirm time-invariance.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-05,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 0.003,
+                        "D_diff": 2.5e-12
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 6000000.000000001
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.06116207951070336
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.00021867459194725388
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 0.0023519207195748485
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.25e-05
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.7808988246673252
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 413.12697557676404
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 1.0,
+                            "expected": 413.12697557676404
+                        }
+                    ]
+                },
+                {
+                    "id": "high_friction_velocity",
+                    "description": "Component defaults but in a strongly turbulent layer, u_star = 0.8 m/s (double the default). A higher friction velocity raises the Stokes number St linearly and strengthens turbulent transport to the surface; the explicit 1/(3*u_star) factor plus the slightly larger collection terms roughly halve r_b relative to default_parameters. Sc, E_B, and E_IN are independent of u_star and stay at their default values.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.8,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 555555.5555555555
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.0014271151885830783
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.0007904004025326843
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 1.4109876023430336e-06
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.25e-07
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.9629274782756465
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 546.3926877939356
+                        }
+                    ]
+                },
+                {
+                    "id": "low_friction_velocity",
+                    "description": "Component defaults but in a weakly turbulent layer, u_star = 0.1 m/s (a quarter of the default). The low friction velocity weakens turbulent transport to the surface; r_b scales roughly as 1/u_star and climbs to ~4.3e3 s/m. This is the opposite limb of the u_star sensitivity exercised by high_friction_velocity.",
+                    "parameter_overrides": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.1,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 555555.5555555555
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.00017838939857288478
+                        },
+                        {
+                            "variable": "E_B",
+                            "time": 0.0,
+                            "expected": 0.0007904004025326843
+                        },
+                        {
+                            "variable": "E_IM",
+                            "time": 0.0,
+                            "expected": 2.2092582098824823e-08
+                        },
+                        {
+                            "variable": "E_IN",
+                            "time": 0.0,
+                            "expected": 1.25e-07
+                        },
+                        {
+                            "variable": "R_1",
+                            "time": 0.0,
+                            "expected": 0.9867325494993485
+                        },
+                        {
+                            "variable": "r_b",
+                            "time": 0.0,
+                            "expected": 4273.18134505417
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "resistance_vs_friction_velocity",
+                    "description": "Quasi-laminar particle resistance r_b as a function of friction velocity u_star, for the default 1 um particle over grassland. As u_star rises, turbulent transport across the quasi-laminar sublayer strengthens and r_b falls steeply — roughly as 1/u_star, with a weak additional dependence through the Stokes-number terms E_IM and R_1. Reproduces the friction-velocity control on particle dry deposition discussed in Seinfeld & Pandis (2006) Ch. 19.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "v_s": 3.5e-05,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_star",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 1.5,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "r_b_vs_u_star",
+                            "type": "line",
+                            "description": "Quasi-laminar resistance r_b versus friction velocity u_star (log-spaced).",
+                            "x": {
+                                "variable": "u_star",
+                                "label": "Friction velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "r_b",
+                                "label": "Quasi-laminar resistance (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "brownian_term_vs_diffusivity",
+                    "description": "Brownian-diffusion collection efficiency E_B and quasi-laminar resistance r_b as a function of the particle Brownian diffusivity D_diff, for the default grassland land-use category at u_star = 0.4 m/s. A larger diffusivity (characteristic of smaller particles) lowers the particle Schmidt number Sc = nu/D_diff and raises E_B = Sc^(-gamma), which in turn lowers r_b. This traces the diffusion-controlled limb of the Zhang et al. (2001) particle deposition curve.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "v_s": 3.5e-05
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_diff",
+                                "range": {
+                                    "start": 1e-12,
+                                    "stop": 1e-07,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "E_B_vs_D_diff",
+                            "type": "line",
+                            "description": "Brownian-diffusion collection efficiency E_B versus particle diffusivity D_diff (log-spaced).",
+                            "x": {
+                                "variable": "D_diff",
+                                "label": "Brownian diffusivity (m^2/s)"
+                            },
+                            "y": {
+                                "variable": "E_B",
+                                "label": "Brownian diffusion efficiency (dimensionless)"
+                            }
+                        },
+                        {
+                            "id": "r_b_vs_D_diff",
+                            "type": "line",
+                            "description": "Quasi-laminar resistance r_b versus particle diffusivity D_diff (log-spaced).",
+                            "x": {
+                                "variable": "D_diff",
+                                "label": "Brownian diffusivity (m^2/s)"
+                            },
+                            "y": {
+                                "variable": "r_b",
+                                "label": "Quasi-laminar resistance (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "impaction_and_sticking_vs_settling_velocity",
+                    "description": "Inertial-impaction efficiency E_IM and sticking fraction R_1 as a function of particle settling velocity v_s, for the default grassland land-use category at u_star = 0.4 m/s. The settling velocity sets the Stokes number St = v_s*u_star/(g*A): as v_s rises, E_IM = (St/(alpha+St))^2 increases (faster particles impact more readily) while the sticking fraction R_1 = exp(-sqrt(St)) falls (faster particles rebound more). This traces the impaction-controlled limb of the Zhang et al. (2001) particle deposition curve.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "nu": 1.5e-05,
+                        "A": 0.002,
+                        "alpha": 1.2,
+                        "gamma": 0.54,
+                        "D_p": 1e-06,
+                        "g": 9.81,
+                        "u_star": 0.4,
+                        "D_diff": 2.7e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "v_s",
+                                "range": {
+                                    "start": 1e-06,
+                                    "stop": 0.01,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "E_IM_vs_v_s",
+                            "type": "line",
+                            "description": "Inertial-impaction collection efficiency E_IM versus settling velocity v_s (log-spaced).",
+                            "x": {
+                                "variable": "v_s",
+                                "label": "Settling velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "E_IM",
+                                "label": "Impaction efficiency (dimensionless)"
+                            }
+                        },
+                        {
+                            "id": "R_1_vs_v_s",
+                            "type": "line",
+                            "description": "Sticking fraction R_1 versus settling velocity v_s (log-spaced).",
+                            "x": {
+                                "variable": "v_s",
+                                "label": "Settling velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "R_1",
+                                "label": "Sticking fraction (dimensionless)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
