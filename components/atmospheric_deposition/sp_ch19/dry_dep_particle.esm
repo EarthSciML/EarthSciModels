@@ -1,0 +1,982 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DryDepositionParticle",
+        "description": "Composite particle dry-deposition model from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition). Given the surface-layer friction velocity and an aerosol particle's properties it computes the particle dry deposition velocity v_d (Eq. 19.7) and the resulting downward deposition flux F (Eq. 19.1). Eq. 19.7, v_d = 1/(r_a + r_b + r_a*r_b*v_s) + v_s, combines the resistance-network pathway -- turbulent transport through the aerodynamic resistance r_a and the quasi-laminar boundary-layer resistance r_b, with the r_a*r_b*v_s cross term capturing gravitational settling acting inside the resistance network -- with a direct gravitational-settling term v_s; the flux F = -v_d*C (Eq. 19.1) is negative for downward transport. The competition between Brownian diffusion (efficient for sub-0.1 um particles) and inertial impaction (efficient for super-um particles) leaves a deposition-velocity minimum at accumulation-mode sizes. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:479 (the DryDepositionParticle @component), which composes three MTK subsystems via System(eqs, t; systems=[aero, settling, qlam]). Represented here as a subsystem-composed ESS model (spec \u00a74.7): the aero subsystem inlines the already-migrated AerodynamicResistance component (aerodynamic_resistance.esm, esm-x8pg), settling inlines ParticleSettling (particle_settling.esm, esm-egwt) and qlam inlines QuasiLaminarResistanceParticle (quasi_laminar_particle.esm, esm-brbr), wired by six top-level coupling equations. Purely algebraic (no D() time-derivative anywhere): u_star and C are input parameters; v_d and F are algebraic state outputs.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "particle-deposition",
+            "deposition-velocity",
+            "composed",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-30bn)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed., Chapter 19: Dry Deposition. John Wiley & Sons, Inc. Eq. 19.7 (particle dry deposition velocity), Eq. 19.1 (deposition flux). ISBN 978-0-471-72018-8."
+            },
+            {
+                "citation": "Zhang, L., Gong, S., Padro, J., & Barrie, L. (2001). A size-segregated particle dry deposition scheme for an atmospheric aerosol module. Atmospheric Environment, 35(3), 549-560. https://doi.org/10.1016/S1352-2310(00)00326-5. Source of the size-resolved particle quasi-laminar resistance adopted as Eq. 19.27 by Seinfeld & Pandis (2006)."
+            }
+        ]
+    },
+    "models": {
+        "DryDepositionParticle": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed., Ch. 19, Eq. 19.7 (particle dry deposition velocity) and Eq. 19.1 (deposition flux). John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:479\nUpstream `DryDepositionParticle` is an MTK `@component` that composes three subsystems -- `@named aero = AerodynamicResistance()`, `@named settling = ParticleSettling()` and `@named qlam = QuasiLaminarResistanceParticle()` -- via `System(eqs, t; systems=[aero, settling, qlam])`, with its own input `@variables` u_star, C, the output `@variables` v_d, F, and six coupling equations. It implements Seinfeld & Pandis (2006) Ch. 19 Eq. 19.7 (particle dry deposition velocity) and Eq. 19.1 (deposition flux).\n\nSubsystem-composed migration (ESS spec \u00a74.7). The three subsystems inline the `variables` + `equations` of the already-migrated standalone components: `aero` <- aerodynamic_resistance.esm (esm-x8pg), `settling` <- particle_settling.esm (esm-egwt), `qlam` <- quasi_laminar_particle.esm (esm-brbr) -- all siblings in components/atmospheric_deposition/sp_ch19/. The six upstream coupling equations are carried as the model's top-level `equations`; subsystem variables are referenced by full dotted path from the model name (spec \u00a74.6, e.g. DryDepositionParticle.aero.r_a), bare names resolve to the top-level system. The closest precedent is sp_ch1/water_vapor_thermo.esm (esm-tfh2), a composed model with top-level coupling equations plus inlined subsystems; see also gaschem/combined/tropospheric_chemistry.esm and the coupling.couple migration pattern.\n\nVariable typing. Top-level: u_star and C are upstream input `@variables` (input=true) with no defining equation -- they migrate as input `parameter`s; v_d and F are equation-defined outputs and migrate as `state`. Re-typing: in the standalone .esm files a component's connected inputs are typed `parameter` (no governing equation within the component). In the composed model the parent coupling equations govern four such inputs -- aero.u_star (by aero.u_star ~ u_star), qlam.u_star (by qlam.u_star ~ u_star), qlam.v_s (by qlam.v_s ~ settling.v_s) and qlam.D_diff (by qlam.D_diff ~ settling.D_diff) -- so those four are re-typed `parameter` -> `state` here, because a `parameter` cannot be an equation left-hand side. Every other subsystem variable keeps its standalone type and default. The settling subsystem has no re-typed variables: its outputs v_s and D_diff are defined by settling's own equations (they appear only on coupling right-hand sides) and stay `state`.\n\nPurely algebraic. There is no `D()` time-derivative anywhere in the upstream module -- DryDepositionParticle and all three subsystems are algebraic. `system_kind` is left unset (the `ode` schema default; zero differential states), the convention of every sp_ch19 sibling. The composed model is migrated with the coupling.couple `type: state` + `equations` form (the pure-algebraic `type: observed` + empty-`equations` form is not applicable: a composed model must carry its coupling relations as `equations`, and a coupling left-hand side such as qlam.u_star must be a `state`, not an `observed` quantity). The flattened system is 16 algebraic equations in 16 states, fully explicit and triangular along the chain u_star -> aero.r_a, particle properties -> settling.v_s/D_diff -> qlam.* -> v_d -> F.\n\nIndependent D_p and g. Upstream, the settling and qlam subsystems each declare their own D_p (particle diameter) and g (gravitational acceleration); there is no coupling equation between settling.D_p and qlam.D_p, so the migration keeps them as independent parameters, faithful to the upstream `systems=[...]` structure. Every inline test sets settling.D_p and qlam.D_p to the same physical value. The settling subsystem's rho_p, D_p, mu, T and C_c carry no `default`, faithful to the standalone particle_settling.esm where they are required inputs; every test supplies them via parameter_overrides. g, k_B, pi_val and kappa keep their upstream constant defaults.\n\nNo `examples` block. `tools/render_example_plots.py` resolves algebraic models on the top-level model only and does not descend into `subsystems`, so plots of the combined-diagnostic outputs cannot be rendered -- matching the composed siblings water_vapor_thermo.esm, radiation_fundamentals.esm and tropospheric_chemistry.esm. Verification is via the inline-test gate (run_esm_inline_tests.py -> earthsci_toolkit.simulation.simulate), which flattens subsystems. Inline-test references use fully-qualified names (Model.sub.var, Model.var): the composed model has name-colliding variables across scopes (u_star top-level + aero.u_star + qlam.u_star; v_s in settling + qlam; D_diff in settling + qlam; D_p and g in settling + qlam), so the bare-suffix fallback in the runner's variable resolver would be ambiguous -- full names are unambiguous.\n\nTolerance rationale (model-level rel=1e-6): an observed-only triangular algebraic system, no ODE integration. Each output is a closed-form composition of +, -, *, /, ^, log, exp and sqrt evaluated once per test point; float64 round-off is ~1e-16 per operation, so rel=1e-6 leaves wide headroom across the tested ranges (r_a ~ 1e1, r_b ~ 1e1 to 4e3, v_d ~ 1e-4 to 2e-2, F ~ -1e-13 to -2e-11). Every asserted value is comfortably nonzero, so no `abs` floor is needed. Test values are the float64 evaluation of the migrated equations; the aero.r_a, settling.v_s and settling.D_diff assertions reproduce the exact values pinned by the standalone aerodynamic_resistance.esm and particle_settling.esm migrations.\n\nTests. Seven inline tests sweep the physically meaningful regimes: default_canonical pins the full coupling chain for a 1 um grassland particle and re-checks v_d/F at t=1 (time-invariance); coarse_particle (10 um) and ultrafine_particle (10 nm) exercise the settling-dominated and diffusion-dominated limbs of Eq. 19.7; strong_turbulence and weak_turbulence sweep the friction-velocity dependence of r_a and r_b; deciduous_forest exercises the land-use dependence threaded through the aero and qlam subsystems; dense_dust_particle doubles the particle density. Upstream `seinfeld_pandis_ch19_test.jl` provides only a structural test for the assembled DryDepositionParticle component, so the numerical assertions here are the float64 evaluation of the migrated equations."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.4,
+                    "description": "Friction velocity characterizing surface-layer turbulence -- input to the composite, fed to the aero and qlam subsystems by the coupling equations aero.u_star ~ u_star and qlam.u_star ~ u_star. Upstream an input @variable; an input parameter in the composed model. Default 0.4 m/s (canonical neutral surface layer)."
+                },
+                "C": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1e-09,
+                    "description": "Particle (aerosol) mass concentration at the reference height -- input to the composite, used by the flux equation F = -v_d*C. Upstream an input @variable; an input parameter in the composed model. Default 1e-9 kg/m^3 (~1 ug/m^3)."
+                },
+                "v_d": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Particle dry deposition velocity (Eq. 19.7) -- composite output combining the aerodynamic and quasi-laminar resistances with the gravitational settling velocity."
+                },
+                "F": {
+                    "type": "state",
+                    "units": "kg/(m^2*s)",
+                    "description": "Particle dry deposition flux (Eq. 19.1), F = -v_d*C; negative for downward (toward-surface) transport."
+                }
+            },
+            "subsystems": {
+                "aero": {
+                    "variables": {
+                        "kappa": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.4,
+                            "description": "Von Karman constant (dimensionless), upstream @constant KAPPA. Sets the slope of the neutral-stability logarithmic wind profile."
+                        },
+                        "z": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 10.0,
+                            "description": "Reference height above the surface at which the aerodynamic resistance is evaluated."
+                        },
+                        "z_0": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.1,
+                            "description": "Surface roughness length."
+                        },
+                        "u_star": {
+                            "type": "state",
+                            "units": "m/s",
+                            "default": 0.4,
+                            "description": "Friction velocity -- coupled input, driven by the parent coupling equation DryDepositionParticle.aero.u_star ~ u_star (re-typed parameter -> state for the composed model)."
+                        },
+                        "r_a": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Aerodynamic resistance to dry deposition through the surface layer under neutral atmospheric stability (Eq. 19.14)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 19.14 -- neutral-stability aerodynamic resistance: r_a = (1/(kappa*u_star)) * ln(z/z_0).",
+                            "lhs": "r_a",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z",
+                                                    "z_0"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "settling": {
+                    "variables": {
+                        "rho_p": {
+                            "type": "parameter",
+                            "units": "kg/m^3",
+                            "description": "Particle density (external input; carries no default, faithful to the standalone particle_settling.esm)."
+                        },
+                        "D_p": {
+                            "type": "parameter",
+                            "units": "m",
+                            "description": "Particle diameter (external input; carries no default, faithful to the standalone particle_settling.esm)."
+                        },
+                        "mu": {
+                            "type": "parameter",
+                            "units": "Pa*s",
+                            "description": "Dynamic viscosity of air (external input; carries no default, faithful to the standalone particle_settling.esm)."
+                        },
+                        "T": {
+                            "type": "parameter",
+                            "units": "K",
+                            "description": "Temperature (external input; carries no default, faithful to the standalone particle_settling.esm)."
+                        },
+                        "C_c": {
+                            "type": "parameter",
+                            "units": "1",
+                            "description": "Cunningham slip correction factor (dimensionless; external input, carries no default, faithful to the standalone particle_settling.esm)."
+                        },
+                        "g": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 9.81,
+                            "description": "Gravitational acceleration (upstream @constant G_ACCEL)."
+                        },
+                        "k_B": {
+                            "type": "parameter",
+                            "units": "J/K",
+                            "default": 1.38e-23,
+                            "description": "Boltzmann constant (upstream @constant K_BOLTZ)."
+                        },
+                        "pi_val": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 3.141592653589793,
+                            "description": "Mathematical constant pi (dimensionless; upstream @constant pi_val = Float64(pi))."
+                        },
+                        "v_s": {
+                            "type": "state",
+                            "units": "m/s",
+                            "description": "Particle gravitational (Stokes) settling velocity (Eq. 19.18)."
+                        },
+                        "D_diff": {
+                            "type": "state",
+                            "units": "m^2/s",
+                            "description": "Brownian (Stokes-Einstein) diffusivity of the particle (Eq. 19.20)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 19.18 -- Stokes settling velocity with Cunningham slip correction: v_s = rho_p*D_p^2*g*C_c/(18*mu).",
+                            "lhs": "v_s",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "rho_p",
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "D_p",
+                                                    2
+                                                ]
+                                            },
+                                            "g",
+                                            "C_c"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            18,
+                                            "mu"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.20 -- Brownian (Stokes-Einstein) diffusivity with Cunningham slip correction: D_diff = k_B*T*C_c/(3*pi*mu*D_p).",
+                            "lhs": "D_diff",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_B",
+                                            "T",
+                                            "C_c"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            3,
+                                            "pi_val",
+                                            "mu",
+                                            "D_p"
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "qlam": {
+                    "variables": {
+                        "nu": {
+                            "type": "parameter",
+                            "units": "m^2/s",
+                            "default": 1.5e-05,
+                            "description": "Kinematic viscosity of air."
+                        },
+                        "A": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 0.002,
+                            "description": "Characteristic radius of surface collectors (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS)."
+                        },
+                        "alpha": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 1.2,
+                            "description": "Impaction efficiency parameter of the land-use category (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS) (dimensionless)."
+                        },
+                        "gamma": {
+                            "type": "parameter",
+                            "units": "1",
+                            "default": 0.54,
+                            "description": "Brownian diffusion efficiency exponent of the land-use category (Zhang et al. 2001, Table 19.2; default LANDUSE_GRASS) (dimensionless)."
+                        },
+                        "D_p": {
+                            "type": "parameter",
+                            "units": "m",
+                            "default": 1e-06,
+                            "description": "Particle diameter. Upstream the qlam subsystem declares its own D_p, independent of settling.D_p; both are set to the same physical value in every inline test."
+                        },
+                        "g": {
+                            "type": "parameter",
+                            "units": "m/s^2",
+                            "default": 9.81,
+                            "description": "Gravitational acceleration (upstream @constant G_ACCEL)."
+                        },
+                        "u_star": {
+                            "type": "state",
+                            "units": "m/s",
+                            "default": 0.4,
+                            "description": "Friction velocity -- coupled input, driven by the parent coupling equation DryDepositionParticle.qlam.u_star ~ u_star (re-typed parameter -> state for the composed model)."
+                        },
+                        "v_s": {
+                            "type": "state",
+                            "units": "m/s",
+                            "default": 3.5e-05,
+                            "description": "Particle settling velocity -- coupled input, driven by the parent coupling equation DryDepositionParticle.qlam.v_s ~ DryDepositionParticle.settling.v_s (re-typed parameter -> state for the composed model)."
+                        },
+                        "D_diff": {
+                            "type": "state",
+                            "units": "m^2/s",
+                            "default": 2.7e-11,
+                            "description": "Brownian diffusivity of the particle -- coupled input, driven by the parent coupling equation DryDepositionParticle.qlam.D_diff ~ DryDepositionParticle.settling.D_diff (re-typed parameter -> state for the composed model)."
+                        },
+                        "Sc": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Particle Schmidt number, Sc = nu/D_diff (dimensionless)."
+                        },
+                        "St": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Stokes number for vegetated surfaces, St = v_s*u_star/(g*A) (Eq. 19.24) (dimensionless)."
+                        },
+                        "E_B": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Brownian diffusion collection efficiency, E_B = Sc^(-gamma) (Eq. 19.21) (dimensionless)."
+                        },
+                        "E_IM": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Inertial impaction collection efficiency, E_IM = (St/(alpha+St))^2 (Eq. 19.22, beta = 2) (dimensionless)."
+                        },
+                        "E_IN": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Interception collection efficiency, E_IN = 0.5*(D_p/A)^2 (Eq. 19.25) (dimensionless)."
+                        },
+                        "R_1": {
+                            "type": "state",
+                            "units": "1",
+                            "description": "Sticking (rebound-correction) fraction, R_1 = exp(-sqrt(St)) (Eq. 19.26) (dimensionless)."
+                        },
+                        "r_b": {
+                            "type": "state",
+                            "units": "s/m",
+                            "description": "Quasi-laminar (boundary-layer) resistance for the particle, Eq. 19.27 (Zhang et al. 2001)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Particle Schmidt number: Sc = nu/D_diff.",
+                            "lhs": "Sc",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    "nu",
+                                    "D_diff"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.24 -- Stokes number for vegetated surfaces: St = v_s*u_star/(g*A).",
+                            "lhs": "St",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "v_s",
+                                            "u_star"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "g",
+                                            "A"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.21 -- Brownian diffusion collection efficiency: E_B = Sc^(-gamma).",
+                            "lhs": "E_B",
+                            "rhs": {
+                                "op": "^",
+                                "args": [
+                                    "Sc",
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "gamma"
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.22 -- inertial impaction collection efficiency, beta = 2: E_IM = (St/(alpha+St))^2.",
+                            "lhs": "E_IM",
+                            "rhs": {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "St",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "alpha",
+                                                    "St"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.25 -- interception collection efficiency: E_IN = 0.5*(D_p/A)^2.",
+                            "lhs": "E_IN",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    0.5,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "D_p",
+                                                    "A"
+                                                ]
+                                            },
+                                            2
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.26 -- sticking fraction / rebound correction: R_1 = exp(-sqrt(St)).",
+                            "lhs": "R_1",
+                            "rhs": {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            {
+                                                "op": "sqrt",
+                                                "args": [
+                                                    "St"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 19.27 -- quasi-laminar resistance for particles, Zhang et al. (2001): r_b = 1/(3*u_star*(E_B+E_IM+E_IN)*R_1).",
+                            "lhs": "r_b",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            3,
+                                            "u_star",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "E_B",
+                                                    "E_IM",
+                                                    "E_IN"
+                                                ]
+                                            },
+                                            "R_1"
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Couple the friction velocity into the aerodynamic-resistance subsystem (upstream: aero.u_star ~ u_star).",
+                    "lhs": "DryDepositionParticle.aero.u_star",
+                    "rhs": "u_star"
+                },
+                {
+                    "_comment": "Couple the friction velocity into the quasi-laminar-resistance subsystem (upstream: qlam.u_star ~ u_star).",
+                    "lhs": "DryDepositionParticle.qlam.u_star",
+                    "rhs": "u_star"
+                },
+                {
+                    "_comment": "Feed the settling velocity from the settling subsystem into the quasi-laminar subsystem (upstream: qlam.v_s ~ settling.v_s).",
+                    "lhs": "DryDepositionParticle.qlam.v_s",
+                    "rhs": "DryDepositionParticle.settling.v_s"
+                },
+                {
+                    "_comment": "Feed the Brownian diffusivity from the settling subsystem into the quasi-laminar subsystem (upstream: qlam.D_diff ~ settling.D_diff).",
+                    "lhs": "DryDepositionParticle.qlam.D_diff",
+                    "rhs": "DryDepositionParticle.settling.D_diff"
+                },
+                {
+                    "_comment": "Eq. 19.7 -- particle dry deposition velocity: v_d = 1/(r_a + r_b + r_a*r_b*v_s) + v_s. The 1/(...) term is the resistance-network pathway (aerodynamic + quasi-laminar, with the r_a*r_b*v_s cross term for settling within the network); the trailing + v_s is direct gravitational settling.",
+                    "lhs": "v_d",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "DryDepositionParticle.aero.r_a",
+                                            "DryDepositionParticle.qlam.r_b",
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "DryDepositionParticle.aero.r_a",
+                                                    "DryDepositionParticle.qlam.r_b",
+                                                    "DryDepositionParticle.settling.v_s"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "DryDepositionParticle.settling.v_s"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.1 -- dry deposition flux: F = -v_d*C. The negative sign marks downward (toward the surface) transport.",
+                    "lhs": "F",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    "v_d"
+                                ]
+                            },
+                            "C"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_canonical",
+                    "description": "Canonical case: a 1 um unit-density (rho_p = 1000 kg/m^3) accumulation-mode particle depositing over grassland (aero z = 10 m, z_0 = 0.1 m; qlam Zhang et al. 2001 Table 19.2 grassland A = 2 mm, alpha = 1.2, gamma = 0.54) in a neutral surface layer with friction velocity u_star = 0.4 m/s. Verifies the full coupling chain: u_star feeds the aero and qlam subsystems, the settling subsystem produces v_s and D_diff from the particle properties, those are wired into qlam (qlam.v_s = settling.v_s, qlam.D_diff = settling.D_diff), and Eq. 19.7 combines aero.r_a, qlam.r_b and settling.v_s into v_d (~0.94 mm/s -- the accumulation-mode deposition-velocity minimum). The flux F = -v_d*C is the downward (negative) deposition flux for C = 1e-9 kg/m^3 (~1 ug/m^3 aerosol mass). The system is algebraic, so v_d and F are also re-checked at t = 1 to confirm time-invariance.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.4,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-06,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.16,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 28.78231366242557
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 3.417297297297298e-05
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.7359646632305877e-11
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.Sc",
+                            "time": 0.0,
+                            "expected": 548252.6949850374
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.St",
+                            "time": 0.0,
+                            "expected": 0.0006966966966966968
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.E_B",
+                            "time": 0.0,
+                            "expected": 0.0007960683935895912
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 1074.1867306540298
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.0009399490791867023
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -9.399490791867023e-13
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 1.0,
+                            "expected": 0.0009399490791867023
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 1.0,
+                            "expected": -9.399490791867023e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "coarse_particle",
+                    "description": "A 10 um coarse particle (D_p = 1e-5 m in both the settling and qlam subsystems, Cunningham slip correction C_c = 1.0 in the continuum limit), grassland and u_star = 0.4 m/s otherwise as default_canonical. The large diameter raises the Stokes settling velocity v_s ~ 2.9 mm/s by the Eq. 19.18 D_p^2 dependence, so the direct gravitational-settling term of Eq. 19.7 now dominates the deposition velocity: v_d ~ 5.0 mm/s, well above the 1 um case. v_d is re-checked at t = 1 for time-invariance.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.4,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-05,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.0,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-05
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 28.78231366242557
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 0.0029459459459459467
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.3585902269229204e-12
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 426.5346625981243
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.0049806029229252525
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -4.9806029229252526e-12
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 1.0,
+                            "expected": 0.0049806029229252525
+                        }
+                    ]
+                },
+                {
+                    "id": "ultrafine_particle",
+                    "description": "A 10 nm ultrafine particle (D_p = 1e-8 m, large Cunningham slip correction C_c = 22.0), grassland and u_star = 0.4 m/s otherwise as default_canonical. The tiny diameter gives a large Brownian diffusivity D_diff ~ 5.2e-8 m^2/s (Eq. 19.20, D_diff proportional to 1/D_p), a small particle Schmidt number Sc ~ 289, and a strong Brownian-diffusion collection efficiency E_B -- so the Zhang et al. quasi-laminar resistance r_b collapses to ~18 s/m. With r_b small the resistance-network term of Eq. 19.7 dominates and v_d ~ 21 mm/s, the diffusion-controlled limb of the particle dry-deposition curve.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.4,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-08,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 22.0,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 28.78231366242557
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 6.481081081081082e-08
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 5.188898499230424e-08
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 17.793716014306874
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.021470320955214065
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -2.1470320955214066e-11
+                        }
+                    ]
+                },
+                {
+                    "id": "strong_turbulence",
+                    "description": "The default 1 um grassland particle in a strongly turbulent surface layer, u_star = 1.0 m/s (2.5x the default). The higher friction velocity lowers both the aerodynamic resistance r_a (Eq. 19.14, r_a proportional to 1/u_star) and the quasi-laminar resistance r_b (Eq. 19.27, the explicit 1/(3*u_star) factor), so the resistance-network pathway of Eq. 19.7 transports the particle to the surface faster and v_d ~ 2.3 mm/s rises above the default case. The settling velocity v_s is unchanged (u_star does not enter Eq. 19.18).",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 1.0,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-06,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.16,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 11.51292546497023
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 3.417297297297298e-05
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.7359646632305877e-11
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 435.35225931160744
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.0022711269498751634
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -2.2711269498751637e-12
+                        }
+                    ]
+                },
+                {
+                    "id": "weak_turbulence",
+                    "description": "The default 1 um grassland particle in a weakly turbulent surface layer, u_star = 0.1 m/s (a quarter of the default). Sluggish turbulence raises both r_a and r_b, throttling the resistance-network deposition pathway, so v_d ~ 0.26 mm/s falls below the default case -- approaching the gravitational-settling floor v_s set by Eq. 19.18. The opposite friction-velocity limb to strong_turbulence.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.1,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-06,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.16,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 115.12925464970228
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 3.417297297297298e-05
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.7359646632305877e-11
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 4242.094040484369
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.00026280120567875496
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -2.62801205678755e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "deciduous_forest",
+                    "description": "The default 1 um particle depositing over a deciduous forest: a rough canopy (aero z_0 = 1.0 m) with the Zhang et al. 2001 Table 19.2 deciduous-forest land-use category in qlam (A = 5 mm, alpha = 0.6, gamma = 0.56). The larger roughness length lowers the aerodynamic resistance r_a relative to grassland, while the larger collector radius A raises the quasi-laminar resistance r_b (lower Stokes number and interception efficiency); the two effects partly cancel, leaving v_d ~ 0.75 mm/s near the grassland default. Exercises the land-use dependence threaded through both the aero and qlam subsystems.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.4,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 1.0,
+                        "DryDepositionParticle.settling.rho_p": 1000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-06,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.16,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.005,
+                        "DryDepositionParticle.qlam.alpha": 0.6,
+                        "DryDepositionParticle.qlam.gamma": 0.56,
+                        "DryDepositionParticle.qlam.D_p": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 14.391156831212784
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 3.417297297297298e-05
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.7359646632305877e-11
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 1385.895960290446
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.0007479648019590088
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -7.479648019590089e-13
+                        }
+                    ]
+                },
+                {
+                    "id": "dense_dust_particle",
+                    "description": "A 1 um particle of doubled density rho_p = 2000 kg/m^3 (representative of a mineral-dust aerosol), grassland and u_star = 0.4 m/s otherwise as default_canonical. The doubled density doubles the Stokes settling velocity v_s (Eq. 19.18, v_s proportional to rho_p) while leaving the Brownian diffusivity D_diff unchanged (Eq. 19.20 has no density term); the faster settling lifts v_d slightly above the unit-density default through both the direct settling term and the r_a*r_b*v_s cross term of Eq. 19.7.",
+                    "parameter_overrides": {
+                        "DryDepositionParticle.u_star": 0.4,
+                        "DryDepositionParticle.C": 1e-09,
+                        "DryDepositionParticle.aero.z": 10.0,
+                        "DryDepositionParticle.aero.z_0": 0.1,
+                        "DryDepositionParticle.settling.rho_p": 2000.0,
+                        "DryDepositionParticle.settling.D_p": 1e-06,
+                        "DryDepositionParticle.settling.mu": 1.85e-05,
+                        "DryDepositionParticle.settling.T": 298.0,
+                        "DryDepositionParticle.settling.C_c": 1.16,
+                        "DryDepositionParticle.qlam.nu": 1.5e-05,
+                        "DryDepositionParticle.qlam.A": 0.002,
+                        "DryDepositionParticle.qlam.alpha": 1.2,
+                        "DryDepositionParticle.qlam.gamma": 0.54,
+                        "DryDepositionParticle.qlam.D_p": 1e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "DryDepositionParticle.aero.r_a",
+                            "time": 0.0,
+                            "expected": 28.78231366242557
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.v_s",
+                            "time": 0.0,
+                            "expected": 6.834594594594596e-05
+                        },
+                        {
+                            "variable": "DryDepositionParticle.settling.D_diff",
+                            "time": 0.0,
+                            "expected": 2.7359646632305877e-11
+                        },
+                        {
+                            "variable": "DryDepositionParticle.qlam.r_b",
+                            "time": 0.0,
+                            "expected": 1084.6221946801356
+                        },
+                        {
+                            "variable": "DryDepositionParticle.v_d",
+                            "time": 0.0,
+                            "expected": 0.0009647742930798374
+                        },
+                        {
+                            "variable": "DryDepositionParticle.F",
+                            "time": 0.0,
+                            "expected": -9.647742930798375e-13
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
