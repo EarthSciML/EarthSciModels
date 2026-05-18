@@ -1,0 +1,351 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormationH2O2",
+        "description": "Aqueous-phase S(IV)→S(VI) oxidation rate by hydrogen peroxide — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Section 7.5.2, Eq. 7.84. Hydrogen peroxide is the dominant oxidant converting dissolved sulfur(IV) (SO2·H2O, HSO3-, SO3^2-) to sulfate in cloud and fog droplets at low pH, where the competing O3 oxidation pathway is slow. The rate law R_H2O2 = k·[H+]·[H2O2]·[HSO3-]/(1+K_eq·[H+]) is first-order in aqueous H2O2 and in bisulfite, rises with acidity, and saturates toward k·[H2O2]·[HSO3-]/K_eq at very high [H+]. Because the equilibrium bisulfite concentration itself scales as 1/[H+], the overall H2O2 oxidation rate (when [HSO3-] is tied to gas-phase SO2) is famously almost pH-independent across cloud-water pH 2-6 — but within this standalone component [HSO3-] is an independent input, so the rate computed here does scale with [H+]. Migrated from Aerosol.jl SulfateFormationH2O2.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch7",
+            "sulfate-formation",
+            "aqueous-chemistry"
+        ]
+    },
+    "models": {
+        "SulfateFormationH2O2": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7 (Chemistry of the Atmospheric Aqueous Phase), Section 7.5.2. S(IV) oxidation by hydrogen peroxide: Eq. 7.84.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:132\n\nUpstream `SulfateFormationH2O2` is an MTK `@component` (no parameterization; default instance name `:SulfateH2O2`). It declares two symbolic `@constants` — `k` (the H2O2 oxidation rate constant) and `K_eq` (the rate-law denominator constant) — and four scalar `@variables`: `H_plus`, `H2O2_aq`, `HSO3_minus` (externally-supplied inputs) and `R_H2O2` (the oxidation-rate output). The single equation is `R_H2O2 ~ k*H_plus*H2O2_aq*HSO3_minus/(1 + K_eq*H_plus)` — Eq. 7.84 of Seinfeld & Pandis (2006) Ch. 7, the aqueous S(IV)+H2O2 oxidation rate.\n\nequations-feature classification: SulfateFormationH2O2 has no `D()` time-derivative anywhere — it is a purely-algebraic component. Three of its four `@variables` (`H_plus`, `H2O2_aq`, `HSO3_minus`) are connected inputs with no defining equation; only `R_H2O2` is defined by an equation. The migration-tracker `features` tag is `equations` (the rate-law RHS references upstream `@variables`, not parameters-only — contrast the sibling `observed`-tagged timescale migrations `gas_diffusion.esm` / `aqueous_eq.esm` whose RHS is parameter-only). It therefore migrates with the three input `@variables` re-typed as `parameter`s and the output `R_H2O2` kept as a `type: state` carrying its defining equation in the `equations` array — one equation per state, the well-posed standalone form. This matches the recent equations-feature migrations `mean_free_path.esm`, `gas_scavenging_coeff.esm` and `bet.esm`, where all inputs are parameters and the lone algebraic output is the state.\n\n@constants to parameters: the upstream `@constants` are `k = 7.5e7/1.0e6` and `K_eq = 13.0/1000.0`. The .esm schema carries no per-model `constants` block, so both migrate as `type: parameter` with the evaluated numeric default (`75.0` and `0.013` — both exact in float64). The literal divisions are molarity→SI unit conversions: the literature rate constant is 7.5e7 M^-2 s^-1 and 1 M^-2 = 1e-6 (mol/m^3)^-2, giving k = 75.0 m^6/mol^2/s; the literature denominator constant is 13 M^-1 and 1 M^-1 = 1e-3 m^3/mol, giving K_eq = 0.013 m^3/mol. The upstream module-level `const K_H2O2 = 7.5e7` and `const K_H2O2_eq = 13.0` are the same constants in the original M-based units (the upstream `rate constants` testset asserts `K_H2O2 ≈ 7.5e7`).\n\nDefaults authored: the three input `@variables` carry no upstream defaults (they are connected externally in the full `CloudChemistry` model). Physically-grounded standalone defaults are authored — `H_plus = 0.1 mol/m^3` (1e-4 M, pH 4, a typical moderately-acidic cloud droplet), `H2O2_aq = 0.1 mol/m^3` (1e-4 M, the aqueous concentration in Henry's-law equilibrium with 1 ppb gas-phase H2O2 at the 1e5 M atm^-1 constant used in the upstream `H2O2 pathway pH independence` testset), and `HSO3_minus = 1.0e-3 mol/m^3` (1e-6 M = 1 µM, representative cloud-water bisulfite).\n\nTests authored from physics: the upstream `aqueous_chemistry_test.jl` carries only a structural test for `SulfateFormationH2O2` (`@test length(equations(sys)) >= 1`); its `H2O2 pathway pH independence` testset evaluates the Eq. 7.84 rate law in pure Julia (M-based units) without instantiating the component. The inline `tests` block is therefore authored from the closed-form Eq. 7.84 — pinning the exact rate at the authored default parameterization, verifying the first-order (linear) dependence on aqueous H2O2 and on bisulfite, bracketing the [H+] dependence on both sides (the low-acidity near-linear regime K_eq·[H+] << 1 and the high-acidity denominator-saturation regime), and the zero-bisulfite limit where the rate vanishes.\n\nNote on pH-independence: the docstring's \"relatively pH-independent\" property is an emergent property of the COUPLED system — equilibrium [HSO3-] scales as 1/[H+], cancelling the explicit [H+] factor in the Eq. 7.84 numerator. Within this standalone component [HSO3-] is an independent input parameter, so `R_H2O2` does scale with `H_plus`; the `low_acidity_near_linear_in_h_plus` test makes that explicit dependence visible.\n\nTolerance rationale (model-level rel=1e-9): the model is a single closed-form algebraic expression — three multiplications, one addition, one division — so float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel=1e-9 leaves ample headroom while still catching a real regression. The `zero_bisulfite_zero_rate` test adds a per-assertion abs=1e-12 (the runner's integrator floor) so a stuck-nonzero regression in the numerator product cannot pass on the relative branch.\n\nNot migrated: `sulfate_formation.jl` defines six independent `@component`s — `SulfateFormationO3`, `SulfateFormationH2O2`, `SulfateFormationFe`, `SulfateFormationMn`, `SulfateFormationFeMn`, and the coupling `SulfateFormation`. Only `SulfateFormationH2O2` (src/sulfate_formation.jl:132) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/sulfate/`."
+            },
+            "variables": {
+                "k": {
+                    "type": "parameter",
+                    "units": "m^6/mol^2/s",
+                    "default": 75.0,
+                    "description": "Rate constant for the S(IV)+H2O2 oxidation pathway (Eq. 7.84). Upstream MTK `@constants` value 7.5e7/1.0e6 = 75.0 — the literature rate constant 7.5e7 M^-2 s^-1 converted to SI (1 M^-2 = 1e-6 (mol/m^3)^-2)."
+                },
+                "K_eq": {
+                    "type": "parameter",
+                    "units": "m^3/mol",
+                    "default": 0.013,
+                    "description": "Equilibrium constant in the rate-law denominator (Eq. 7.84) — the term 1 + K_eq·[H+] saturates the acid-catalysed rate at high acidity. Upstream MTK `@constants` value 13.0/1000.0 = 0.013 — the literature constant 13 M^-1 converted to SI (1 M^-1 = 1e-3 m^3/mol)."
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.1,
+                    "description": "Hydrogen-ion concentration [H+] of the cloud droplet, setting its pH. Default 0.1 mol/m^3 = 1e-4 M (pH 4), a typical moderately-acidic cloud droplet. Upstream an externally-connected `@variable`; re-typed as a parameter for this standalone .esm."
+                },
+                "H2O2_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.1,
+                    "description": "Aqueous-phase hydrogen-peroxide concentration [H2O2(aq)] dissolved in the cloud droplet. Default 0.1 mol/m^3 = 1e-4 M — the aqueous concentration in Henry's-law equilibrium with 1 ppb gas-phase H2O2. Upstream an externally-connected `@variable`; re-typed as a parameter here."
+                },
+                "HSO3_minus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Bisulfite-ion concentration [HSO3-], the dominant dissolved S(IV) species over cloud-water pH ~2-7 and the limiting reactant for this oxidation pathway. Default 1.0e-3 mol/m^3 = 1 µM. Upstream an externally-connected `@variable`; re-typed as a parameter here."
+                },
+                "R_H2O2": {
+                    "type": "state",
+                    "units": "mol/m^3/s",
+                    "description": "Aqueous S(IV)->S(VI) oxidation rate by the H2O2 pathway (Eq. 7.84): R_H2O2 = k·[H+]·[H2O2]·[HSO3-]/(1+K_eq·[H+]). First-order in both aqueous H2O2 and bisulfite; rises with acidity and saturates toward k·[H2O2]·[HSO3-]/K_eq at very high [H+]. The dominant aqueous sulfate-formation pathway at low pH, where the competing O3 pathway is slow."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 7.84 (Seinfeld & Pandis 2006, Ch. 7, Section 7.5.2) — aqueous S(IV)+H2O2 oxidation rate: R_H2O2 = k·[H+]·[H2O2]·[HSO3-]/(1 + K_eq·[H+]). R_H2O2 depends only on parameters, so it is constant in time.",
+                    "lhs": "R_H2O2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k",
+                                    "H_plus",
+                                    "H2O2_aq",
+                                    "HSO3_minus"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "K_eq",
+                                            "H_plus"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eq. 7.84 at the authored default parameterization (H_plus = 0.1 mol/m^3 ≈ pH 4, H2O2_aq = 0.1 mol/m^3, HSO3_minus = 1e-3 mol/m^3). R_H2O2 = k·H_plus·H2O2_aq·HSO3_minus/(1+K_eq·H_plus) = 75·0.1·0.1·1e-3/(1+0.013·0.1) = 7.5e-4/1.0013 = 7.490262658543893e-4 mol/m^3/s. The output is algebraic and time-invariant, so the same value is asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.0007490262658543893
+                        },
+                        {
+                            "variable": "R_H2O2",
+                            "time": 1.0,
+                            "expected": 0.0007490262658543893
+                        }
+                    ]
+                },
+                {
+                    "id": "linear_in_peroxide",
+                    "description": "The H2O2 oxidation rate is first-order (linear) in aqueous H2O2 — H2O2_aq enters the Eq. 7.84 numerator linearly and is absent from the denominator. Doubling H2O2_aq from the 0.1 mol/m^3 default to 0.2 mol/m^3 exactly doubles R_H2O2 from 7.490262658543893e-4 to 1.4980525317087785e-3 mol/m^3/s.",
+                    "parameter_overrides": {
+                        "H2O2_aq": 0.2
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.0014980525317087785
+                        }
+                    ]
+                },
+                {
+                    "id": "linear_in_bisulfite",
+                    "description": "The H2O2 oxidation rate is first-order (linear) in bisulfite — HSO3_minus enters the Eq. 7.84 numerator linearly. Raising HSO3_minus five-fold from the 1e-3 mol/m^3 default to 5e-3 mol/m^3 raises R_H2O2 five-fold to 3.745131329271946e-3 mol/m^3/s. Bisulfite is the limiting dissolved-S(IV) reservoir for this pathway.",
+                    "parameter_overrides": {
+                        "HSO3_minus": 5.0e-3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.003745131329271946
+                        }
+                    ]
+                },
+                {
+                    "id": "low_acidity_near_linear_in_h_plus",
+                    "description": "At low acidity K_eq·[H+] << 1, so the Eq. 7.84 denominator 1+K_eq·[H+] ≈ 1 and the rate is very nearly linear (first-order) in [H+]. At H_plus = 1e-3 mol/m^3 (1e-6 M, pH 6) K_eq·H_plus = 1.3e-5 and R_H2O2 = 7.499902501267483e-6 mol/m^3/s — within 0.0013% of the pure-linear estimate k·H_plus·H2O2_aq·HSO3_minus = 7.5e-6.",
+                    "parameter_overrides": {
+                        "H_plus": 1.0e-3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 7.499902501267483e-6
+                        }
+                    ]
+                },
+                {
+                    "id": "high_acidity_denominator_saturation",
+                    "description": "At high acidity the Eq. 7.84 denominator 1+K_eq·[H+] grows and the rate saturates toward the asymptote k·[H2O2]·[HSO3-]/K_eq. At H_plus = 1000 mol/m^3 (1 M, pH 0 — far more acidic than any real cloud droplet, but it exercises the saturating denominator) K_eq·H_plus = 13, the denominator is 14, and R_H2O2 = 75·1000·0.1·1e-3/14 = 7.5/14 = 0.5357142857142857 mol/m^3/s — 92.86% of the saturation asymptote k·H2O2_aq·HSO3_minus/K_eq = 0.5769230769230770 mol/m^3/s.",
+                    "parameter_overrides": {
+                        "H_plus": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.5357142857142857
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_bisulfite_zero_rate",
+                    "description": "Limiting case: with no dissolved S(IV) (HSO3_minus = 0) the Eq. 7.84 numerator k·[H+]·[H2O2]·[HSO3-] vanishes and R_H2O2 = 0 exactly — there is no sulfate-formation rate without a bisulfite reactant, regardless of [H+] or [H2O2]. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the numerator product.",
+                    "parameter_overrides": {
+                        "HSO3_minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rate_vs_bisulfite",
+                    "description": "The H2O2 oxidation rate is first-order in dissolved S(IV) (Eq. 7.84). Sweeping the bisulfite concentration HSO3_minus over 1e-5–1e-2 mol/m^3 (0.01–10 µM, the span of cloud-water S(IV)) at the default acidity and aqueous-H2O2 concentration traces the straight line R_H2O2 ∝ HSO3_minus — the rate scales directly with the available bisulfite reactant.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HSO3_minus",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_hso3",
+                            "type": "line",
+                            "description": "S(IV)+H2O2 oxidation rate R_H2O2 as a function of bisulfite concentration HSO3_minus (at the default H_plus and H2O2_aq).",
+                            "x": {
+                                "variable": "HSO3_minus",
+                                "label": "Bisulfite concentration [HSO3-] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_H2O2",
+                                "label": "S(IV)+H2O2 oxidation rate R_H2O2 (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_vs_acidity",
+                    "description": "Dependence of the H2O2 oxidation rate on droplet acidity (Eq. 7.84). Sweeping H_plus over 1e-4–1e3 mol/m^3 (pH 7 down to pH 0) at the default bisulfite and aqueous-H2O2 concentrations traces R_H2O2 = k·[H+]·[H2O2]·[HSO3-]/(1+K_eq·[H+]): the rate is near-linear in [H+] across cloud-water pH (where K_eq·[H+] << 1) and rolls over toward the saturation asymptote k·[H2O2]·[HSO3-]/K_eq only at extreme, non-cloud acidity.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": {
+                                    "start": 1.0e-4,
+                                    "stop": 1.0e3,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_h_plus",
+                            "type": "line",
+                            "description": "S(IV)+H2O2 oxidation rate R_H2O2 as a function of hydrogen-ion concentration H_plus (at the default HSO3_minus and H2O2_aq).",
+                            "x": {
+                                "variable": "H_plus",
+                                "label": "Hydrogen-ion concentration [H+] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_H2O2",
+                                "label": "S(IV)+H2O2 oxidation rate R_H2O2 (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_acidity_peroxide_heatmap",
+                    "description": "Joint dependence of the H2O2 oxidation rate on droplet acidity and aqueous-H2O2 concentration (Eq. 7.84). The heatmap of R_H2O2(H_plus, H2O2_aq) — H_plus over 1e-3–1e2 mol/m^3 (pH 6–1), H2O2_aq over 1e-3–1.0 mol/m^3 (1 µM–1 mM) — shows the rate rising with both drivers: linearly with aqueous H2O2 and, over this acidity range, near-linearly with [H+].",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": {
+                                    "start": 1.0e-3,
+                                    "stop": 1.0e2,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "H2O2_aq",
+                                "range": {
+                                    "start": 1.0e-3,
+                                    "stop": 1.0,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_h_plus_h2o2_heatmap",
+                            "type": "heatmap",
+                            "description": "R_H2O2(H_plus, H2O2_aq) heatmap over the droplet-acidity / aqueous-H2O2 plane.",
+                            "x": {
+                                "variable": "H_plus",
+                                "label": "Hydrogen-ion concentration [H+] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "H2O2_aq",
+                                "label": "Aqueous H2O2 concentration [H2O2(aq)] (mol/m^3)"
+                            },
+                            "value": {
+                                "variable": "R_H2O2",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
