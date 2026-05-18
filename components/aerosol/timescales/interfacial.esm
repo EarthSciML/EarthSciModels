@@ -1,0 +1,395 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "InterfacialTimescale",
+        "description": "Characteristic timescale to achieve equilibrium at the gas-particle interface for a gas exchanging with an aqueous aerosol droplet — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12, Eqs. 12.61-12.62. Two limiting regimes are computed. For very soluble gases the approach to interfacial equilibrium is controlled by interfacial (accommodation-limited) mass transport, τ_p_soluble ≈ R_p·H*·√(2π·M_A·R·T)/(3α) (Eq. 12.61). For low-solubility gases it is instead controlled by aqueous-phase diffusion within the droplet interior, τ_p_insoluble ≈ R_p²/(π²·D_aq) (Eq. 12.62). Migrated from Aerosol.jl InterfacialTimescale.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch12",
+            "timescales",
+            "mass-transfer"
+        ]
+    },
+    "models": {
+        "InterfacialTimescale": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Interfacial equilibration timescale for very soluble gases: Eq. 12.61; for low-solubility gases: Eq. 12.62.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:70\n\nUpstream `InterfacialTimescale` is an MTK `@component` (no parameterization). It declares one scalar `@constants` entry — `R` (universal gas constant, 8.314 J/(mol*K)) — six scalar `@parameters` — `R_p` (droplet radius, m), `α` (accommodation coefficient, dimensionless), `M_A` (molecular weight of species A, kg/mol), `T` (temperature, K), `H_star` (effective Henry's-law coefficient, mol/(m^3*Pa)), `D_aq` (aqueous-phase diffusivity, m^2/s) — and two scalar `@variables` — `τ_p_soluble` and `τ_p_insoluble` (both interfacial timescales, s). The two equations are Eq. 12.61 `τ_p_soluble ~ (R_p * H_star * sqrt(2 * π * M_A * R * T)) / (3 * α)` (the interfacial-transport-controlled timescale for very soluble gases) and Eq. 12.62 `τ_p_insoluble ~ R_p^2 / (π^2 * D_aq)` (the aqueous-diffusion-controlled timescale for low-solubility gases). The two outputs are independent — neither equation references the other variable — so the component reports both limiting regimes side by side.\n\n@constants R -> parameter: the upstream `@constants` `R` is carried as `type: parameter` with the fixed default 8.314 — the .esm schema has no constant variable type, so every MTK `@constant` migrates as a fixed-default parameter (the rig-wide convention applied by the sibling Aerosol.jl migration `mean_free_path.esm`, which carries its own `@constants` `R` the same way, units `J/(mol*K)` / default 8.314). The upstream symbol name `R` is kept verbatim. `R` is one of the .esm schema's three reserved physical-constant names (`R`, `k_B`, `N_A`); a `type: parameter` named `R` is dimensionally checked against the canonical ideal-gas-constant units `J/(mol*K)`. The upstream `@constants` declares `R` with exactly `u\"J/(mol*K)\"`, so the migrated `units: \"J/(mol*K)\"` is dimensionally identical to the canonical form and the reserved-name check (`_KNOWN_PHYSICAL_CONSTANTS`) passes — no rename is needed.\n\nBare π -> inline literal: unlike `R`, the constant π is NOT declared in the upstream `@constants` block — `timescales.jl` uses the bare Julia `π` (an `Irrational`) directly inside the equations (`2 * π * ...` and `π^2`). In an MTK symbolic expression `Int * Irrational` collapses to a `Float64` coefficient, so π never becomes a symbolic parameter of the compiled system — it is a numeric literal. It is therefore serialized as the inline numeric literal `3.141592653589793` (the IEEE-754 double `Float64(π)`) inside the expression AST, matching the sibling Aerosol.jl migration `cloud_optical_depth.esm`, which likewise carries its upstream bare `π` as an inline `3.141592653589793`. This is deliberately distinct from `mean_free_path.esm` and `droplet_growth.esm`, whose upstream sources declare `π_val` as a `@constants` and therefore migrate it as a fixed-default `type: parameter`.\n\nObserved classification: InterfacialTimescale has no `D()` time-derivative anywhere — it is a purely-algebraic component. `τ_p_soluble` and `τ_p_insoluble` are both algebraic outputs (`τ_p_soluble ~ ...`, `τ_p_insoluble ~ ...`). After MTK `mtkcompile` / `structural_simplify` the compiled system has zero ODE states and both become observed quantities. They are therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the sibling pure-algebraic Aerosol.jl migrations `aqueous_eq.esm` (same source file `src/timescales.jl`), `kelvin.esm`, and `zsr.esm`.\n\nUnicode identifiers `τ_p_soluble`, `τ_p_insoluble`, and `α` are kept verbatim from the upstream `@variables` / `@parameters` declarations; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migrations (`aqueous_eq.esm`: `τ_s`, `τ_a`; `kelvin.esm`: `σ`, `ρ_l`) keep Greek symbols, so no ASCII rename is applied.\n\nTests authored from physics: the upstream `timescales.jl` carries no test file (`has_tests: N` in the migration tracker). The inline `tests` block is authored from the closed-form Eqs. 12.61-12.62 — pinning the exact analytic values of both timescales at the upstream default parameterization, and exercising each scaling law: `τ_p_soluble` linear in droplet radius `R_p`, inverse in the accommodation coefficient `α`, linear in the Henry's-law coefficient `H_star` (so a more soluble gas has a longer interfacial timescale — the defining behavior of the soluble regime), and proportional to √T; `τ_p_insoluble` quadratic in `R_p` and inverse in the aqueous diffusivity `D_aq`.\n\nNot migrated: `timescales.jl` defines six independent `@component`s — `GasDiffusionTimescale`, `AqueousDiffusionTimescale`, `InterfacialTimescale`, `ReactionTimescale`, `SolidEquilibrationTimescale`, and `AqueousEquilibrationTimescale`. Only `InterfacialTimescale` (src/timescales.jl:70) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/timescales/` (`AqueousEquilibrationTimescale` is already migrated as `aqueous_eq.esm`).\n\nTolerance rationale (model-level rel=1e-8): the model is two small closed-form algebraic expressions — `τ_p_soluble` is one `sqrt` over a five-factor product divided by a two-factor product; `τ_p_insoluble` is one division of two short products — so float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel=1e-8 leaves ample headroom while still catching a structural regression."
+            },
+            "variables": {
+                "R": {
+                    "type": "parameter",
+                    "units": "J/(mol*K)",
+                    "default": 8.314,
+                    "description": "Universal gas constant — the Eq. 12.61 term R inside the mean-molecular-speed factor √(2π·M_A·R·T). Migrated from the upstream `@constants` block; the .esm schema has no constant variable type, so it is carried as a fixed-default parameter. Declared with the canonical ideal-gas-constant units J/(mol*K), matching the reserved physical-constant name `R`."
+                },
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Droplet radius (Eqs. 12.61-12.62 term R_p) — the radius of the aqueous aerosol particle. The interfacial timescale for soluble gases scales linearly with R_p; for low-solubility gases it scales with R_p²."
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Mass accommodation coefficient (Eq. 12.61 term α) — the dimensionless probability, in (0, 1], that a gas molecule striking the droplet surface is taken up. It appears in the Eq. 12.61 denominator, so a less efficient surface (smaller α) lengthens the interfacial timescale for soluble gases."
+                },
+                "M_A": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of the diffusing gas species A (Eq. 12.61 term M_A). It enters the mean-molecular-speed factor √(2π·M_A·R·T); a heavier molecule moves more slowly and lengthens the interfacial timescale. The default 0.029 kg/mol is the molar mass of air."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature (Eq. 12.61 term T) of the droplet and surrounding gas. It enters the mean-molecular-speed factor √(2π·M_A·R·T), so τ_p_soluble scales with √T."
+                },
+                "H_star": {
+                    "type": "parameter",
+                    "units": "mol/(m^3*Pa)",
+                    "default": 1.0e5,
+                    "description": "Effective Henry's-law coefficient (Eq. 12.61 term H*) of the gas in the aqueous phase — the equilibrium ratio of dissolved to gas-phase concentration, augmented by aqueous-phase dissociation/reaction. τ_p_soluble is linear in H*: a more soluble gas takes longer to fill the larger aqueous reservoir, so it has a longer interfacial timescale."
+                },
+                "D_aq": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-9,
+                    "description": "Aqueous-phase diffusivity (Eq. 12.62 term D_aq) of the dissolved species inside the droplet. It appears in the Eq. 12.62 denominator, so slower aqueous diffusion lengthens the interfacial timescale for low-solubility gases."
+                },
+                "τ_p_soluble": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Interfacial equilibration timescale for very soluble gases (Eq. 12.61): τ_p_soluble = R_p·H*·√(2π·M_A·R·T)/(3α). For a highly soluble gas the approach to gas-particle interfacial equilibrium is controlled by interfacial (accommodation-limited) mass transport across the droplet surface.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_p",
+                                    "H_star",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    2,
+                                                    3.141592653589793,
+                                                    "M_A",
+                                                    "R",
+                                                    "T"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    "α"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "τ_p_insoluble": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Interfacial equilibration timescale for low-solubility gases (Eq. 12.62): τ_p_insoluble = R_p²/(π²·D_aq). For a poorly soluble gas the approach to gas-particle interfacial equilibrium is controlled by aqueous-phase diffusion within the droplet interior rather than by surface transport.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "^",
+                                "args": [
+                                    "R_p",
+                                    2
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            3.141592653589793,
+                                            2
+                                        ]
+                                    },
+                                    "D_aq"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-08
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eqs. 12.61-12.62 at the upstream default parameterization (R_p = 1e-5 m, α = 1.0, M_A = 0.029 kg/mol, T = 298.15 K, H_star = 1e5 mol/(m³·Pa), D_aq = 1e-9 m²/s, R = 8.314 J/(mol·K)). The soluble-gas timescale evaluates to τ_p_soluble = R_p·H*·√(2π·M_A·R·T)/(3α) = 7.084188 s and the low-solubility timescale to τ_p_insoluble = R_p²/(π²·D_aq) = 0.01013212 s — interfacial equilibration is far slower for a highly soluble gas, whose large aqueous reservoir must be filled through the accommodation-limited surface. Both outputs are algebraic and time-invariant, so the same values are asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 0.0,
+                            "expected": 7.084188283306294
+                        },
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 1.0,
+                            "expected": 7.084188283306294
+                        },
+                        {
+                            "variable": "τ_p_insoluble",
+                            "time": 0.0,
+                            "expected": 0.01013211836423378
+                        },
+                        {
+                            "variable": "τ_p_insoluble",
+                            "time": 1.0,
+                            "expected": 0.01013211836423378
+                        }
+                    ]
+                },
+                {
+                    "id": "soluble_larger_droplet",
+                    "description": "Eq. 12.61 is linear in the droplet radius R_p. Doubling R_p from the 1e-5 m default to 2e-5 m doubles the soluble-gas interfacial timescale from 7.084188 s to τ_p_soluble = 14.168377 s — a larger droplet has proportionally more surface-limited aqueous volume to equilibrate.",
+                    "parameter_overrides": {
+                        "R_p": 2.0e-5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 0.0,
+                            "expected": 14.168376566612588
+                        }
+                    ]
+                },
+                {
+                    "id": "soluble_reduced_accommodation",
+                    "description": "Eq. 12.61 varies inversely with the mass accommodation coefficient α. Lowering α tenfold from the 1.0 default to 0.1 — a surface that takes up only one in ten impinging molecules — lengthens the soluble-gas interfacial timescale tenfold to τ_p_soluble = 70.841883 s, since uptake is accommodation-limited.",
+                    "parameter_overrides": {
+                        "α": 0.1
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 0.0,
+                            "expected": 70.84188283306294
+                        }
+                    ]
+                },
+                {
+                    "id": "soluble_high_solubility",
+                    "description": "Eq. 12.61 is linear in the effective Henry's-law coefficient H*. Raising H_star tenfold from the 1e5 default to 1e6 mol/(m³·Pa) lengthens the soluble-gas interfacial timescale tenfold to τ_p_soluble = 70.841883 s — the defining behavior of the soluble regime: a more soluble gas must fill a larger aqueous reservoir through the surface, so it takes longer to reach interfacial equilibrium.",
+                    "parameter_overrides": {
+                        "H_star": 1.0e6
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 0.0,
+                            "expected": 70.84188283306294
+                        }
+                    ]
+                },
+                {
+                    "id": "soluble_colder_temperature",
+                    "description": "Eq. 12.61 carries temperature inside the mean-molecular-speed factor √(2π·M_A·R·T), so τ_p_soluble scales with √T. Cooling from the default 298.15 K to 273.15 K lowers the soluble-gas interfacial timescale to τ_p_soluble = 6.780681 s = 7.084188·√(273.15/298.15) — a colder, slower-moving gas reaches the surface less often but the √T dependence makes the effect weak.",
+                    "parameter_overrides": {
+                        "T": 273.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_soluble",
+                            "time": 0.0,
+                            "expected": 6.780680650717945
+                        }
+                    ]
+                },
+                {
+                    "id": "insoluble_larger_droplet",
+                    "description": "Eq. 12.62 is quadratic in the droplet radius R_p. Doubling R_p from the 1e-5 m default to 2e-5 m raises the low-solubility interfacial timescale fourfold from 0.01013212 s to τ_p_insoluble = 0.04052847 s — the aqueous-diffusion time grows with the square of the distance the dissolved species must diffuse across the droplet.",
+                    "parameter_overrides": {
+                        "R_p": 2.0e-5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_insoluble",
+                            "time": 0.0,
+                            "expected": 0.04052847345693512
+                        }
+                    ]
+                },
+                {
+                    "id": "insoluble_slower_diffusion",
+                    "description": "Eq. 12.62 varies inversely with the aqueous-phase diffusivity D_aq. Halving D_aq from the 1e-9 default to 5e-10 m²/s doubles the low-solubility interfacial timescale from 0.01013212 s to τ_p_insoluble = 0.02026424 s — slower diffusion within the droplet lengthens the time to equilibrate the interior.",
+                    "parameter_overrides": {
+                        "D_aq": 5.0e-10
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_p_insoluble",
+                            "time": 0.0,
+                            "expected": 0.02026423672846756
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "soluble_timescale_vs_droplet_radius",
+                    "description": "The interfacial timescale for very soluble gases rises linearly with the droplet radius (Eq. 12.61). Sweeping R_p over the 1e-7–1e-4 m range — from a sub-micron aqueous aerosol particle up to a large cloud droplet — at the upstream default parameterization traces the line τ_p_soluble = R_p·H*·√(2π·M_A·R·T)/(3α).",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {
+                                    "start": 1.0e-7,
+                                    "stop": 1.0e-4,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_soluble_vs_R_p",
+                            "type": "line",
+                            "description": "Soluble-gas interfacial timescale τ_p_soluble as a function of droplet radius R_p (at the default α, M_A, T, H_star).",
+                            "x": {
+                                "variable": "R_p",
+                                "label": "Droplet radius R_p (m)"
+                            },
+                            "y": {
+                                "variable": "τ_p_soluble",
+                                "label": "Soluble-gas interfacial timescale τ_p_soluble (s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "insoluble_timescale_vs_aqueous_diffusivity",
+                    "description": "The interfacial timescale for low-solubility gases varies inversely with the aqueous-phase diffusivity (Eq. 12.62). With R_p at its default, sweeping D_aq over the 1e-10–1e-8 m²/s range traces the τ_p_insoluble = R_p²/(π²·D_aq) hyperbola — slower aqueous diffusion lengthens the time to equilibrate the droplet interior.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_aq",
+                                "range": {
+                                    "start": 1.0e-10,
+                                    "stop": 1.0e-8,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_insoluble_vs_D_aq",
+                            "type": "line",
+                            "description": "Low-solubility-gas interfacial timescale τ_p_insoluble as a function of aqueous-phase diffusivity D_aq (at the default droplet radius R_p).",
+                            "x": {
+                                "variable": "D_aq",
+                                "label": "Aqueous-phase diffusivity D_aq (m²/s)"
+                            },
+                            "y": {
+                                "variable": "τ_p_insoluble",
+                                "label": "Low-solubility-gas interfacial timescale τ_p_insoluble (s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "soluble_timescale_vs_accommodation_coefficient",
+                    "description": "The interfacial timescale for very soluble gases varies inversely with the mass accommodation coefficient (Eq. 12.61). With the other parameters at their defaults, sweeping α over the 1e-2–1.0 range — from a strongly accommodation-limited surface to a perfectly accommodating one — traces the τ_p_soluble = R_p·H*·√(2π·M_A·R·T)/(3α) hyperbola.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "α",
+                                "range": {
+                                    "start": 1.0e-2,
+                                    "stop": 1.0,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_soluble_vs_alpha",
+                            "type": "line",
+                            "description": "Soluble-gas interfacial timescale τ_p_soluble as a function of the mass accommodation coefficient α (at the default R_p, M_A, T, H_star).",
+                            "x": {
+                                "variable": "α",
+                                "label": "Mass accommodation coefficient α (dimensionless)"
+                            },
+                            "y": {
+                                "variable": "τ_p_soluble",
+                                "label": "Soluble-gas interfacial timescale τ_p_soluble (s)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
