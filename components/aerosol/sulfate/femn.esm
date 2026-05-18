@@ -1,0 +1,551 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormationFeMn",
+        "description": "ModelingToolkit implementation of the S(IV) → S(VI) aqueous-phase oxidation rate catalysed by O2 with Fe(III)/Mn(II) synergism, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Section 7.5.5, Eq. 7.102. The component reports the three additive contributions to the catalysed oxidation rate of dissolved S(IV) — a Mn(II)-only term (k_Mn·[Mn(II)]·[S(IV)]), an Fe(III)-only term (k_Fe·[Fe(III)]·[S(IV)]), and a synergistic term (k_FeMn·[Mn(II)]·[Fe(III)]·[S(IV)]) that is greatly enhanced when both transition metals are present — together with their sum R_FeMn. Migrated from Aerosol.jl SulfateFormationFeMn. Purely algebraic: no differential states; the four rate outputs are algebraic states defined by four equations.",
+        "tags": [
+            "aerosol",
+            "sulfate",
+            "aqueous-phase-chemistry",
+            "seinfeld_pandis_ch7"
+        ]
+    },
+    "models": {
+        "SulfateFormationFeMn": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7, Section 7.5.5. Fe/Mn-synergistic S(IV) oxidation rate: Eq. 7.102.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:284\n\nUpstream `SulfateFormationFeMn` is an MTK `@component` with three `@constants` (k_Mn, k_Fe, k_FeMn — the three rate constants), seven time-indexed `@variables`, and four equations. Three of the variables (Mn_II, Fe_III, S_IV_total) are pure inputs — they appear only on equation right-hand sides and are wired in by the parent `SulfateFormation` system through connection equations (femn_ox.Mn_II ~ Mn_II, etc.); the remaining four (R_Mn_term, R_Fe_term, R_synergy_term, R_FeMn) are outputs, each carrying a defining equation:\n  • R_Mn_term      ~ k_Mn * Mn_II * S_IV_total                 — Mn(II)-only contribution\n  • R_Fe_term      ~ k_Fe * Fe_III * S_IV_total                — Fe(III)-only contribution\n  • R_synergy_term ~ k_FeMn * Mn_II * Fe_III * S_IV_total      — Fe/Mn synergistic contribution\n  • R_FeMn         ~ R_Mn_term + R_Fe_term + R_synergy_term    — total rate (Eq. 7.102)\nAll four equations are algebraic (a plain `lhs ~ rhs` with no `D(·)` time derivative); the component has no differential state anywhere.\n\nVariable classification (equations form): the migration-tracker `features` tag for this component is `equations`, and every output equation's right-hand side references upstream input `@variables` (Mn_II, Fe_III, S_IV_total), so the `equations`-form migration applies — not the `observed` form. The four outputs are kept as `type: state`, each with its defining relation carried as a `{lhs, rhs}` entry in the `equations` array (one equation per state); the `equations` array is therefore populated, not empty. `type: state` + `equations` is not exclusive to ODE components — for an `equations`-tagged purely-algebraic component it is the correct form, the form used by the sibling purely-algebraic `equations`-tagged components mean_free_path.esm and bet.esm. With no differential state, MTK `mtkcompile`/`structural_simplify` reduces the four-equation algebraic system at load time. R_FeMn's equation references the three term states by name, preserving the upstream equation symbol-for-symbol; the canonical ESS runner resolves the inter-state dependency.\n\nInput handling: the three upstream input `@variables` (Mn_II, Fe_III, S_IV_total) have no defining equation in the standalone component, so they migrate as `type: parameter` with representative defaults — mapping them to `type: state` would leave the system underdetermined (7 unknowns > 4 equations) and the load/simulate would fail. Each default is 1.0e-3 mol/m^3 (= 1 µM), the dissolved transition-metal / S(IV) concentration used by the upstream `Fe/Mn synergism` test in test/aqueous_chemistry_test.jl.\n\nConstant handling: the three upstream `@constants` (k_Mn, k_Fe, k_FeMn) migrate as `type: parameter` with fixed defaults — the ESS schema has no constant variable type, so every `@constant` becomes a fixed-default parameter (the convention sibling mean_free_path.esm applies to its R/M_air/π_val constants). The upstream defaults are written as unit-conversion arithmetic — k_Mn = 750.0/1000.0, k_Fe = 2600.0/1000.0, k_FeMn = 1.0e10/1.0e6 — converting the textbook M-based (mol/L) rate constants K_MN_SIV = 750 M^-1 s^-1, K_FE_SIV = 2600 M^-1 s^-1, K_FEMN_SIV = 1.0e10 M^-2 s^-1 (Eq. 7.102) into SI (mol/m^3): 1 M^-1 = 1e-3 m^3/mol and 1 M^-2 = 1e-6 m^6/mol^2. The evaluated SI defaults are recorded here — k_Mn = 0.75 m^3/(mol*s), k_Fe = 2.6 m^3/(mol*s), k_FeMn = 10000.0 m^6/(mol^2*s).\n\nTests: the upstream component's behavioral coverage in aqueous_chemistry_test.jl is the `Fe/Mn synergism` test — Mn(II) = Fe(III) = S(IV) = 1 µM, asserting the synergistic term exceeds the sum of the Fe-only and Mn-only terms. The `default_conditions` test reproduces exactly that scenario at the declared defaults and pins all three terms, demonstrating R_synergy_term (1.0e-5) > R_Fe_term (2.6e-6) + R_Mn_term (7.5e-7). The remaining tests sweep each input: `no_manganese` and `no_iron` confirm both the catalysed metal term and the synergistic term vanish when either metal is absent; `zero_s_iv` confirms every pathway is first-order in S(IV); `high_s_iv` confirms all three terms scale linearly with [S(IV)]; `high_metals` confirms the synergistic term scales as the product [Mn(II)]·[Fe(III)] (a 10× rise in both metals gives a 100× rise in R_synergy_term while the single-metal terms rise only 10×); `low_concentrations` confirms the synergistic term — cubic in concentration — becomes sub-dominant to the Fe-only term in dilute conditions. Because all four outputs are algebraic and time-independent, `default_conditions` asserts at both t=0 and t=1 to confirm time-invariance; the remaining tests assert at t=0.\n\nTolerance rationale (model-level rel=1e-9): purely-algebraic system, no ODE integration. Each output is a two- or three-factor product, and R_FeMn is a three-term sum; float64 round-off is ~1e-15 relative, so rel=1e-9 leaves six orders of magnitude of headroom and absorbs any associativity difference in the n-ary products and sum. The pinned expected values are the exact analytic products from textbook Eq. 7.102, so the migration is checkable against the closed-form rate law, not merely against a prior solver run.\n\nUnit balance (verified):\n  R_Mn_term `k_Mn * Mn_II * S_IV_total`:                    m^3/(mol*s) · mol/m^3 · mol/m^3 = mol/(m^3*s)\n  R_Fe_term `k_Fe * Fe_III * S_IV_total`:                   m^3/(mol*s) · mol/m^3 · mol/m^3 = mol/(m^3*s)\n  R_synergy_term `k_FeMn * Mn_II * Fe_III * S_IV_total`:     m^6/(mol^2*s) · mol/m^3 · mol/m^3 · mol/m^3 = mol/(m^3*s)\n  R_FeMn `R_Mn_term + R_Fe_term + R_synergy_term`:           mol/(m^3*s) (all three addends share units)\nSI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "k_Mn": {
+                    "type": "parameter",
+                    "units": "m^3/(mol*s)",
+                    "default": 0.75,
+                    "description": "Rate constant of the Mn(II)-only catalysed S(IV) oxidation term. Carried as a fixed-default parameter because the ESS schema has no constant variable type; the upstream MTK `@constant` is k_Mn = 750.0/1000.0, the textbook value K_MN_SIV = 750 M^-1 s^-1 (Seinfeld & Pandis Eq. 7.102) converted to SI by 1 M^-1 = 1e-3 m^3/mol."
+                },
+                "k_Fe": {
+                    "type": "parameter",
+                    "units": "m^3/(mol*s)",
+                    "default": 2.6,
+                    "description": "Rate constant of the Fe(III)-only catalysed S(IV) oxidation term. Carried as a fixed-default parameter; the upstream MTK `@constant` is k_Fe = 2600.0/1000.0, the textbook value K_FE_SIV = 2600 M^-1 s^-1 (Eq. 7.102) converted to SI by 1 M^-1 = 1e-3 m^3/mol."
+                },
+                "k_FeMn": {
+                    "type": "parameter",
+                    "units": "m^6/(mol^2*s)",
+                    "default": 10000.0,
+                    "description": "Rate constant of the Fe/Mn synergistic S(IV) oxidation term. Carried as a fixed-default parameter; the upstream MTK `@constant` is k_FeMn = 1.0e10/1.0e6, the textbook value K_FEMN_SIV = 1.0e10 M^-2 s^-1 (Eq. 7.102) converted to SI by 1 M^-2 = 1e-6 m^6/mol^2. The large coefficient encodes the strong rate enhancement when both transition metals are present together."
+                },
+                "Mn_II": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Dissolved Mn(II) concentration. An upstream input `@variable` with no defining equation (wired in by the parent SulfateFormation system); migrated as a parameter per the connected-input convention. Default 1.0e-3 mol/m^3 = 1 µM, the value used by the upstream `Fe/Mn synergism` test."
+                },
+                "Fe_III": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Dissolved Fe(III) concentration. An upstream input `@variable` with no defining equation; migrated as a parameter. Default 1.0e-3 mol/m^3 = 1 µM, the value used by the upstream `Fe/Mn synergism` test."
+                },
+                "S_IV_total": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Total dissolved S(IV) concentration — the sum of the dissolved-SO2 species [SO2·H2O] + [HSO3-] + [SO3^2-]. An upstream input `@variable` with no defining equation; migrated as a parameter. Default 1.0e-3 mol/m^3 = 1 µM, the value used by the upstream `Fe/Mn synergism` test."
+                },
+                "R_Mn_term": {
+                    "type": "state",
+                    "units": "mol/(m^3*s)",
+                    "description": "Mn(II)-only contribution to the S(IV) oxidation rate (Seinfeld & Pandis Eq. 7.102): k_Mn·[Mn(II)]·[S(IV)]. First-order in both Mn(II) and S(IV). Algebraic state defined by the first equation."
+                },
+                "R_Fe_term": {
+                    "type": "state",
+                    "units": "mol/(m^3*s)",
+                    "description": "Fe(III)-only contribution to the S(IV) oxidation rate (Eq. 7.102): k_Fe·[Fe(III)]·[S(IV)]. First-order in both Fe(III) and S(IV). Algebraic state defined by the second equation."
+                },
+                "R_synergy_term": {
+                    "type": "state",
+                    "units": "mol/(m^3*s)",
+                    "description": "Fe/Mn synergistic contribution to the S(IV) oxidation rate (Eq. 7.102): k_FeMn·[Mn(II)]·[Fe(III)]·[S(IV)]. First-order in S(IV) and in each metal, so it scales as the product [Mn(II)]·[Fe(III)] and dominates when both transition metals are present. Algebraic state defined by the third equation."
+                },
+                "R_FeMn": {
+                    "type": "state",
+                    "units": "mol/(m^3*s)",
+                    "description": "Total S(IV) oxidation rate with Fe/Mn synergism (Seinfeld & Pandis Eq. 7.102): the sum of the Mn-only, Fe-only and synergistic contributions, R_FeMn = R_Mn_term + R_Fe_term + R_synergy_term. Algebraic state defined by the fourth equation."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "R_Mn_term",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k_Mn",
+                            "Mn_II",
+                            "S_IV_total"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_Fe_term",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k_Fe",
+                            "Fe_III",
+                            "S_IV_total"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_synergy_term",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "k_FeMn",
+                            "Mn_II",
+                            "Fe_III",
+                            "S_IV_total"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "R_FeMn",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "R_Mn_term",
+                            "R_Fe_term",
+                            "R_synergy_term"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "All inputs at their declared defaults: Mn_II = Fe_III = S_IV_total = 1.0e-3 mol/m^3 (1 µM each), the conditions of the upstream `Fe/Mn synergism` test. R_Mn_term = k_Mn·Mn_II·S_IV_total = 0.75·1e-3·1e-3 = 7.5e-7; R_Fe_term = 2.6·1e-3·1e-3 = 2.6e-6; R_synergy_term = 1.0e4·1e-3·1e-3·1e-3 = 1.0e-5; R_FeMn = 7.5e-7 + 2.6e-6 + 1.0e-5 = 1.335e-5 mol/(m^3*s). The synergistic term (1.0e-5) exceeds the sum of the single-metal terms (3.35e-6) — the qualitative behaviour the upstream test asserts. All four outputs are algebraic and time-independent, so the assertions are repeated at t=0 and t=1 to confirm time-invariance.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-7
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6e-6
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1.0e-5
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 1.335e-5
+                        },
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 1.0,
+                            "expected": 7.5e-7
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 1.0,
+                            "expected": 2.6e-6
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 1.0,
+                            "expected": 1.0e-5
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 1.0,
+                            "expected": 1.335e-5
+                        }
+                    ]
+                },
+                {
+                    "id": "no_manganese",
+                    "description": "Mn(II) set to zero with Fe_III and S_IV_total at their defaults (1.0e-3 mol/m^3). Both the Mn-only term and the synergistic term carry a Mn_II factor, so both vanish: R_Mn_term = 0 and R_synergy_term = 0. Only the Fe-only pathway remains: R_Fe_term = 2.6·1e-3·1e-3 = 2.6e-6, and R_FeMn = R_Fe_term = 2.6e-6 mol/(m^3*s). Confirms the synergism requires Mn(II) to be present.",
+                    "parameter_overrides": {
+                        "Mn_II": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6e-6
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 2.6e-6
+                        }
+                    ]
+                },
+                {
+                    "id": "no_iron",
+                    "description": "Fe(III) set to zero with Mn_II and S_IV_total at their defaults (1.0e-3 mol/m^3). Both the Fe-only term and the synergistic term carry a Fe_III factor, so both vanish: R_Fe_term = 0 and R_synergy_term = 0. Only the Mn-only pathway remains: R_Mn_term = 0.75·1e-3·1e-3 = 7.5e-7, and R_FeMn = R_Mn_term = 7.5e-7 mol/(m^3*s). Confirms the synergism requires Fe(III) to be present.",
+                    "parameter_overrides": {
+                        "Fe_III": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-7
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 7.5e-7
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_s_iv",
+                    "description": "Total S(IV) set to zero with both metals at their defaults (1.0e-3 mol/m^3). Every term carries an S_IV_total factor — each oxidation pathway is first-order in dissolved S(IV) — so every rate vanishes: R_Mn_term = R_Fe_term = R_synergy_term = R_FeMn = 0. Confirms there is no oxidation rate without a substrate.",
+                    "parameter_overrides": {
+                        "S_IV_total": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 0.0
+                        }
+                    ]
+                },
+                {
+                    "id": "high_s_iv",
+                    "description": "Total S(IV) raised tenfold to 1.0e-2 mol/m^3 with both metals at their defaults (1.0e-3 mol/m^3). Every term is first-order in S(IV), so every rate rises exactly 10× relative to default_conditions: R_Mn_term = 0.75·1e-3·1e-2 = 7.5e-6; R_Fe_term = 2.6·1e-3·1e-2 = 2.6e-5; R_synergy_term = 1.0e4·1e-3·1e-3·1e-2 = 1.0e-4; R_FeMn = 7.5e-6 + 2.6e-5 + 1.0e-4 = 1.335e-4 mol/(m^3*s). Confirms the linear S(IV) dependence of all three pathways.",
+                    "parameter_overrides": {
+                        "S_IV_total": 1.0e-2
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-6
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6e-5
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1.0e-4
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 1.335e-4
+                        }
+                    ]
+                },
+                {
+                    "id": "high_metals",
+                    "description": "Both transition metals raised tenfold to 1.0e-2 mol/m^3 with S_IV_total at its default (1.0e-3 mol/m^3). The single-metal terms are first-order in their metal, so each rises 10×: R_Mn_term = 0.75·1e-2·1e-3 = 7.5e-6, R_Fe_term = 2.6·1e-2·1e-3 = 2.6e-5. The synergistic term carries both metals, so it rises 100×: R_synergy_term = 1.0e4·1e-2·1e-2·1e-3 = 1.0e-3. Total R_FeMn = 7.5e-6 + 2.6e-5 + 1.0e-3 = 1.0335e-3 mol/(m^3*s). Confirms the synergistic term scales as the product [Mn(II)]·[Fe(III)].",
+                    "parameter_overrides": {
+                        "Mn_II": 1.0e-2,
+                        "Fe_III": 1.0e-2
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-6
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6e-5
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1.0e-3
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 1.0335e-3
+                        }
+                    ]
+                },
+                {
+                    "id": "low_concentrations",
+                    "description": "All three inputs lowered to 1.0e-5 mol/m^3 (0.01 µM each, 100× below default). R_Mn_term = 0.75·1e-5·1e-5 = 7.5e-11; R_Fe_term = 2.6·1e-5·1e-5 = 2.6e-10; R_synergy_term = 1.0e4·1e-5·1e-5·1e-5 = 1.0e-11; R_FeMn = 7.5e-11 + 2.6e-10 + 1.0e-11 = 3.45e-10 mol/(m^3*s). The synergistic term is cubic in concentration, so in dilute conditions it (1.0e-11) falls below the Fe-only term (2.6e-10) — the reverse of the default-conditions regime where synergism dominates. Confirms the concentration regime where Fe/Mn synergism is and is not important.",
+                    "parameter_overrides": {
+                        "Mn_II": 1.0e-5,
+                        "Fe_III": 1.0e-5,
+                        "S_IV_total": 1.0e-5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-11
+                        },
+                        {
+                            "variable": "R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6e-10
+                        },
+                        {
+                            "variable": "R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1.0e-11
+                        },
+                        {
+                            "variable": "R_FeMn",
+                            "time": 0.0,
+                            "expected": 3.45e-10
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "s_iv_concentration_sweep",
+                    "description": "Sweep the total dissolved S(IV) concentration over three orders of magnitude (1.0e-5 to 1.0e-2 mol/m^3, logarithmically) with both transition metals held at their 1 µM defaults. Every oxidation pathway is first-order in S(IV), so the total rate R_FeMn and the synergistic term both rise linearly with [S(IV)] — a straight line of slope 1 on log-log axes.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "S_IV_total",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "total_rate_vs_s_iv",
+                            "type": "line",
+                            "description": "Total S(IV) oxidation rate R_FeMn as a function of total dissolved S(IV), on log-log axes — the linear S(IV) dependence shared by all three oxidation pathways (Eq. 7.102).",
+                            "x": {
+                                "variable": "S_IV_total",
+                                "label": "total dissolved S(IV) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_FeMn",
+                                "label": "total S(IV) oxidation rate R_FeMn (mol/(m^3*s))"
+                            }
+                        },
+                        {
+                            "id": "synergy_term_vs_s_iv",
+                            "type": "line",
+                            "description": "Fe/Mn synergistic contribution R_synergy_term as a function of total dissolved S(IV), on log-log axes. Like the other pathways it is first-order in S(IV).",
+                            "x": {
+                                "variable": "S_IV_total",
+                                "label": "total dissolved S(IV) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_synergy_term",
+                                "label": "synergistic oxidation rate R_synergy_term (mol/(m^3*s))"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "manganese_loading_sweep",
+                    "description": "Sweep the dissolved Mn(II) concentration over three orders of magnitude (1.0e-5 to 1.0e-2 mol/m^3, logarithmically) with Fe(III) and S(IV) held at their 1 µM defaults. Both the Mn-only term and the synergistic term are first-order in Mn(II), so both rise linearly with [Mn(II)]; the total rate R_FeMn rises from the Mn-independent Fe-only floor toward synergism-dominated values at high Mn loading.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mn_II",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "synergy_term_vs_mn",
+                            "type": "line",
+                            "description": "Fe/Mn synergistic contribution R_synergy_term as a function of dissolved Mn(II), on log-log axes — linear in [Mn(II)] at fixed Fe(III) and S(IV).",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "dissolved Mn(II) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_synergy_term",
+                                "label": "synergistic oxidation rate R_synergy_term (mol/(m^3*s))"
+                            }
+                        },
+                        {
+                            "id": "total_rate_vs_mn",
+                            "type": "line",
+                            "description": "Total S(IV) oxidation rate R_FeMn as a function of dissolved Mn(II). At low Mn(II) the rate is set by the Mn-independent Fe-only term; as Mn(II) rises the synergistic term takes over and R_FeMn climbs.",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "dissolved Mn(II) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_FeMn",
+                                "label": "total S(IV) oxidation rate R_FeMn (mol/(m^3*s))"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "fe_mn_synergy_heatmap",
+                    "description": "Joint dependence of the synergistic oxidation rate on both transition metals: a Cartesian sweep of dissolved Mn(II) and Fe(III), each from 1.0e-5 to 1.0e-2 mol/m^3 logarithmically, with S(IV) held at its 1 µM default. R_synergy_term = k_FeMn·[Mn(II)]·[Fe(III)]·[S(IV)] is proportional to the product of the two metal concentrations, so the heatmap rises toward the upper-right corner where both metals are abundant — the Fe/Mn synergism of Eq. 7.102.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mn_II",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "Fe_III",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "synergy_heatmap",
+                            "type": "heatmap",
+                            "description": "Fe/Mn synergistic oxidation rate R_synergy_term(Mn_II, Fe_III) heatmap. R_synergy_term ∝ [Mn(II)]·[Fe(III)], so the rate increases toward the upper-right corner (both metals abundant) and is smallest in the lower-left (both metals dilute).",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "dissolved Mn(II) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "Fe_III",
+                                "label": "dissolved Fe(III) concentration (mol/m^3)"
+                            },
+                            "value": {
+                                "variable": "R_synergy_term",
+                                "reduce": "final"
+                            }
+                        },
+                        {
+                            "id": "total_rate_heatmap",
+                            "type": "heatmap",
+                            "description": "Total S(IV) oxidation rate R_FeMn(Mn_II, Fe_III) heatmap. R_FeMn combines the single-metal terms (linear in one metal) with the synergistic term (bilinear in both), so the rate rises most steeply toward the upper-right corner where the synergistic pathway dominates.",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "dissolved Mn(II) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "Fe_III",
+                                "label": "dissolved Fe(III) concentration (mol/m^3)"
+                            },
+                            "value": {
+                                "variable": "R_FeMn",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
