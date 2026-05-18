@@ -1,0 +1,435 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SolidEquilibrationTimescale",
+        "description": "Characteristic timescale for a gas to equilibrate with solid aerosol particles — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12. Computes the solid-particle gas-equilibration timescale in two equivalent forms: τ_s = ρ_p R_p²/(3 D_A m_p f) expressed via the aerosol mass concentration m_p (Eq. 12.135), and τ_s_alt = 1/(4π N R_p D_A f) expressed via the particle number concentration N and radius R_p (Eq. 12.139). The two forms coincide when the mass and number parameterizations are mutually consistent. Migrated from Aerosol.jl SolidEquilibrationTimescale.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch12",
+            "timescales",
+            "gas-particle-equilibration"
+        ]
+    },
+    "models": {
+        "SolidEquilibrationTimescale": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Solid-particle gas-equilibration timescale: Eqs. 12.135 and 12.139.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:145\n\nUpstream `SolidEquilibrationTimescale` is an MTK `@component` (no parameterization) in Aerosol.jl's timescales.jl. It declares six scalar `@parameters` — `R_p` (particle radius, m), `ρ_p` (particle density, kg/m^3), `D_A` (gas-phase diffusivity, m^2/s), `m_p` (aerosol mass concentration, kg/m^3), `f_Kn` (transition-regime correction factor f(Kn,α), dimensionless), `N` (particle number concentration, m^-3) — and two scalar `@variables` (`τ_s`, `τ_s_alt`, both in s). The two equations are `τ_s ~ ρ_p R_p^2 / (3 D_A m_p f_Kn)` (Seinfeld & Pandis 2006 Eq. 12.135 — the solid-particle gas-equilibration timescale expressed via the aerosol mass concentration) and `τ_s_alt ~ 1 / (4 π N R_p D_A f_Kn)` (Eq. 12.139 — the same timescale in the alternative form expressed via the number concentration N and radius R_p).\n\nObserved classification: SolidEquilibrationTimescale has no `D()` time-derivative anywhere — it is a purely-algebraic component. Both `τ_s` and `τ_s_alt` are algebraic outputs (`τ_s ~ ...`, `τ_s_alt ~ ...`), each a function of the input parameters alone. After MTK `mtkcompile`/`structural_simplify` the compiled system has zero ODE states and both become observed quantities. They are therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty — matching the sibling pure-algebraic Aerosol.jl migrations kelvin.esm and zsr.esm. Unlike kelvin.esm's `S ~ exp(ln_S)` chain, `τ_s` and `τ_s_alt` are mutually independent: neither references the other, so each observed expression resolves directly from the parameters.\n\nπ inlining: the `π` in Eq. 12.139 is Julia's built-in `Irrational` math constant. The .esm Expression AST has no symbolic π, so it is inlined as the float64 literal 3.141592653589793 (the IEEE-754 double-precision representation of π), matching the rig convention (sibling particle_scavenging_coeff.esm: \"Julia's `pi` is inlined as the float64 literal 3.141592653589793\"). The integer literals 3 and 4 in the denominators are kept as integers, and `R_p^2` is encoded as a `^` node with integer exponent 2.\n\nPhysics — two equivalent forms: Eqs. 12.135 and 12.139 are alternative expressions of the same physical timescale. They are algebraically identical when the parameters are mutually consistent — i.e. when the aerosol mass concentration equals the number concentration times the per-particle mass: m_p = N · (4/3)π R_p^3 ρ_p (mass concentration = number concentration × per-particle volume × density). The upstream `@parameters` defaults (m_p = 1e-8 kg/m^3, N = 1e9 m^-3, R_p = 1e-7 m, ρ_p = 1000 kg/m^3) do not satisfy this relation — at the defaults the consistent m_p would be 4.18879e-9 kg/m^3 — so the two outputs differ at the default parameterization (τ_s = 16.6667 s, τ_s_alt = 39.7887 s). This is faithful to the upstream component, which declares the two parameter sets independently. The `consistent_parameterization` inline test sets m_p to the consistency value and confirms τ_s and τ_s_alt then coincide exactly (both 39.78873577297383 s).\n\nTests: the upstream component has no tests (`has_tests: N` on the migration tracker). The eight inline tests here are authored from the physics of Eqs. 12.135/12.139. `default_parameters` pins both outputs at the upstream defaults and re-asserts them at t=1 to document time-invariance (the component is algebraic — no time dependence). Six single-parameter tests each vary one parameter to exercise its scaling — τ_s ∝ R_p^2, ρ_p, 1/D_A, 1/m_p, 1/f_Kn and τ_s_alt ∝ 1/R_p, 1/D_A, 1/f_Kn, 1/N — and assert both outputs, so each test also documents which output a parameter does and does not affect (m_p and ρ_p move only τ_s; N moves only τ_s_alt; R_p, D_A and f_Kn move both). `consistent_parameterization` verifies the Eq. 12.135 ⇔ Eq. 12.139 equivalence.\n\nUnicode identifiers `τ_s`, `τ_s_alt` and `ρ_p` are kept verbatim from the upstream `@variables`/`@parameters` declarations; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migration kelvin.esm keeps the Greek symbols `σ` and `ρ_l`. The parameter `N` (particle number concentration) is a single-capital name and is not one of the schema's reserved physical-constant names (`R`, `k_B`, `N_A`), so no rename is applied.\n\nTolerance rationale (model-level rel=1e-9): both outputs are small closed-form rational expressions — a handful of multiplications, one integer power, and one division, with no transcendental functions. float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel=1e-9 leaves roughly six orders of magnitude of headroom and matches the sibling pure-rational Aerosol.jl migration mean_free_path.esm. All asserted values are non-zero (smallest ~1.67 s), so no `abs` floor is needed."
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Particle (aerosol) radius — the radius of the solid particles the gas equilibrates with (Eqs. 12.135/12.139 term R_p). The default 100 nm is a fine-mode aerosol radius. τ_s scales as R_p^2 (Eq. 12.135) while τ_s_alt scales as 1/R_p (Eq. 12.139)."
+                },
+                "ρ_p": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Particle (aerosol) mass density (Eq. 12.135 term ρ_p). The default 1000 kg/m³ is the density of liquid water. τ_s scales linearly with ρ_p; ρ_p does not appear in Eq. 12.139."
+                },
+                "D_A": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.0e-5,
+                    "description": "Gas-phase molecular diffusivity of the equilibrating species A (Eqs. 12.135/12.139 term D_A). Both timescales scale as 1/D_A — faster gas-phase diffusion of the species toward the particles shortens the equilibration time."
+                },
+                "m_p": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.0e-8,
+                    "description": "Aerosol (solid-particle) mass concentration — the mass of aerosol per unit volume of air (Eq. 12.135 term m_p). The default 1e-8 kg/m³ is 10 µg/m³. τ_s scales as 1/m_p — a larger condensed-phase mass sink equilibrates the gas faster — and m_p does not appear in Eq. 12.139."
+                },
+                "f_Kn": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Transition-regime (non-continuum) correction factor f(Kn, α), a function of the Knudsen number and the mass accommodation coefficient (Eqs. 12.135/12.139 term f). Dimensionless; equals 1 in the continuum limit, and a sub-unity value represents free-molecular/transition-regime slowing of mass transfer. Both timescales scale as 1/f_Kn."
+                },
+                "N": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1.0e9,
+                    "description": "Particle number concentration — the number of aerosol particles per unit volume of air (Eq. 12.139 term N). τ_s_alt scales as 1/N — more particles provide more surface area and equilibrate the gas faster — and N does not appear in Eq. 12.135."
+                },
+                "τ_s": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Solid-particle gas-equilibration timescale (Eq. 12.135): the characteristic time for a gas-phase species to reach equilibrium with a population of solid aerosol particles, τ_s = ρ_p R_p²/(3 D_A m_p f). This form is expressed via the aerosol mass concentration m_p.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "ρ_p",
+                                    {
+                                        "op": "^",
+                                        "args": ["R_p", 2]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [3, "D_A", "m_p", "f_Kn"]
+                            }
+                        ]
+                    }
+                },
+                "τ_s_alt": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Solid-particle gas-equilibration timescale, alternative form (Eq. 12.139): τ_s ≈ 1/(4π N R_p D_A f) — the same physical timescale as τ_s, expressed via the particle number concentration N and radius R_p instead of the mass concentration m_p. Equals τ_s exactly when the parameterizations are mutually consistent (m_p = N (4/3)π R_p³ ρ_p).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            {
+                                "op": "*",
+                                "args": [4, 3.141592653589793, "N", "R_p", "D_A", "f_Kn"]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eqs. 12.135 and 12.139 at the upstream default parameterization (R_p = 100 nm, ρ_p = 1000 kg/m³, D_A = 2e-5 m²/s, m_p = 1e-8 kg/m³, f_Kn = 1, N = 1e9 m⁻³). τ_s = ρ_p R_p²/(3 D_A m_p f) = 16.66667 s and τ_s_alt = 1/(4π N R_p D_A f) = 39.78874 s. The two forms differ because the default m_p and N are not mutually consistent (see the consistent_parameterization test). Both outputs are algebraic and time-invariant, so the same values are asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 16.66666666666666
+                        },
+                        {
+                            "variable": "τ_s",
+                            "time": 1.0,
+                            "expected": 16.66666666666666
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 39.78873577297383
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 1.0,
+                            "expected": 39.78873577297383
+                        }
+                    ]
+                },
+                {
+                    "id": "larger_particle_radius",
+                    "description": "Eq. 12.135 carries the particle radius quadratically (τ_s ∝ R_p²) while Eq. 12.139 carries it inversely (τ_s_alt ∝ 1/R_p). Raising R_p tenfold from the default 100 nm to 1 μm multiplies τ_s by 100 (16.66667 → 1666.667 s) and divides τ_s_alt by 10 (39.78874 → 3.978874 s).",
+                    "parameter_overrides": {
+                        "R_p": 1.0e-6
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 1666.6666666666665
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 3.9788735772973833
+                        }
+                    ]
+                },
+                {
+                    "id": "higher_gas_diffusivity",
+                    "description": "Both timescales scale inversely with the gas-phase diffusivity D_A — faster molecular diffusion of the species toward the particles shortens the equilibration time. Raising D_A fivefold from 2e-5 to 1e-4 m²/s divides both outputs by 5 (τ_s: 16.66667 → 3.333333 s; τ_s_alt: 39.78874 → 7.957747 s).",
+                    "parameter_overrides": {
+                        "D_A": 1.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 3.3333333333333326
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 7.957747154594767
+                        }
+                    ]
+                },
+                {
+                    "id": "higher_aerosol_mass_loading",
+                    "description": "The aerosol mass concentration m_p appears only in Eq. 12.135: τ_s ∝ 1/m_p — a larger condensed-phase mass sink equilibrates the gas faster — while Eq. 12.139's τ_s_alt is independent of m_p. Raising m_p tenfold from 1e-8 to 1e-7 kg/m³ (10 → 100 µg/m³) divides τ_s by 10 (16.66667 → 1.666667 s) and leaves τ_s_alt unchanged at 39.78874 s.",
+                    "parameter_overrides": {
+                        "m_p": 1.0e-7
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 1.6666666666666663
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 39.78873577297383
+                        }
+                    ]
+                },
+                {
+                    "id": "denser_particles",
+                    "description": "The particle density ρ_p appears only in Eq. 12.135, linearly: τ_s ∝ ρ_p. Doubling ρ_p from 1000 to 2000 kg/m³ doubles τ_s (16.66667 → 33.33333 s) and leaves Eq. 12.139's τ_s_alt unchanged at 39.78874 s.",
+                    "parameter_overrides": {
+                        "ρ_p": 2000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 33.33333333333332
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 39.78873577297383
+                        }
+                    ]
+                },
+                {
+                    "id": "transition_regime_correction",
+                    "description": "The transition-regime correction factor f(Kn, α) appears in both equations as 1/f. It equals 1 in the continuum limit; a sub-unity value represents non-continuum (free-molecular / transition-regime) slowing of mass transfer. Setting f_Kn = 0.5 doubles both timescales (τ_s: 16.66667 → 33.33333 s; τ_s_alt: 39.78874 → 79.57747 s).",
+                    "parameter_overrides": {
+                        "f_Kn": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 33.33333333333332
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 79.57747154594766
+                        }
+                    ]
+                },
+                {
+                    "id": "higher_number_concentration",
+                    "description": "The particle number concentration N appears only in Eq. 12.139: τ_s_alt ∝ 1/N — more particles provide more surface area and equilibrate the gas faster — while Eq. 12.135's τ_s is independent of N. Raising N tenfold from 1e9 to 1e10 m⁻³ divides τ_s_alt by 10 (39.78874 → 3.978874 s) and leaves τ_s unchanged at 16.66667 s.",
+                    "parameter_overrides": {
+                        "N": 1.0e10
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 16.66666666666666
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 3.9788735772973833
+                        }
+                    ]
+                },
+                {
+                    "id": "consistent_parameterization",
+                    "description": "Eqs. 12.135 and 12.139 are two forms of the same physical timescale and coincide exactly when the aerosol mass and number concentrations are mutually consistent: m_p = N·(4/3)π R_p³ ρ_p (mass concentration = number concentration × per-particle volume × density). At the default N, R_p and ρ_p this consistency value is m_p = 4.18879e-9 kg/m³. With m_p set to it, τ_s and τ_s_alt both evaluate to 39.78873577297383 s — verifying the Eq. 12.135 ⇔ Eq. 12.139 equivalence.",
+                    "parameter_overrides": {
+                        "m_p": 4.18879020478639e-9
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "τ_s",
+                            "time": 0.0,
+                            "expected": 39.78873577297383
+                        },
+                        {
+                            "variable": "τ_s_alt",
+                            "time": 0.0,
+                            "expected": 39.78873577297383
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "equilibration_timescale_vs_particle_radius",
+                    "description": "The two forms of the solid-particle equilibration timescale have opposite radius dependence: Eq. 12.135's τ_s rises as R_p² while Eq. 12.139's τ_s_alt falls as 1/R_p. Sweeping the particle radius over the 1 nm – 1 μm aerosol size range on a logarithmic axis traces the two curves, which cross where the default mass- and number-based parameterizations momentarily agree.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {
+                                    "start": 1.0e-9,
+                                    "stop": 1.0e-6,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_s_vs_r_p",
+                            "type": "line",
+                            "description": "Solid-particle equilibration timescale vs particle radius — Eq. 12.135 (τ_s, ∝ R_p²) and Eq. 12.139 (τ_s_alt, ∝ 1/R_p) overlaid.",
+                            "x": {
+                                "variable": "R_p",
+                                "label": "Particle radius R_p (m)"
+                            },
+                            "y": {
+                                "variable": "τ_s",
+                                "label": "Equilibration timescale (s)"
+                            },
+                            "series": [
+                                {
+                                    "name": "τ_s — Eq. 12.135 (mass-concentration form)",
+                                    "variable": "τ_s"
+                                },
+                                {
+                                    "name": "τ_s_alt — Eq. 12.139 (number-concentration form)",
+                                    "variable": "τ_s_alt"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": "equilibration_timescale_vs_aerosol_mass",
+                    "description": "Eq. 12.135's τ_s scales inversely with the aerosol mass concentration — a heavier condensed-phase mass sink equilibrates the gas faster. Sweeping m_p over the 1 – 1000 µg/m³ atmospheric loading range (1e-9 – 1e-6 kg/m³) on a logarithmic axis traces τ_s decreasing monotonically as the aerosol burden grows.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "m_p",
+                                "range": {
+                                    "start": 1.0e-9,
+                                    "stop": 1.0e-6,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_s_vs_m_p",
+                            "type": "line",
+                            "description": "Solid-particle equilibration timescale τ_s (Eq. 12.135) as a function of aerosol mass concentration m_p.",
+                            "x": {
+                                "variable": "m_p",
+                                "label": "Aerosol mass concentration m_p (kg/m³)"
+                            },
+                            "y": {
+                                "variable": "τ_s",
+                                "label": "Equilibration timescale τ_s (s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "solid_timescale_radius_mass_heatmap",
+                    "description": "Joint dependence of the Eq. 12.135 equilibration timescale on particle radius and aerosol mass concentration. The heatmap of τ_s(R_p, m_p) shows the timescale longest for large particles in a lightly-loaded aerosol and shortest for small particles in a heavily-loaded aerosol.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {
+                                    "start": 1.0e-9,
+                                    "stop": 1.0e-6,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "m_p",
+                                "range": {
+                                    "start": 1.0e-9,
+                                    "stop": 1.0e-6,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "tau_s_r_p_m_p_heatmap",
+                            "type": "heatmap",
+                            "description": "τ_s(R_p, m_p) heatmap — solid-particle equilibration timescale over particle radius and aerosol mass concentration.",
+                            "x": {
+                                "variable": "R_p",
+                                "label": "Particle radius R_p (m)"
+                            },
+                            "y": {
+                                "variable": "m_p",
+                                "label": "Aerosol mass concentration m_p (kg/m³)"
+                            },
+                            "value": {
+                                "variable": "τ_s",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
