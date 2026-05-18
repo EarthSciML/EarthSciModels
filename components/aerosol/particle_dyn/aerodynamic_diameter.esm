@@ -1,0 +1,213 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AerodynamicDiameter",
+        "description": "Equivalent particle diameters for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:390 (`AerodynamicDiameter` @component). Computes the classical aerodynamic diameter D_ca (the diameter of a unit-density sphere with the same settling velocity) and its continuum-limit approximation (Seinfeld & Pandis 2006, Chapter 9, Eqs. 9.110 and 9.112).",
+        "tags": [
+            "aerosol",
+            "particle-dynamics",
+            "aerodynamic-diameter"
+        ],
+        "created": "2026-05-18T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-irmp)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Eqs. 9.110 and 9.112 (aerodynamic diameter)."
+            }
+        ]
+    },
+    "models": {
+        "AerodynamicDiameter": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:390\nUpstream `AerodynamicDiameter` is an MTK `@component` with one constant (ρ_p0), five `@parameters` (D_p, ρ_p, C_c_Dp, C_c_Da, χ), and two variables (D_ca, D_ca_continuum). The equations are:\n  • D_ca           ~ D_p * sqrt(ρ_p / ρ_p0) * sqrt(C_c_Dp / C_c_Da)  (Eq. 9.110 — classical aerodynamic diameter)\n  • D_ca_continuum ~ D_p * sqrt(ρ_p / ρ_p0)                          (Eq. 9.112 — continuum-limit approximation, C_c ≈ 1)\nBoth equations are algebraic (no derivatives), making this an observed-only component.\n\nUnused-parameter pruning: the `@parameter` χ (dynamic shape factor) is declared upstream but appears in no equation in the component's `eqs` array — the docstring's electrical-mobility-diameter relation that would use it is not implemented. `System(eqs, t)` collects parameters from the equations only, so `parameters(sys)` excludes χ; χ is therefore omitted from this migration. The migrated parameter set (ρ_p0, D_p, ρ_p, C_c_Dp, C_c_Da) matches `parameters(sys)`.\n\nConstant ρ_p0 (reference density, 1000 kg/m³ — a unit-density sphere) migrates as a `type: parameter` carrying its numeric default, consistent with the sibling single_particle_dynamics.jl migrations (mean_free_path.esm, slip.esm).\n\nObservability classification: observed-only — every output is given by a single algebraic equation in which the output appears only on the LHS. Outputs migrate as `type: state` with explicit `equations`, matching the sibling components mean_free_path.esm and slip.esm. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); each equation is a product of a sqrt and a division of parameters. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "ρ_p0": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Reference density (1 g/cm³)"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-6,
+                    "description": "Particle diameter"
+                },
+                "ρ_p": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1500.0,
+                    "description": "Particle density"
+                },
+                "C_c_Dp": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Slip correction at D_p (dimensionless)"
+                },
+                "C_c_Da": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Slip correction at D_ca (dimensionless)"
+                },
+                "D_ca": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Classical aerodynamic diameter"
+                },
+                "D_ca_continuum": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Aerodynamic diameter (continuum limit)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "D_ca",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "D_p",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [{ "op": "/", "args": ["ρ_p", "ρ_p0"] }]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "sqrt",
+                                "args": [{ "op": "/", "args": ["C_c_Dp", "C_c_Da"] }]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "D_ca_continuum",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "D_p",
+                            {
+                                "op": "sqrt",
+                                "args": [{ "op": "/", "args": ["ρ_p", "ρ_p0"] }]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default conditions: D_p = 1.0e-6 m, ρ_p = 1500 kg/m³, C_c_Dp = C_c_Da = 1.0. With equal slip corrections the slip ratio is 1, so D_ca = D_ca_continuum = D_p*sqrt(ρ_p/ρ_p0) = 1e-6*sqrt(1.5) ≈ 1.2247e-6 m.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 1.224744871391589e-6 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 1.224744871391589e-6 }
+                    ]
+                },
+                {
+                    "id": "unit_density",
+                    "description": "Particle density equal to the reference density (ρ_p = ρ_p0 = 1000 kg/m³): sqrt(ρ_p/ρ_p0) = 1, so both diameters equal the geometric diameter D_p = 1.0e-6 m.",
+                    "parameter_overrides": { "ρ_p": 1000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 1.0e-6 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 1.0e-6 }
+                    ]
+                },
+                {
+                    "id": "dense_particle",
+                    "description": "Dense particle (ρ_p = 4000 kg/m³): sqrt(ρ_p/ρ_p0) = sqrt(4) = 2, so D_ca = D_ca_continuum = 2*D_p = 2.0e-6 m.",
+                    "parameter_overrides": { "ρ_p": 4000.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 2.0e-6 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 2.0e-6 }
+                    ]
+                },
+                {
+                    "id": "slip_correction_ratio",
+                    "description": "Unequal slip corrections (C_c_Dp = 1.44, C_c_Da = 1.0): the slip ratio sqrt(C_c_Dp/C_c_Da) = 1.2 enlarges D_ca relative to the continuum diameter. D_ca = 1e-6*sqrt(1.5)*1.2 ≈ 1.4697e-6 m; D_ca_continuum is unaffected by slip at 1e-6*sqrt(1.5) ≈ 1.2247e-6 m.",
+                    "parameter_overrides": { "C_c_Dp": 1.44, "C_c_Da": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 1.4696938456699068e-6 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 1.224744871391589e-6 }
+                    ]
+                },
+                {
+                    "id": "large_particle",
+                    "description": "Large particle (D_p = 1.0e-5 m = 10 μm): both diameters scale linearly with D_p. D_ca = D_ca_continuum = 1e-5*sqrt(1.5) ≈ 1.2247e-5 m.",
+                    "parameter_overrides": { "D_p": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 1.224744871391589e-5 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 1.224744871391589e-5 }
+                    ]
+                },
+                {
+                    "id": "light_particle_high_slip",
+                    "description": "Light particle below reference density (ρ_p = 500 kg/m³) with a larger slip correction at D_ca than at D_p (C_c_Da = 2.0, C_c_Dp = 1.0 default): D_ca = 1e-6*sqrt(0.5)*sqrt(0.5) = 5.0e-7 m, smaller than the continuum diameter D_ca_continuum = 1e-6*sqrt(0.5) ≈ 7.071e-7 m.",
+                    "parameter_overrides": { "ρ_p": 500.0, "C_c_Da": 2.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D_ca", "time": 0.0, "expected": 5.0e-7 },
+                        { "variable": "D_ca_continuum", "time": 0.0, "expected": 7.071067811865476e-7 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "density_dependence",
+                    "description": "Sweep particle density ρ_p from 500 to 3000 kg/m³ at a fixed geometric diameter D_p = 1.0e-6 m. With C_c_Dp = 1.44 and C_c_Da = 1.0 the slip ratio sqrt(C_c_Dp/C_c_Da) = 1.2, so the classical aerodynamic diameter D_ca exceeds the continuum-limit diameter D_ca_continuum by a constant factor of 1.2 while both scale as sqrt(ρ_p).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_p": 1.0e-6,
+                        "C_c_Dp": 1.44,
+                        "C_c_Da": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "ρ_p",
+                                "range": { "start": 500.0, "stop": 3000.0, "count": 50 }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "aerodynamic_diameter_vs_density",
+                            "type": "line",
+                            "description": "Classical aerodynamic diameter D_ca vs particle density — D_ca ∝ sqrt(ρ_p), scaled up by the constant slip ratio.",
+                            "x": { "variable": "ρ_p", "label": "ρ_p (kg/m^3)" },
+                            "y": { "variable": "D_ca", "label": "D_ca (m)" }
+                        },
+                        {
+                            "id": "continuum_diameter_vs_density",
+                            "type": "line",
+                            "description": "Continuum-limit aerodynamic diameter D_ca_continuum vs particle density — D_ca_continuum ∝ sqrt(ρ_p), independent of the slip correction.",
+                            "x": { "variable": "ρ_p", "label": "ρ_p (kg/m^3)" },
+                            "y": { "variable": "D_ca_continuum", "label": "D_ca_continuum (m)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
