@@ -1,0 +1,447 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ZSRWaterContent",
+        "description": "ZSR (Zdanovskii-Stokes-Robinson) mixing rule for aerosol liquid water content — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 10. Computes the total aerosol liquid water content W of a multicomponent inorganic-salt solution as the sum over species of the water each salt holds in its own binary solution at the ambient water activity (Eq. 10.98), with the water activity set equal to the relative humidity for an equilibrium aerosol (Eq. 10.63). Migrated from Aerosol.jl ZSRWaterContent at the upstream default parameterization n_species = 3.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch10",
+            "thermodynamics",
+            "water-content"
+        ]
+    },
+    "models": {
+        "ZSRWaterContent": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 10, Section 10.2. Water activity at equilibrium: Eq. 10.63; ZSR mixing rule: Eq. 10.98.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/seinfeld_pandis_ch10/zsr.jl:45\n\nUpstream `ZSRWaterContent` is an MTK `@component` parameterized by `n_species` (Int, default 3). It declares one scalar `@parameters` (`RH`, relative humidity 0-1) plus two length-`n_species` parameter arrays — `C[1:n_species]` (salt concentrations, mol/m^3) and `m0[1:n_species]` (binary-solution molalities at the water activity, mol/kg) — and two scalar `@variables` (`W`, aerosol liquid water content, kg/m^3; `α_w`, water activity, dimensionless). The two equations are `α_w ~ RH` (Eq. 10.63: water activity equals relative humidity for an equilibrium aerosol) and `W ~ sum(C[i]/m0[i] for i in 1:n_species)` (Eq. 10.98: the ZSR mixing rule — total aerosol water is the sum of the water each salt would hold in its own binary solution at the ambient water activity).\n\nn_species fixed to 3: the .esm encodes one concrete instantiation of the parameterized component, fixed to the upstream canonical default `ZSRWaterContent(; name, n_species::Int = 3)`. The array parameters are unfolded to scalars `C_1..C_3` and `m0_1..m0_3` following the unfold-to-scalar convention used by the other parameterized-array migrations in this rig (e.g. uniform_grid.esm fixes its layer count N to the upstream default). The ZSR mixing rule is additively separable — each species contributes an independent `C_i/m0_i` term — so the per-species reference values pinned in `tests` remain exact for any larger `n_species` (the extra terms simply add), and a future templated representation would extend, not invalidate, them.\n\nObserved classification: `W` and `α_w` are both algebraic outputs (`W ~ ...`, `α_w ~ ...`; no time derivative anywhere). After MTK structural_simplify / mtkcompile the compiled system has zero ODE states and both become observed quantities — the upstream `mtkcompile(ZSRWaterContent(n_species = 2))` test exercises exactly this compiled form. They are therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the sibling observed-only Aerosol.jl migration `critical_ssa.esm`. `α_w` has no consumer inside the component but is retained as a first-class observed output because it is the explicit encoding of Eq. 10.63.\n\nUnicode identifier `α_w` is kept verbatim from the upstream `@variables` declaration; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migrations (`critical_ssa.esm`: `β`, `ω_crit`) keep Greek symbols, so no ASCII rename is applied.\n\nNot migrated: the file-level helpers `binary_molality_nh42so4/nh4no3/nacl` and `zsr_water_content` in zsr.jl are plain Julia functions (empirical polynomial fits for specific salts, and a dictionary-driven scalar evaluator) — not MTK components — and are out of scope for this component migration. In the MTK component `m0` is a free input parameter; the salt-specific RH→molality coupling those helpers implement is a caller concern.\n\nTolerance rationale (model-level rel=1e-8): the model is a small closed-form algebraic system — one division per species and an n-term sum — so float64 evaluation roundoff is at the 1-ULP (~1e-16 relative) level; rel=1e-8 leaves ample headroom. The `zero_concentration_zero_water` test adds a tight per-assertion abs=1e-20 so a stuck-nonzero regression in the W sum cannot pass on the relative branch."
+            },
+            "variables": {
+                "RH": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.8,
+                    "description": "Relative humidity, expressed as a fraction in [0, 1]. For an equilibrium aerosol it equals the water activity α_w (Eq. 10.63)."
+                },
+                "C_1": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Molar concentration of salt species 1 per unit volume of air (Eq. 10.98 term Cᵢ)."
+                },
+                "C_2": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Molar concentration of salt species 2 per unit volume of air (Eq. 10.98 term Cᵢ)."
+                },
+                "C_3": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Molar concentration of salt species 3 per unit volume of air (Eq. 10.98 term Cᵢ)."
+                },
+                "m0_1": {
+                    "type": "parameter",
+                    "units": "mol/kg",
+                    "default": 5.0,
+                    "description": "Binary-solution molality of species 1 — the molality species 1 would have, dissolved alone in water, at the ambient water activity α_w (Eq. 10.98 term m₀,ᵢ)."
+                },
+                "m0_2": {
+                    "type": "parameter",
+                    "units": "mol/kg",
+                    "default": 5.0,
+                    "description": "Binary-solution molality of species 2 — the molality species 2 would have, dissolved alone in water, at the ambient water activity α_w (Eq. 10.98 term m₀,ᵢ)."
+                },
+                "m0_3": {
+                    "type": "parameter",
+                    "units": "mol/kg",
+                    "default": 5.0,
+                    "description": "Binary-solution molality of species 3 — the molality species 3 would have, dissolved alone in water, at the ambient water activity α_w (Eq. 10.98 term m₀,ᵢ)."
+                },
+                "α_w": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Water activity (dimensionless). Equal to the relative humidity for an equilibrium aerosol (Eq. 10.63: α_w = RH).",
+                    "expression": "RH"
+                },
+                "W": {
+                    "type": "observed",
+                    "units": "kg/m^3",
+                    "description": "Total aerosol liquid water content — mass of liquid water per unit volume of air. Given by the ZSR mixing rule (Eq. 10.98): W = Σᵢ Cᵢ / m₀,ᵢ.",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "C_1",
+                                    "m0_1"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "C_2",
+                                    "m0_2"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "C_3",
+                                    "m0_3"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-08
+            },
+            "tests": [
+                {
+                    "id": "default_three_species",
+                    "description": "All three salt species at the upstream default parameterization (RH = 0.8, Cᵢ = 1e-6 mol/m³, m₀,ᵢ = 5.0 mol/kg). Anchors Eq. 10.63 (α_w = RH = 0.8) and Eq. 10.98 (W = 3 · (1e-6 / 5.0) = 6e-7 kg/m³). Both outputs are algebraic and time-invariant, so the same values are asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "α_w",
+                            "time": 0.0,
+                            "expected": 0.8
+                        },
+                        {
+                            "variable": "α_w",
+                            "time": 1.0,
+                            "expected": 0.8
+                        },
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 6e-07
+                        },
+                        {
+                            "variable": "W",
+                            "time": 1.0,
+                            "expected": 6e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "water_activity_equals_relative_humidity",
+                    "description": "Eq. 10.63 — water activity equals relative humidity for an equilibrium aerosol. With RH overridden to 0.6, α_w tracks it to 0.6. W is unchanged at 6e-7 kg/m³ because the ZSR water content (Eq. 10.98) depends only on Cᵢ and m₀,ᵢ, not on RH.",
+                    "parameter_overrides": {
+                        "RH": 0.6
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "α_w",
+                            "time": 0.0,
+                            "expected": 0.6
+                        },
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 6e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "water_activity_near_saturation",
+                    "description": "Eq. 10.63 at a near-saturation relative humidity. RH = 0.95 gives α_w = 0.95, confirming the water-activity equation holds across the humidity range without clamping.",
+                    "parameter_overrides": {
+                        "RH": 0.95
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "α_w",
+                            "time": 0.0,
+                            "expected": 0.95
+                        }
+                    ]
+                },
+                {
+                    "id": "linearity_in_concentration",
+                    "description": "ZSR water content is linear in salt concentration (Eq. 10.98). Doubling every Cᵢ from the 1e-6 default to 2e-6 mol/m³ doubles W from 6e-7 to W = 3 · (2e-6 / 5.0) = 1.2e-6 kg/m³ — the upstream `W_more ≈ 2 · W` linearity check. α_w is unaffected at the default 0.8, confirming the water-activity output is decoupled from concentration.",
+                    "parameter_overrides": {
+                        "C_1": 2e-06,
+                        "C_2": 2e-06,
+                        "C_3": 2e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 1.2e-06
+                        },
+                        {
+                            "variable": "α_w",
+                            "time": 0.0,
+                            "expected": 0.8
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_concentration_zero_water",
+                    "description": "Zero salt implies zero aerosol water (upstream `W_zero ≈ 0`). With every Cᵢ set to 0, each ZSR term Cᵢ/m₀,ᵢ vanishes and W = 0 exactly. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the W sum.",
+                    "parameter_overrides": {
+                        "C_1": 0.0,
+                        "C_2": 0.0,
+                        "C_3": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-20
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "single_species_isolation",
+                    "description": "Single-component ZSR — only species 1 is present (C_2 = C_3 = 0). W collapses to the single binary-solution term W = C_1 / m₀,₁ = 1e-6 / 5.0 = 2e-7 kg/m³ (upstream single-component check `W_single ≈ C / m0`). This is the additivity building block: each species contributes its water uptake independently.",
+                    "parameter_overrides": {
+                        "C_2": 0.0,
+                        "C_3": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 2e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "additivity_heterogeneous_concentrations",
+                    "description": "ZSR is an additive mixing rule (Eq. 10.98): total water is the sum of the independent per-species contributions. With distinct concentrations C₁ = 1e-6, C₂ = 3e-6, C₃ = 6e-6 mol/m³ at the common m₀ = 5.0 mol/kg, W = 1e-6/5 + 3e-6/5 + 6e-6/5 = 2e-7 + 6e-7 + 1.2e-6 = 2.0e-6 kg/m³ — the upstream additivity check `W(A+B) = W(A) + W(B)` extended to three species.",
+                    "parameter_overrides": {
+                        "C_1": 1e-06,
+                        "C_2": 3e-06,
+                        "C_3": 6e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 2e-06
+                        }
+                    ]
+                },
+                {
+                    "id": "inverse_molality_dependence",
+                    "description": "Aerosol water content varies inversely with binary-solution molality (Eq. 10.98): a higher m₀,ᵢ — a more concentrated binary solution — holds less water per mole of salt. Doubling every m₀,ᵢ from 5.0 to 10.0 mol/kg halves W from 6e-7 to W = 3 · (1e-6 / 10.0) = 3e-7 kg/m³.",
+                    "parameter_overrides": {
+                        "m0_1": 10.0,
+                        "m0_2": 10.0,
+                        "m0_3": 10.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 3e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "heterogeneous_molality",
+                    "description": "ZSR mixing rule with distinct per-species binary molalities m₀ = (5.0, 10.0, 20.0) mol/kg at the common default concentration Cᵢ = 1e-6 mol/m³. W = 1e-6/5 + 1e-6/10 + 1e-6/20 = 2e-7 + 1e-7 + 5e-8 = 3.5e-7 kg/m³ — each species' water uptake resolved independently before summing.",
+                    "parameter_overrides": {
+                        "m0_1": 5.0,
+                        "m0_2": 10.0,
+                        "m0_3": 20.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "W",
+                            "time": 0.0,
+                            "expected": 3.5e-07
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "water_content_vs_concentration",
+                    "description": "ZSR water content scales linearly with salt concentration (Eq. 10.98). Species 2 and 3 are removed (C₂ = C₃ = 0) to isolate a single binary solution at m₀,₁ = 5.0 mol/kg; sweeping C₁ traces the straight line W = C₁ / m₀,₁ through the origin.",
+                    "parameters": {
+                        "C_2": 0.0,
+                        "C_3": 0.0,
+                        "m0_1": 5.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "C_1",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1e-05,
+                                    "count": 50,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w_vs_c1",
+                            "type": "line",
+                            "description": "Aerosol liquid water content W as a function of salt concentration C₁ (single-species ZSR at m₀,₁ = 5 mol/kg).",
+                            "x": {
+                                "variable": "C_1",
+                                "label": "Salt concentration C₁ (mol/m³)"
+                            },
+                            "y": {
+                                "variable": "W",
+                                "label": "Aerosol liquid water content W (kg/m³)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "water_content_vs_binary_molality",
+                    "description": "ZSR water content varies inversely with binary-solution molality (Eq. 10.98). With a single species present (C₁ = 1e-6 mol/m³, C₂ = C₃ = 0), sweeping m₀,₁ over the 1–30 mol/kg range characteristic of inorganic-salt binary solutions traces the W = C₁ / m₀,₁ hyperbola — a drier (more concentrated) binary solution holds less aerosol water.",
+                    "parameters": {
+                        "C_1": 1e-06,
+                        "C_2": 0.0,
+                        "C_3": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "m0_1",
+                                "range": {
+                                    "start": 1.0,
+                                    "stop": 30.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w_vs_m0_1",
+                            "type": "line",
+                            "description": "Aerosol liquid water content W as a function of binary-solution molality m₀,₁ (single-species ZSR at C₁ = 1e-6 mol/m³).",
+                            "x": {
+                                "variable": "m0_1",
+                                "label": "Binary-solution molality m₀,₁ (mol/kg)"
+                            },
+                            "y": {
+                                "variable": "W",
+                                "label": "Aerosol liquid water content W (kg/m³)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "water_content_concentration_molality_heatmap",
+                    "description": "Joint dependence of ZSR water content on salt concentration and binary-solution molality (Eq. 10.98) for a single species (C₂ = C₃ = 0). The heatmap of W(C₁, m₀,₁) shows W rising with concentration and falling with molality — the W = C₁ / m₀,₁ surface.",
+                    "parameters": {
+                        "C_2": 0.0,
+                        "C_3": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "C_1",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1e-05,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "m0_1",
+                                "range": {
+                                    "start": 1.0,
+                                    "stop": 30.0,
+                                    "count": 25,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "w_c1_m0_1_heatmap",
+                            "type": "heatmap",
+                            "description": "W(C₁, m₀,₁) heatmap for single-species ZSR.",
+                            "x": {
+                                "variable": "C_1",
+                                "label": "Salt concentration C₁ (mol/m³)"
+                            },
+                            "y": {
+                                "variable": "m0_1",
+                                "label": "Binary-solution molality m₀,₁ (mol/kg)"
+                            },
+                            "value": {
+                                "variable": "W",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
