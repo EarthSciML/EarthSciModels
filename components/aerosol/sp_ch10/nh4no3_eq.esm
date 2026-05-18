@@ -1,0 +1,495 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "NH4NO3Equilibrium",
+        "description": "ModelingToolkit implementation of ammonium nitrate (NH4NO3) gas-aerosol equilibrium from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 10, Section 10.4.3. NH4NO3 is a semi-volatile aerosol species whose gas-particle partitioning depends strongly on temperature and relative humidity. The component evaluates three temperature- and humidity-dependent quantities: the natural log of the solid-phase dissociation constant ln(Kp) for NH3(g) + HNO3(g) <-> NH4NO3(s) (Eq. 10.91), the deliquescence relative humidity DRH of NH4NO3 (Eq. 10.88), and a phase indicator that is 1 when the ambient RH exceeds the DRH (aqueous aerosol) and 0 otherwise (solid aerosol). Migrated from Aerosol.jl NH4NO3Equilibrium. Purely algebraic: no differential states, three observed outputs and an empty equations array.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch10",
+            "thermodynamics",
+            "gas-particle-partitioning",
+            "ammonium-nitrate"
+        ]
+    },
+    "models": {
+        "NH4NO3Equilibrium": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 10, Section 10.4.3. Solid NH4NO3 dissociation constant: Eq. 10.91; NH4NO3 deliquescence RH: Eq. 10.88.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/seinfeld_pandis_ch10/nh4no3_equilibrium.jl:68\n\nUpstream `NH4NO3Equilibrium` is a flat MTK `@component` -- `System(eqs, t; name)` with no subsystems -- implementing Seinfeld & Pandis (2006) Section 10.4.3, the ammonium-nitrate gas-aerosol equilibrium. It declares two scalar `@parameters` (T, temperature; RH, relative humidity 0-1), a six-entry `@constants` block (T_ref, c1_Kp, c2_Kp, c3_Kp, c1_DRH, c2_DRH), and three scalar `@variables` (ln_Kp, DRH_out, is_aqueous). The three equations are ln_Kp ~ c1_Kp - c2_Kp/T - c3_Kp*log(T/T_ref) (Eq. 10.91, the solid NH4NO3 dissociation constant Kp in ppb^2 units), DRH_out ~ exp(c1_DRH/T + c2_DRH)/100 (Eq. 10.88, the NH4NO3 deliquescence RH), and is_aqueous ~ ifelse(RH > DRH_out, 1, 0) (the phase indicator). They are kept in upstream order, which is already a valid topological order (ln_Kp and DRH_out depend only on parameters; is_aqueous consumes DRH_out).\n\nObserved classification: ln_Kp, DRH_out and is_aqueous are all algebraic outputs (plain `lhs ~ rhs`; no time derivative anywhere in the component). After MTK structural_simplify / mtkcompile the compiled system has zero ODE states and all three become observed quantities. They are therefore serialized as `type: observed` carrying an `expression` (not `type: state` with an equation), and the `equations` array is empty -- matching the sibling purely-algebraic Aerosol.jl migrations zsr.esm and critical_ssa.esm. The is_aqueous observed references the DRH_out observed inside its ifelse condition; the observed set is a small DAG resolved DRH_out -> is_aqueous.\n\nConstants. The upstream `@constants` block (T_ref, c1_Kp, c2_Kp, c3_Kp, c1_DRH, c2_DRH) migrates as fixed-default `parameter`s: the ESM schema has no `constant` variable type, so every `@constant` becomes a parameter carrying its numeric value as `default`. None of the six constant names, nor the two genuine `@parameters` (T, RH), collides with the schema's reserved physical-constant names (R, k_B, N_A).\n\nInputs. T and RH are the two upstream `@parameters` and migrate as parameters; their migrated defaults (T = 298 K, RH = 0.5) are the upstream `@parameters` defaults verbatim.\n\nUnits. ln_Kp is the natural log of a constant expressed in ppb^2 units and so is dimensionless (upstream `unit = u\"1\"`); DRH_out and is_aqueous are likewise dimensionless. ESM `units` fields are descriptive only -- the runners perform no dimensional analysis -- so the mixed-unit form of Eq. 10.91 (a dimensionless 84.6, a K-valued 24220 divided by T, and a dimensionless log term) carries through as written.\n\nNot migrated. The file-level helpers `nh4no3_Kp`, `nh4no3_K_AN`, `ionic_strength_fraction`, `equilibrium_constant_temperature` and `get_equilibrium_constant`, and the `EQUILIBRIUM_CONSTANTS` Table-10.7 dictionary, are plain Julia functions and data -- not MTK components -- and are out of scope for this component migration (the migration target is the `@component` at nh4no3_equilibrium.jl:68). The component docstring's \"Variables\" section additionally lists Kp, K_AN and Y, but the implemented `@variables` block declares only ln_Kp, DRH_out and is_aqueous; only the three implemented variables are migrated.\n\nPhase boundary. is_aqueous is a step function of the strict inequality RH > DRH_out. Its value (exactly 0 or 1, the ifelse literals) is robust, but the branch taken is sensitive to round-off when RH lands within a few ULP of DRH_out. Every test and example holds RH a comfortable margin (>= 0.06) away from the DRH curve, so both conforming runners select the same branch.\n\nTolerance rationale (model-level rel=1e-8): a closed-form explicit algebraic system -- one log, one exp, a few divisions and a comparison. The expected values are the Float64 evaluation of Eqs. 10.88 and 10.91; rel=1e-8 absorbs last-ULP round-off in log/exp, eight orders of magnitude above the ~1e-16 relative agreement expected between conforming runners. The is_aqueous = 0 assertions additionally carry a tight per-assertion abs=1e-12 because the relative check alone is ill-conditioned at expected = 0."
+            },
+            "tolerance": {
+                "rel": 1e-08
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Air temperature. Drives both the Eq. 10.91 dissociation constant and the Eq. 10.88 deliquescence RH."
+                },
+                "RH": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Relative humidity, expressed as a fraction in [0, 1]. Compared against the deliquescence RH to set the aerosol phase."
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Reference temperature for the log(T/T_ref) term of Eq. 10.91 (upstream @constant)."
+                },
+                "c1_Kp": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 84.6,
+                    "description": "Constant term of the Eq. 10.91 ln(Kp) expression (upstream @constant)."
+                },
+                "c2_Kp": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 24220.0,
+                    "description": "Temperature coefficient of the 1/T term in Eq. 10.91 (upstream @constant)."
+                },
+                "c3_Kp": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 6.1,
+                    "description": "Coefficient of the log(T/T_ref) term in Eq. 10.91 (upstream @constant)."
+                },
+                "c1_DRH": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 723.7,
+                    "description": "Temperature coefficient of the 1/T term in the Eq. 10.88 deliquescence-RH expression (upstream @constant)."
+                },
+                "c2_DRH": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.6954,
+                    "description": "Constant term of the Eq. 10.88 deliquescence-RH expression (upstream @constant)."
+                },
+                "ln_Kp": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Natural log of the solid-phase NH4NO3 dissociation constant Kp (Kp in ppb^2; equilibrium NH3(g) + HNO3(g) <-> NH4NO3(s), Eq. 10.91). Rises strongly with temperature.",
+                    "expression": {
+                        "op": "-",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    "c1_Kp",
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "c2_Kp",
+                                            "T"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "c3_Kp",
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "T",
+                                                    "T_ref"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "DRH_out": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Deliquescence relative humidity of NH4NO3 -- the RH at which solid NH4NO3 takes up water and dissolves into an aqueous solution (Eq. 10.88). Falls with temperature.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "c1_DRH",
+                                                    "T"
+                                                ]
+                                            },
+                                            "c2_DRH"
+                                        ]
+                                    }
+                                ]
+                            },
+                            100.0
+                        ]
+                    }
+                },
+                "is_aqueous": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Phase indicator: 1 when the ambient RH exceeds the deliquescence RH (aqueous aerosol), 0 otherwise (solid aerosol).",
+                    "expression": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "RH",
+                                    "DRH_out"
+                                ]
+                            },
+                            1.0,
+                            0.0
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_298K_solid",
+                    "description": "Upstream default parameterization: T = 298 K, RH = 0.5. Anchors Eq. 10.91 -- at T = T_ref the log term vanishes, so ln_Kp = 84.6 - 24220/298 = 3.3248 (the upstream NH4NO3-Equilibrium-Constants testitem checks ln_Kp(298) ~ 3.32) -- and Eq. 10.88, DRH_out = exp(723.7/298 + 1.6954)/100 = 0.6180 (upstream checks nh4no3_drh(298) ~ 0.618). With RH = 0.5 below the 0.618 deliquescence RH the aerosol is solid, is_aqueous = 0. All three outputs are algebraic and time-invariant, so ln_Kp and is_aqueous are re-checked at t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": 3.3248322147650953
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.6180124376651474
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "ln_Kp",
+                            "time": 1.0,
+                            "expected": 3.3248322147650953
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_310K",
+                    "description": "Warm air, T = 310 K. The Eq. 10.91 dissociation constant rises strongly with temperature -- ln_Kp climbs from the 298 K value of 3.32 to 6.23 -- while the Eq. 10.88 deliquescence RH falls from 0.618 to 0.563. With RH = 0.5 still below DRH_out the aerosol remains solid (is_aqueous = 0).",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "RH": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": 6.230146994995379
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.5625619278792913
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_280K",
+                    "description": "Cold air, T = 280 K. The Eq. 10.91 dissociation constant drops sharply -- ln_Kp goes negative (-1.52), i.e. Kp < 1 ppb^2, so NH4NO3 is far more stable as a solid than at 298 K -- and the Eq. 10.88 deliquescence RH rises to 0.722. RH = 0.5 stays well below DRH_out, so is_aqueous = 0.",
+                    "parameter_overrides": {
+                        "T": 280.0,
+                        "RH": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": -1.519946311649461
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.7224353609252703
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "aqueous_phase_high_rh",
+                    "description": "Phase determination above the deliquescence point: T = 298 K, RH = 0.8. ln_Kp and DRH_out are unchanged from the default case (they depend only on T), but RH = 0.8 now exceeds the 0.618 deliquescence RH, so the NH4NO3 aerosol is aqueous and is_aqueous = 1.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "RH": 0.8
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": 3.3248322147650953
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.6180124376651474
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 1.0
+                        }
+                    ]
+                },
+                {
+                    "id": "solid_phase_low_rh",
+                    "description": "Phase determination well below the deliquescence point: T = 298 K, RH = 0.3. With RH far under the 0.618 deliquescence RH the aerosol is solid and is_aqueous = 0 -- the dry counterpart of aqueous_phase_high_rh at the same temperature.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "RH": 0.3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": 3.3248322147650953
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.6180124376651474
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_aqueous_320K",
+                    "description": "Combined warm-and-humid case, T = 320 K, RH = 0.7. ln_Kp reaches 8.48 (Eq. 10.91) and the deliquescence RH drops to 0.523 (Eq. 10.88); because warming lowers DRH_out, RH = 0.7 now sits above it and the aerosol is aqueous (is_aqueous = 1) -- the same RH that would be solid at a colder temperature.",
+                    "parameter_overrides": {
+                        "T": 320.0,
+                        "RH": 0.7
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "ln_Kp",
+                            "time": 0.0,
+                            "expected": 8.47801219334095
+                        },
+                        {
+                            "variable": "DRH_out",
+                            "time": 0.0,
+                            "expected": 0.5229822857299338
+                        },
+                        {
+                            "variable": "is_aqueous",
+                            "time": 0.0,
+                            "expected": 1.0
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "dissociation_constant_vs_temperature",
+                    "description": "Log of the solid NH4NO3 dissociation constant as a function of temperature (Eq. 10.91). Sweeping T from 270 to 320 K traces the steep rise of ln_Kp -- the equilibrium NH3(g) + HNO3(g) <-> NH4NO3(s) shifts strongly toward the gas phase as the air warms. RH is fixed at the default 0.5 and does not enter Eq. 10.91.",
+                    "parameters": {
+                        "RH": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 270.0,
+                                    "stop": 320.0,
+                                    "count": 51,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ln_kp_vs_T",
+                            "type": "line",
+                            "description": "Natural log of the solid NH4NO3 dissociation constant ln_Kp versus temperature T.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "y": {
+                                "variable": "ln_Kp",
+                                "label": "ln(Kp) of solid NH4NO3 (Kp in ppb^2)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "deliquescence_rh_vs_temperature",
+                    "description": "Deliquescence relative humidity of NH4NO3 as a function of temperature (Eq. 10.88). Sweeping T from 270 to 320 K shows DRH_out falling monotonically -- warmer air lowers the RH threshold at which solid NH4NO3 deliquesces into an aqueous droplet.",
+                    "parameters": {
+                        "RH": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 270.0,
+                                    "stop": 320.0,
+                                    "count": 51,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "drh_vs_T",
+                            "type": "line",
+                            "description": "Deliquescence relative humidity DRH_out versus temperature T.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "y": {
+                                "variable": "DRH_out",
+                                "label": "Deliquescence relative humidity"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "phase_diagram",
+                    "description": "NH4NO3 aerosol phase over the temperature-humidity plane. The is_aqueous indicator is evaluated on a Cartesian grid of T (270-320 K) and RH (0.1-0.95); the heatmap renders the deliquescence boundary of Eq. 10.88 -- aqueous (is_aqueous = 1) above the falling DRH_out(T) curve, solid (is_aqueous = 0) below it.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 270.0,
+                                    "stop": 320.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "RH",
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 0.95,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "phase_heatmap",
+                            "type": "heatmap",
+                            "description": "NH4NO3 aerosol phase indicator is_aqueous over temperature T and relative humidity RH.",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "y": {
+                                "variable": "RH",
+                                "label": "Relative humidity"
+                            },
+                            "value": {
+                                "variable": "is_aqueous",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
