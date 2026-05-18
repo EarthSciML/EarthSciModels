@@ -1,0 +1,313 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormationFe",
+        "description": "ModelingToolkit implementation of the aqueous-phase S(IV)→S(VI) oxidation rate catalyzed by dissolved Fe(III), from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Eq. 7.92. The component reports a single diagnostic, the Fe(III)-catalyzed oxidation rate R_Fe = k·[Fe(III)]·[S(IV)]/[H+], for the low-pH (pH 0-3.6) regime: the rate rises in proportion to the dissolved-iron catalyst and the total S(IV) substrate, and falls inversely with the hydrogen-ion concentration. Migrated from Aerosol.jl SulfateFormationFe. Purely algebraic: no differential states, one observed output and an empty equations array.",
+        "tags": [
+            "aerosol",
+            "sulfate",
+            "aqueous-phase-chemistry",
+            "seinfeld_pandis_ch7"
+        ]
+    },
+    "models": {
+        "SulfateFormationFe": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7, Section 7.5.3. Fe(III)-catalyzed S(IV) oxidation, low-pH regime: Eq. 7.92.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:189\n\nUpstream `SulfateFormationFe` is an MTK `@component` with one `@constants` entry (k_low_pH, the low-pH Fe(III) rate constant), four time-indexed `@variables` (H_plus, Fe_III, S_IV_total, R_Fe), and a single equation:\n  • Eq. 7.92: R_Fe ~ k_low_pH * Fe_III * S_IV_total / H_plus — S(IV) oxidation rate by Fe(III)-catalyzed dissolved O2 in the low-pH (pH 0-3.6) regime.\nThe equation is algebraic (a plain `lhs ~ rhs` with no `D(·)` time derivative); the component has no differential state anywhere.\n\nScope (upstream simplification): Seinfeld & Pandis Section 7.5.3 gives four pH-regime rate laws for the Fe(III)-catalyzed pathway (Eq. 7.92 pH 0-3.6, Eq. 7.93 pH≈4, Eq. 7.94 pH 5-6, Eq. 7.95 pH 7). The upstream component deliberately implements only the low-pH law Eq. 7.92, \"most relevant for typical cloud droplet conditions\" per its docstring; this migration preserves that single-regime scope symbol-for-symbol. The default H_plus = 1.0 mol/m^3 (pH 3) is chosen inside the pH 0-3.6 validity window.\n\nObservability classification: observed-only. With no differential state, MTK `mtkcompile`/`structural_simplify` reduces the raw 4-unknown / 1-equation `System(eqs, t)` to zero ODE states plus the algebraically-recovered output R_Fe. R_Fe is therefore encoded as `type: observed`, carrying its defining relation in its `expression` field, and the `equations` array is empty — the post-`mtkcompile` representation, matching sibling observed-only migrations reaction.esm and aqueous_eq.esm.\n\nInput handling: H_plus, Fe_III and S_IV_total are upstream `@variables` that carry no defining equation — they are model inputs supplied by coupling within the full `SulfateFormation` system. The ESS schema has no \"connected input\" variable type, so each migrates as `type: parameter` with a fixed, physically-representative default — the convention applied across the migrated component set for connected `@variable` inputs. Re-typing the three inputs as parameters leaves R_Fe as a pure function of parameters, which is exactly the observed-only form above.\n\nConstant handling: the upstream `@constants k_low_pH = 6.0` migrates as a `type: parameter` with a fixed default — the ESS schema has no constant variable type, so every `@constant` becomes a fixed-default parameter. No unit conversion is applied: k_low_pH stays 6.0 s^-1 because the concentration ratio Fe_III·S_IV_total/H_plus carries a single net factor of 1000 between mol/L and mol/m^3 units, the same factor by which the rate R_Fe scales, so the rate constant is invariant under the concentration-unit choice. (Contrast the sibling O3/H2O2/Mn rate constants, which DO carry explicit /1000 or /1e6 factors in the source because their concentration products do not cancel a single power.)\n\nTests: the upstream test suite (test/aqueous_chemistry_test.jl, \"SulfateFormation structure\") exercises this component only structurally — it asserts `sys isa System` and `length(equations(sys)) >= 1`, with no numeric assertions on R_Fe. The seven inline tests below are therefore authored directly from the analytic formula R_Fe = k·[Fe(III)]·[S(IV)]/[H+], evaluated in float64 at the declared defaults or a single-parameter override. Because R_Fe is algebraic and time-independent, `default_conditions` asserts at both t=0 and t=1 to confirm time-invariance; the remaining tests assert at t=0. Coverage sweeps the catalyst (Fe_III ×10 / ×0.1), the substrate (S_IV_total ×10 / ×0.1), and the acidity (strongly/weakly acidic, spanning the pH 0-3.6 regime), confirming the proportionalities R_Fe ∝ [Fe(III)], R_Fe ∝ [S(IV)] and R_Fe ∝ 1/[H+] respectively.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system, no ODE integration. R_Fe is a three-factor product followed by a division; float64 round-off is ~1e-16 relative, so rel=1e-9 leaves seven orders of magnitude of headroom and absorbs any associativity difference in the n-ary product k·Fe·S_IV. The pinned expected values are the exact analytic results of the textbook formula, so the migration is checkable against Eq. 7.92, not merely against a prior solver run.\n\nUnit balance (verified):\n  R_Fe `k_low_pH * Fe_III * S_IV_total / H_plus`: s^-1 · (mol/m^3) · (mol/m^3) / (mol/m^3) = s^-1 · mol/m^3 = mol/(m^3·s) = mol/m^3/s\nSI throughout; no unit conversion at parse or runtime."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "k_low_pH": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 6.0,
+                    "description": "Rate constant for the Fe(III)-catalyzed S(IV) oxidation in the low-pH regime (pH 0-3.6), Seinfeld & Pandis (2006) Eq. 7.92. Carried as a fixed-default parameter because the ESS schema has no constant variable type; the upstream value is the MTK `@constant` k_low_pH = 6.0 s^-1."
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0,
+                    "description": "Hydrogen ion concentration [H+] of the cloud/fog droplet aqueous phase. An upstream model input (an `@variable` with no defining equation) re-typed as a parameter on migration. The default 1.0 mol/m^3 corresponds to pH 3, mid-range of the pH 0-3.6 regime for which this low-pH rate law is valid."
+                },
+                "Fe_III": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Dissolved Fe(III) concentration — the catalyst of the oxidation pathway. An upstream model input re-typed as a parameter on migration. The default 1.0e-3 mol/m^3 (1 μM) is a representative cloud-water dissolved-iron concentration."
+                },
+                "S_IV_total": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-2,
+                    "description": "Total dissolved S(IV) concentration (SO2·H2O + HSO3- + SO3^2-) — the substrate oxidized to S(VI). An upstream model input re-typed as a parameter on migration. The default 1.0e-2 mol/m^3 (10 μM) is a representative cloud-water S(IV) loading."
+                },
+                "R_Fe": {
+                    "type": "observed",
+                    "units": "mol/m^3/s",
+                    "description": "S(IV) oxidation rate by Fe(III)-catalyzed dissolved O2 in the aqueous phase (Seinfeld & Pandis 2006, Eq. 7.92, low-pH regime): R_Fe = k·[Fe(III)]·[S(IV)]/[H+]. The rate rises in proportion to the dissolved-iron catalyst Fe_III and the total S(IV) substrate, and falls inversely with the hydrogen-ion concentration H_plus.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_low_pH",
+                                    "Fe_III",
+                                    "S_IV_total"
+                                ]
+                            },
+                            "H_plus"
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "All parameters at their declared defaults: k_low_pH = 6.0 s^-1, H_plus = 1.0 mol/m^3 (pH 3), Fe_III = 1.0e-3 mol/m^3, S_IV_total = 1.0e-2 mol/m^3. The Fe(III)-catalyzed oxidation rate is R_Fe = k·[Fe(III)]·[S(IV)]/[H+] = 6.0·1.0e-3·1.0e-2/1.0 = 6.0e-5 mol/m^3/s. R_Fe is algebraic and time-independent, so the assertion is repeated at t=0 and t=1 to confirm time-invariance.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-5
+                        },
+                        {
+                            "variable": "R_Fe",
+                            "time": 1.0,
+                            "expected": 6.0e-5
+                        }
+                    ]
+                },
+                {
+                    "id": "elevated_iron",
+                    "description": "Iron-rich droplet: Fe_III raised to 1.0e-2 mol/m^3 (10x the default, ~10 μM dissolved iron) with H_plus and S_IV_total at their defaults. R_Fe is first-order in the catalyst, so the rate rises 10x to R_Fe = 6.0·1.0e-2·1.0e-2/1.0 = 6.0e-4 mol/m^3/s. Confirms R_Fe ∝ [Fe(III)] (Eq. 7.92).",
+                    "parameter_overrides": {
+                        "Fe_III": 1.0e-2
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-4
+                        }
+                    ]
+                },
+                {
+                    "id": "depleted_iron",
+                    "description": "Iron-poor droplet: Fe_III lowered to 1.0e-4 mol/m^3 (0.1x the default, ~0.1 μM dissolved iron) with H_plus and S_IV_total at their defaults. The rate falls 10x to R_Fe = 6.0·1.0e-4·1.0e-2/1.0 = 6.0e-6 mol/m^3/s. Mirror image of `elevated_iron`.",
+                    "parameter_overrides": {
+                        "Fe_III": 1.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-6
+                        }
+                    ]
+                },
+                {
+                    "id": "elevated_siv",
+                    "description": "High S(IV) loading: S_IV_total raised to 1.0e-1 mol/m^3 (10x the default, ~100 μM total dissolved S(IV)) with H_plus and Fe_III at their defaults. R_Fe is first-order in the substrate, so the rate rises 10x to R_Fe = 6.0·1.0e-3·1.0e-1/1.0 = 6.0e-4 mol/m^3/s. Confirms R_Fe ∝ [S(IV)] (Eq. 7.92).",
+                    "parameter_overrides": {
+                        "S_IV_total": 1.0e-1
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-4
+                        }
+                    ]
+                },
+                {
+                    "id": "depleted_siv",
+                    "description": "Low S(IV) loading: S_IV_total lowered to 1.0e-3 mol/m^3 (0.1x the default, ~1 μM total dissolved S(IV)) with H_plus and Fe_III at their defaults. The rate falls 10x to R_Fe = 6.0·1.0e-3·1.0e-3/1.0 = 6.0e-6 mol/m^3/s. Mirror image of `elevated_siv`.",
+                    "parameter_overrides": {
+                        "S_IV_total": 1.0e-3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-6
+                        }
+                    ]
+                },
+                {
+                    "id": "strongly_acidic",
+                    "description": "Strongly acidic droplet: H_plus raised to 10.0 mol/m^3 (pH 2.0, the acidic end of the pH 0-3.6 regime) with Fe_III and S_IV_total at their defaults. R_Fe varies inversely with acidity, so the rate falls 10x to R_Fe = 6.0·1.0e-3·1.0e-2/10.0 = 6.0e-6 mol/m^3/s. Confirms R_Fe ∝ 1/[H+] (Eq. 7.92).",
+                    "parameter_overrides": {
+                        "H_plus": 10.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 6.0e-6
+                        }
+                    ]
+                },
+                {
+                    "id": "weakly_acidic",
+                    "description": "Weakly acidic droplet: H_plus lowered to 0.25 mol/m^3 (pH ≈ 3.6, the upper boundary of the pH 0-3.6 regime) with Fe_III and S_IV_total at their defaults. The smaller [H+] raises the rate to R_Fe = 6.0·1.0e-3·1.0e-2/0.25 = 2.4e-4 mol/m^3/s. Mirror image of `strongly_acidic`.",
+                    "parameter_overrides": {
+                        "H_plus": 0.25
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Fe",
+                            "time": 0.0,
+                            "expected": 2.4e-4
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "iron_concentration_sweep",
+                    "description": "Sweep the dissolved Fe(III) catalyst concentration over three orders of magnitude (1.0e-4 to 1.0e-1 mol/m^3, ~0.1 to 100 μM, logarithmically) with H_plus and S_IV_total at their defaults. The Fe(III)-catalyzed oxidation rate R_Fe = k·[Fe(III)]·[S(IV)]/[H+] is first-order in the catalyst, so it rises linearly with Fe_III — a straight line on log-log axes.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Fe_III",
+                                "range": {
+                                    "start": 1.0e-4,
+                                    "stop": 1.0e-1,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_iron",
+                            "type": "line",
+                            "description": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe as a function of the dissolved Fe(III) concentration, on log-log axes — the first-order dependence R_Fe ∝ [Fe(III)] of Eq. 7.92.",
+                            "x": {
+                                "variable": "Fe_III",
+                                "label": "dissolved Fe(III) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_Fe",
+                                "label": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "acidity_sweep",
+                    "description": "Sweep the hydrogen-ion concentration over the low-pH regime (0.25 to 100.0 mol/m^3, i.e. pH 3.6 down to pH 1.0, logarithmically) with Fe_III and S_IV_total at their defaults. R_Fe = k·[Fe(III)]·[S(IV)]/[H+] varies inversely with acidity, so it falls as 1/[H+] — a straight line of slope −1 on log-log axes.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": {
+                                    "start": 0.25,
+                                    "stop": 100.0,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_acidity",
+                            "type": "line",
+                            "description": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe as a function of the hydrogen-ion concentration, on log-log axes — the inverse dependence R_Fe ∝ 1/[H+] of Eq. 7.92.",
+                            "x": {
+                                "variable": "H_plus",
+                                "label": "hydrogen-ion concentration [H+] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_Fe",
+                                "label": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "siv_concentration_sweep",
+                    "description": "Sweep the total dissolved S(IV) substrate concentration over two orders of magnitude (1.0e-3 to 1.0e-1 mol/m^3, ~1 to 100 μM, logarithmically) with H_plus and Fe_III at their defaults. R_Fe = k·[Fe(III)]·[S(IV)]/[H+] is first-order in the substrate, so it rises linearly with S_IV_total — a straight line on log-log axes.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "S_IV_total",
+                                "range": {
+                                    "start": 1.0e-3,
+                                    "stop": 1.0e-1,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_siv",
+                            "type": "line",
+                            "description": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe as a function of the total dissolved S(IV) concentration, on log-log axes — the first-order dependence R_Fe ∝ [S(IV)] of Eq. 7.92.",
+                            "x": {
+                                "variable": "S_IV_total",
+                                "label": "total dissolved S(IV) concentration (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_Fe",
+                                "label": "Fe(III)-catalyzed S(IV) oxidation rate R_Fe (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
