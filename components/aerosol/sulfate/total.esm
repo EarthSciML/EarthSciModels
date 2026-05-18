@@ -1,0 +1,1045 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormation",
+        "description": "Combined aqueous-phase S(IV)->S(VI) oxidation kinetics — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Section 7.5, with the Section 7.4 rate conversions. The model composes five S(IV)-oxidation pathway subsystems — O3 (Eqs. 7.79-7.80), H2O2 (Eq. 7.84), Fe(III)-catalyzed (Eq. 7.92), Mn(II)-catalyzed (Eq. 7.101), and Fe/Mn synergism (Eq. 7.102) — wired to shared cloud-droplet inputs by coupling equations. The total oxidation rate R_total sums the O3, H2O2 and Fe/Mn-synergism rates (the femn_ox subsystem already carries Fe-only and Mn-only terms, so the standalone fe_ox/mn_ox rates are excluded to avoid double-counting). It also reports sulfate production S_VI_production = R_total and three Section 7.4 diagnostics: the rate in ppb/hr (Eq. 7.75) and %/hr (Eq. 7.76) and the SO2 lifetime tau_SO2 (Eq. 7.78). Migrated from Aerosol.jl SulfateFormation as a subsystem-composed model (ESS spec §4.7).",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch7",
+            "sulfate-formation",
+            "aqueous-chemistry",
+            "composed"
+        ]
+    },
+    "models": {
+        "SulfateFormation": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7 (Chemistry of the Atmospheric Aqueous Phase), Sections 7.4-7.5. S(IV) oxidation kinetics and rate conversions: Eqs. 7.75-7.78 and 7.79-7.102.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:349\n\nUpstream `SulfateFormation` (default instance name `:SulfateForm`) is the combining MTK `@component` of the S(IV)->S(VI) oxidation module. It instantiates five pathway subsystems — `o3_ox = SulfateFormationO3()`, `h2o2_ox = SulfateFormationH2O2()`, `fe_ox = SulfateFormationFe()`, `mn_ox = SulfateFormationMn()`, `femn_ox = SulfateFormationFeMn()` — and returns `System(eqs, t; systems=[o3_ox, h2o2_ox, fe_ox, mn_ox, femn_ox], name)` with its own `@constants`, `@parameters`, `@variables` and 21 equations (15 coupling equations wiring inputs into the subsystems, plus 6 equations for the total rate, sulfate production, and the Section 7.4 rate conversions).\n\nMigrated as a subsystem-composed model (ESS spec §4.7), following the precedent `components/atmospheric_dynamics/sp_ch1/water_vapor_thermo.esm` (composed model with top-level coupling equations + inlined subsystems) and `components/gaschem/radiation/radiation_fundamentals.esm`. Each of the five subsystems inlines its `variables` + `equations` under the model's `subsystems` map: o3_ox and h2o2_ox mirror the already-migrated standalone `o3.esm` / `h2o2.esm` (same equations-form). fe_ox and mn_ox are inlined from `fe.esm` / `mn.esm` but re-expressed in equations-form (the lone output re-typed `observed` -> `state` with its rate law moved into the subsystem `equations` array): a composed `coupling.couple` model must carry its relations as equations, not as `observed` expressions — the observed-vs-equations choice for a flat standalone component does not override the composition pattern. femn_ox has no standalone `.esm` on `main` yet (`femn.esm` is a separate migration-tracker row, src/sulfate_formation.jl:284); its `variables` + four `equations` are inlined directly from the `SulfateFormationFeMn` `@component` source.\n\nRe-typing: in the standalone `.esm` files each subsystem input is typed `parameter` (no governing equation within the component). In the composed model the 15 parent coupling equations `<sub>.<input> ~ <input>` govern those inputs — and a `parameter` cannot be an equation LHS — so every connected subsystem input is re-typed `parameter` -> `state` here. Subsystem rate constants (the `@constants` k0/k1/k2, k/K_eq, k_low_pH, k0, k_Mn/k_Fe/k_FeMn) are not equation LHSs and keep `type: parameter`. The model's own top-level `@variables` T, H_plus, SO2_aq, HSO3_minus, SO3_2minus, S_IV_total, O3_aq, H2O2_aq, Fe_III, Mn_II have no defining equation (they appear only as the RHS of coupling/conversion equations) and migrate as input `parameter`s; the upstream `@parameters` L and xi_SO2 likewise stay `parameter`s; the six `@constants` (R_gas, p_total, rho_w_inv, s_per_hr, ppb_factor, pct_factor) migrate as `parameter`s with their evaluated numeric defaults (the .esm schema has no per-model `constants` block). The six top-level outputs R_total, S_VI_production, w_L, R_ppb_hr, R_percent_hr, tau_SO2 are each defined by one top-level equation and are `type: state`.\n\nSubsystem variables are referenced by full dotted path from the model name in the top-level equations and in all test references (spec §4.6/§10.7), e.g. `SulfateFormation.o3_ox.R_O3`; bare names resolve to the top-level system. The flattened system is 29 algebraic equations in 29 states (5 + 4 + 4 + 3 + 7 subsystem states + 6 top-level states), fully explicit and triangular: coupling equations set subsystem inputs from top-level parameters, subsystem equations compute each pathway rate, then R_total and the Section 7.4 conversions follow.\n\nDouble-counting note: R_total = o3_ox.R_O3 + h2o2_ox.R_H2O2 + femn_ox.R_FeMn deliberately uses the Fe/Mn-synergism rate femn_ox.R_FeMn and EXCLUDES the standalone fe_ox.R_Fe and mn_ox.R_Mn. The femn_ox subsystem (Eq. 7.102) already carries an Fe-only term (k_Fe*[Fe]*[S(IV)]) and an Mn-only term (k_Mn*[Mn]*[S(IV)]) alongside the synergistic term, so adding fe_ox/mn_ox would double-count the metal-catalyzed contribution (upstream comment, sulfate_formation.jl). fe_ox and mn_ox are retained as subsystems (the upstream `systems=[...]` lists all five and wires their inputs) and their rates remain available as diagnostics — they are simply not summed.\n\nNo differential states: `system_kind` is left unset, consistent with the algebraic siblings o3.esm / h2o2.esm / water_vapor_thermo.esm. No `examples` block: `tools/render_example_plots.py` resolves algebraic models on the top-level model only and does not descend into `subsystems`, so combined-diagnostic plots cannot be rendered — matching the composed precedents water_vapor_thermo.esm / radiation_fundamentals.esm. Verification is via the inline-test gate (`tools/run_esm_inline_tests.py`), which flattens subsystems.\n\nDefaults authored: neither the upstream `@parameters` (L, xi_SO2) nor the input `@variables` carry upstream defaults — they are connected externally in the full CloudChemistry model. Physically-grounded standalone defaults are authored for a representative moderately-acidic cloud droplet (pH ~4, T = 298.15 K, L = 0.5 g/m^3, xi_SO2 = 1 ppb): SO2_aq = 1.0e-5, HSO3_minus = 1.0e-3 (bisulfite dominant at cloud pH), SO3_2minus = 1.0e-6 (trace), S_IV_total = 1.0e-3, O3_aq = 1.0e-6, H2O2_aq = 1.0e-4, Fe_III = Mn_II = 1.0e-3 mol/m^3. The re-typed coupled-input subsystem states carry the same defaults (the algebraic-solve seed; the coupling equation drives the actual value).\n\nTests authored from physics: the upstream `aqueous_chemistry_test.jl` carries only a structural test for `SulfateFormation` (the `SulfateFormation structure` testitem). The inline `tests` block is authored from the closed-form Eqs. 7.79/7.84/7.92/7.101/7.102 and 7.75-7.78: a full default-parameter run pinning every subsystem rate and every top-level output (checked at t = 0 and t = 1 for the algebraic time-invariance); three pathway-isolation tests that zero the other oxidants/catalysts to confirm the R_total sum picks up exactly the O3, H2O2 and Fe/Mn terms in turn; a shared-input wiring test (HSO3_minus drives both o3_ox and h2o2_ox); a rate-conversion test (doubling L scales w_L, R_ppb_hr, R_percent_hr and tau_SO2); and a subsystem rate-constant override sentinel. No test drives R_total to zero — tau_SO2 = .../(w_L*R_gas*T*R_total) is singular there; every test keeps at least one oxidation channel and L, xi_SO2, T nonzero.\n\nTolerance rationale (model-level rel = 1e-6): an observed-only triangular algebraic system (no ODE integration) of elementary operations (multiply, add, divide; no transcendentals). rel = 1e-6 comfortably covers float64 roundoff and any algebraic-solve residual across the wide magnitude range of the outputs (R_total ~ 1e-5, tau_SO2 ~ 5e3, R_percent_hr ~ 70), and matches the composed precedent water_vapor_thermo.esm. The pathway-isolation zero assertions add a per-assertion abs = 1e-12 because a relative bound is undefined at expected zero.\n\nUnit balance (verified): the rate-conversion equations balance dimensionally in SI. w_L = rho_w_inv*L = (m^3/g)*(g/m^3) = 1. R_ppb_hr = ppb_factor*s_per_hr*w_L*R_gas*T*R_total/p_total = (1)*(s)*(1)*(J/mol/K)*(K)*(mol/m^3/s)/(Pa) = (s)*(J/mol)*(mol/m^3)/(Pa); with J = Pa*m^3 this is (s)*(Pa*m^3/mol)*(mol/m^3)/(Pa) = (s)/(s)... = dimensionless. tau_SO2 = xi_SO2*p_total/(w_L*R_gas*T*R_total) = (1)*(Pa)/((1)*(J/mol/K)*(K)*(mol/m^3/s)) = (Pa)/((Pa*m^3/mol)*(mol/m^3/s)) = (Pa)/(Pa/s) = s. The runner performs no dimensional analysis; units are descriptive."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "R_gas": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.31446,
+                    "description": "Universal gas constant — used in the Section 7.4 rate-conversion equations (Eqs. 7.75-7.78). Upstream MTK `@constants` value 8.31446 J/mol/K."
+                },
+                "p_total": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Total (standard atmospheric) pressure used in the rate-conversion equations. Upstream MTK `@constants` value 101325.0 Pa = 1 atm."
+                },
+                "rho_w_inv": {
+                    "type": "parameter",
+                    "units": "m^3/g",
+                    "default": 1e-06,
+                    "description": "Inverse density of liquid water — converts liquid water content L (g/m^3) to the dimensionless liquid water volume ratio w_L. Upstream MTK `@constants` value 1.0e-6 m^3/g (= 1/(1e6 g/m^3))."
+                },
+                "s_per_hr": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 3600.0,
+                    "description": "Seconds-per-hour conversion factor for expressing the oxidation rate per hour (Eqs. 7.75-7.76). Upstream MTK `@constants` value 3600.0 s."
+                },
+                "ppb_factor": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1000000000.0,
+                    "description": "Parts-per-billion scaling factor for the ppb/hr rate conversion (Eq. 7.75). Dimensionless. Upstream MTK `@constants` value 1.0e9."
+                },
+                "pct_factor": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 100.0,
+                    "description": "Percent scaling factor for the %/hr rate conversion (Eq. 7.76). Dimensionless. Upstream MTK `@constants` value 100.0."
+                },
+                "L": {
+                    "type": "parameter",
+                    "units": "g/m^3",
+                    "default": 0.5,
+                    "description": "Cloud/fog liquid water content — mass of liquid water per unit volume of air. Default 0.5 g/m^3, a representative cloud value (clouds span ~0.1-1 g/m^3). Sets the liquid water volume ratio w_L = rho_w_inv*L. Upstream `@parameters` (no upstream default; authored here)."
+                },
+                "xi_SO2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1e-09,
+                    "description": "Gas-phase SO2 mixing ratio (dimensionless mole fraction). Default 1.0e-9 (1 ppb). Appears in the %/hr conversion (Eq. 7.76) and the SO2 lifetime (Eq. 7.78). Upstream `@parameters` (no upstream default; authored here)."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Air/cloud temperature — feeds the Section 7.4 rate-conversion equations (Eqs. 7.75-7.78). Default 298.15 K. A pure model input (an upstream `@variable` with no defining equation); migrated as a parameter."
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.1,
+                    "description": "Hydrogen-ion concentration [H+] of the cloud droplet, setting its pH. Default 0.1 mol/m^3 (1e-4 M, pH 4). Coupled into the h2o2_ox and fe_ox subsystems. A pure model input; migrated as a parameter."
+                },
+                "SO2_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-05,
+                    "description": "Aqueous un-ionized sulfur-dioxide concentration [SO2.H2O]. Default 1.0e-5 mol/m^3. Coupled into the o3_ox subsystem. A pure model input; migrated as a parameter."
+                },
+                "HSO3_minus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.001,
+                    "description": "Bisulfite-ion concentration [HSO3-] — the dominant dissolved-S(IV) species at cloud pH. Default 1.0e-3 mol/m^3. Coupled into BOTH the o3_ox and h2o2_ox subsystems. A pure model input; migrated as a parameter."
+                },
+                "SO3_2minus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Sulfite-ion concentration [SO3^2-] — a trace species, most reactive toward ozone. Default 1.0e-6 mol/m^3. Coupled into the o3_ox subsystem. A pure model input; migrated as a parameter."
+                },
+                "S_IV_total": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.001,
+                    "description": "Total dissolved S(IV) concentration ([SO2.H2O] + [HSO3-] + [SO3^2-]) — the substrate for the metal-catalyzed pathways. Default 1.0e-3 mol/m^3. Coupled into the fe_ox, mn_ox and femn_ox subsystems. A pure model input; migrated as a parameter."
+                },
+                "O3_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Dissolved (aqueous-phase) ozone concentration [O3(aq)] — the oxidant of the O3 pathway. Default 1.0e-6 mol/m^3. Coupled into the o3_ox subsystem. A pure model input; migrated as a parameter."
+                },
+                "H2O2_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Aqueous-phase hydrogen-peroxide concentration [H2O2(aq)] — the oxidant of the H2O2 pathway. Default 1.0e-4 mol/m^3. Coupled into the h2o2_ox subsystem. A pure model input; migrated as a parameter."
+                },
+                "Fe_III": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.001,
+                    "description": "Dissolved Fe(III) concentration — the catalyst of the Fe pathway. Default 1.0e-3 mol/m^3. Coupled into the fe_ox and femn_ox subsystems. A pure model input; migrated as a parameter."
+                },
+                "Mn_II": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.001,
+                    "description": "Dissolved Mn(II) concentration — the catalyst of the Mn pathway. Default 1.0e-3 mol/m^3. Coupled into the mn_ox and femn_ox subsystems. A pure model input; migrated as a parameter."
+                },
+                "R_total": {
+                    "type": "state",
+                    "units": "mol/m^3/s",
+                    "description": "Total aqueous S(IV)->S(VI) oxidation rate — the sum of the O3, H2O2 and Fe/Mn-synergism pathway rates: R_total = o3_ox.R_O3 + h2o2_ox.R_H2O2 + femn_ox.R_FeMn. The Fe/Mn synergism subsystem (femn_ox) already carries the Fe-only and Mn-only terms, so the standalone fe_ox.R_Fe and mn_ox.R_Mn rates are deliberately EXCLUDED from the sum to avoid double-counting (upstream comment at sulfate_formation.jl)."
+                },
+                "S_VI_production": {
+                    "type": "state",
+                    "units": "mol/m^3/s",
+                    "description": "Sulfate (S(VI)) production rate — equal to the total S(IV) oxidation rate R_total (every S(IV) oxidized becomes S(VI))."
+                },
+                "w_L": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Liquid water volume ratio (dimensionless) — volume of cloud liquid water per unit volume of air, w_L = rho_w_inv*L."
+                },
+                "R_ppb_hr": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Total oxidation rate expressed as an SO2 mixing-ratio loss rate in ppb per hour (Eq. 7.75): R_ppb_hr = 1e9 * 3600 * w_L * R_gas * T * R_total / p_total."
+                },
+                "R_percent_hr": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Total oxidation rate expressed as the percentage of the SO2 burden converted per hour (Eq. 7.76): R_percent_hr = 100 * 3600 * R_total * w_L * R_gas * T / (p_total * xi_SO2)."
+                },
+                "tau_SO2": {
+                    "type": "state",
+                    "units": "s",
+                    "description": "SO2 lifetime against aqueous-phase oxidation (Eq. 7.78) — the e-folding time for gas-phase SO2 removal by in-cloud S(IV) oxidation: tau_SO2 = xi_SO2 * p_total / (w_L * R_gas * T * R_total)."
+                }
+            },
+            "subsystems": {
+                "o3_ox": {
+                    "variables": {
+                        "k0": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 24.0,
+                            "description": "Rate constant for the SO2.H2O + O3 oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 2.4e4/1000.0 = 24.0 — the literature rate constant 2.4e4 M^-1 s^-1 (module constant K0_O3) converted to SI (1 M^-1 = 1e-3 m^3/mol). Mirrors o3.esm."
+                        },
+                        "k1": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 370.0,
+                            "description": "Rate constant for the HSO3- + O3 oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 3.7e5/1000.0 = 370.0 — the literature rate constant 3.7e5 M^-1 s^-1 (K1_O3) converted to SI. Mirrors o3.esm."
+                        },
+                        "k2": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 1500000.0,
+                            "description": "Rate constant for the SO3^2- + O3 oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 1.5e9/1000.0 = 1500000.0 — the literature rate constant 1.5e9 M^-1 s^-1 (K2_O3) converted to SI; by far the largest of the three, so the O3 channel accelerates sharply as rising droplet pH shifts S(IV) speciation toward sulfite. Mirrors o3.esm."
+                        },
+                        "SO2_aq": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 1e-05,
+                            "description": "Aqueous un-ionized sulfur-dioxide concentration [SO2.H2O] in the cloud droplet. In the composed model this subsystem input is driven by the coupling equation SulfateFormation.o3_ox.SO2_aq ~ SO2_aq; re-typed parameter -> state (a parameter cannot be an equation LHS). Default 1.0e-5 mol/m^3 seeds the algebraic solve."
+                        },
+                        "HSO3_minus": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Bisulfite-ion concentration [HSO3-] in the cloud droplet — the dominant dissolved-S(IV) species at cloud pH ~4-5. Driven by SulfateFormation.o3_ox.HSO3_minus ~ HSO3_minus; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "SO3_2minus": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 1e-06,
+                            "description": "Sulfite-ion concentration [SO3^2-] in the cloud droplet — a trace species at cloud pH but the most reactive toward ozone. Driven by SulfateFormation.o3_ox.SO3_2minus ~ SO3_2minus; re-typed parameter -> state. Default 1.0e-6 mol/m^3."
+                        },
+                        "O3_aq": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 1e-06,
+                            "description": "Dissolved (aqueous-phase) ozone concentration [O3(aq)] — the oxidant. Driven by SulfateFormation.o3_ox.O3_aq ~ O3_aq; re-typed parameter -> state. Default 1.0e-6 mol/m^3."
+                        },
+                        "R_O3": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "S(IV)->S(VI) oxidation rate by the O3 pathway (Eqs. 7.79-7.80): R_O3 = (k0*[SO2.H2O] + k1*[HSO3-] + k2*[SO3^2-])*[O3(aq)]. One of the principal in-cloud sulfate-formation routes, dominant at elevated droplet pH."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eqs. 7.79-7.80 — total aqueous S(IV)+O3 oxidation rate summed over the three dissolved-S(IV) species. Inlined from o3.esm (SulfateFormationO3).",
+                            "lhs": "R_O3",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k0",
+                                                    "SO2_aq"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k1",
+                                                    "HSO3_minus"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "k2",
+                                                    "SO3_2minus"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "O3_aq"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "h2o2_ox": {
+                    "variables": {
+                        "k": {
+                            "type": "parameter",
+                            "units": "m^6/mol^2/s",
+                            "default": 75.0,
+                            "description": "Rate constant for the S(IV)+H2O2 oxidation pathway (Eq. 7.84). Upstream MTK `@constants` value 7.5e7/1.0e6 = 75.0 — the literature rate constant 7.5e7 M^-2 s^-1 converted to SI (1 M^-2 = 1e-6 (mol/m^3)^-2). Mirrors h2o2.esm."
+                        },
+                        "K_eq": {
+                            "type": "parameter",
+                            "units": "m^3/mol",
+                            "default": 0.013,
+                            "description": "Equilibrium constant in the Eq. 7.84 rate-law denominator — the term 1 + K_eq*[H+] saturates the acid-catalysed rate at high acidity. Upstream MTK `@constants` value 13.0/1000.0 = 0.013 — the literature constant 13 M^-1 converted to SI. Mirrors h2o2.esm."
+                        },
+                        "H_plus": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.1,
+                            "description": "Hydrogen-ion concentration [H+] of the cloud droplet. Driven by SulfateFormation.h2o2_ox.H_plus ~ H_plus; re-typed parameter -> state. Default 0.1 mol/m^3 (1e-4 M, pH 4)."
+                        },
+                        "H2O2_aq": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.0001,
+                            "description": "Aqueous-phase hydrogen-peroxide concentration [H2O2(aq)] in the cloud droplet. Driven by SulfateFormation.h2o2_ox.H2O2_aq ~ H2O2_aq; re-typed parameter -> state. Default 1.0e-4 mol/m^3."
+                        },
+                        "HSO3_minus": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Bisulfite-ion concentration [HSO3-] — the limiting reactant for this pathway. Driven by SulfateFormation.h2o2_ox.HSO3_minus ~ HSO3_minus; re-typed parameter -> state. Default 1.0e-3 mol/m^3. Shares the top-level HSO3_minus input with the o3_ox subsystem."
+                        },
+                        "R_H2O2": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "S(IV)->S(VI) oxidation rate by the H2O2 pathway (Eq. 7.84): R_H2O2 = k*[H+]*[H2O2]*[HSO3-]/(1+K_eq*[H+]). The dominant aqueous sulfate-formation pathway at low pH, where the competing O3 pathway is slow."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 7.84 — aqueous S(IV)+H2O2 oxidation rate. Inlined from h2o2.esm (SulfateFormationH2O2).",
+                            "lhs": "R_H2O2",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k",
+                                            "H_plus",
+                                            "H2O2_aq",
+                                            "HSO3_minus"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "K_eq",
+                                                    "H_plus"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "fe_ox": {
+                    "variables": {
+                        "k_low_pH": {
+                            "type": "parameter",
+                            "units": "s^-1",
+                            "default": 6.0,
+                            "description": "Rate constant for the Fe(III)-catalyzed S(IV) oxidation in the low-pH regime (pH 0-3.6), Eq. 7.92. Upstream MTK `@constants` value 6.0 s^-1. Mirrors fe.esm."
+                        },
+                        "H_plus": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.1,
+                            "description": "Hydrogen-ion concentration [H+] of the cloud droplet. Driven by SulfateFormation.fe_ox.H_plus ~ H_plus; re-typed parameter -> state. Default 0.1 mol/m^3."
+                        },
+                        "Fe_III": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Dissolved Fe(III) concentration — the catalyst of this oxidation pathway. Driven by SulfateFormation.fe_ox.Fe_III ~ Fe_III; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "S_IV_total": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Total dissolved S(IV) concentration — the substrate oxidized to S(VI). Driven by SulfateFormation.fe_ox.S_IV_total ~ S_IV_total; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "R_Fe": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "S(IV)->S(VI) oxidation rate by Fe(III)-catalyzed dissolved O2 (Eq. 7.92, low-pH regime): R_Fe = k_low_pH*[Fe(III)]*[S(IV)]/[H+]. NOTE: this standalone Fe-only rate is NOT summed into the model's R_total — the femn_ox subsystem already carries an Fe-only term, and using femn_ox avoids double-counting. fe_ox is retained for diagnostic comparison. Migrated equations-form (type: state + equation), not the observed-form used by the standalone fe.esm, because a composed model carries its relations as equations."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 7.92 — Fe(III)-catalyzed S(IV) oxidation rate (low-pH regime). Inlined from fe.esm (SulfateFormationFe), with the output re-expressed in equations-form.",
+                            "lhs": "R_Fe",
+                            "rhs": {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k_low_pH",
+                                            "Fe_III",
+                                            "S_IV_total"
+                                        ]
+                                    },
+                                    "H_plus"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "mn_ox": {
+                    "variables": {
+                        "k0": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 1.0,
+                            "description": "Rate constant for the low-S(IV)-regime Mn(II)-catalyzed S(IV) oxidation (Eq. 7.101). Upstream MTK `@constants` value 1000.0/1000.0 = 1.0 — the literature value 1000 M^-1 s^-1 converted to SI. Mirrors mn.esm."
+                        },
+                        "Mn_II": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Dissolved Mn(II) concentration — the transition-metal catalyst. Driven by SulfateFormation.mn_ox.Mn_II ~ Mn_II; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "S_IV_total": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Total dissolved S(IV) concentration. Driven by SulfateFormation.mn_ox.S_IV_total ~ S_IV_total; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "R_Mn": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "S(IV)->S(VI) oxidation rate by the Mn(II)-catalyzed O2 pathway (Eq. 7.101): R_Mn = k0*[Mn(II)]*[S(IV)]. NOTE: this standalone Mn-only rate is NOT summed into R_total — femn_ox already carries an Mn-only term. mn_ox is retained for diagnostic comparison. Migrated equations-form (type: state + equation), not the observed-form used by the standalone mn.esm."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 7.101 — Mn(II)-catalyzed S(IV) oxidation rate (low-S(IV) regime). Inlined from mn.esm (SulfateFormationMn), with the output re-expressed in equations-form.",
+                            "lhs": "R_Mn",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "k0",
+                                    "Mn_II",
+                                    "S_IV_total"
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "femn_ox": {
+                    "variables": {
+                        "k_Mn": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 0.75,
+                            "description": "Rate constant for the Mn-only term of the Fe/Mn synergism rate law (Eq. 7.102). Upstream MTK `@constants` value 750.0/1000.0 = 0.75 — the literature value 750 M^-1 s^-1 converted to SI."
+                        },
+                        "k_Fe": {
+                            "type": "parameter",
+                            "units": "m^3/mol/s",
+                            "default": 2.6,
+                            "description": "Rate constant for the Fe-only term of the Fe/Mn synergism rate law (Eq. 7.102). Upstream MTK `@constants` value 2600.0/1000.0 = 2.6 — the literature value 2600 M^-1 s^-1 converted to SI."
+                        },
+                        "k_FeMn": {
+                            "type": "parameter",
+                            "units": "m^6/mol^2/s",
+                            "default": 10000.0,
+                            "description": "Rate constant for the synergistic Fe.Mn term of the Fe/Mn synergism rate law (Eq. 7.102). Upstream MTK `@constants` value 1.0e10/1.0e6 = 10000.0 — the literature value 1.0e10 M^-2 s^-1 converted to SI (1 M^-2 = 1e-6 (mol/m^3)^-2). The large coefficient represents the greatly enhanced oxidation when both Fe(III) and Mn(II) are present."
+                        },
+                        "Mn_II": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Dissolved Mn(II) concentration. Driven by SulfateFormation.femn_ox.Mn_II ~ Mn_II; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "Fe_III": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Dissolved Fe(III) concentration. Driven by SulfateFormation.femn_ox.Fe_III ~ Fe_III; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "S_IV_total": {
+                            "type": "state",
+                            "units": "mol/m^3",
+                            "default": 0.001,
+                            "description": "Total dissolved S(IV) concentration. Driven by SulfateFormation.femn_ox.S_IV_total ~ S_IV_total; re-typed parameter -> state. Default 1.0e-3 mol/m^3."
+                        },
+                        "R_Mn_term": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "Mn-only contribution to the Fe/Mn synergism rate (Eq. 7.102): k_Mn*[Mn(II)]*[S(IV)]."
+                        },
+                        "R_Fe_term": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "Fe-only contribution to the Fe/Mn synergism rate (Eq. 7.102): k_Fe*[Fe(III)]*[S(IV)]."
+                        },
+                        "R_synergy_term": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "Synergistic contribution to the Fe/Mn rate (Eq. 7.102): k_FeMn*[Mn(II)]*[Fe(III)]*[S(IV)]. The greatly enhanced channel that operates only when both transition metals are present; typically the largest of the three terms."
+                        },
+                        "R_FeMn": {
+                            "type": "state",
+                            "units": "mol/m^3/s",
+                            "description": "Total S(IV)->S(VI) oxidation rate with Fe/Mn synergism (Eq. 7.102): the sum of the Mn-only, Fe-only and synergistic terms. This is the Fe/Mn term used in the model's R_total (replacing the standalone fe_ox/mn_ox rates to avoid double-counting)."
+                        }
+                    },
+                    "equations": [
+                        {
+                            "_comment": "Eq. 7.102 — Mn-only term of the Fe/Mn synergism rate law.",
+                            "lhs": "R_Mn_term",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "k_Mn",
+                                    "Mn_II",
+                                    "S_IV_total"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 7.102 — Fe-only term of the Fe/Mn synergism rate law.",
+                            "lhs": "R_Fe_term",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "k_Fe",
+                                    "Fe_III",
+                                    "S_IV_total"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 7.102 — synergistic Fe.Mn term of the Fe/Mn synergism rate law.",
+                            "lhs": "R_synergy_term",
+                            "rhs": {
+                                "op": "*",
+                                "args": [
+                                    "k_FeMn",
+                                    "Mn_II",
+                                    "Fe_III",
+                                    "S_IV_total"
+                                ]
+                            }
+                        },
+                        {
+                            "_comment": "Eq. 7.102 — total Fe/Mn-synergism oxidation rate (sum of the three terms).",
+                            "lhs": "R_FeMn",
+                            "rhs": {
+                                "op": "+",
+                                "args": [
+                                    "R_Mn_term",
+                                    "R_Fe_term",
+                                    "R_synergy_term"
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Coupling equation — feed the top-level input SO2_aq into the o3_ox subsystem.",
+                    "lhs": "SulfateFormation.o3_ox.SO2_aq",
+                    "rhs": "SO2_aq"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input HSO3_minus into the o3_ox subsystem.",
+                    "lhs": "SulfateFormation.o3_ox.HSO3_minus",
+                    "rhs": "HSO3_minus"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input SO3_2minus into the o3_ox subsystem.",
+                    "lhs": "SulfateFormation.o3_ox.SO3_2minus",
+                    "rhs": "SO3_2minus"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input O3_aq into the o3_ox subsystem.",
+                    "lhs": "SulfateFormation.o3_ox.O3_aq",
+                    "rhs": "O3_aq"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input H_plus into the h2o2_ox subsystem.",
+                    "lhs": "SulfateFormation.h2o2_ox.H_plus",
+                    "rhs": "H_plus"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input H2O2_aq into the h2o2_ox subsystem.",
+                    "lhs": "SulfateFormation.h2o2_ox.H2O2_aq",
+                    "rhs": "H2O2_aq"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input HSO3_minus into the h2o2_ox subsystem.",
+                    "lhs": "SulfateFormation.h2o2_ox.HSO3_minus",
+                    "rhs": "HSO3_minus"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input H_plus into the fe_ox subsystem.",
+                    "lhs": "SulfateFormation.fe_ox.H_plus",
+                    "rhs": "H_plus"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input Fe_III into the fe_ox subsystem.",
+                    "lhs": "SulfateFormation.fe_ox.Fe_III",
+                    "rhs": "Fe_III"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input S_IV_total into the fe_ox subsystem.",
+                    "lhs": "SulfateFormation.fe_ox.S_IV_total",
+                    "rhs": "S_IV_total"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input Mn_II into the mn_ox subsystem.",
+                    "lhs": "SulfateFormation.mn_ox.Mn_II",
+                    "rhs": "Mn_II"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input S_IV_total into the mn_ox subsystem.",
+                    "lhs": "SulfateFormation.mn_ox.S_IV_total",
+                    "rhs": "S_IV_total"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input Mn_II into the femn_ox subsystem.",
+                    "lhs": "SulfateFormation.femn_ox.Mn_II",
+                    "rhs": "Mn_II"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input Fe_III into the femn_ox subsystem.",
+                    "lhs": "SulfateFormation.femn_ox.Fe_III",
+                    "rhs": "Fe_III"
+                },
+                {
+                    "_comment": "Coupling equation — feed the top-level input S_IV_total into the femn_ox subsystem.",
+                    "lhs": "SulfateFormation.femn_ox.S_IV_total",
+                    "rhs": "S_IV_total"
+                },
+                {
+                    "_comment": "Total S(IV) oxidation rate — sum of the O3, H2O2 and Fe/Mn-synergism pathway rates. The fe_ox and mn_ox standalone rates are excluded: femn_ox already includes Fe-only and Mn-only terms, so using it avoids double-counting (upstream comment).",
+                    "lhs": "R_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "SulfateFormation.o3_ox.R_O3",
+                            "SulfateFormation.h2o2_ox.R_H2O2",
+                            "SulfateFormation.femn_ox.R_FeMn"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Sulfate production equals the S(IV) oxidation rate.",
+                    "lhs": "S_VI_production",
+                    "rhs": "R_total"
+                },
+                {
+                    "_comment": "Liquid water volume ratio (dimensionless): w_L = rho_w_inv * L.",
+                    "lhs": "w_L",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "rho_w_inv",
+                            "L"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 7.75 — rate conversion to ppb/hr: R_ppb_hr = ppb_factor * s_per_hr * w_L * R_gas * T * R_total / p_total.",
+                    "lhs": "R_ppb_hr",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "ppb_factor",
+                                    "s_per_hr",
+                                    "w_L",
+                                    "R_gas",
+                                    "T",
+                                    "R_total"
+                                ]
+                            },
+                            "p_total"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 7.76 — rate conversion to %/hr: R_percent_hr = pct_factor * s_per_hr * R_total * w_L * R_gas * T / (p_total * xi_SO2).",
+                    "lhs": "R_percent_hr",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "pct_factor",
+                                    "s_per_hr",
+                                    "R_total",
+                                    "w_L",
+                                    "R_gas",
+                                    "T"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "p_total",
+                                    "xi_SO2"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 7.78 — SO2 lifetime: tau_SO2 = xi_SO2 * p_total / (w_L * R_gas * T * R_total).",
+                    "lhs": "tau_SO2",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "xi_SO2",
+                                    "p_total"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "w_L",
+                                    "R_gas",
+                                    "T",
+                                    "R_total"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Full coupled run at the representative cloud-droplet default parameterization (T = 298.15 K, pH 4, L = 0.5 g/m^3, xi_SO2 = 1 ppb). Verifies the entire composition: each of the five pathway subsystems produces its rate, R_total sums the O3, H2O2 and Fe/Mn-synergism rates, and the Section 7.4 conversions (w_L, R_ppb_hr, R_percent_hr, tau_SO2) follow. fe_ox.R_Fe and mn_ox.R_Mn are evaluated but excluded from R_total. The system is algebraic, so R_total and tau_SO2 are also checked at t = 1 (time-invariance).",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 1.8702399999999997e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.R_H2O2",
+                            "time": 0.0,
+                            "expected": 7.490262658543893e-07
+                        },
+                        {
+                            "variable": "SulfateFormation.fe_ox.R_Fe",
+                            "time": 0.0,
+                            "expected": 6e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.mn_ox.R_Mn",
+                            "time": 0.0,
+                            "expected": 1e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-07
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6000000000000005e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_FeMn",
+                            "time": 0.0,
+                            "expected": 1.3350000000000001e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.596926626585439e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.S_VI_production",
+                            "time": 0.0,
+                            "expected": 1.596926626585439e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.w_L",
+                            "time": 0.0,
+                            "expected": 5e-07
+                        },
+                        {
+                            "variable": "SulfateFormation.R_ppb_hr",
+                            "time": 0.0,
+                            "expected": 0.7032499612438424
+                        },
+                        {
+                            "variable": "SulfateFormation.R_percent_hr",
+                            "time": 0.0,
+                            "expected": 70.32499612438423
+                        },
+                        {
+                            "variable": "SulfateFormation.tau_SO2",
+                            "time": 0.0,
+                            "expected": 5119.090221679726
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 1.0,
+                            "expected": 1.596926626585439e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.tau_SO2",
+                            "time": 1.0,
+                            "expected": 5119.090221679726
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_pathway_isolated",
+                    "description": "Isolates the O3 pathway in the R_total sum by zeroing the H2O2 oxidant (H2O2_aq = 0) and both metal catalysts (Mn_II = Fe_III = 0). h2o2_ox.R_H2O2 and femn_ox.R_FeMn both vanish exactly, so R_total = o3_ox.R_O3 = 1.87024e-6 mol/m^3/s. Confirms the R_total sum wiring picks up exactly the O3 term when the others are off.",
+                    "parameter_overrides": {
+                        "SulfateFormation.H2O2_aq": 0.0,
+                        "SulfateFormation.Mn_II": 0.0,
+                        "SulfateFormation.Fe_III": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_FeMn",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 1.8702399999999997e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.8702399999999997e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.S_VI_production",
+                            "time": 0.0,
+                            "expected": 1.8702399999999997e-06
+                        }
+                    ]
+                },
+                {
+                    "id": "h2o2_pathway_isolated",
+                    "description": "Isolates the H2O2 pathway by zeroing the dissolved ozone (O3_aq = 0) and both metal catalysts (Mn_II = Fe_III = 0). o3_ox.R_O3 and femn_ox.R_FeMn vanish exactly, so R_total = h2o2_ox.R_H2O2 = 7.490262658543893e-7 mol/m^3/s.",
+                    "parameter_overrides": {
+                        "SulfateFormation.O3_aq": 0.0,
+                        "SulfateFormation.Mn_II": 0.0,
+                        "SulfateFormation.Fe_III": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_FeMn",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.R_H2O2",
+                            "time": 0.0,
+                            "expected": 7.490262658543893e-07
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 7.490262658543893e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "femn_synergism_isolated",
+                    "description": "Isolates the Fe/Mn synergism pathway by zeroing both oxidants (O3_aq = H2O2_aq = 0), so R_total = femn_ox.R_FeMn. Exposes the three Eq. 7.102 terms at the default metal/S(IV) loading: the synergistic Fe.Mn term (1.0e-5) dominates the Fe-only term (2.6e-6) and the Mn-only term (7.5e-7) — the hallmark of the synergism. R_FeMn = R_Mn_term + R_Fe_term + R_synergy_term = 1.335e-5 mol/m^3/s.",
+                    "parameter_overrides": {
+                        "SulfateFormation.O3_aq": 0.0,
+                        "SulfateFormation.H2O2_aq": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.R_H2O2",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_Mn_term",
+                            "time": 0.0,
+                            "expected": 7.5e-07
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_Fe_term",
+                            "time": 0.0,
+                            "expected": 2.6000000000000005e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_synergy_term",
+                            "time": 0.0,
+                            "expected": 1e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.femn_ox.R_FeMn",
+                            "time": 0.0,
+                            "expected": 1.3350000000000001e-05
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.3350000000000001e-05
+                        }
+                    ]
+                },
+                {
+                    "id": "bisulfite_couples_two_subsystems",
+                    "description": "Wiring test for a shared input: the top-level HSO3_minus parameter is coupled into BOTH the o3_ox and h2o2_ox subsystems. Overriding HSO3_minus from 1.0e-3 to 2.0e-3 mol/m^3 must propagate to o3_ox.HSO3_minus and h2o2_ox.HSO3_minus alike and change both pathway rates (R_O3 via the k1 term, R_H2O2 linearly), and hence R_total. Confirms one model input drives two subsystems through the coupling equations.",
+                    "parameter_overrides": {
+                        "SulfateFormation.HSO3_minus": 0.002
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.o3_ox.HSO3_minus",
+                            "time": 0.0,
+                            "expected": 0.002
+                        },
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.HSO3_minus",
+                            "time": 0.0,
+                            "expected": 0.002
+                        },
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 2.24024e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.h2o2_ox.R_H2O2",
+                            "time": 0.0,
+                            "expected": 1.4980525317087785e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.708829253170878e-05
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_conversion_scales_with_lwc",
+                    "description": "Section 7.4 rate conversions vs liquid water content. Doubling L from 0.5 to 1.0 g/m^3 doubles the liquid water volume ratio w_L (rho_w_inv*L) and therefore doubles R_ppb_hr and R_percent_hr (both linear in w_L) and halves the SO2 lifetime tau_SO2 (w_L in its denominator). The aqueous-phase rate R_total is unchanged — L enters only the Section 7.4 conversions, not the kinetics.",
+                    "parameter_overrides": {
+                        "SulfateFormation.L": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.w_L",
+                            "time": 0.0,
+                            "expected": 1e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.R_ppb_hr",
+                            "time": 0.0,
+                            "expected": 1.4064999224876849
+                        },
+                        {
+                            "variable": "SulfateFormation.R_percent_hr",
+                            "time": 0.0,
+                            "expected": 140.64999224876846
+                        },
+                        {
+                            "variable": "SulfateFormation.tau_SO2",
+                            "time": 0.0,
+                            "expected": 2559.545110839863
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.596926626585439e-05
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_subsystem_rate_constant_override",
+                    "description": "Sentinel that a subsystem rate constant is a live parameter reachable by its fully-qualified path. Overriding SulfateFormation.o3_ox.k2 (the SO3^2- + O3 channel constant) from 1.5e6 to 3.0e6 m^3/mol/s doubles the k2 term of R_O3: o3_ox.R_O3 rises from 1.87024e-6 to 3.37024e-6 mol/m^3/s, and R_total tracks the change.",
+                    "parameter_overrides": {
+                        "SulfateFormation.o3_ox.k2": 3000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "SulfateFormation.o3_ox.R_O3",
+                            "time": 0.0,
+                            "expected": 3.3702399999999998e-06
+                        },
+                        {
+                            "variable": "SulfateFormation.R_total",
+                            "time": 0.0,
+                            "expected": 1.7469266265854388e-05
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
