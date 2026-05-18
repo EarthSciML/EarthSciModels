@@ -1,0 +1,325 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormationMn",
+        "description": "Mn(II)-catalyzed aqueous-phase S(IV) oxidation rate (sulfate formation) — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Section 7.5.4, Eq. 7.101. In cloud and fog droplets, dissolved S(IV) (SO2·H2O, HSO3⁻, SO3²⁻) is oxidized to S(VI) (sulfate) by dissolved O2, a reaction strongly accelerated by transition-metal catalysts. This component implements the manganese(II)-catalyzed pathway in the low-S(IV) (< 1 µM) regime, where the rate law R_Mn = k0·[Mn(II)]·[S(IV)] is first-order in both the Mn(II) catalyst and the total dissolved S(IV). (In the high-S(IV) regime, > 100 µM, the rate instead becomes zero-order in S(IV) and second-order in Mn — a separate regime not implemented here.) The Mn(II) pathway, together with the O3, H2O2, and Fe(III) pathways and the Fe/Mn synergistic term, controls how fast SO2 is converted to sulfate aerosol within clouds — a dominant route for atmospheric sulfate production. Migrated from Aerosol.jl SulfateFormationMn.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch7",
+            "sulfate-formation",
+            "aqueous-chemistry"
+        ]
+    },
+    "models": {
+        "SulfateFormationMn": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7. Mn(II)-catalyzed S(IV) oxidation: Section 7.5.4, Eq. 7.101.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:237\n\nUpstream `SulfateFormationMn` is an MTK `@component` (no parameterization; default MTK instance name `:SulfateMn`). It declares one `@constant` — `k0` (rate constant for the low-S(IV) regime) — and three scalar `@variables`: `Mn_II` (Mn(II) catalyst concentration, mol/m^3), `S_IV_total` (total dissolved S(IV) concentration, mol/m^3), and `R_Mn` (the Mn(II)-catalyzed S(IV) oxidation rate, mol/m^3/s). The single equation is `R_Mn ~ k0 * Mn_II * S_IV_total` — Eq. 7.101 of Seinfeld & Pandis (2006) Ch. 7, Section 7.5.4: the rate of aqueous S(IV) → S(VI) oxidation by O2 catalyzed by Mn(II) in the low-S(IV) (< 1 µM) regime, first-order in both the Mn(II) catalyst and the dissolved S(IV).\n\nConstant handling: upstream `k0` is an MTK `@constant` with the default expression `1000.0 / 1000.0`. The `.esm` schema has no constant variable type, so `k0` migrates as a `type: parameter` carrying the evaluated IEEE-754 default `1.0` (the convention the sibling migrations apply to MTK `@constants` — e.g. the reaction.esm gas constant and diagnostic_pressure.esm `g`). The `/ 1000.0` in the upstream default converts the literature rate constant 1000 M^-1 s^-1 (= 1000 L mol^-1 s^-1) to SI units m^3 mol^-1 s^-1, since 1 M^-1 = 1 L/mol = 1e-3 m^3/mol; the evaluated default is therefore 1.0 m^3/mol/s.\n\nInput → parameter conversion: `Mn_II` and `S_IV_total` are upstream `@variables`, but neither appears on an equation LHS in the standalone component — they are pure inputs, wired in by the parent `SulfateFormation` system via the connection equations `mn_ox.Mn_II ~ Mn_II` and `mn_ox.S_IV_total ~ S_IV_total`. A connected input `@variable` has no defining equation in the standalone component and migrates as `type: parameter` with a representative `default`, not `type: state` (which would leave the system underdetermined: N states > N equations). `R_Mn` is the only `@variable` with a defining equation.\n\nObserved classification: SulfateFormationMn has no `D()` time-derivative anywhere — it is a purely-algebraic component. `R_Mn` is an algebraic output (`R_Mn ~ k0·Mn_II·S_IV_total`). After MTK `mtkcompile` / `structural_simplify` the compiled system has zero ODE states and `R_Mn` becomes an observed quantity. It is therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the sibling pure-algebraic Aerosol.jl migrations gas_diffusion.esm (src/timescales.jl:14), zsr.esm and critical_ssa.esm.\n\nRepresentative input defaults: `Mn_II` default 1.0e-3 mol/m^3 (= 1 µM Mn(II)) is the Mn(II) concentration used in the upstream `aqueous_chemistry_test.jl` \"Fe/Mn synergism\" testitem. `S_IV_total` default 1.0e-4 mol/m^3 (= 0.1 µM total S(IV)) is chosen to sit clearly inside the < 1 µM low-S(IV) regime that Eq. 7.101 is valid for (the upstream synergism test uses 1 µM, the regime boundary). At these defaults R_Mn = 1.0 · 1.0e-3 · 1.0e-4 = 1.0e-7 mol/m^3/s.\n\nTests authored from physics: upstream `aqueous_chemistry_test.jl` carries only a structural test for SulfateFormationMn (`@test sys isa System`, `@test length(equations(sys)) >= 1`) — there is no numeric test of the rate equation, so nothing can be ported as an inline simulation test. The inline `tests` block is authored from the closed-form Eq. 7.101: pinning the exact rate at the default parameterization, bracketing the first-order Mn(II) dependence on both sides of the default (Mn doubled → rate ×2; Mn halved → rate ÷2), exercising the first-order S(IV) dependence (S(IV) doubled → rate ×2), confirming the bilinear product structure (both inputs ×3 → rate ×9, not ×6 as a sum would give), and the two zero limits where the rate vanishes (no catalyst → R_Mn = 0; no dissolved S(IV) → R_Mn = 0).\n\nTolerance rationale (model-level rel=1e-8): the model is a single closed-form algebraic expression — one n-ary product of three factors, two float64 multiplications — so evaluation roundoff is at the 1-ULP (~1e-16 relative) level; rel=1e-8 leaves ample headroom. The two zero-rate tests add a tight per-assertion abs=1e-20 so a stuck-nonzero regression in the R_Mn product cannot pass on the relative branch.\n\nNot migrated: `sulfate_formation.jl` defines six independent `@component`s — `SulfateFormationO3`, `SulfateFormationH2O2`, `SulfateFormationFe`, `SulfateFormationMn`, `SulfateFormationFeMn`, and the combined `SulfateFormation` — plus three plain rate-conversion helper functions (`rate_to_ppb_hr`, `rate_to_percent_hr`, `so2_lifetime`). Only `SulfateFormationMn` (src/sulfate_formation.jl:237) is in scope for this component migration; the others are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/sulfate/`."
+            },
+            "variables": {
+                "k0": {
+                    "type": "parameter",
+                    "units": "m^3/mol/s",
+                    "default": 1.0,
+                    "description": "Rate constant for the low-S(IV)-regime Mn(II)-catalyzed S(IV) oxidation (Eq. 7.101). Upstream MTK `@constant` with default expression `1000.0 / 1000.0`; the literature value is 1000 M^-1 s^-1 and the `/ 1000.0` converts it to SI m^3 mol^-1 s^-1 (1 M^-1 = 1 L/mol = 1e-3 m^3/mol), giving the evaluated default 1.0. Sets the proportionality between the oxidation rate and the product of the Mn(II) and S(IV) concentrations."
+                },
+                "Mn_II": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-3,
+                    "description": "Mn(II) (manganese(II)) concentration in the aqueous (cloud-droplet) phase — the dissolved transition-metal catalyst for the O2 oxidation of S(IV). A connected input in the upstream model (wired in by the parent SulfateFormation system); migrated here as a parameter. The catalyzed oxidation rate (Eq. 7.101) is first-order in Mn(II). Default 1.0e-3 mol/m^3 = 1 µM, the Mn(II) level used in the upstream Fe/Mn synergism test."
+                },
+                "S_IV_total": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-4,
+                    "description": "Total dissolved S(IV) concentration — the sum [SO2·H2O] + [HSO3⁻] + [SO3²⁻] of the three aqueous S(IV) species. A connected input in the upstream model; migrated here as a parameter. Eq. 7.101 (this component's low-S(IV) rate law) is first-order in S(IV) and valid for S(IV) below ~1 µM (1e-3 mol/m^3); the default 1.0e-4 mol/m^3 = 0.1 µM sits clearly inside that regime."
+                },
+                "R_Mn": {
+                    "type": "observed",
+                    "units": "mol/m^3/s",
+                    "description": "S(IV) oxidation rate by the Mn(II)-catalyzed O2 pathway (Eq. 7.101): R_Mn = k0·Mn_II·S_IV_total. The rate at which dissolved S(IV) is converted to S(VI) (sulfate) in cloud droplets via the manganese-catalyzed pathway. Bilinear — first-order in both the Mn(II) catalyst and the dissolved S(IV) — so it scales with the product of the two concentrations. One of the transition-metal-catalyzed contributions (alongside the Fe(III) pathway and the Fe/Mn synergistic term) to in-cloud sulfate production.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "k0",
+                            "Mn_II",
+                            "S_IV_total"
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-08
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eq. 7.101 at the upstream-derived default parameterization (k0 = 1.0 m³ mol⁻¹ s⁻¹, Mn_II = 1e-3 mol/m³ = 1 µM Mn(II), S_IV_total = 1e-4 mol/m³ = 0.1 µM S(IV)). The Mn(II)-catalyzed S(IV) oxidation rate is R_Mn = k0·Mn_II·S_IV_total = 1.0·1e-3·1e-4 = 1.0e-7 mol/m³/s. The output is algebraic and time-invariant, so the same value is asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 1.0e-7
+                        },
+                        {
+                            "variable": "R_Mn",
+                            "time": 1.0,
+                            "expected": 1.0e-7
+                        }
+                    ]
+                },
+                {
+                    "id": "first_order_in_manganese",
+                    "description": "Eq. 7.101 is first-order in the Mn(II) catalyst concentration. Doubling Mn_II from the 1e-3 mol/m³ default to 2e-3 mol/m³, at the default S_IV_total, doubles the oxidation rate from 1.0e-7 to R_Mn = 1.0·2e-3·1e-4 = 2.0e-7 mol/m³/s — twice the dissolved manganese drives twice the catalyzed S(IV) → S(VI) conversion.",
+                    "parameter_overrides": {
+                        "Mn_II": 2.0e-3
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 2.0e-7
+                        }
+                    ]
+                },
+                {
+                    "id": "manganese_halved",
+                    "description": "The first-order Mn(II) dependence of Eq. 7.101 acts downward as well: halving Mn_II from the 1e-3 mol/m³ default to 5e-4 mol/m³, at the default S_IV_total, halves the oxidation rate from 1.0e-7 to R_Mn = 1.0·5e-4·1e-4 = 5.0e-8 mol/m³/s. Together with first_order_in_manganese this brackets the linear Mn(II) scaling on both sides of the default.",
+                    "parameter_overrides": {
+                        "Mn_II": 5.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 5.0e-8
+                        }
+                    ]
+                },
+                {
+                    "id": "first_order_in_siv",
+                    "description": "Eq. 7.101 is first-order in the total dissolved S(IV) concentration. Doubling S_IV_total from the 1e-4 mol/m³ default to 2e-4 mol/m³ (still well inside the < 1 µM low-S(IV) regime the rate law is valid for), at the default Mn_II, doubles the oxidation rate from 1.0e-7 to R_Mn = 1.0·1e-3·2e-4 = 2.0e-7 mol/m³/s.",
+                    "parameter_overrides": {
+                        "S_IV_total": 2.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 2.0e-7
+                        }
+                    ]
+                },
+                {
+                    "id": "bilinear_product",
+                    "description": "Eq. 7.101 is bilinear — the rate scales with the product Mn_II·S_IV_total, not their sum. Raising both inputs to 3× the default (Mn_II = 3e-3 mol/m³, S_IV_total = 3e-4 mol/m³) raises the rate to 3·3 = 9× the default: R_Mn = 1.0·3e-3·3e-4 = 9.0e-7 mol/m³/s. A sum-structured rate would have given only 6× — the ×9 confirms the product structure.",
+                    "parameter_overrides": {
+                        "Mn_II": 3.0e-3,
+                        "S_IV_total": 3.0e-4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 9.0e-7
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_manganese_zero_rate",
+                    "description": "Limiting case: with no dissolved manganese catalyst (Mn_II = 0) the Mn(II)-catalyzed pathway is shut off and R_Mn = 0 exactly — the rate is the product k0·Mn_II·S_IV_total and the vanishing Mn_II factor zeroes it regardless of the S(IV) concentration. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the R_Mn product.",
+                    "parameter_overrides": {
+                        "Mn_II": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-20
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_siv_zero_rate",
+                    "description": "Limiting case: with no dissolved S(IV) (S_IV_total = 0) there is nothing to oxidize and R_Mn = 0 exactly — the vanishing S_IV_total factor zeroes the k0·Mn_II·S_IV_total product regardless of how much Mn(II) catalyst is present. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression.",
+                    "parameter_overrides": {
+                        "S_IV_total": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_Mn",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-20
+                            }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rate_vs_manganese",
+                    "description": "The Mn(II)-catalyzed S(IV) oxidation rate rises linearly with the dissolved manganese concentration (Eq. 7.101). Sweeping Mn_II over the 1e-5–1e-2 mol/m³ range — from clean to heavily metal-polluted cloud water — at the default S_IV_total traces the straight line R_Mn = k0·S_IV_total·Mn_II through the origin.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mn_II",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "R_Mn_vs_Mn_II",
+                            "type": "line",
+                            "description": "Mn(II)-catalyzed S(IV) oxidation rate R_Mn as a function of the Mn(II) catalyst concentration (at the default S(IV)).",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "Mn(II) concentration (mol/m³)"
+                            },
+                            "y": {
+                                "variable": "R_Mn",
+                                "label": "S(IV) oxidation rate R_Mn (mol/m³/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_vs_siv",
+                    "description": "The Mn(II)-catalyzed oxidation rate rises linearly with the total dissolved S(IV) concentration (Eq. 7.101, low-S(IV) regime). Sweeping S_IV_total over the 1e-6–1e-3 mol/m³ range — staying within the < 1 µM regime where this first-order rate law is valid — at the default Mn_II traces the straight line R_Mn = k0·Mn_II·S_IV_total.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "S_IV_total",
+                                "range": {
+                                    "start": 1.0e-6,
+                                    "stop": 1.0e-3,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "R_Mn_vs_S_IV_total",
+                            "type": "line",
+                            "description": "Mn(II)-catalyzed S(IV) oxidation rate R_Mn as a function of the total dissolved S(IV) concentration (at the default Mn(II)).",
+                            "x": {
+                                "variable": "S_IV_total",
+                                "label": "Total S(IV) concentration (mol/m³)"
+                            },
+                            "y": {
+                                "variable": "R_Mn",
+                                "label": "S(IV) oxidation rate R_Mn (mol/m³/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_manganese_siv_heatmap",
+                    "description": "Joint dependence of the Mn(II)-catalyzed S(IV) oxidation rate on the manganese catalyst and the dissolved S(IV) (Eq. 7.101). The heatmap of R_Mn(Mn_II, S_IV_total) shows the bilinear k0·Mn_II·S_IV_total surface — the rate is largest where both the catalyst and the substrate are abundant and falls off toward either axis.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "Mn_II",
+                                "range": {
+                                    "start": 1.0e-5,
+                                    "stop": 1.0e-2,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "S_IV_total",
+                                "range": {
+                                    "start": 1.0e-6,
+                                    "stop": 1.0e-3,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "R_Mn_Mn_II_S_IV_heatmap",
+                            "type": "heatmap",
+                            "description": "R_Mn(Mn_II, S_IV_total) heatmap over the manganese / dissolved-S(IV) plane.",
+                            "x": {
+                                "variable": "Mn_II",
+                                "label": "Mn(II) concentration (mol/m³)"
+                            },
+                            "y": {
+                                "variable": "S_IV_total",
+                                "label": "Total S(IV) concentration (mol/m³)"
+                            },
+                            "value": {
+                                "variable": "R_Mn",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
