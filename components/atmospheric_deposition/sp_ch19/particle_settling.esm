@@ -1,0 +1,266 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ParticleSettling",
+        "description": "Gravitational settling velocity and Brownian diffusivity of an aerosol particle, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition). Two algebraic outputs are computed from the particle and air properties. The settling (terminal) velocity v_s = rho_p*D_p^2*g*C_c/(18*mu) (Eq. 19.18) is the steady gravitational drift speed of a particle in the Stokes (low-Reynolds-number) regime, where aerodynamic drag balances gravity; the Cunningham slip correction factor C_c (>= 1) accounts for the non-continuum reduction in drag when the particle diameter approaches the mean free path of air. The Brownian diffusivity D_diff = k_B*T*C_c/(3*pi*mu*D_p) (Eq. 19.20) is the Stokes-Einstein diffusion coefficient describing the particle's thermal random walk. The two quantities have opposite size dependence -- v_s grows as D_p^2 while D_diff falls as 1/D_p -- which is the physical origin of the dry-deposition-velocity minimum for accumulation-mode (~0.1-1 um) aerosol: such particles settle too slowly to deposit gravitationally yet are too large to diffuse efficiently to the surface. Both quantities feed the Zhang et al. (2001) quasi-laminar resistance and the overall particle dry deposition velocity computed by the sibling sp_ch19 components. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:182 (`ParticleSettling` @component). Observed-only algebraic model: rho_p, D_p, mu, T, C_c are input parameters, g/k_B/pi_val are physical-constant parameters, and v_s and D_diff are the two algebraic outputs, each fixed by one equation with no time derivative.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "particle-settling",
+            "stokes-law",
+            "brownian-diffusion",
+            "observed-only"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-egwt)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 19: Dry Deposition. John Wiley & Sons, Inc. Eq. 19.18 (Stokes settling velocity) and Eq. 19.20 (Brownian diffusivity)."
+            }
+        ]
+    },
+    "models": {
+        "ParticleSettling": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eqs. 19.18 and 19.20. John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:182\nUpstream `ParticleSettling` is an MTK `@component` in the DryDeposition module of seinfeld_pandis_ch19.jl. It declares 3 `@constants` (g, k_B, pi_val), 5 `@parameters` (rho_p, D_p, mu, T, C_c) and 2 `@variables(t)` (v_s, D_diff), related by 2 equations. Neither equation carries a time derivative, so the system is purely algebraic (observed-only): `system_kind` is left unset because `ode` is the schema default and there is no differential state, matching the sibling observed-only AtmosphericDeposition.jl migrations gas_scavenging_coeff.esm (esm-8sez) and reversible_gas_scavenging.esm (esm-0jvy). v_s and D_diff are each serialized as `type: state` with one explicit algebraic equation in the `equations` array.\n\n@constants -> parameters. The ESM schema has no constant variable type, so the 3 upstream `@constants` migrate as `type: parameter` carrying their evaluated numeric defaults -- the convention applied by the sibling diagnostic_pressure.esm `@constant g`. g = G_ACCEL = 9.81 m/s^2; k_B = K_BOLTZ = 1.38e-23 J/K; pi_val = Float64(pi) = 3.141592653589793 (dimensionless). Each constant remains a named symbol in the equations rather than being inlined, keeping the .esm equations symbol-for-symbol identical to the upstream `System(eqs, t)`. k_B keeps its upstream name: it is the Boltzmann constant and its declared units J/K satisfy the ESS schema's reserved-physical-constant dimensional check for the name `k_B`.\n\n@parameters carry no defaults. The 5 upstream `@parameters` (rho_p, D_p, mu, T, C_c) are declared in seinfeld_pandis_ch19.jl with no default values -- they are required inputs, set when the component is composed into DryDepositionParticle. They are therefore migrated WITHOUT a `default` field; every inline test supplies all 5 via `parameter_overrides`, and the examples supply them via the example `parameters` block plus the swept dimension.\n\nEquations. Eq. 19.18 (Stokes settling velocity with Cunningham slip correction): v_s = rho_p*D_p^2*g*C_c/(18*mu). Eq. 19.20 (Brownian / Stokes-Einstein diffusivity with Cunningham slip correction): D = k_B*T*C_c/(3*pi*mu*D_p). The integer literals 18 and 3 are kept as integers, mirroring the upstream Ints; D_p^2 is encoded as a `^` node with integer exponent 2. Both equations are dimensionally consistent (v_s: [kg/m^3]*[m^2]*[m/s^2]*[1]/([1]*[Pa*s]) = m/s; D_diff: [J/K]*[K]*[1]/([1]*[1]*[Pa*s]*[m]) = m^2/s), so there is no upstream `checks=false` to mirror.\n\nThe module-level `struct`s LandUseParameters and GasProperties and their Table 19.2 / 19.4 instances are not referenced by `ParticleSettling` and are not migrated.\n\nTolerance rationale (model-level rel=1e-6): an observed-only algebraic system with no ODE integration; each equation is a closed-form rational expression evaluated once at each test point. rel=1e-6 comfortably covers float64 round-off in the handful of multiplies and one divide of each equation, well above the bit-level agreement expected between bindings, and matches the sibling gas_scavenging_coeff.esm choice. No `abs` tolerance is needed: every asserted value is nonzero (smallest ~1.37e-11).\n\nTest provenance: the `canonical_one_micron_particle` test reproduces the upstream seinfeld_pandis_ch19_test.jl testitem '2.3 Eq. 19.18: Particle Settling Velocity (Stokes)' (rho_p=1000 kg/m^3, D_p=1 um, mu=1.85e-5 Pa*s, C_c=1.16), which checks v_s ~ 3.41e-5 m/s at rtol 0.1; the migrated test pins the exact value v_s = 3.417297297297298e-5 m/s and additionally pins D_diff = 2.7359646632305877e-11 m^2/s at T=298 K. The other 5 tests each vary one parameter from that canonical case to exercise every dependency in the two equations."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "rho_p": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "description": "Particle density"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "description": "Particle diameter"
+                },
+                "mu": {
+                    "type": "parameter",
+                    "units": "Pa*s",
+                    "description": "Dynamic viscosity of air"
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "description": "Temperature"
+                },
+                "C_c": {
+                    "type": "parameter",
+                    "units": "1",
+                    "description": "Cunningham slip correction factor (dimensionless)"
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration"
+                },
+                "k_B": {
+                    "type": "parameter",
+                    "units": "J/K",
+                    "default": 1.38e-23,
+                    "description": "Boltzmann constant"
+                },
+                "pi_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Mathematical constant pi (dimensionless)"
+                },
+                "v_s": {
+                    "type": "state",
+                    "units": "m/s",
+                    "description": "Particle settling velocity (Eq. 19.18)"
+                },
+                "D_diff": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Brownian diffusivity of particle (Eq. 19.20)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 19.18 - Stokes settling (terminal) velocity with Cunningham slip correction: v_s = rho_p*D_p^2*g*C_c/(18*mu). v_s depends only on parameters, so it is constant in time.",
+                    "lhs": "v_s",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho_p",
+                                    { "op": "^", "args": ["D_p", 2] },
+                                    "g",
+                                    "C_c"
+                                ]
+                            },
+                            { "op": "*", "args": [18, "mu"] }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.20 - Brownian (Stokes-Einstein) diffusivity with Cunningham slip correction: D = k_B*T*C_c/(3*pi*mu*D_p). D_diff depends only on parameters, so it is constant in time.",
+                    "lhs": "D_diff",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["k_B", "T", "C_c"] },
+                            { "op": "*", "args": [3, "pi_val", "mu", "D_p"] }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "canonical_one_micron_particle",
+                    "description": "Canonical case -- a unit-density (rho_p = 1000 kg/m^3) 1 um particle in air at 298 K (mu = 1.85e-5 Pa*s, Cunningham slip correction C_c = 1.16). Reproduces the upstream seinfeld_pandis_ch19_test.jl testitem '2.3 Eq. 19.18: Particle Settling Velocity (Stokes)', which checks v_s ~ 3.41e-5 m/s (rtol 0.1). The Stokes settling velocity v_s = 3.4173e-5 m/s (~0.034 mm/s) is the slow gravitational drift of an accumulation-mode aerosol particle; the Brownian diffusivity D_diff = 2.736e-11 m^2/s is its thermal random-walk diffusion coefficient (Eq. 19.20).",
+                    "parameter_overrides": { "rho_p": 1000.0, "D_p": 1.0e-6, "mu": 1.85e-5, "T": 298.0, "C_c": 1.16 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 3.417297297297298e-5 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 2.7359646632305877e-11 }
+                    ]
+                },
+                {
+                    "id": "dense_particle",
+                    "description": "Doubling the particle density rho_p from 1000 to 2000 kg/m^3 (representative of a mineral-dust or sea-salt aerosol) doubles the settling velocity to 6.835e-5 m/s (v_s proportional to rho_p, Eq. 19.18) while leaving the Brownian diffusivity unchanged at 2.736e-11 m^2/s -- Eq. 19.20 has no density dependence.",
+                    "parameter_overrides": { "rho_p": 2000.0, "D_p": 1.0e-6, "mu": 1.85e-5, "T": 298.0, "C_c": 1.16 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 6.834594594594596e-5 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 2.7359646632305877e-11 }
+                    ]
+                },
+                {
+                    "id": "larger_particle",
+                    "description": "Doubling the particle diameter D_p from 1 to 2 um quadruples the settling velocity to 1.367e-4 m/s (v_s proportional to D_p^2, Eq. 19.18) and halves the Brownian diffusivity to 1.368e-11 m^2/s (D_diff proportional to 1/D_p, Eq. 19.20) -- the opposing size dependence that produces the dry-deposition-velocity minimum for accumulation-mode particles.",
+                    "parameter_overrides": { "rho_p": 1000.0, "D_p": 2.0e-6, "mu": 1.85e-5, "T": 298.0, "C_c": 1.16 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 1.3669189189189192e-4 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 1.3679823316152939e-11 }
+                    ]
+                },
+                {
+                    "id": "warm_air",
+                    "description": "Raising the temperature T from 298 to 320 K leaves the settling velocity unchanged at 3.417e-5 m/s (Eq. 19.18 carries no explicit temperature term) but raises the Brownian diffusivity to 2.938e-11 m^2/s (D_diff proportional to T via the Stokes-Einstein relation, Eq. 19.20).",
+                    "parameter_overrides": { "rho_p": 1000.0, "D_p": 1.0e-6, "mu": 1.85e-5, "T": 320.0, "C_c": 1.16 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 3.417297297297298e-5 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 2.937948631657007e-11 }
+                    ]
+                },
+                {
+                    "id": "higher_viscosity",
+                    "description": "Raising the dynamic viscosity of air mu from 1.85e-5 to 2.0e-5 Pa*s lowers both outputs: the settling velocity falls to 3.161e-5 m/s and the Brownian diffusivity to 2.531e-11 m^2/s (both proportional to 1/mu -- the Stokes drag in Eqs. 19.18 and 19.20).",
+                    "parameter_overrides": { "rho_p": 1000.0, "D_p": 1.0e-6, "mu": 2.0e-5, "T": 298.0, "C_c": 1.16 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 3.1610000000000004e-5 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 2.5307673134882935e-11 }
+                    ]
+                },
+                {
+                    "id": "slip_correction_unity",
+                    "description": "Setting the Cunningham slip correction factor C_c to 1.0 (the continuum limit, valid when the particle is much larger than the mean free path of air) lowers both outputs by the factor 1/1.16 relative to the canonical case: v_s = 2.946e-5 m/s and D_diff = 2.359e-11 m^2/s. C_c multiplies both equations identically, so it scales the two outputs together.",
+                    "parameter_overrides": { "rho_p": 1000.0, "D_p": 1.0e-6, "mu": 1.85e-5, "T": 298.0, "C_c": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "v_s", "time": 0.0, "expected": 2.9459459459459466e-5 },
+                        { "variable": "D_diff", "time": 0.0, "expected": 2.3585902269229204e-11 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "settling_and_diffusion_vs_particle_diameter",
+                    "description": "Stokes settling velocity v_s and Brownian diffusivity D_diff as functions of particle diameter D_p, swept log-spaced from 0.01 um to 10 um at unit particle density (rho_p = 1000 kg/m^3), air viscosity mu = 1.85e-5 Pa*s, temperature T = 298 K, and Cunningham slip correction C_c = 1.16. The two outputs have opposite size dependence: v_s proportional to D_p^2 (Eq. 19.18) rises steeply with size, while D_diff proportional to 1/D_p (Eq. 19.20) falls -- accumulation-mode particles (~0.1-1 um) lie in the dry-deposition trough where neither settling nor diffusion is efficient. Note: this standalone-component sweep holds C_c fixed; physically the Cunningham correction rises as D_p falls, so the true small-particle settling velocity is somewhat larger than this fixed-C_c curve.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "rho_p": 1000.0,
+                        "mu": 1.85e-5,
+                        "T": 298.0,
+                        "C_c": 1.16
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-8, "stop": 1.0e-5, "count": 21, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "v_s_vs_d_p",
+                            "type": "line",
+                            "description": "Stokes settling velocity v_s as a function of particle diameter D_p (Eq. 19.18).",
+                            "x": { "variable": "D_p", "label": "Particle diameter (m)" },
+                            "y": { "variable": "v_s", "label": "Settling velocity (m/s)" }
+                        },
+                        {
+                            "id": "d_diff_vs_d_p",
+                            "type": "line",
+                            "description": "Brownian diffusivity D_diff as a function of particle diameter D_p (Eq. 19.20).",
+                            "x": { "variable": "D_p", "label": "Particle diameter (m)" },
+                            "y": { "variable": "D_diff", "label": "Brownian diffusivity (m^2/s)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "settling_velocity_over_diameter_and_density",
+                    "description": "Two-dimensional sweep of the Stokes settling velocity v_s over particle diameter D_p (0.01-10 um, log-spaced) and particle density rho_p (1000-2500 kg/m^3, spanning water-like through mineral-dust aerosol), at air viscosity mu = 1.85e-5 Pa*s, temperature T = 298 K, and Cunningham slip correction C_c = 1.16. Surfaces the joint Eq. 19.18 dependence v_s = rho_p*D_p^2*g*C_c/(18*mu): linear in rho_p, quadratic in D_p -- the settling velocity is largest for big, dense particles.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "mu": 1.85e-5,
+                        "T": 298.0,
+                        "C_c": 1.16
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-8, "stop": 1.0e-5, "count": 16, "scale": "log" }
+                            },
+                            {
+                                "parameter": "rho_p",
+                                "range": { "start": 1000.0, "stop": 2500.0, "count": 16, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "v_s_heatmap",
+                            "type": "heatmap",
+                            "description": "Stokes settling velocity v_s as a function of particle diameter D_p and particle density rho_p (Eq. 19.18).",
+                            "x": { "variable": "D_p", "label": "Particle diameter (m)" },
+                            "y": { "variable": "rho_p", "label": "Particle density (kg/m^3)" },
+                            "value": { "variable": "v_s", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
