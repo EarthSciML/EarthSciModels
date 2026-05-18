@@ -1,0 +1,1004 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SurfaceResistance",
+        "description": "ModelingToolkit implementation of the surface (canopy) resistance to gaseous dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eqs. 19.50-19.52 -- the Wesely (1989) resistance model. Computes the total surface resistance r_c [s/m] as four parallel deposition pathways (Eq. 19.50): the combined stomatal+mesophyll pathway, the cuticular/outer-surface pathway r_lu, the lower-canopy pathway r_dc+r_cl, and the ground pathway r_ac+r_gs. The stomatal resistance r_st (Eq. 19.51) responds to solar irradiance G and surface temperature T_s through dimensionless light and temperature factors; the mesophyll resistance r_m (Eq. 19.52) is set by the gas's effective Henry's-law solubility H_star and reactivity f_0. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:311 (the SurfaceResistance @component). Purely algebraic: no differential states, six explicit equations evaluated as a triangular cascade.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "surface-resistance",
+            "wesely-1989"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-ug1i)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 19: Dry Deposition, Eqs. 19.50-19.52. John Wiley & Sons, Inc."
+            },
+            {
+                "citation": "Wesely, M. L. (1989). Parameterization of surface resistances to gaseous dry deposition in regional-scale numerical models. Atmospheric Environment 23(6), 1293-1304. doi:10.1016/0004-6981(89)90153-4"
+            }
+        ]
+    },
+    "models": {
+        "SurfaceResistance": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eqs. 19.50-19.52 (Wesely 1989 surface-resistance model). John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:311\n\nUpstream `SurfaceResistance` is a flat MTK `@component` -- `System(eqs, t)` with no subsystems -- implementing Seinfeld & Pandis (2006) Eqs. 19.50-19.52, the Wesely (1989) bulk surface-resistance model. It has six algebraic equations and no time derivative, so it is a purely algebraic (triangular) system; `system_kind` is left unset, the triangular-algebraic convention of the sibling wesley1989/surface_resistance.esm migration. The six equations are kept in upstream order, which is already a valid topological order (T_s_C and G_factor first, then T_factor, then r_st; r_m independently; r_c last, consuming r_st and r_m).\n\nConstants. The upstream `@constants` block (T_ref, G_ref, G_offset, T_coeff, T_max, H_coeff, f_coeff) migrates as fixed-default `parameter`s: the ESM schema has no `constant` variable type, so every `@constant` becomes a parameter carrying its numeric value as `default`. None of the seven constant names collides with the schema's reserved physical-constant names (R, k_B, N_A).\n\nInput variables. Upstream, G (solar irradiance) and T_s (surface temperature) are `@variables` with no defining equation in the standalone component -- they are inputs, wired in by the parent `DryDepositionGas` system via `surf.G ~ G` and `surf.T_s ~ T_s`. A standalone migration has no such parent, so G and T_s are migrated as `parameter`s, matching the wesley1989/surface_resistance.esm treatment of its scalar input arguments. The six genuinely-computed `@variables` (T_s_C, G_factor, T_factor, r_st, r_m, r_c) migrate as `type: state` with explicit algebraic equations, preserving 1:1 symmetry with the upstream `@variables` block.\n\nParameter defaults. Upstream declares no defaults for its `@parameters`. The migrated defaults describe SO2 dry deposition over a midsummer deciduous forest: the gas-property triple (D_ratio=1.9, H_star=1e5, f_0=0) is the S&P Table 19.4 SO2 row, and the land-use resistances (r_i=70, r_lu=2000, r_ac=2000, r_cl=2000, r_gs=500 s/m) are the deciduous-forest / midsummer / SO2 entries of the Wesely 1989 tables -- the same season x land-use cell asserted by wesley1989/surface_resistance.esm's `default_midsummer_so2` test. r_dc=100 s/m is a representative lower-canopy buoyant-convection resistance (tabulated here as a direct parameter). G=300 W/m^2 and T_s=298.15 K (25 degC) are mid-range daytime conditions.\n\nUnits. H_star is dimensionless in this formulation (the effective Henry's-law constant normalized; upstream `unit = u\"1\"`), so the mesophyll coefficients H_coeff [m/s] and f_coeff [m/s] make r_m = 1/(H_coeff*H_star + f_coeff*f_0) come out in s/m. ESM `units` fields are descriptive only; the runners perform no dimensional analysis.\n\nSingularities. The temperature factor T_factor = T_coeff/(T_s_C*(T_max - T_s_C)) is singular at T_s_C = 0 and T_s_C = 40 (T_s = 273.15 K and 313.15 K); the light factor G_factor is singular at G = -G_offset = -0.1 W/m^2, and the small G_offset keeps G = 0 well-defined. Every test and example evaluation stays strictly interior (T_s_C in [5, 35] degC, G >= 0).\n\nTolerance rationale (model-level rel=1e-6): a closed-form explicit algebraic system with no ODE integration. The expected values are the Float64 evaluation of Eqs. 19.50-19.52; rel=1e-6 absorbs round-off across the reciprocal-sum chain, well above the bit-level agreement expected between conforming runners."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Celsius-to-Kelvin offset applied to the surface temperature (upstream @constant)."
+                },
+                "G_ref": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 200.0,
+                    "description": "Reference solar irradiance in the stomatal light response, Eq. 19.51 (upstream @constant)."
+                },
+                "G_offset": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 0.1,
+                    "description": "Small irradiance offset that keeps the light factor finite at G = 0 (upstream @constant)."
+                },
+                "T_coeff": {
+                    "type": "parameter",
+                    "units": "K^2",
+                    "default": 400.0,
+                    "description": "Temperature coefficient of the stomatal temperature factor, Eq. 19.51 (upstream @constant)."
+                },
+                "T_max": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 40.0,
+                    "description": "Upper temperature bound (Celsius-equivalent) of stomatal function in Eq. 19.51 (upstream @constant)."
+                },
+                "H_coeff": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.00033,
+                    "description": "Henry's-law coefficient of the mesophyll resistance, Eq. 19.52 (upstream @constant)."
+                },
+                "f_coeff": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 100.0,
+                    "description": "Reactivity coefficient of the mesophyll resistance, Eq. 19.52 (upstream @constant)."
+                },
+                "H_star": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 100000.0,
+                    "description": "Effective Henry's-law constant of the depositing gas (dimensionless, normalized; S&P Table 19.4). Default: SO2."
+                },
+                "f_0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Chemical reactivity factor of the depositing gas, 0-1 (S&P Table 19.4). Default: SO2."
+                },
+                "D_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.9,
+                    "description": "Ratio of water-vapor to gas molecular diffusivity, D_H2O/D_gas (S&P Table 19.4). Default: SO2."
+                },
+                "r_i": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 70.0,
+                    "description": "Minimum bulk-canopy stomatal resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                },
+                "r_lu": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 2000.0,
+                    "description": "Cuticular / outer-canopy-surface resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                },
+                "r_dc": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 100.0,
+                    "description": "Lower-canopy buoyant-convection resistance (Wesely 1989 land-use table). Default: representative midsummer value."
+                },
+                "r_cl": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 2000.0,
+                    "description": "Lower-canopy exposed-surfaces uptake resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer, SO2."
+                },
+                "r_ac": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 2000.0,
+                    "description": "In-canopy aerodynamic resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer."
+                },
+                "r_gs": {
+                    "type": "parameter",
+                    "units": "s/m",
+                    "default": 500.0,
+                    "description": "Ground-surface uptake resistance (Wesely 1989 land-use table). Default: deciduous forest, midsummer, SO2."
+                },
+                "G": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 300.0,
+                    "description": "Solar irradiance reaching the surface. Upstream a connected @variable; an input parameter in the standalone migration."
+                },
+                "T_s": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Surface temperature. Upstream a connected @variable; an input parameter in the standalone migration."
+                },
+                "T_s_C": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Surface temperature offset from the 273.15 K reference (Celsius-equivalent magnitude carried with a K unit)."
+                },
+                "G_factor": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless irradiance factor of the stomatal resistance, 1 + (G_ref/(G+G_offset))^2 (Eq. 19.51)."
+                },
+                "T_factor": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Dimensionless temperature factor of the stomatal resistance, T_coeff/(T_s_C*(T_max-T_s_C)) (Eq. 19.51)."
+                },
+                "r_st": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Bulk-canopy stomatal resistance (Eq. 19.51)."
+                },
+                "r_m": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Mesophyll resistance (Eq. 19.52)."
+                },
+                "r_c": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Total surface (canopy) resistance to gaseous dry deposition along four parallel pathways (Eq. 19.50)."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Temperature offset from the 273.15 K reference: T_s_C = T_s - T_ref.",
+                    "lhs": "T_s_C",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            "T_s",
+                            "T_ref"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.51 light factor: G_factor = 1 + (G_ref/(G + G_offset))^2.",
+                    "lhs": "G_factor",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            1,
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "G_ref",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "G",
+                                                    "G_offset"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.51 temperature factor: T_factor = T_coeff/(T_s_C*(T_max - T_s_C)).",
+                    "lhs": "T_factor",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "T_coeff",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "T_s_C",
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "T_max",
+                                            "T_s_C"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.51 stomatal resistance: r_st = D_ratio*r_i*G_factor*T_factor.",
+                    "lhs": "r_st",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "D_ratio",
+                            "r_i",
+                            "G_factor",
+                            "T_factor"
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.52 mesophyll resistance: r_m = 1/(H_coeff*H_star + f_coeff*f_0).",
+                    "lhs": "r_m",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "H_coeff",
+                                            "H_star"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "f_coeff",
+                                            "f_0"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.50 total surface resistance: four parallel deposition pathways.",
+                    "lhs": "r_c",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "r_st",
+                                                    "r_m"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            "r_lu"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "r_dc",
+                                                    "r_cl"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "r_ac",
+                                                    "r_gs"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_so2_deciduous",
+                    "description": "Default case: SO2 over a midsummer deciduous forest, G = 300 W/m^2, T_s = 298.15 K (25 degC). All four S&P Eq. 19.50 pathways carry their default land-use resistances. r_c is re-checked at t = 1 s to confirm this algebraic system is time-invariant.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 204.87650495856408
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.030303030303030304
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 159.83485089186416
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 1.0,
+                            "expected": 159.83485089186416
+                        }
+                    ]
+                },
+                {
+                    "id": "ozone_deciduous",
+                    "description": "Ozone over the same midsummer deciduous forest. O3 is weakly soluble but highly reactive (f_0 = 1), so the mesophyll resistance r_m collapses to ~0.01 s/m via the f_coeff*f_0 term of Eq. 19.52 rather than the Henry's-law term that dominates for SO2.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.6,
+                        "H_star": 0.01,
+                        "f_0": 1.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 172.52758312300134
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.009999999670000011
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 139.43055397838557
+                        }
+                    ]
+                },
+                {
+                    "id": "no2_deciduous",
+                    "description": "Nitrogen dioxide over the midsummer deciduous forest. NO2 shares O3's diffusivity and solubility but is only mildly reactive (f_0 = 0.1), giving an intermediate mesophyll resistance r_m ~ 0.1 s/m (Eq. 19.52).",
+                    "parameter_overrides": {
+                        "D_ratio": 1.6,
+                        "H_star": 0.01,
+                        "f_0": 0.1,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 172.52758312300134
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.09999996700001089
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 139.48932285245638
+                        }
+                    ]
+                },
+                {
+                    "id": "hno3_perfect_sink",
+                    "description": "Nitric acid over the midsummer deciduous forest. HNO3's enormous effective Henry's-law constant (H_star = 1e14) drives the mesophyll resistance r_m to ~3e-11 s/m -- a near-perfect sink -- so the combined stomatal+mesophyll pathway of Eq. 19.50 is set almost entirely by r_st.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000000000000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 204.87650495856408
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 3.03030303030303e-11
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 159.81641218874307
+                        }
+                    ]
+                },
+                {
+                    "id": "low_light_so2",
+                    "description": "SO2 over the deciduous forest at low solar irradiance G = 10 W/m^2. The Eq. 19.51 light factor G_factor rises steeply (~393), the stomatal resistance r_st becomes very large, and the total r_c climbs as the stomatal pathway effectively shuts -- the night-time / heavy-shade limit.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 10.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 393.1184197627683
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 55770.3998170114
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.030303030303030304
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 717.2977885649599
+                        }
+                    ]
+                },
+                {
+                    "id": "bright_light_so2",
+                    "description": "SO2 over the deciduous forest at bright solar irradiance G = 900 W/m^2. G_factor approaches its small-irradiance-independent floor (~1.05), the stomatal resistance r_st is near its minimum, and r_c is at the low end of its daytime range.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 900.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.0493717439412014
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0666666666666667
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 148.8708714071251
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.030303030303030304
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 123.57801515280919
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_surface_so2",
+                    "description": "SO2 over the deciduous forest at a cool surface, T_s = 278.15 K (T_s_C = 5 degC). The Eq. 19.51 temperature factor T_factor = T_coeff/(T_s_C*(T_max-T_s_C)) rises away from its T_s_C = 20 minimum, raising the stomatal resistance.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 278.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 5.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 2.2857142857142856
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 439.02108205406586
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.030303030303030304
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 273.68555488014
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_surface_so2",
+                    "description": "SO2 over the deciduous forest at a warm surface, T_s = 308.15 K (T_s_C = 35 degC). Because the Eq. 19.51 temperature factor is symmetric about T_s_C = 20 degC, T_factor, r_st and r_c here are identical to the cold_surface_so2 case at T_s_C = 5 degC.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0,
+                        "T_s": 308.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 35.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.44414829623048
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 2.2857142857142856
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 439.02108205406586
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.030303030303030304
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 273.68555488014
+                        }
+                    ]
+                },
+                {
+                    "id": "o3_grassland",
+                    "description": "Ozone over midsummer grass/range land (r_ac = 100, r_gs = 350 s/m), G = 500 W/m^2, T_s = 293.15 K. At T_s_C = 20 degC the temperature factor hits its exact minimum T_factor = 1, and the low in-canopy aerodynamic resistance opens the ground pathway of Eq. 19.50.",
+                    "parameter_overrides": {
+                        "D_ratio": 1.6,
+                        "H_star": 0.01,
+                        "f_0": 1.0,
+                        "r_i": 120.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 100.0,
+                        "r_gs": 350.0,
+                        "G": 500.0,
+                        "T_s": 293.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "T_s_C",
+                            "time": 0.0,
+                            "expected": 20.0
+                        },
+                        {
+                            "variable": "G_factor",
+                            "time": 0.0,
+                            "expected": 1.1599360191948813
+                        },
+                        {
+                            "variable": "T_factor",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "r_st",
+                            "time": 0.0,
+                            "expected": 222.7077156854172
+                        },
+                        {
+                            "variable": "r_m",
+                            "time": 0.0,
+                            "expected": 0.009999999670000011
+                        },
+                        {
+                            "variable": "r_c",
+                            "time": 0.0,
+                            "expected": 130.0660519374524
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "resistance_vs_solar_irradiation",
+                    "description": "Total surface resistance r_c as a function of solar irradiance G for SO2 over a midsummer deciduous forest at T_s = 298.15 K. As G rises the Eq. 19.51 light factor falls, stomata open, the stomatal resistance drops, and r_c declines toward its bright-light floor.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "T_s": 298.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "G",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1000.0,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rc_vs_G",
+                            "type": "line",
+                            "description": "Total surface resistance r_c versus solar irradiance G.",
+                            "x": {
+                                "variable": "G",
+                                "label": "Solar irradiance (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "r_c",
+                                "label": "Surface resistance r_c (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "resistance_vs_surface_temperature",
+                    "description": "Total surface resistance r_c as a function of surface temperature T_s for SO2 over a midsummer deciduous forest at G = 300 W/m^2. The Eq. 19.51 temperature factor is U-shaped with a minimum at T_s_C = 20 degC (T_s = 293.15 K), so r_c is lowest near 20 degC and rises toward both the cool and warm ends of the swept range.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0,
+                        "G": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T_s",
+                                "range": {
+                                    "start": 278.15,
+                                    "stop": 308.15,
+                                    "count": 16,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rc_vs_Ts",
+                            "type": "line",
+                            "description": "Total surface resistance r_c versus surface temperature T_s.",
+                            "x": {
+                                "variable": "T_s",
+                                "label": "Surface temperature (K)"
+                            },
+                            "y": {
+                                "variable": "r_c",
+                                "label": "Surface resistance r_c (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "resistance_over_light_and_temperature",
+                    "description": "Total surface resistance r_c for SO2 over a midsummer deciduous forest as a joint function of solar irradiance G and surface temperature T_s. Surfaces how the light and temperature factors of the Eq. 19.51 stomatal pathway together set r_c: lowest in the bright, mild corner and highest under dim light at temperature extremes. The T_s sweep stays strictly inside the T_s_C = 0 / 40 degC singularities of the temperature factor.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "D_ratio": 1.9,
+                        "H_star": 100000.0,
+                        "f_0": 0.0,
+                        "r_i": 70.0,
+                        "r_lu": 2000.0,
+                        "r_dc": 100.0,
+                        "r_cl": 2000.0,
+                        "r_ac": 2000.0,
+                        "r_gs": 500.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "G",
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1000.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "T_s",
+                                "range": {
+                                    "start": 278.15,
+                                    "stop": 308.15,
+                                    "count": 7,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rc_heatmap",
+                            "type": "heatmap",
+                            "description": "Total surface resistance r_c over solar irradiance G and surface temperature T_s.",
+                            "x": {
+                                "variable": "G",
+                                "label": "Solar irradiance (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "T_s",
+                                "label": "Surface temperature (K)"
+                            },
+                            "value": {
+                                "variable": "r_c",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
