@@ -1,0 +1,2394 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TOMAS",
+        "description": "TwO-Moment Aerosol Sectional (TOMAS) Brownian-coagulation model with five mass-doubling size bins. Each bin k carries two moments - particle number concentration N_k and mass concentration M_k - and the bins are coupled by Brownian coagulation: intra- and inter-bin collisions remove particles and transfer mass toward larger bins at rates set by a precomputed 5x5 coagulation-coefficient matrix. f_k and psi_k are the within-bin linear number-distribution reconstruction coefficients of the two-moment scheme, evaluated algebraically from N_k. Migrated from the module-level script Aerosol.jl src/TOMAS.jl @ c8c640bb636b22f2425460e9ed5cba50793bfee1; the upstream array-variable ODESystem was scalarized to 20 scalar unknowns and mtk2esm-scaffolded. All coagulation coefficients, bin masses and the bin-spacing factor xi are baked in as numeric literals, so the model has no free parameters.",
+        "tags": [
+            "aerosol",
+            "coagulation",
+            "sectional",
+            "tomas",
+            "microphysics",
+            "size-distribution"
+        ],
+        "created": "2026-05-18T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-kxky)"
+        ],
+        "references": [
+            {
+                "doi": "10.1029/2001JD001010",
+                "citation": "Adams, P. J. and Seinfeld, J. H.: Predicting global aerosol size distributions in general circulation models, J. Geophys. Res., 107(D19), 4370, 2002.",
+                "url": "https://doi.org/10.1029/2001JD001010"
+            }
+        ]
+    },
+    "models": {
+        "TOMAS": {
+            "reference": {
+                "doi": "10.1029/2001JD001010",
+                "citation": "Adams, P. J. and Seinfeld, J. H.: Predicting global aerosol size distributions in general circulation models, J. Geophys. Res., 107(D19), 4370, 2002.",
+                "url": "https://doi.org/10.1029/2001JD001010",
+                "notes": "Source: Aerosol.jl src/TOMAS.jl @ c8c640bb636b22f2425460e9ed5cba50793bfee1 (migration bead esm-kxky). The upstream file is an undocumented, module-level (Pluto-style) script with no in-repo tests or docs (migration-tracker section 1.15 TOMAS.jl). It builds a five-bin TwO-Moment Aerosol Sectional (TOMAS) Brownian-coagulation ODESystem. The size grid is mass-doubling (m_upper = 2*m_lower, lowest bin m_lower = 1e-18 g), particle density 1.8 g/cm^3, so all five bins lie in the free-molecular regime (diameter < 0.1 um); the 5x5 coagulation-coefficient matrix is evaluated at T = 298 K and baked into the equations as numeric literals, together with the bin masses and the mass-doubling spectral factor xi = 1.0625. The model therefore has no free parameters. f_k and psi_k are the linear within-bin number-distribution reconstruction coefficients of the two-moment scheme; on the mass-doubling grid m_k/m_lower = 1.5 for every bin, so the f_k and psi_k expressions coincide identically (both reduce to N_k/m_lower_k) and the (psi_k - f_k) terms in the differential equations vanish. Migration: the upstream @named ODESystem is defined over array variables N(t)[1:5], M(t)[1:5], f(t)[1:5], psi(t)[1:5]; these were scalarized into 20 scalar unknowns (N1..N5, M1..M5, f1..f5, psi1..psi5) so the equations serialize without array-indexing ops, then scaffolded with mtk2esm. Inline-test expected values are an upstream reference run of the same scalarized ODESystem (OrdinaryDiffEq Tsit5, abstol=1e-14, reltol=1e-12). Tolerance rationale (model-level rel=2e-3): the Python inline-test gate re-integrates with SciPy LSODA (rtol=1e-10, atol=1e-12). All twenty state trajectories - the number concentrations N_k, the mass concentrations M_k, and the algebraic coefficients f_k/psi_k - were verified to agree between the Tsit5 reference and the LSODA gate to better than 2.1e-4 relative at every assertion point across all three test scenarios; rel=2e-3 is a ~10x margin over that observed Tsit5-vs-LSODA truncation difference. Mass-bin assertions are deliberately placed at t=0 and at early-to-mid times where M_k stays well above the gate's atol=1e-12 integrator floor, so each remains a meaningful relative check."
+            },
+            "tolerance": {
+                "rel": 0.002
+            },
+            "variables": {
+                "N1": {
+                    "type": "state",
+                    "units": "cm^-3",
+                    "default": 15830903.16595993,
+                    "description": "Number concentration of aerosol particles in mass-doubling size bin 1 (of 5)."
+                },
+                "N2": {
+                    "type": "state",
+                    "units": "cm^-3",
+                    "default": 27165938.46737124,
+                    "description": "Number concentration of aerosol particles in mass-doubling size bin 2 (of 5)."
+                },
+                "N3": {
+                    "type": "state",
+                    "units": "cm^-3",
+                    "default": 44789060.589685805,
+                    "description": "Number concentration of aerosol particles in mass-doubling size bin 3 (of 5)."
+                },
+                "N4": {
+                    "type": "state",
+                    "units": "cm^-3",
+                    "default": 70949185.69246289,
+                    "description": "Number concentration of aerosol particles in mass-doubling size bin 4 (of 5)."
+                },
+                "N5": {
+                    "type": "state",
+                    "units": "cm^-3",
+                    "default": 107981933.02637613,
+                    "description": "Number concentration of aerosol particles in mass-doubling size bin 5 (of 5)."
+                },
+                "M1": {
+                    "type": "state",
+                    "units": "g/cm^3",
+                    "default": 2.374635474893989e-11,
+                    "description": "Mass concentration of aerosol particles in mass-doubling size bin 1 (of 5)."
+                },
+                "M2": {
+                    "type": "state",
+                    "units": "g/cm^3",
+                    "default": 8.149781540211371e-11,
+                    "description": "Mass concentration of aerosol particles in mass-doubling size bin 2 (of 5)."
+                },
+                "M3": {
+                    "type": "state",
+                    "units": "g/cm^3",
+                    "default": 2.687343635381148e-10,
+                    "description": "Mass concentration of aerosol particles in mass-doubling size bin 3 (of 5)."
+                },
+                "M4": {
+                    "type": "state",
+                    "units": "g/cm^3",
+                    "default": 8.513902283095546e-10,
+                    "description": "Mass concentration of aerosol particles in mass-doubling size bin 4 (of 5)."
+                },
+                "M5": {
+                    "type": "state",
+                    "units": "g/cm^3",
+                    "default": 2.5915663926330265e-09,
+                    "description": "Mass concentration of aerosol particles in mass-doubling size bin 5 (of 5)."
+                },
+                "f1": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient f for size bin 1; evaluated algebraically as 2*N1/m_lower*(2 - m_k/m_lower). Equals psi1 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "f2": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient f for size bin 2; evaluated algebraically as 2*N2/m_lower*(2 - m_k/m_lower). Equals psi2 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "f3": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient f for size bin 3; evaluated algebraically as 2*N3/m_lower*(2 - m_k/m_lower). Equals psi3 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "f4": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient f for size bin 4; evaluated algebraically as 2*N4/m_lower*(2 - m_k/m_lower). Equals psi4 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "f5": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient f for size bin 5; evaluated algebraically as 2*N5/m_lower*(2 - m_k/m_lower). Equals psi5 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "psi1": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient psi for size bin 1; evaluated algebraically as 2*N1/m_lower*(m_k/m_lower - 1). Equals f1 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "psi2": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient psi for size bin 2; evaluated algebraically as 2*N2/m_lower*(m_k/m_lower - 1). Equals f2 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "psi3": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient psi for size bin 3; evaluated algebraically as 2*N3/m_lower*(m_k/m_lower - 1). Equals f3 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "psi4": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient psi for size bin 4; evaluated algebraically as 2*N4/m_lower*(m_k/m_lower - 1). Equals f4 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                },
+                "psi5": {
+                    "type": "state",
+                    "units": "cm^-3/g",
+                    "description": "Within-bin linear number-distribution reconstruction coefficient psi for size bin 5; evaluated algebraically as 2*N5/m_lower*(m_k/m_lower - 1). Equals f5 on the mass-doubling grid (m_k/m_lower = 1.5)."
+                }
+            },
+            "equations": [
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    -1.5339907267237098e-09,
+                                    {
+                                        "args": [
+                                            "N1",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    "N1",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "N3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.304813445275614e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.685530410823016e-09,
+                                                    "N2"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "N1"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    6.715785230622954e-10,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f2"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi2"
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.6977404750594217e-09,
+                                    {
+                                        "args": [
+                                            "N2",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    7.669953633618549e-10,
+                                    {
+                                        "args": [
+                                            "N1",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    "N2",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "N3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.7282326069301694e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.685530410823016e-09,
+                                    "M1",
+                                    "psi2"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "N2"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    6.715785230622954e-10,
+                                    {
+                                        "args": [
+                                            "f2",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    8.488702375297108e-10,
+                                    {
+                                        "args": [
+                                            "N2",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    132812500000000016,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi3"
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.997661783300136e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.569386056625455e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.8595125110708578e-09,
+                                    {
+                                        "args": [
+                                            "N3",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    "N3",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.35376992455032e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.685530410823016e-09,
+                                    "M1",
+                                    "psi2"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi3"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "N3"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    -2.0051076185437887e-09,
+                                    {
+                                        "args": [
+                                            "N4",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    66406250000000008,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi4"
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.2109191193475384e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.773374448181019e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    6.559593287789356e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    132812500000000016,
+                                    {
+                                        "args": [
+                                            "f3",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi3"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.997661783300136e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.569386056625455e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    9.297562555354289e-10,
+                                    {
+                                        "args": [
+                                            "N3",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -2.153624885355299e-09,
+                                    "N5",
+                                    "N4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi3"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "N4"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    1.0025538092718944e-09,
+                                    {
+                                        "args": [
+                                            "N4",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    "psi5",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.35376992455032e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.153624885355299e-09,
+                                                    "M4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.304813445275614e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.7282326069301694e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    33203125000000004,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.4122619547301916e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.5843498624263582e-26,
+                                                    "M4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    4.95722016791342e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    8.184697820790507e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            "psi5",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f5"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -2.117154741395111e-09,
+                                    {
+                                        "args": [
+                                            "N5",
+                                            2
+                                        ],
+                                        "op": "^"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    66406250000000008,
+                                    {
+                                        "args": [
+                                            "f4",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.2109191193475384e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.773374448181019e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    6.559593287789356e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi4"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "N5"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    -1,
+                                    "M1",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "N3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.304813445275614e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.685530410823016e-09,
+                                                    "N2"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.5339907267237098e-09,
+                                    "N1",
+                                    "M1"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "M1"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    1.1372237880761914e-27,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f2"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi2"
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "N3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.7282326069301694e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "M2"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.5339907267237098e-09,
+                                    "N1",
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.6977404750594217e-09,
+                                    "N2",
+                                    "M2"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.3431570461245907e-27,
+                                    "f2",
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -6.742121643292064e-27,
+                                    "M1",
+                                    "psi2"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.685530410823016e-09,
+                                    "N2",
+                                    "M1"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "M2"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    "N3",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -7.999999999999999e-18,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi3"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1,
+                                    "M3",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.35376992455032e-09,
+                                                    "N5"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "N4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.1372237880761914e-27,
+                                    {
+                                        "args": [
+                                            "f2",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.3431570461245907e-27,
+                                    "f2",
+                                    "M1"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.6977404750594217e-09,
+                                    "N2",
+                                    "M2"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -0.53125,
+                                    "f3",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.997661783300136e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.569386056625455e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    149932861328125024,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    4.496492674950203e-45,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.6708158169876362e-44,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi3"
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.8595125110708578e-09,
+                                    "N3",
+                                    "M3"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    6.742121643292064e-27,
+                                    "M1",
+                                    "psi2"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "M3"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    -2.0051076185437887e-09,
+                                    "M4",
+                                    "N4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -0.53125,
+                                    "f4",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.2109191193475384e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.773374448181019e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    6.559593287789356e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    74966430664062512,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    7.265514716085229e-44,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.660061672271527e-45,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.9678779863368064e-44,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            "psi4"
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    149932861328125024,
+                                    {
+                                        "args": [
+                                            "f3",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi3"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    4.496492674950203e-45,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.6708158169876362e-44,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "N4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -2.153624885355299e-09,
+                                    "N5",
+                                    "M4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    0.53125,
+                                    "f3",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.997661783300136e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.569386056625455e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -1.5999999999999998e-17,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.8595125110708578e-09,
+                                    "N3",
+                                    "M3"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    7.999999999999999e-18,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.9984411888667577e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.8564620188751522e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi3"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "M4"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            {
+                                "args": [
+                                    2.0051076185437887e-09,
+                                    "M4",
+                                    "N4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    "N5",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.35376992455032e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.153624885355299e-09,
+                                                    "M4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.304813445275614e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.7282326069301694e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    0.53125,
+                                    "f4",
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.2109191193475384e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.773374448181019e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    6.559593287789356e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    74966430664062512,
+                                    {
+                                        "args": [
+                                            "f4",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "psi4"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    7.265514716085229e-44,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    5.660061672271527e-45,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    1.9678779863368064e-44,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    37483215332031256,
+                                    {
+                                        "args": [
+                                            "psi5",
+                                            {
+                                                "args": [
+                                                    -1,
+                                                    "f5"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    8.473571728381149e-44,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    3.101219834911629e-43,
+                                                    "M4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    7.435830251870129e-45,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.4554093462371517e-44,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    }
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -0.53125,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    1.4122619547301916e-26,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.5843498624263582e-26,
+                                                    "M4"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    4.95722016791342e-27,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    8.184697820790507e-27,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "f5"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    1.5999999999999998e-17,
+                                    {
+                                        "args": [
+                                            {
+                                                "args": [
+                                                    2.0181985322458977e-09,
+                                                    "M3"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.515582965454013e-09,
+                                                    "M1"
+                                                ],
+                                                "op": "*"
+                                            },
+                                            {
+                                                "args": [
+                                                    2.1865310959297857e-09,
+                                                    "M2"
+                                                ],
+                                                "op": "*"
+                                            }
+                                        ],
+                                        "op": "+"
+                                    },
+                                    "psi4"
+                                ],
+                                "op": "*"
+                            },
+                            {
+                                "args": [
+                                    -2.117154741395111e-09,
+                                    "N5",
+                                    "M5"
+                                ],
+                                "op": "*"
+                            }
+                        ],
+                        "op": "+"
+                    },
+                    "lhs": {
+                        "args": [
+                            "M5"
+                        ],
+                        "op": "D",
+                        "wrt": "t"
+                    }
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            1000000000000000128,
+                            "N1"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "f1"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            500000000000000064,
+                            "N2"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "f2"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            250000000000000032,
+                            "N3"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "f3"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            125000000000000016,
+                            "N4"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "f4"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            62500000000000008,
+                            "N5"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "f5"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            1000000000000000128,
+                            "N1"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "psi1"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            500000000000000064,
+                            "N2"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "psi2"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            250000000000000032,
+                            "N3"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "psi3"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            125000000000000016,
+                            "N4"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "psi4"
+                },
+                {
+                    "rhs": {
+                        "args": [
+                            62500000000000008,
+                            "N5"
+                        ],
+                        "op": "*"
+                    },
+                    "lhs": "psi5"
+                }
+            ],
+            "tests": [
+                {
+                    "id": "canonical_lognormal_day",
+                    "description": "Upstream TOMAS.jl base case: a normal-distribution-weighted initial number spectrum (N_k proportional to pdf(Normal(15,5), k)) integrated over a full day. Brownian coagulation collapses the number concentration in every bin by 3-7 orders of magnitude over 86400 s. The N1 assertion at t=0 verifies initial-condition handling; N_k at 1 h and 24 h are the primary behavioral gate; the mass bins M3-M5 are checked at 5 min and M5 (slowest-decaying mass bin) again at 24 h.",
+                    "initial_conditions": {
+                        "N1": 15830903.16595993,
+                        "M1": 2.374635474893989e-11,
+                        "N2": 27165938.46737124,
+                        "M2": 8.149781540211371e-11,
+                        "N3": 44789060.589685805,
+                        "M3": 2.687343635381148e-10,
+                        "N4": 70949185.69246289,
+                        "M4": 8.513902283095546e-10,
+                        "N5": 107981933.02637613,
+                        "M5": 2.5915663926330265e-09
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 86400.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "N1",
+                            "time": 0.0,
+                            "expected": 15830903.16595993
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 3600.0,
+                            "expected": 89.19930319142259
+                        },
+                        {
+                            "variable": "N2",
+                            "time": 3600.0,
+                            "expected": 1029.3536239398309
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 3600.0,
+                            "expected": 6108.853146944454
+                        },
+                        {
+                            "variable": "N4",
+                            "time": 3600.0,
+                            "expected": 24748.96132511365
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 3600.0,
+                            "expected": 110419.40805753833
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 86400.0,
+                            "expected": 0.5899336964512746
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 86400.0,
+                            "expected": 157.6329120425347
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 86400.0,
+                            "expected": 4748.165756761327
+                        },
+                        {
+                            "variable": "M3",
+                            "time": 300.0,
+                            "expected": 6.846060673866528e-13
+                        },
+                        {
+                            "variable": "M4",
+                            "time": 300.0,
+                            "expected": 4.452831698407978e-12
+                        },
+                        {
+                            "variable": "M5",
+                            "time": 300.0,
+                            "expected": 1.363178440218432e-10
+                        },
+                        {
+                            "variable": "M5",
+                            "time": 86400.0,
+                            "expected": 1.2558915529539911e-12
+                        }
+                    ]
+                },
+                {
+                    "id": "canonical_fast_transient",
+                    "description": "Same normal-weighted initial spectrum, first 10 minutes. Coagulation is fastest here: N1 falls ~250-fold in the first 60 s. Resolves the stiff initial transient that the 24 h test only samples at its endpoints. Mass bins M3-M5 are checked at 60 s.",
+                    "initial_conditions": {
+                        "N1": 15830903.16595993,
+                        "M1": 2.374635474893989e-11,
+                        "N2": 27165938.46737124,
+                        "M2": 8.149781540211371e-11,
+                        "N3": 44789060.589685805,
+                        "M3": 2.687343635381148e-10,
+                        "N4": 70949185.69246289,
+                        "M4": 8.513902283095546e-10,
+                        "N5": 107981933.02637613,
+                        "M5": 2.5915663926330265e-09
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 600.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "N1",
+                            "time": 60.0,
+                            "expected": 62841.472624463946
+                        },
+                        {
+                            "variable": "N2",
+                            "time": 60.0,
+                            "expected": 250965.44988886872
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 60.0,
+                            "expected": 756580.3427713346
+                        },
+                        {
+                            "variable": "N4",
+                            "time": 60.0,
+                            "expected": 2001186.7693549113
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 60.0,
+                            "expected": 5903973.557765648
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 300.0,
+                            "expected": 4736.257922385079
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 300.0,
+                            "expected": 112424.2059420626
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 300.0,
+                            "expected": 1266753.8109713357
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 600.0,
+                            "expected": 1556.1300713504
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 600.0,
+                            "expected": 643824.7798095755
+                        },
+                        {
+                            "variable": "M3",
+                            "time": 60.0,
+                            "expected": 4.596388172128885e-12
+                        },
+                        {
+                            "variable": "M4",
+                            "time": 60.0,
+                            "expected": 2.4804537054861988e-11
+                        },
+                        {
+                            "variable": "M5",
+                            "time": 60.0,
+                            "expected": 4.4881054706653444e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "uniform_initial_distribution",
+                    "description": "A flat initial number spectrum (N_k = 5e7 cm^-3 in every bin) coagulated for one hour. Exercises the model from an initial state unlike the upstream lognormal case and confirms it relaxes toward a similar self-preserving shape. The t=0 assertions verify initial-condition handling; the f3/psi3 assertions at 10 min check that the two algebraic reconstruction coefficients track N3 and remain identical.",
+                    "initial_conditions": {
+                        "N1": 50000000,
+                        "M1": 7.499999999999999e-11,
+                        "N2": 50000000,
+                        "M2": 1.4999999999999997e-10,
+                        "N3": 50000000,
+                        "M3": 2.9999999999999995e-10,
+                        "N4": 50000000,
+                        "M4": 5.999999999999999e-10,
+                        "N5": 50000000,
+                        "M5": 1.1999999999999998e-09
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "N1",
+                            "time": 0.0,
+                            "expected": 50000000
+                        },
+                        {
+                            "variable": "M1",
+                            "time": 0.0,
+                            "expected": 7.499999999999999e-11
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 600.0,
+                            "expected": 4967.89383163667
+                        },
+                        {
+                            "variable": "N2",
+                            "time": 600.0,
+                            "expected": 21088.94133214904
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 600.0,
+                            "expected": 67949.9528962513
+                        },
+                        {
+                            "variable": "N4",
+                            "time": 600.0,
+                            "expected": 189928.1527596645
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 600.0,
+                            "expected": 624149.7234928618
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 3600.0,
+                            "expected": 274.29903359219924
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 3600.0,
+                            "expected": 8072.106469110638
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 3600.0,
+                            "expected": 108010.50164437758
+                        },
+                        {
+                            "variable": "M4",
+                            "time": 3600.0,
+                            "expected": 3.472817558310097e-13
+                        },
+                        {
+                            "variable": "M5",
+                            "time": 3600.0,
+                            "expected": 2.1354007089650603e-11
+                        },
+                        {
+                            "variable": "f3",
+                            "time": 600.0,
+                            "expected": 1.6987488224062827e+22
+                        },
+                        {
+                            "variable": "psi3",
+                            "time": 600.0,
+                            "expected": 1.6987488224062827e+22
+                        }
+                    ]
+                },
+                {
+                    "id": "descending_initial_distribution",
+                    "description": "A descending initial number spectrum (most particles in the smallest bin: N = [2e8, 8e7, 2e7, 5e6, 1e6] cm^-3) coagulated for two hours. Exercises coagulation driven from the small-particle end. The t=0 assertions verify initial-condition handling; the f1/psi1 assertions at 15 min check the algebraic coefficients for the smallest bin.",
+                    "initial_conditions": {
+                        "N1": 200000000,
+                        "M1": 2.9999999999999995e-10,
+                        "N2": 80000000,
+                        "M2": 2.3999999999999995e-10,
+                        "N3": 20000000,
+                        "M3": 1.1999999999999997e-10,
+                        "N4": 5000000,
+                        "M4": 5.999999999999999e-11,
+                        "N5": 1000000,
+                        "M5": 2.3999999999999995e-11
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 7200.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "N1",
+                            "time": 0.0,
+                            "expected": 200000000
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 0.0,
+                            "expected": 1000000
+                        },
+                        {
+                            "variable": "M1",
+                            "time": 0.0,
+                            "expected": 2.9999999999999995e-10
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 3600.0,
+                            "expected": 413.49249242033244
+                        },
+                        {
+                            "variable": "N2",
+                            "time": 3600.0,
+                            "expected": 2185.3912558754896
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 3600.0,
+                            "expected": 8627.10600036097
+                        },
+                        {
+                            "variable": "N4",
+                            "time": 3600.0,
+                            "expected": 27896.963397602667
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 3600.0,
+                            "expected": 113500.68716088931
+                        },
+                        {
+                            "variable": "N1",
+                            "time": 7200.0,
+                            "expected": 129.6738926321766
+                        },
+                        {
+                            "variable": "N3",
+                            "time": 7200.0,
+                            "expected": 3688.680555994787
+                        },
+                        {
+                            "variable": "N5",
+                            "time": 7200.0,
+                            "expected": 57496.815320082635
+                        },
+                        {
+                            "variable": "f1",
+                            "time": 900.0,
+                            "expected": 4.3661243090561317e+21
+                        },
+                        {
+                            "variable": "psi1",
+                            "time": 900.0,
+                            "expected": 4.3661243090561317e+21
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "canonical_coagulation_day",
+                    "description": "The two figures produced by the upstream TOMAS.jl script: number concentration N_k and mass concentration M_k in each of the five size bins over a 24 h coagulation run, started from the default normal-weighted spectrum. Both decay monotonically as particles coagulate; plot on a log y-axis.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 86400.0
+                    },
+                    "plots": [
+                        {
+                            "id": "number_concentration_decay",
+                            "type": "line",
+                            "description": "Number concentration N_k(t) for the five size bins (upstream TOMAS.jl figure 1).",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "N1",
+                                "label": "number concentration (cm^-3)"
+                            },
+                            "series": [
+                                {
+                                    "name": "N1",
+                                    "variable": "N1"
+                                },
+                                {
+                                    "name": "N2",
+                                    "variable": "N2"
+                                },
+                                {
+                                    "name": "N3",
+                                    "variable": "N3"
+                                },
+                                {
+                                    "name": "N4",
+                                    "variable": "N4"
+                                },
+                                {
+                                    "name": "N5",
+                                    "variable": "N5"
+                                }
+                            ]
+                        },
+                        {
+                            "id": "mass_concentration_decay",
+                            "type": "line",
+                            "description": "Mass concentration M_k(t) for the five size bins (upstream TOMAS.jl figure 2).",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "M1",
+                                "label": "mass concentration (g cm^-3)"
+                            },
+                            "series": [
+                                {
+                                    "name": "M1",
+                                    "variable": "M1"
+                                },
+                                {
+                                    "name": "M2",
+                                    "variable": "M2"
+                                },
+                                {
+                                    "name": "M3",
+                                    "variable": "M3"
+                                },
+                                {
+                                    "name": "M4",
+                                    "variable": "M4"
+                                },
+                                {
+                                    "name": "M5",
+                                    "variable": "M5"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "id": "uniform_initial_collapse",
+                    "description": "Number-concentration decay from a flat initial spectrum (N_k = 5e7 cm^-3 in every bin). Illustrates that the model relaxes toward a self-preserving size distribution regardless of the initial shape.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "N1": 50000000,
+                            "M1": 7.499999999999999e-11,
+                            "N2": 50000000,
+                            "M2": 1.4999999999999997e-10,
+                            "N3": 50000000,
+                            "M3": 2.9999999999999995e-10,
+                            "N4": 50000000,
+                            "M4": 5.999999999999999e-10,
+                            "N5": 50000000,
+                            "M5": 1.1999999999999998e-09
+                        }
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "plots": [
+                        {
+                            "id": "uniform_number_decay",
+                            "type": "line",
+                            "description": "Number concentration N_k(t) from a uniform initial spectrum.",
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "N1",
+                                "label": "number concentration (cm^-3)"
+                            },
+                            "series": [
+                                {
+                                    "name": "N1",
+                                    "variable": "N1"
+                                },
+                                {
+                                    "name": "N2",
+                                    "variable": "N2"
+                                },
+                                {
+                                    "name": "N3",
+                                    "variable": "N3"
+                                },
+                                {
+                                    "name": "N4",
+                                    "variable": "N4"
+                                },
+                                {
+                                    "name": "N5",
+                                    "variable": "N5"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
