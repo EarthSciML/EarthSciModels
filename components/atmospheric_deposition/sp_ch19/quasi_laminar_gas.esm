@@ -1,0 +1,259 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "QuasiLaminarResistanceGas",
+        "description": "ModelingToolkit implementation of the quasi-laminar (boundary-layer) resistance to gaseous dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.17. The quasi-laminar resistance r_b [s/m] is the second of the three series resistances of the gas dry-deposition resistance model (r_a aerodynamic + r_b quasi-laminar + r_c surface) and represents molecular diffusion of the depositing gas across the thin, quasi-laminar sublayer of stagnant air in direct contact with the surface. It is computed as r_b = 5*Sc^(2/3)/u_star, where the Schmidt number Sc = nu/D_g is the ratio of the kinematic viscosity of air nu to the molecular diffusivity D_g of the gas, and u_star is the friction velocity. Slower-diffusing (higher-Sc) gases face a larger boundary-layer resistance, and stronger surface turbulence (higher u_star) thins the sublayer and lowers r_b. Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:143 (`QuasiLaminarResistanceGas` @component). Algebraic (no time derivative) two-equation system: Sc and r_b are the algebraic outputs (the upstream component's computed @variables, migrated as type:state); nu and D_g are the input @parameters and u_star is the upstream input @variable (migrated as type:parameter -- it carries no defining equation and the upstream test suite compiles the component with u_star declared as an input).",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "quasi-laminar-resistance",
+            "resistance-model",
+            "schmidt-number"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-t3wp)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 19: Dry Deposition, Eq. 19.17 (quasi-laminar resistance for gaseous species). John Wiley & Sons, Inc."
+            }
+        ]
+    },
+    "models": {
+        "QuasiLaminarResistanceGas": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.17. John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:143\n\nUpstream `QuasiLaminarResistanceGas` is a flat MTK `@component` -- `System(eqs, t)` with no subsystems -- implementing Seinfeld & Pandis (2006) Eq. 19.17, the quasi-laminar (boundary-layer) resistance for gaseous dry deposition. It has two algebraic equations and no time derivative, so it is migrated as an algebraic (observed-only) system: `system_kind` is left unset (the schema default `ode`), the triangular-algebraic convention of the sibling observed-only migrations sp_ch19/surface_resistance.esm and sp06_ch20/mass_transfer_coeff.esm. With no `D()` equation the runner evaluates Sc and r_b algebraically; the two equations are triangular (Sc depends only on parameters, r_b depends on Sc and u_star), so the system reduces to direct substitution.\n\nVariable mapping. The upstream component declares 2 `@parameters` (nu, D_g) and 3 `@variables` (u_star, Sc, r_b). nu and D_g migrate as `type: parameter`. Sc and r_b are the upstream component's computed output `@variables`, each fixed by one of the two equations -- they migrate as `type: state` with explicit equations, the type:state + explicit-equation convention for algebraic upstream @variables used by the sibling sp_ch19/surface_resistance.esm (whose six intermediate resistances are all algebraic `state`s). u_star is the upstream input `@variable`: it appears in the r_b equation but has no defining equation of its own, and the upstream test suite (seinfeld_pandis_ch19_test.jl test 5.3) compiles the component with `mtkcompile(rb_gas; inputs = [rb_gas_nns.u_star])` -- i.e. u_star is supplied externally. A connected input @variable with no defining equation migrates as `type: parameter` (it is value-supplied, not equation-determined), so u_star is a parameter here. The migrated file therefore has 3 parameters + 2 states + 2 equations; the 2-equation count reproduces the upstream structural test 1.2 invariant `length(equations(rb_gas)) == 2`.\n\nEquations (migrated verbatim from the upstream `eqs` vector). (1) Sc ~ nu / D_g -- the Schmidt number, the ratio of the kinematic viscosity of air to the gas molecular diffusivity. (2) r_b ~ 5 * Sc^(2/3) / u_star -- Eq. 19.17. The exponent 2/3 is encoded as the AST node {op:\"/\",args:[2,3]} (float division, 0.666...), the same integer-ratio-exponent encoding the sibling mass_transfer_coeff.esm uses for its 1/3 cube-root exponent. Sc = nu/D_g is strictly positive for all physical inputs (nu, D_g > 0), so Sc^(2/3) is smooth and real-valued everywhere in the test range -- there is no singular point. Julia's `5 * Sc^(2/3) / u_star` parses left-associatively (^ binds tighter than * and /; * and / are equal-precedence and left-associative) as ((5 * Sc^(2/3)) / u_star); the migrated AST mirrors that exactly with an outer `/` node whose left arg is the `5 * Sc^(2/3)` product.\n\nDefaults. The upstream component's `@parameters` and `@variables` carry no defaults. The migrated defaults are drawn from the upstream test suite's reference conditions (seinfeld_pandis_ch19_test.jl test 2.2): nu = 1.5e-5 m^2/s (kinematic viscosity of air near 298 K), D_g = 1.5e-5 m^2/s (an O3-like molecular diffusivity -- the test comment gives D ~ 1.5e-5 m^2/s for O3, so Sc ~ 1.0), and u_star = 0.4 m/s (the friction velocity used throughout test 2.2). These defaults give Sc = 1.0 and r_b = 5 * 1.0^(2/3) / 0.4 = 12.5 s/m, anchoring the `default_conditions` test exactly at the upstream test 2.2 reference value `expected_r_b ~ 12.5`.\n\nDimensional consistency: Sc = nu/D_g = (m^2/s)/(m^2/s) is dimensionless; r_b = 5 * Sc^(2/3) / u_star has units 1/(m/s) = s/m. The dimensionless Schmidt number carries unit \"1\" (matching the upstream `u\"1\"` and the sibling surface_resistance.esm's dimensionless states). There is no upstream `checks=false`.\n\nTolerance rationale (model-level rel=1e-6): an explicit algebraic system with no ODE integration, matching the sibling observed-only migrations sp_ch19/surface_resistance.esm and sp06_ch20/mass_transfer_coeff.esm (both rel=1e-6). The pinned `expected` values are computed from the same AST the runner evaluates (one division for Sc; a fractional power, a product and a division for r_b); rel=1e-6 covers float64 round-off across that chain with wide margin, far above the sub-ulp cross-binding agreement of pow() between the Julia walker and the Python gate. No assertion in the suite is near zero (Sc and r_b are strictly positive and O(1)-O(50) throughout), so a relative tolerance alone is sufficient.\n\nThe inline `tests` block reproduces both numeric cases of the upstream seinfeld_pandis_ch19_test.jl test 2.2 'Eq. 19.17: Quasi-Laminar Resistance for Gases' -- `default_conditions` (Sc=1.0 -> r_b=12.5, the test's first assertion) and `so2_higher_schmidt` (Sc=1.3 -> r_b = 5*1.3^(2/3)/0.4 = 14.889, the test's second assertion) -- along with the test 2.2 monotonicity check (higher Sc gives higher r_b) and the test 3.1 positivity check (r_b > 0). It adds u_star sensitivity (`strong_turbulence`, `calm_conditions`, and `inverse_ustar_law` which verifies the r_b proportional-to-1/u_star law), D_g sensitivity (`fast_diffusing_gas`, `slow_diffusing_gas`), and the `schmidt_via_low_diffusivity` / `schmidt_via_high_viscosity` pair, which reach the same Sc=2.0 by halving D_g versus doubling nu and so confirm Sc depends only on the ratio nu/D_g and that both parameters are correctly wired into the Schmidt-number equation.\n\nThe `examples` block reproduces the two headline sensitivities of Eq. 19.17 as 1-D parameter sweeps: `rb_vs_friction_velocity` (the r_b proportional-to-1/u_star decay as surface turbulence thins the laminar sublayer) and `rb_vs_gas_diffusivity` (r_b falling as the gas molecular diffusivity rises, i.e. faster-diffusing gases face less boundary-layer resistance, swept across the realistic D_g range of common depositing trace gases)."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "nu": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.5e-5,
+                    "description": "Kinematic viscosity of air (upstream input @parameter; default 1.5e-5 m^2/s is the value for air near 298 K used in the upstream test suite)"
+                },
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.5e-5,
+                    "description": "Molecular diffusivity of the depositing gas in air (upstream input @parameter; default 1.5e-5 m^2/s is an O3-like diffusivity giving a Schmidt number of 1.0)"
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.4,
+                    "description": "Friction velocity (upstream input @variable with no defining equation, migrated as a value-supplied parameter; default 0.4 m/s is the reference value used in the upstream test 2.2)"
+                },
+                "Sc": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Schmidt number Sc = nu/D_g, the dimensionless ratio of momentum to mass diffusivity (algebraic output)"
+                },
+                "r_b": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Quasi-laminar (boundary-layer) resistance for the gas, Eq. 19.17 (algebraic output)"
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Schmidt number Sc = nu/D_g -- the ratio of the kinematic viscosity of air to the molecular diffusivity of the depositing gas. Strictly positive for all physical inputs.",
+                    "lhs": "Sc",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["nu", "D_g"]
+                    }
+                },
+                {
+                    "_comment": "Eq. 19.17 -- quasi-laminar resistance for gases, r_b = 5 * Sc^(2/3) / u_star. The exponent 2/3 is the AST node {op:/,args:[2,3]} (float division). Julia's left-associative `5 * Sc^(2/3) / u_star` parses as (5*Sc^(2/3))/u_star, mirrored here by the outer / node over the 5*Sc^(2/3) product.",
+                    "lhs": "r_b",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    5,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "Sc",
+                                            { "op": "/", "args": [2, 3] }
+                                        ]
+                                    }
+                                ]
+                            },
+                            "u_star"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Component defaults -- nu = D_g = 1.5e-5 m^2/s (an O3-like gas in air near 298 K) and u_star = 0.4 m/s. The Schmidt number is Sc = nu/D_g = 1.0 and the quasi-laminar resistance is r_b = 5 * 1.0^(2/3) / 0.4 = 12.5 s/m. Reproduces the first numeric assertion of the upstream seinfeld_pandis_ch19_test.jl test 2.2 (`expected_r_b ~ 12.5` for Sc=1, u_star=0.4) and the test 3.1 positivity check (r_b > 0). r_b is also asserted at t = 1 to confirm the algebraic system is time-invariant.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.0 },
+                        { "variable": "r_b", "time": 0.0, "expected": 12.5 },
+                        { "variable": "r_b", "time": 1.0, "expected": 12.5 }
+                    ]
+                },
+                {
+                    "id": "so2_higher_schmidt",
+                    "description": "SO2-like gas at 298 K with a Schmidt number of 1.3. D_g is overridden to nu/1.3 = 1.1538e-5 m^2/s -- within the measured range of SO2 molecular diffusivity in air -- so Sc = nu/D_g = 1.3 exactly. The resistance r_b = 5 * 1.3^(2/3) / 0.4 = 14.889 s/m. Reproduces the second numeric assertion of the upstream test 2.2 (`r_b_SO2 ~ 5 * 1.3^(2/3) / 0.4`) and its monotonicity check `r_b_SO2 > expected_r_b` -- a slower-diffusing (higher-Sc) gas has a larger quasi-laminar resistance than the Sc=1.0 default case (14.889 > 12.5).",
+                    "parameter_overrides": { "D_g": 1.1538461538461538e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.3 },
+                        { "variable": "r_b", "time": 0.0, "expected": 14.88923031495541 }
+                    ]
+                },
+                {
+                    "id": "strong_turbulence",
+                    "description": "Strong surface turbulence: u_star raised to 1.0 m/s (from the 0.4 m/s default), nu and D_g at default so Sc = 1.0. Higher friction velocity thins the quasi-laminar sublayer, lowering r_b to 5 * 1.0^(2/3) / 1.0 = 5.0 s/m. Isolates the u_star dependence of Eq. 19.17.",
+                    "parameter_overrides": { "u_star": 1.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.0 },
+                        { "variable": "r_b", "time": 0.0, "expected": 5.0 }
+                    ]
+                },
+                {
+                    "id": "calm_conditions",
+                    "description": "Calm, weakly turbulent conditions: u_star lowered to 0.1 m/s, nu and D_g at default so Sc = 1.0. The thicker quasi-laminar sublayer raises r_b to 5 * 1.0^(2/3) / 0.1 = 50.0 s/m -- four times the default 12.5 s/m. Exercises the lower end of the friction-velocity range.",
+                    "parameter_overrides": { "u_star": 0.1 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.0 },
+                        { "variable": "r_b", "time": 0.0, "expected": 50.0 }
+                    ]
+                },
+                {
+                    "id": "inverse_ustar_law",
+                    "description": "Verifies the r_b proportional-to-1/u_star law of Eq. 19.17: doubling the friction velocity to u_star = 0.8 m/s (from the 0.4 m/s default) exactly halves the resistance, r_b = 12.5 / 2 = 6.25 s/m. Sc is unchanged at 1.0 because only u_star is overridden.",
+                    "parameter_overrides": { "u_star": 0.8 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "r_b", "time": 0.0, "expected": 6.25 }
+                    ]
+                },
+                {
+                    "id": "fast_diffusing_gas",
+                    "description": "A fast-diffusing gas: D_g raised to 3.0e-5 m^2/s (twice the default), nu and u_star at default. The Schmidt number falls to Sc = nu/D_g = 0.5, and r_b = 5 * 0.5^(2/3) / 0.4 = 7.875 s/m -- below the Sc=1.0 default of 12.5 s/m. A more mobile gas crosses the quasi-laminar sublayer more easily. Isolates the D_g dependence.",
+                    "parameter_overrides": { "D_g": 3.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 0.5 },
+                        { "variable": "r_b", "time": 0.0, "expected": 7.874506561842957 }
+                    ]
+                },
+                {
+                    "id": "slow_diffusing_gas",
+                    "description": "A slow-diffusing gas: D_g lowered to 1.0e-5 m^2/s, nu and u_star at default. The Schmidt number rises to Sc = nu/D_g = 1.5, and r_b = 5 * 1.5^(2/3) / 0.4 = 16.380 s/m -- above the Sc=1.0 default of 12.5 s/m. Confirms r_b increases with Sc, consistent with the upstream test 2.2 monotonicity check.",
+                    "parameter_overrides": { "D_g": 1.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.5 },
+                        { "variable": "r_b", "time": 0.0, "expected": 16.3796337138056 }
+                    ]
+                },
+                {
+                    "id": "schmidt_via_low_diffusivity",
+                    "description": "Schmidt number Sc = 2.0 reached by halving the gas diffusivity: D_g overridden to 7.5e-6 m^2/s with nu at the 1.5e-5 default, so Sc = nu/D_g = 2.0. With u_star at default, r_b = 5 * 2.0^(2/3) / 0.4 = 19.843 s/m. Paired with schmidt_via_high_viscosity to confirm the Schmidt-number equation depends only on the ratio nu/D_g.",
+                    "parameter_overrides": { "D_g": 7.5e-6 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 2.0 },
+                        { "variable": "r_b", "time": 0.0, "expected": 19.842513149602492 }
+                    ]
+                },
+                {
+                    "id": "schmidt_via_high_viscosity",
+                    "description": "Schmidt number Sc = 2.0 reached by doubling the kinematic viscosity instead: nu overridden to 3.0e-5 m^2/s with D_g at the 1.5e-5 default, so Sc = nu/D_g = 2.0 -- the same Schmidt number as schmidt_via_low_diffusivity, reached by the opposite parameter route. r_b = 5 * 2.0^(2/3) / 0.4 = 19.843 s/m, identical to that test, confirming Sc and r_b depend only on the ratio nu/D_g and that both nu and D_g are correctly wired into the Schmidt-number equation.",
+                    "parameter_overrides": { "nu": 3.0e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 2.0 },
+                        { "variable": "r_b", "time": 0.0, "expected": 19.842513149602492 }
+                    ]
+                },
+                {
+                    "id": "combined_override",
+                    "description": "All three inputs overridden together: nu = 1.8e-5 m^2/s, D_g = 1.2e-5 m^2/s (so Sc = 1.5), and u_star = 0.6 m/s. The resistance r_b = 5 * 1.5^(2/3) / 0.6 = 10.920 s/m. Exercises the full equation chain with every parameter off its default, guarding against any equation that is stuck at a default value.",
+                    "parameter_overrides": { "nu": 1.8e-5, "D_g": 1.2e-5, "u_star": 0.6 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "Sc", "time": 0.0, "expected": 1.5 },
+                        { "variable": "r_b", "time": 0.0, "expected": 10.919755809203735 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rb_vs_friction_velocity",
+                    "description": "Quasi-laminar resistance r_b as a function of friction velocity u_star, swept linearly from 0.1 to 1.2 m/s -- the range spanning calm to strongly turbulent surface-layer conditions -- at the component-default gas (nu = D_g = 1.5e-5 m^2/s, Schmidt number 1.0). r_b falls as 1/u_star (Eq. 19.17): stronger surface turbulence thins the quasi-laminar sublayer and lowers the boundary-layer resistance, from 50 s/m at u_star = 0.1 m/s down to about 4.2 s/m at u_star = 1.2 m/s.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_star",
+                                "range": { "start": 0.1, "stop": 1.2, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rb_vs_ustar",
+                            "type": "line",
+                            "description": "Quasi-laminar resistance r_b as a function of friction velocity u_star (Eq. 19.17), showing the 1/u_star decay as surface turbulence thins the laminar sublayer.",
+                            "x": { "variable": "u_star", "label": "Friction velocity (m/s)" },
+                            "y": { "variable": "r_b", "label": "Quasi-laminar resistance (s/m)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "rb_vs_gas_diffusivity",
+                    "description": "Quasi-laminar resistance r_b as a function of the gas molecular diffusivity D_g, swept linearly from 1.0e-5 to 2.5e-5 m^2/s -- the realistic range of molecular diffusivity in air for common depositing trace gases (SO2, HNO3, O3, NO2, H2O) -- at the default kinematic viscosity nu = 1.5e-5 m^2/s and friction velocity u_star = 0.4 m/s. As D_g rises the Schmidt number Sc = nu/D_g falls and r_b decreases following the Sc^(2/3) law of Eq. 19.17: faster-diffusing gases cross the quasi-laminar sublayer more easily and face less boundary-layer resistance.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_g",
+                                "range": { "start": 1.0e-5, "stop": 2.5e-5, "count": 25, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rb_vs_dg",
+                            "type": "line",
+                            "description": "Quasi-laminar resistance r_b as a function of gas molecular diffusivity D_g (Eq. 19.17), decreasing as the Schmidt number falls for faster-diffusing gases.",
+                            "x": { "variable": "D_g", "label": "Gas molecular diffusivity (m^2/s)" },
+                            "y": { "variable": "r_b", "label": "Quasi-laminar resistance (s/m)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
