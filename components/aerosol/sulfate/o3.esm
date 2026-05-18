@@ -1,0 +1,401 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "SulfateFormationO3",
+        "description": "Aqueous-phase S(IV)→S(VI) oxidation rate by dissolved ozone — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 7, Section 7.5.1, Eqs. 7.79-7.80. Dissolved S(IV) (sulfur in the +4 oxidation state) partitions in cloud and fog droplets among three species — un-ionized SO₂·H₂O, bisulfite HSO₃⁻, and sulfite SO₃²⁻ — set by the S(IV) acid-dissociation equilibria. Each is oxidized to S(VI) (sulfate) by dissolved ozone through a parallel second-order channel, and the total oxidation rate is their sum: R_O3 = (k0·[SO₂·H₂O] + k1·[HSO₃⁻] + k2·[SO₃²⁻])·[O₃(aq)], first-order in each S(IV) species and first-order in dissolved O₃. The three rate constants climb steeply with the degree of ionization — k0 = 24, k1 = 370, k2 = 1.5×10⁶ m³ mol⁻¹ s⁻¹ — so the channel is strongly pH-dependent: at high droplet pH the sulfite term dominates and oxidation is fast, at low pH it is slow. The S(IV)+O₃ pathway is one of the principal in-cloud sulfate-production routes. Migrated from Aerosol.jl SulfateFormationO3.",
+        "tags": [
+            "aerosol",
+            "seinfeld_pandis_ch7",
+            "sulfate-formation",
+            "aqueous-chemistry"
+        ]
+    },
+    "models": {
+        "SulfateFormationO3": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 7 (Chemistry of the Atmospheric Aqueous Phase), Section 7.5.1. S(IV) oxidation by ozone: Eqs. 7.79-7.80.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/sulfate_formation.jl:78\n\nUpstream `SulfateFormationO3` is an MTK `@component` (no parameterization; default instance name `:SulfateO3`). It declares three symbolic `@constants` — `k0`, `k1`, `k2` (the three S(IV)+O3 channel rate constants) — and five scalar `@variables`: `SO2_aq`, `HSO3_minus`, `SO3_2minus`, `O3_aq` (externally-supplied inputs) and `R_O3` (the oxidation-rate output). The single equation is `R_O3 ~ (k0*SO2_aq + k1*HSO3_minus + k2*SO3_2minus) * O3_aq` — Eq. 7.79-7.80 of Seinfeld & Pandis (2006) Ch. 7, the total aqueous S(IV)+O3 oxidation rate summed over the three dissolved-S(IV) species. The constructor returns `System(eqs, t; name)`.\n\nequations-feature classification: SulfateFormationO3 has no `D()` time-derivative anywhere — it is a purely-algebraic component. Four of its five `@variables` (`SO2_aq`, `HSO3_minus`, `SO3_2minus`, `O3_aq`) are connected inputs with no defining equation; only `R_O3` is defined by an equation. The migration-tracker `features` tag is `equations` (the rate-law RHS references upstream `@variables`, not parameters-only — contrast the sibling `observed`-tagged timescale migrations `gas_diffusion.esm` / `aqueous_eq.esm` whose RHS is parameter-only). It therefore migrates with the four input `@variables` re-typed as `parameter`s and the output `R_O3` kept as a `type: state` carrying its defining equation in the `equations` array — one equation per state, the well-posed standalone form. This matches the direct same-source-file sibling `components/aerosol/sulfate/h2o2.esm` (SulfateFormationH2O2, src/sulfate_formation.jl:132 — the H2O2 oxidation pathway, identically structured: connected-input `@variables` re-typed as parameters, lone algebraic output `R_H2O2` kept as `type: state` with one entry in `equations`) and the recent equations-feature migrations `mean_free_path.esm`, `gas_scavenging_coeff.esm` and `bet.esm`. The .esm carries one entry in `equations`, preserving the upstream structural invariant `length(equations(sys)) >= 1` checked by the `SulfateFormation structure` testitem (test/aqueous_chemistry_test.jl:77-85).\n\n@constants to parameters: the upstream `@constants` are `k0 = 2.4e4 / 1000.0`, `k1 = 3.7e5 / 1000.0` and `k2 = 1.5e9 / 1000.0`. The .esm schema carries no per-model `constants` block, so all three migrate as `type: parameter` with the evaluated numeric default (`24.0`, `370.0` and `1500000.0` — all exact in float64). The literal divisions are molarity->SI unit conversions: the literature rate constants are 2.4e4, 3.7e5 and 1.5e9 M^-1 s^-1, and 1 M^-1 = 1e-3 m^3/mol, giving k0 = 24.0, k1 = 370.0 and k2 = 1.5e6 m^3/mol/s. The upstream module-level `const K0_O3 = 2.4e4`, `const K1_O3 = 3.7e5` and `const K2_O3 = 1.5e9` are the same constants in the original M-based units (the upstream `rate constants` testset asserts `K0_O3 ~ 2.4e4`, `K1_O3 ~ 3.7e5`, `K2_O3 ~ 1.5e9` — test/aqueous_chemistry_test.jl:127-129).\n\nDefaults authored: the four input `@variables` carry no upstream defaults (they are connected externally in the full `SulfateFormation` / `CloudChemistry` model). Physically-grounded standalone defaults are authored as representative cloud-droplet aqueous-phase concentrations (all SI mol/m^3), at a moderately-acidic cloud pH (~4-5) where bisulfite dominates the S(IV) speciation, and chosen so each of the three oxidation channels makes a non-negligible contribution to the default rate — `SO2_aq = 1.0e-6 mol/m^3` (un-ionized SO2.H2O, ~ Henry's-law equilibrium with ~1 ppb gas-phase SO2 at ~pH 4, T = 298 K — Aerosol.jl docs/src/aqueous_chemistry.md and test/aqueous_chemistry_test.jl:255-281), `HSO3_minus = 1.0e-4 mol/m^3` (bisulfite, the dominant S(IV) species at cloud pH 4-5), `SO3_2minus = 1.0e-7 mol/m^3` (sulfite, a trace species at cloud pH) and `O3_aq = 1.0e-6 mol/m^3` (dissolved O3, ~ Henry's-law equilibrium with tens of ppb gas-phase O3; the Aerosol.jl docs use p_O3 = 50 ppb with H_O3 ~ 1.1e-2 M atm^-1). At these defaults the three channel contributions to the rate bracket k0*SO2_aq + k1*HSO3_minus + k2*SO3_2minus are 2.4e-5, 3.7e-2 and 0.15 s^-1 respectively (the sulfite term largest despite SO3^2- being the most dilute species — the k2 >> k1 >> k0 ordering at work), summing to 0.187024 s^-1, giving R_O3 = 0.187024 * 1.0e-6 = 1.87024e-7 mol/m^3/s.\n\nTests authored from physics: the upstream `aqueous_chemistry_test.jl` carries only a structural test for `SulfateFormationO3` (the `SulfateFormation structure` testitem loops the five pathway components and asserts `sys isa System` and `length(equations(sys)) >= 1`); there is no numerical test of `R_O3`. The inline `tests` block is therefore authored from the closed-form Eq. 7.79 — pinning the exact rate at the default parameterization (at both t = 0 and t = 1, since the trajectory is algebraic and time-invariant); isolating and pinning each of the three rate-constant channels (k0, k1, k2) in turn by zeroing the other two S(IV) species; a wiring sentinel that overrides k1 to confirm the rate constant is a live, linearly-acting parameter; the first-order (linear) dependence on dissolved O3; and the two physical zero limits — no oxidant (O3_aq = 0) and no reductant (all S(IV) = 0).\n\nPhysics note — pH dependence: dissolved S(IV) in a cloud or fog droplet is distributed among un-ionized SO2.H2O, bisulfite HSO3- and sulfite SO3^2- by the S(IV) acid-dissociation equilibria, and as droplet pH rises the speciation shifts from SO2.H2O toward HSO3- and then SO3^2-. The three O3 rate constants rise sharply with the degree of ionization (k2 ~ 4000x k1 ~ 62000x k0) because the more-ionized, more-nucleophilic S(IV) species react far faster with ozone. The combination — speciation shifting toward sulfite with pH, and sulfite reacting fastest — makes the S(IV)+O3 channel strongly pH-dependent: fast at high droplet pH (sulfite term dominant), slow at low pH. Within this standalone component the three S(IV) concentrations are independent input parameters, so the pH dependence is not built in here — it emerges only when the component is coupled to the S(IV) dissociation equilibria in the full `SulfateFormation` model; the `sulfite_pathway_isolated` test makes the dominance of the k2 channel explicit.\n\nTolerance rationale (model-level rel = 1e-9): the model is a single closed-form algebraic expression — three multiplications, a 3-term sum and one final multiplication, with no division, power or transcendental function — so float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel = 1e-9 leaves ample headroom while still catching a real regression, and matches the same-directory sibling h2o2.esm (model rel = 1e-9). The two zero-rate tests (`zero_dissolved_ozone_halts_oxidation`, `zero_s_iv_halts_oxidation`) add a per-assertion abs = 1e-12 (the runner's integrator floor) so a stuck-nonzero regression in the rate product cannot pass on the relative branch — matching h2o2.esm's `zero_bisulfite_zero_rate` test.\n\nUnit balance (verified): the single equation balances dimensionally. k0/k1/k2 in m^3/mol/s; SO2_aq/HSO3_minus/SO3_2minus/O3_aq in mol/m^3; each product k_i*[S(IV)_i] = (m^3/mol/s)*(mol/m^3) = 1/s; the 3-term sum is 1/s; (sum)*O3_aq = (1/s)*(mol/m^3) = mol/m^3/s = R_O3. SI throughout; no unit conversion at parse or runtime.\n\nNot migrated: `sulfate_formation.jl` defines five S(IV)-oxidation pathway `@component`s — `SulfateFormationO3`, `SulfateFormationH2O2`, `SulfateFormationFe`, `SulfateFormationMn`, `SulfateFormationFeMn` — plus the coupling component `SulfateFormation` (src/sulfate_formation.jl:349) that connects them. Only `SulfateFormationO3` (src/sulfate_formation.jl:78) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/sulfate/` (h2o2.esm, fe.esm and mn.esm are already on `main`)."
+            },
+            "variables": {
+                "k0": {
+                    "type": "parameter",
+                    "units": "m^3/mol/s",
+                    "default": 24.0,
+                    "description": "Rate constant for the SO₂·H₂O + O₃ oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 2.4e4/1000.0 = 24.0 — the literature rate constant 2.4×10⁴ M⁻¹ s⁻¹ (module constant K0_O3) converted to SI (1 M⁻¹ = 1e-3 m³/mol). The smallest of the three rate constants: un-ionized SO₂·H₂O is the least reactive S(IV) species toward ozone."
+                },
+                "k1": {
+                    "type": "parameter",
+                    "units": "m^3/mol/s",
+                    "default": 370.0,
+                    "description": "Rate constant for the HSO₃⁻ + O₃ oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 3.7e5/1000.0 = 370.0 — the literature rate constant 3.7×10⁵ M⁻¹ s⁻¹ (module constant K1_O3) converted to SI (1 M⁻¹ = 1e-3 m³/mol). Bisulfite reacts with ozone ~15× faster than un-ionized SO₂·H₂O."
+                },
+                "k2": {
+                    "type": "parameter",
+                    "units": "m^3/mol/s",
+                    "default": 1500000.0,
+                    "description": "Rate constant for the SO₃²⁻ + O₃ oxidation channel (Eq. 7.79). Upstream MTK `@constants` value 1.5e9/1000.0 = 1500000.0 — the literature rate constant 1.5×10⁹ M⁻¹ s⁻¹ (module constant K2_O3) converted to SI (1 M⁻¹ = 1e-3 m³/mol). By far the largest of the three rate constants (~4000× k1, ~62000× k0): doubly-ionized sulfite is the most reactive S(IV) species toward ozone, which is why the S(IV)+O₃ channel accelerates so sharply as rising pH shifts S(IV) speciation toward SO₃²⁻."
+                },
+                "SO2_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Aqueous-phase un-ionized sulfur-dioxide concentration [SO₂·H₂O] dissolved in the cloud droplet — the dissolved-gas form of S(IV), in Henry's-law equilibrium with gas-phase SO₂, and the least-dissociated and least-reactive of the three S(IV) species toward ozone (rate constant k0). Default 1.0e-6 mol/m³, a representative cloud-droplet value (≈ the SO₂·H₂O in equilibrium with ~1 ppb gas-phase SO₂ at ~pH 4, T = 298 K). Upstream an externally-connected `@variable`; re-typed as a parameter for this standalone .esm."
+                },
+                "HSO3_minus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Bisulfite-ion concentration [HSO₃⁻] dissolved in the cloud droplet — the first dissociation product of S(IV) (SO₂·H₂O ⇌ HSO₃⁻ + H⁺) and the dominant dissolved-S(IV) species over cloud-water pH ~4-5. Default 1.0e-4 mol/m³, representative of cloud-droplet conditions where HSO₃⁻ dominates the S(IV) speciation. Upstream an externally-connected `@variable`; re-typed as a parameter here."
+                },
+                "SO3_2minus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-07,
+                    "description": "Sulfite-ion concentration [SO₃²⁻] dissolved in the cloud droplet — the second dissociation product of S(IV) (HSO₃⁻ ⇌ SO₃²⁻ + H⁺), a trace species at cloud pH but by far the most reactive toward ozone (rate constant k2 = 1.5×10⁶ m³ mol⁻¹ s⁻¹, ~4000× k1). Default 1.0e-7 mol/m³, a representative trace cloud-droplet level. Upstream an externally-connected `@variable`; re-typed as a parameter here."
+                },
+                "O3_aq": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1e-06,
+                    "description": "Dissolved (aqueous-phase) ozone concentration [O₃(aq)] in the cloud droplet — the oxidant, in Henry's-law equilibrium with gas-phase O₃. The S(IV)+O₃ rate is first-order in [O₃(aq)], so R_O3 scales linearly with this input. Default 1.0e-6 mol/m³, a representative cloud-droplet value (≈ dissolved O₃ in equilibrium with tens of ppb gas-phase O₃; the Aerosol.jl docs use p_O3 = 50 ppb with H_O3 ≈ 1.1e-2 M atm⁻¹). Upstream an externally-connected `@variable`; re-typed as a parameter here."
+                },
+                "R_O3": {
+                    "type": "state",
+                    "units": "mol/m^3/s",
+                    "description": "Aqueous S(IV)→S(VI) oxidation rate by the O₃ pathway (Eqs. 7.79-7.80): R_O3 = (k0·[SO₂·H₂O] + k1·[HSO₃⁻] + k2·[SO₃²⁻])·[O₃(aq)]. The sum of three parallel second-order channels — SO₂·H₂O + O₃, HSO₃⁻ + O₃, SO₃²⁻ + O₃ — each first-order in its S(IV) species and first-order in dissolved O₃. One of the principal in-cloud sulfate-formation pathways, dominant at elevated droplet pH where the sulfite channel runs fast. Defined by one algebraic equation (no time derivative); encoded `type: state`."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 7.79-7.80 (Seinfeld & Pandis 2006, Ch. 7, Section 7.5.1) — total aqueous S(IV)+O3 oxidation rate summed over the three dissolved-S(IV) species: R_O3 = (k0·[SO2·H2O] + k1·[HSO3-] + k2·[SO3^2-])·[O3(aq)]. R_O3 depends only on parameters, so it is constant in time.",
+                    "lhs": "R_O3",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k0",
+                                            "SO2_aq"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k1",
+                                            "HSO3_minus"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "k2",
+                                            "SO3_2minus"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "O3_aq"
+                        ]
+                    }
+                }
+            ],
+            "tolerance": {
+                "rel": 1e-09
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Eq. 7.79 at the representative cloud-droplet default parameterization (SO2_aq = 1e-6, HSO3_minus = 1e-4, SO3_2minus = 1e-7, O3_aq = 1e-6 mol/m^3). The three channel contributions to the rate bracket are k0*SO2_aq = 2.4e-5, k1*HSO3_minus = 3.7e-2 and k2*SO3_2minus = 0.15 s^-1; their sum 0.187024 s^-1 times [O3(aq)] gives R_O3 = 1.87024e-7 mol/m^3/s. The output is algebraic and time-invariant, so the same value is asserted at t = 0 and t = 1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 1.87024e-07
+                        },
+                        {
+                            "variable": "R_O3",
+                            "time": 1.0,
+                            "expected": 1.87024e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "so2_pathway_isolated",
+                    "description": "Isolates the SO2.H2O + O3 channel by zeroing the bisulfite and sulfite inputs (HSO3_minus = SO3_2minus = 0). Only the k0 term survives: R_O3 = k0*SO2_aq*O3_aq = 24*1e-6*1e-6 = 2.4e-11 mol/m^3/s. Pins the smallest of the three rate constants (k0 = 24 m^3/mol/s) — un-ionized SO2.H2O is the least reactive S(IV) species toward ozone.",
+                    "parameter_overrides": {
+                        "HSO3_minus": 0.0,
+                        "SO3_2minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 2.4e-11
+                        }
+                    ]
+                },
+                {
+                    "id": "bisulfite_pathway_isolated",
+                    "description": "Isolates the HSO3- + O3 channel by zeroing the SO2.H2O and sulfite inputs (SO2_aq = SO3_2minus = 0). Only the k1 term survives: R_O3 = k1*HSO3_minus*O3_aq = 370*1e-4*1e-6 = 3.7e-8 mol/m^3/s. Pins the bisulfite rate constant (k1 = 370 m^3/mol/s). At typical cloud pH, where HSO3- is the dominant dissolved-S(IV) species, this channel carries much of the oxidation.",
+                    "parameter_overrides": {
+                        "SO2_aq": 0.0,
+                        "SO3_2minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 3.7e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "sulfite_pathway_isolated",
+                    "description": "Isolates the SO3^2- + O3 channel by zeroing the SO2.H2O and bisulfite inputs (SO2_aq = HSO3_minus = 0). Only the k2 term survives: R_O3 = k2*SO3_2minus*O3_aq = 1.5e6*1e-7*1e-6 = 1.5e-7 mol/m^3/s. Pins the largest rate constant (k2 = 1.5e6 m^3/mol/s) — even at the trace default SO3_2minus = 1e-7 mol/m^3 this channel exceeds the bisulfite channel, illustrating why oxidation accelerates sharply as rising pH shifts S(IV) speciation toward sulfite.",
+                    "parameter_overrides": {
+                        "SO2_aq": 0.0,
+                        "HSO3_minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 1.5e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "bisulfite_rate_constant_doubled",
+                    "description": "Wiring sentinel for the k1 rate constant: with only the bisulfite channel active (SO2_aq = SO3_2minus = 0), overriding k1 from its default 370 to 740 m^3/mol/s doubles the rate to R_O3 = 740*1e-4*1e-6 = 7.4e-8 mol/m^3/s — exactly twice the bisulfite_pathway_isolated value. Confirms k1 is a live, linearly-acting parameter rather than a frozen literal.",
+                    "parameter_overrides": {
+                        "k1": 740.0,
+                        "SO2_aq": 0.0,
+                        "SO3_2minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 7.4e-08
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_linear_in_dissolved_ozone",
+                    "description": "Eq. 7.79 is first-order (linear) in dissolved ozone — [O3(aq)] multiplies the whole S(IV) rate bracket and is absent from it. Doubling O3_aq from the 1e-6 default to 2e-6 mol/m^3, with all S(IV) inputs at their defaults, exactly doubles the rate from 1.87024e-7 to R_O3 = 3.74048e-7 mol/m^3/s. Verifies the linear dependence on the oxidant concentration.",
+                    "parameter_overrides": {
+                        "O3_aq": 2e-06
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 3.74048e-07
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_dissolved_ozone_halts_oxidation",
+                    "description": "Limiting case: with no dissolved oxidant (O3_aq = 0) the S(IV)+O3 channel is shut off and R_O3 = 0 exactly — the rate bracket k0*SO2_aq + k1*HSO3_minus + k2*SO3_2minus is finite and, multiplied by +0.0, gives exactly +0.0 in IEEE-754. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the rate product.",
+                    "parameter_overrides": {
+                        "O3_aq": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "zero_s_iv_halts_oxidation",
+                    "description": "Limiting case: with no dissolved S(IV) reductant present (SO2_aq = HSO3_minus = SO3_2minus = 0) there is nothing for ozone to oxidize and R_O3 = 0 exactly — every term of the rate bracket vanishes, so (0)*O3_aq = +0.0 in IEEE-754. Together with zero_dissolved_ozone_halts_oxidation this pins both physical zero limits of the bilinear rate law; a tight per-assertion absolute tolerance guards against a stuck-nonzero regression.",
+                    "parameter_overrides": {
+                        "SO2_aq": 0.0,
+                        "HSO3_minus": 0.0,
+                        "SO3_2minus": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "R_O3",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rate_vs_dissolved_ozone",
+                    "description": "The S(IV)+O3 oxidation rate is first-order in dissolved ozone (Eq. 7.79). Sweeping O3_aq over 1e-8-1e-5 mol/m^3 — the span of dissolved-ozone concentrations in cloud droplets in Henry's-law equilibrium with sub-ppb to hundreds-of-ppb gas-phase O3 — at the default S(IV) speciation traces the straight line R_O3 = (k0*SO2_aq + k1*HSO3_minus + k2*SO3_2minus)*[O3(aq)]: the rate climbs in direct proportion to the oxidant.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "O3_aq",
+                                "range": {
+                                    "start": 1e-08,
+                                    "stop": 1e-05,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_o3_aq",
+                            "type": "line",
+                            "description": "S(IV)+O3 oxidation rate R_O3 as a function of dissolved-ozone concentration O3_aq (at the default S(IV) speciation).",
+                            "x": {
+                                "variable": "O3_aq",
+                                "label": "Dissolved ozone concentration [O3(aq)] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_O3",
+                                "label": "S(IV)+O3 oxidation rate R_O3 (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_vs_bisulfite",
+                    "description": "The bisulfite-channel contribution to the rate scales linearly with [HSO3-]. Sweeping HSO3_minus over 1e-6-1e-3 mol/m^3 — trace to S(IV)-rich cloud-droplet conditions — with the other inputs at their defaults shows R_O3 rising as the k1*HSO3_minus term grows; at the high end the bisulfite channel overtakes the fixed sulfite contribution.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HSO3_minus",
+                                "range": {
+                                    "start": 1e-06,
+                                    "stop": 0.001,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_hso3_minus",
+                            "type": "line",
+                            "description": "S(IV)+O3 oxidation rate R_O3 as a function of bisulfite concentration HSO3_minus (at the default SO2.H2O, sulfite and dissolved-O3 inputs).",
+                            "x": {
+                                "variable": "HSO3_minus",
+                                "label": "Bisulfite concentration [HSO3-] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_O3",
+                                "label": "S(IV)+O3 oxidation rate R_O3 (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "rate_vs_sulfite",
+                    "description": "The sulfite channel carries the largest rate constant (k2 = 1.5e6 m^3/mol/s). Sweeping SO3_2minus over 1e-9-1e-5 mol/m^3 — the range over which rising droplet pH shifts S(IV) speciation toward sulfite — with the other inputs at their defaults shows R_O3 climbing steeply through the k2*SO3_2minus term: even small increases in sulfite drive large gains in the oxidation rate, the mechanism behind the strong pH-dependence of in-cloud S(IV)+O3 oxidation.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "SO3_2minus",
+                                "range": {
+                                    "start": 1e-09,
+                                    "stop": 1e-05,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "rate_vs_so3_2minus",
+                            "type": "line",
+                            "description": "S(IV)+O3 oxidation rate R_O3 as a function of sulfite concentration SO3_2minus (at the default SO2.H2O, bisulfite and dissolved-O3 inputs).",
+                            "x": {
+                                "variable": "SO3_2minus",
+                                "label": "Sulfite concentration [SO3^2-] (mol/m^3)"
+                            },
+                            "y": {
+                                "variable": "R_O3",
+                                "label": "S(IV)+O3 oxidation rate R_O3 (mol/m^3/s)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
