@@ -1,0 +1,399 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AerodynamicResistance",
+        "description": "ModelingToolkit implementation of the aerodynamic resistance to dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.14. Computes the aerodynamic resistance r_a [s/m] -- the resistance to turbulent transport of a depositing species through the surface layer, from the reference height z down to the roughness height z_0 -- under neutral atmospheric stability. Eq. 19.14, r_a = ln(z/z_0)/(kappa*u_star), is the integral of the neutral-stability logarithmic wind profile: r_a falls inversely with the friction velocity u_star (stronger turbulence carries the species down faster) and with the logarithm of the height ratio z/z_0 (a rougher surface, larger z_0, is more efficiently coupled to the atmosphere and presents less aerodynamic resistance). Migrated from AtmosphericDeposition.jl@e4468c79 src/seinfeld_pandis_ch19.jl:106 (the AerodynamicResistance @component). Purely algebraic: no differential states, a single explicit equation.",
+        "tags": [
+            "atmospheric_deposition",
+            "seinfeld-pandis",
+            "sp-ch19",
+            "dry-deposition",
+            "aerodynamic-resistance",
+            "neutral-stability"
+        ],
+        "created": "2026-05-17T00:00:00Z",
+        "authors": [
+            "AtmosphericDeposition.jl contributors",
+            "EarthSciModels migration (esm-x8pg)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Chapter 19: Dry Deposition, Eq. 19.14. John Wiley & Sons, Inc."
+            }
+        ]
+    },
+    "models": {
+        "AerodynamicResistance": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.14 (aerodynamic resistance, neutral stability). John Wiley & Sons, Inc.",
+                "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/seinfeld_pandis_ch19.jl:106\n\nUpstream `AerodynamicResistance` is a flat MTK `@component` -- `System(eqs, t)` with no subsystems -- implementing Seinfeld & Pandis (2006) Eq. 19.14, the neutral-stability aerodynamic resistance. It has a single algebraic equation and no time derivative, so it is a purely algebraic system; `system_kind` is left unset, the triangular-algebraic convention of the sibling sp_ch19/surface_resistance.esm migration.\n\nConstant. The upstream `@constants` block holds one entry, `kappa` (the von Karman constant, KAPPA = 0.4). The ESM schema has no `constant` variable type, so `kappa` migrates as a fixed-default `parameter` carrying 0.4 as its `default`. `kappa` does not collide with the schema's reserved physical-constant names (R, k_B, N_A).\n\nInput variable. Upstream, `u_star` (friction velocity) is an `@variable` with no defining equation in the standalone component -- it is an input, wired in by the parent `DryDepositionGas` / `DryDepositionParticle` systems via `aero.u_star ~ u_star`, and `test/seinfeld_pandis_ch19_test.jl` confirms it by compiling the component with `mtkcompile(ra; inputs = [ra_nns.u_star])`. A standalone migration has no such parent, so `u_star` migrates as a `parameter`, matching the sp_ch19/surface_resistance.esm treatment of its connected input variables G and T_s. The one genuinely-computed `@variable`, `r_a`, migrates as `type: state` with its explicit algebraic equation, preserving 1:1 symmetry with the upstream `@variables` block.\n\nParameter defaults. Upstream declares no defaults for its `@parameters` (z, z_0) or for the input u_star. The migrated defaults z = 10 m, z_0 = 0.1 m, u_star = 0.4 m/s are the canonical case of `test/seinfeld_pandis_ch19_test.jl` \"2.1 Eq. 19.14: Aerodynamic Resistance (Neutral Stability)\" -- a 10 m reference height over a 0.1 m roughness length (open cropland / tall grass) with a 0.4 m/s friction velocity -- which the upstream test pins to r_a ~ 28.78 s/m.\n\nUnits. ESM `units` fields are descriptive only; the runners perform no dimensional analysis. The height ratio z/z_0 inside the logarithm is dimensionless and kappa is dimensionless, so 1/(kappa*u_star) carries the s/m of r_a.\n\nSingularities and domain. Eq. 19.14 is singular where u_star = 0 (no turbulent transport -> infinite resistance) and where z_0 = 0 (log -> -inf); r_a passes through 0 at z_0 = z and is unphysically negative for z_0 > z. Every test and example keeps u_star > 0 and 0 < z_0 < z, strictly interior to those singularities. Neutral stability is assumed throughout: the upstream component omits the Monin-Obukhov stability-correction term, so r_a here is the neutral-limit value.\n\nTolerance rationale (model-level rel=1e-6): a closed-form explicit algebraic system with no ODE integration -- a single reciprocal-times-logarithm evaluation. The expected values are the Float64 evaluation of Eq. 19.14; rel=1e-6 absorbs round-off, well above the bit-level agreement expected between conforming runners, and matches the sibling sp_ch19/surface_resistance.esm migration."
+            },
+            "tolerance": {
+                "rel": 1e-06
+            },
+            "variables": {
+                "kappa": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.4,
+                    "description": "Von Karman constant (dimensionless), upstream @constant KAPPA. Sets the slope of the neutral-stability logarithmic wind profile."
+                },
+                "z": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 10.0,
+                    "description": "Reference height above the surface at which the resistance is evaluated. Default: 10 m (S&P upstream test 2.1 canonical case)."
+                },
+                "z_0": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Surface roughness length. Default: 0.1 m, open cropland / tall grass (S&P upstream test 2.1 canonical case)."
+                },
+                "u_star": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.4,
+                    "description": "Friction velocity characterizing surface-layer turbulence. Upstream a connected @variable; an input parameter in the standalone migration."
+                },
+                "r_a": {
+                    "type": "state",
+                    "units": "s/m",
+                    "description": "Aerodynamic resistance to dry deposition through the surface layer under neutral atmospheric stability (Eq. 19.14)."
+                }
+            },
+            "equations": [
+                {
+                    "_comment": "Eq. 19.14 -- neutral-stability aerodynamic resistance: r_a = (1/(kappa*u_star)) * ln(z/z_0).",
+                    "lhs": "r_a",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "kappa",
+                                            "u_star"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "log",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "z",
+                                            "z_0"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_neutral_stability",
+                    "description": "Canonical neutral-stability case from upstream test '2.1 Eq. 19.14: Aerodynamic Resistance': a 10 m reference height, a 0.1 m roughness length (open cropland / tall grass) and a 0.4 m/s friction velocity. The upstream test pins r_a to ~28.78 s/m. r_a is re-checked at t = 1 s to confirm this algebraic system is time-invariant.",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 0.1,
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 28.78231366242557
+                        },
+                        {
+                            "variable": "r_a",
+                            "time": 1.0,
+                            "expected": 28.78231366242557
+                        }
+                    ]
+                },
+                {
+                    "id": "weak_turbulence_low_u_star",
+                    "description": "Weak surface-layer turbulence, u_star = 0.1 m/s. Because Eq. 19.14 makes r_a inversely proportional to u_star, the resistance is exactly 4x the 0.4 m/s default case -- the near-calm limit where sluggish aerodynamic transport throttles dry deposition.",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 0.1,
+                        "u_star": 0.1
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 115.12925464970228
+                        }
+                    ]
+                },
+                {
+                    "id": "strong_turbulence_high_u_star",
+                    "description": "Strong surface-layer turbulence, u_star = 1.0 m/s. r_a falls to 0.4x the default case -- the windy limit where turbulent transport through the surface layer is efficient and the aerodynamic pathway offers little resistance.",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 0.1,
+                        "u_star": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 11.51292546497023
+                        }
+                    ]
+                },
+                {
+                    "id": "friction_velocity_inverse_scaling",
+                    "description": "u_star = 0.2 m/s, exactly half the default. Eq. 19.14's r_a proportional-to-1/u_star scaling makes r_a here exactly twice the default-case value -- the relationship the upstream sensitivity test '6.1 Aerodynamic Resistance vs Friction Velocity' asserts (doubling u_star halves r_a).",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 0.1,
+                        "u_star": 0.2
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 57.56462732485114
+                        }
+                    ]
+                },
+                {
+                    "id": "rough_forest_surface",
+                    "description": "A rough surface, z_0 = 1.0 m (forest canopy). The larger roughness length shrinks the height ratio z/z_0 inside the logarithm, lowering r_a relative to the 0.1 m default -- a rougher surface is more efficiently coupled to the atmosphere. Matches the upstream sensitivity test '6.2 Aerodynamic Resistance vs Roughness Length'.",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 1.0,
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 14.391156831212784
+                        }
+                    ]
+                },
+                {
+                    "id": "smooth_grass_surface",
+                    "description": "A smooth surface, z_0 = 0.01 m (mown grass). The smaller roughness length widens the height ratio z/z_0, raising r_a above the 0.1 m default case.",
+                    "parameter_overrides": {
+                        "z": 10.0,
+                        "z_0": 0.01,
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 43.17347049363835
+                        }
+                    ]
+                },
+                {
+                    "id": "elevated_reference_height",
+                    "description": "Reference height raised to z = 20 m. A taller surface-layer column to traverse widens the height ratio z/z_0 and raises r_a above the 10 m default case.",
+                    "parameter_overrides": {
+                        "z": 20.0,
+                        "z_0": 0.1,
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_a",
+                            "time": 0.0,
+                            "expected": 33.11448354092522
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "resistance_vs_friction_velocity",
+                    "description": "Aerodynamic resistance r_a as a function of friction velocity u_star for a 10 m reference height over a 0.1 m roughness length. Eq. 19.14 makes r_a inversely proportional to u_star, so the curve is the classic hyperbola -- resistance is large in near-calm air and falls steeply as surface-layer turbulence strengthens.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z": 10.0,
+                        "z_0": 0.1
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_star",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 1.5,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ra_vs_ustar",
+                            "type": "line",
+                            "description": "Aerodynamic resistance r_a versus friction velocity u_star.",
+                            "x": {
+                                "variable": "u_star",
+                                "label": "Friction velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "r_a",
+                                "label": "Aerodynamic resistance r_a (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "resistance_vs_roughness_length",
+                    "description": "Aerodynamic resistance r_a as a function of surface roughness length z_0 at a 10 m reference height and a 0.4 m/s friction velocity, swept logarithmically from a very smooth surface (z_0 = 1 mm, snow / open water) to a forest canopy (z_0 = 1 m). Because Eq. 19.14 carries z_0 inside the logarithm, r_a is linear in ln(z_0) -- a straight, decreasing line on the log-z_0 axis. The sweep stays below the reference height z = 10 m, strictly interior to the z_0 = z zero-crossing of r_a.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z": 10.0,
+                        "u_star": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "z_0",
+                                "range": {
+                                    "start": 0.001,
+                                    "stop": 1.0,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ra_vs_z0",
+                            "type": "line",
+                            "description": "Aerodynamic resistance r_a versus surface roughness length z_0.",
+                            "x": {
+                                "variable": "z_0",
+                                "label": "Roughness length z_0 (m)"
+                            },
+                            "y": {
+                                "variable": "r_a",
+                                "label": "Aerodynamic resistance r_a (s/m)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "resistance_over_velocity_and_roughness",
+                    "description": "Aerodynamic resistance r_a over the joint friction-velocity / roughness-length plane at a 10 m reference height. Surfaces how the two controls of Eq. 19.14 combine: r_a is largest in the calm, smooth corner (low u_star, low z_0) and smallest under strong turbulence over a rough surface. The z_0 sweep stays below the reference height z = 10 m, strictly interior to the z_0 = z zero-crossing of r_a.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "z": 10.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "u_star",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 1.5,
+                                    "count": 16,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "z_0",
+                                "range": {
+                                    "start": 0.001,
+                                    "stop": 1.0,
+                                    "count": 13,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ra_heatmap",
+                            "type": "heatmap",
+                            "description": "Aerodynamic resistance r_a over friction velocity u_star and roughness length z_0.",
+                            "x": {
+                                "variable": "u_star",
+                                "label": "Friction velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "z_0",
+                                "label": "Roughness length z_0 (m)"
+                            },
+                            "value": {
+                                "variable": "r_a",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
