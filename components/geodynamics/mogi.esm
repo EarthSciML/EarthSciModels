@@ -1,0 +1,361 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MogiModel",
+        "description": "Mogi (1958) point-source model for volcanic surface deformation. Computes horizontal-radial (Ur) and vertical (Uz) surface displacements due to a pressurized spherical cavity in an elastic half-space, using the small-sphere (point-source) approximation (ε = a/d ≪ 1). Three purely-algebraic equations: R = sqrt(x²+d²) (source-to-surface distance), Ur = a³ΔP(1−ν)x / (G·R³) (Eq. 1, radial displacement), Uz = a³ΔP(1−ν)d / (G·R³) (Eq. 2, vertical displacement). Migrated from Geodynamics.jl@d680af419676cc576d60b16af0d3dd40c0b23eea src/mogi_mctigue.jl:48 (`MogiModel` @component).",
+        "tags": [
+            "geodynamics",
+            "volcanic-deformation",
+            "mogi",
+            "observed-only",
+            "algebraic"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Geodynamics.jl contributors",
+            "EarthSciModels migration (esm-hmdb)"
+        ],
+        "references": [
+            {
+                "citation": "Mogi, K., 1958. Relations between the eruptions of various volcanoes and the deformations of the ground surfaces around them. Bull. Earthq. Res. Inst. 36, 99–134."
+            },
+            {
+                "citation": "Taylor, N.C., Johnson, J.H., Herd, R.A. (2021). Making the most of the Mogi model: Size matters. Journal of Volcanology and Geothermal Research, 419, 107380. https://doi.org/10.1016/j.jvolgeores.2021.107380. Equations 1–2 implemented here."
+            }
+        ]
+    },
+    "models": {
+        "MogiModel": {
+            "reference": {
+                "notes": "source_ref: Geodynamics.jl@d680af419676cc576d60b16af0d3dd40c0b23eea:src/mogi_mctigue.jl:48\n\nUpstream `MogiModel` is an MTK `@component` implementing the Mogi (1958) point-source analytical model for volcanic ground deformation. It declares 6 `@parameters` (G, ν, ΔP, a, d, x) and 3 time-indexed `@variables` (R, Ur, Uz), with 3 equations returning `System(eqs, t; name)`. The upstream Julia test confirms `length(unknowns(mtkcompile(sys))) == 0` — after structural simplification, all 3 variables are algebraic observed quantities (zero dynamic states), consistent with the explicit closed-form structure.\n\nSystem kind: all 3 upstream equations are explicit algebraic assignments with no `D(.)` operator. Each LHS variable is a direct closed-form function of the 6 parameters (with R entering Ur and Uz as an auxiliary). The dependency chain is strictly forward (R→Ur, R→Uz), so the system is triangular — no implicit Newton solve is required, and `system_kind` is left unset (default 'ode', zero differential states), exactly as for the sibling observed-only components AnelasticMassContinuity, AtmosphericDiffusion, etc.\n\nNote on migration tracker blocking gap. The tracker lists this bead as `gt-ebuq (init_eq/system_kind=nonlinear)`. Investigation of the upstream source confirms the equations are EXPLICITLY algebraic — no `initialization_equations`, no `guesses`, and no implicit coupling. The `system_kind=nonlinear` label was applied conservatively to the whole Geodynamics group; MogiModel and McTigueModel do not use NonlinearSystem semantics in practice (the Julia test also constructs a `NonlinearProblem` only because MTK compiles all-algebraic `System`s to that type internally — not because the equations require iteration). The migration therefore uses the explicit-algebraic path without `system_kind`, matching the approach for all other explicit-algebraic components in this rig.\n\nNote on `one_m` constant. The upstream declares `one_m = 1.0 [unit = u\"m\"]` and writes the R equation as `(x^2/one_m^2 + d^2/one_m^2)^0.5 * one_m` to satisfy DynamicQuantities' requirement that sqrt arguments be dimensionless. Since ESM has no dimensional quantity tracking in expression trees, `one_m` is mathematically 1.0 and the equation reduces to `R = sqrt(x^2 + d^2)` with no loss of precision.\n\nParameters (6): G (shear modulus, Pa), ν (Poisson's ratio, dimensionless), ΔP (source overpressure, Pa), a (source radius, m), d (source depth, m), x (horizontal distance from source, m).\n\nState variables (3): R (source-to-surface distance, m), Ur (horizontal-radial surface displacement, m), Uz (vertical surface displacement, m).\n\nEquation faithfulness. The 3 equations from src/mogi_mctigue.jl:68-77 are preserved in order:\n  1. R ~ (x^2/one_m^2 + d^2/one_m^2)^0.5 * one_m  →  R = sqrt(x^2 + d^2)\n  2. Ur ~ a^3 * ΔP * (1-ν) * x / (G * R^3)          (Eq. 1, Taylor et al.)\n  3. Uz ~ a^3 * ΔP * (1-ν) * d / (G * R^3)          (Eq. 2, Taylor et al.)\n\nDefault values match Table 1 of Taylor et al. (2021): G=4 GPa, ν=0.25, ΔP=2 MPa, a=1 km, d=4 km, x=5 km.\n\nTolerance rationale. Closed-form algebraic evaluation — no ODE integration, no implicit solve — so there is no integrator error to bound; rel=1e-6 covers float64 round-off in the power/multiply/divide chains."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "G": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 4.0e9,
+                    "description": "Shear modulus (Pa) of the elastic half-space. Controls the stiffness of the medium — a higher G yields smaller displacements for the same overpressure. Upstream MTK `@parameter`; default 4.0 GPa, the value used in Taylor et al. (2021) Table 1 for Kīlauea volcano rock."
+                },
+                "ν": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.25,
+                    "description": "Poisson's ratio (dimensionless) of the elastic half-space. Typical values for crustal rock are 0.25–0.30. Appears as (1−ν) in the Mogi displacement formulas, modulating the amplitude of both radial and vertical displacements. Upstream MTK `@parameter`; default 0.25 (incompressible-limit approximation, Table 1 of Taylor et al. 2021)."
+                },
+                "ΔP": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 2.0e6,
+                    "description": "Source overpressure (Pa) — the excess pressure inside the spherical magma chamber above the far-field lithostatic stress. Positive ΔP (inflation) produces positive outward radial displacement (Ur > 0) and positive vertical uplift (Uz > 0); negative ΔP (deflation) reverses both. Displacements scale linearly with ΔP. Upstream MTK `@parameter`; default 2.0 MPa (Table 1 of Taylor et al. 2021)."
+                },
+                "a": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1000.0,
+                    "description": "Source radius (m) — the radius of the spherical magma chamber. Displacements scale as a^3, so doubling the radius produces 8× the displacement. The Mogi point-source approximation is valid when ε = a/d ≪ 1; Taylor et al. (2021) give ε < 0.37 for ≤5% error relative to finite-element models. Upstream MTK `@parameter`; default 1000 m (1 km, Table 1 of Taylor et al. 2021)."
+                },
+                "d": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 4000.0,
+                    "description": "Source depth (m) — the depth of the center of the spherical magma chamber below the free surface. Enters both the source-to-surface distance R and the vertical displacement Uz directly; deeper sources produce broader but smaller-amplitude displacement patterns. Upstream MTK `@parameter`; default 4000 m (4 km, Table 1 of Taylor et al. 2021)."
+                },
+                "x": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5000.0,
+                    "description": "Horizontal distance from source (m) — the radial distance on the free surface from the point directly above the source center. Enters R, Ur, and Uz; Ur is maximized at x = d/sqrt(2) and Uz is maximized at x = 0. Upstream MTK `@parameter`; default 5000 m (5 km, Table 1 evaluation point)."
+                },
+                "R": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Distance from source center to surface evaluation point (m): R = sqrt(x^2 + d^2). Auxiliary variable computed first in the explicit triangular system; used in both Ur and Uz equations. Equivalent to the slant range from the source to the surface point. Upstream MTK `@variable` with time index; no time derivative present, no initial condition (observed/algebraic)."
+                },
+                "Ur": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Horizontal-radial surface displacement (m) due to source overpressure (Eq. 1, Taylor et al. 2021): Ur = a^3 * ΔP * (1−ν) * x / (G * R^3). Positive for inflation (ΔP > 0) and outward from the source (x > 0). Maximized at x_crit = d/sqrt(2). Upstream MTK `@variable`; observed/algebraic, no time derivative."
+                },
+                "Uz": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Vertical surface displacement (m) due to source overpressure (Eq. 2, Taylor et al. 2021): Uz = a^3 * ΔP * (1−ν) * d / (G * R^3). Positive for inflation (ΔP > 0, uplift). Maximized directly above the source at x = 0; decreases monotonically with x. Note Ur/Uz = x/d — a fundamental Mogi identity. Upstream MTK `@variable`; observed/algebraic, no time derivative."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "R",
+                    "rhs": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "^", "args": ["x", 2]},
+                                    {"op": "^", "args": ["d", 2]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Ur",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "^", "args": ["a", 3]},
+                                    "ΔP",
+                                    {"op": "-", "args": [1, "ν"]},
+                                    "x"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "G",
+                                    {"op": "^", "args": ["R", 3]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Uz",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "^", "args": ["a", 3]},
+                                    "ΔP",
+                                    {"op": "-", "args": [1, "ν"]},
+                                    "d"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "G",
+                                    {"op": "^", "args": ["R", 3]}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "taylor_table1_correctness",
+                    "description": "Primary numerical correctness test using Table 1 parameters from Taylor et al. (2021): G=4 GPa, ν=0.25, ΔP=2 MPa, a=1 km, d=4 km, evaluated at x=5 km. Verifies all three state variables (R, Ur, Uz) against precomputed reference values from Eqs. 1–2: R = sqrt(5000^2+4000^2) = 6403.124..., Ur = a^3*ΔP*(1−ν)*x/(G*R^3) ≈ 7.142e-3 m, Uz = a^3*ΔP*(1−ν)*d/(G*R^3) ≈ 5.714e-3 m. Tolerance rtol=1e-10 confirms closed-form float64 precision.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 5000.0
+                    },
+                    "assertions": [
+                        {"variable": "R",  "time": 0.0, "expected": 6403.1242374328485,   "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Ur", "time": 0.0, "expected": 0.007142092769296011,  "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": 0.005713674215436808,  "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "kilauea_deflation_event",
+                    "description": "Kīlauea June 2007 deflation event (Table 3, Taylor et al. 2021): G=4 GPa, ν=0.25, ΔP=−3.73 MPa (deflation), a=800 m, d=2000 m, x=3000 m. Negative overpressure (deflation) must produce negative radial displacement (inward) and negative vertical displacement (subsidence). Reference values precomputed from Eqs. 1–2 with Table 3 parameters; Ur = −0.02292 m, Uz = −0.01528 m.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": -3.73e6,
+                        "a": 800.0,
+                        "d": 2000.0,
+                        "x": 3000.0
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": -0.022918505338191925, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": -0.015279003558794616, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "ur_uz_ratio_equals_x_over_d",
+                    "description": "Fundamental Mogi identity: Ur/Uz = x/d, which follows directly from dividing Eq. 1 by Eq. 2. Both Ur and Uz share the same a³ΔP(1−ν)/(G·R³) prefactor; their ratio collapses to x/d regardless of source parameters. Tested at G=4e9, ν=0.25, ΔP=2e6, a=1000, d=4000, x=2000 m (ratio = 0.5). Assertion checks Ur = 0.5 * Uz at this x/d ratio.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 2000.0
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": 0.008385254915624212, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": 0.016770509831248424, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "ur_maximum_at_x_crit",
+                    "description": "Mogi Ur maximum at x_crit = d/sqrt(2). Setting dUr/dx = 0 in Eq. 1 gives x_crit = d/sqrt(2) ≈ 2828.43 m for d=4000 m. At this point Ur = a^3*ΔP*(1−ν)*x_crit / (G * R_crit^3) with R_crit = d*sqrt(3/2). Reference value Ur_max = 0.009021097956087904 m (Table 1 parameters). Verified against upstream test 'Mogi Ur Maximum at x_crit'.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 2828.4271247461897
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": 0.009021097956087904, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "uz_maximum_near_origin",
+                    "description": "Uz is maximized directly above the source (x → 0). At x=0, Uz_max = a^3*ΔP*(1−ν)/(G*d^2) = 1e9*2e6*0.75/(4e9*16e6) = 0.0234375 m. Evaluated at x=0.001 m (near-zero, avoiding the exact singularity at x=0 which the upstream test also avoids). Reference: Uz ≈ 0.0234375 m (tolerance rel=1e-6 since x=0.001 introduces a tiny x^2 deviation from the true maximum).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 0.001
+                    },
+                    "assertions": [
+                        {"variable": "Uz", "time": 0.0, "expected": 0.023437499999997798, "tolerance": {"rel": 1.0e-6}}
+                    ]
+                },
+                {
+                    "id": "sign_convention_positive_dp",
+                    "description": "Sign convention for positive overpressure (inflation): ΔP > 0 produces positive radial displacement (Ur > 0, outward) at positive x, and positive vertical displacement (Uz > 0, uplift). Default Table 1 parameters (ΔP=2 MPa, x=5 km). Verified against upstream 'Displacement Symmetry and Signs' test.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 5000.0
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": 0.007142092769296011, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": 0.005713674215436808, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "displacement_linear_in_dp",
+                    "description": "Displacements scale linearly with overpressure ΔP (Eqs. 1–2 are linear in ΔP). Doubling ΔP from 2 MPa to 4 MPa doubles both Ur and Uz exactly. Table 1 geometry (a=1000, d=4000, x=5000). Expected Ur = 2×0.007142092769296011 = 0.014284185538592022 m, Uz = 2×0.005713674215436808 = 0.011427348430873616 m.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 4.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0,
+                        "x": 5000.0
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": 0.014284185538592022, "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": 0.011427348430873616, "tolerance": {"rel": 1.0e-10}}
+                    ]
+                },
+                {
+                    "id": "displacement_cubic_in_a",
+                    "description": "Displacements scale as a^3 (Eqs. 1–2 have a^3 in the numerator). Doubling the source radius a from 1000 m to 2000 m multiplies Ur and Uz by 8. Table 1 geometry (d=4000, x=5000). Expected Ur = 8×0.007142092769296011 = 0.05713674215436809 m, Uz = 8×0.005713674215436808 = 0.04570939372349446 m.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 2000.0,
+                        "d": 4000.0,
+                        "x": 5000.0
+                    },
+                    "assertions": [
+                        {"variable": "Ur", "time": 0.0, "expected": 0.05713674215436809,  "tolerance": {"rel": 1.0e-10}},
+                        {"variable": "Uz", "time": 0.0, "expected": 0.04570939372349446,  "tolerance": {"rel": 1.0e-10}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "displacement_profile_vs_distance",
+                    "description": "Horizontal-radial (Ur) and vertical (Uz) surface displacement profiles as a function of horizontal distance x from the source, using Table 1 parameters (G=4 GPa, ν=0.25, ΔP=2 MPa, a=1 km, d=4 km). Ur peaks at x_crit = d/sqrt(2) ≈ 2.83 km then decays; Uz decays monotonically from its maximum at x=0. Both displacements decay to near-zero beyond ~20 km from the source.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameters": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "d": 4000.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "x",
+                                "range": {"start": 200.0, "stop": 20000.0, "count": 100, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Ur_vs_x",
+                            "type": "line",
+                            "description": "Horizontal-radial displacement Ur (m) vs horizontal distance x (m). Peaks at x_crit = d/sqrt(2) ≈ 2828 m for d=4000 m, then decays as x^{-2} at large distances.",
+                            "x": {"variable": "x", "label": "Horizontal distance x (m)"},
+                            "y": {"variable": "Ur", "label": "Horizontal-radial displacement Ur (m)"}
+                        },
+                        {
+                            "id": "Uz_vs_x",
+                            "type": "line",
+                            "description": "Vertical displacement Uz (m) vs horizontal distance x (m). Maximum directly above the source (x=0), decays monotonically. Far-field decay follows x^{-3}.",
+                            "x": {"variable": "x", "label": "Horizontal distance x (m)"},
+                            "y": {"variable": "Uz", "label": "Vertical displacement Uz (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "displacement_vs_depth",
+                    "description": "Maximum vertical displacement Uz_max (at x≈0) as a function of source depth d, for source radius a=1000 m. Uz_max = a^3*ΔP*(1−ν)/(G*d^2) decreases as d^{-2}. Deeper sources produce weaker but broader displacement patterns. G=4 GPa, ν=0.25, ΔP=2 MPa, x=1 m (near-zero to approximate the x=0 maximum).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameters": {
+                        "G": 4.0e9,
+                        "ν": 0.25,
+                        "ΔP": 2.0e6,
+                        "a": 1000.0,
+                        "x": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "d",
+                                "range": {"start": 1000.0, "stop": 13000.0, "count": 50, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Uz_max_vs_depth",
+                            "type": "line",
+                            "description": "Maximum vertical displacement Uz_max (m) at x≈0 as a function of source depth d (m). Follows a d^{-2} power law. Deeper sources produce less ground deformation at the surface.",
+                            "x": {"variable": "d", "label": "Source depth d (m)"},
+                            "y": {"variable": "Uz", "label": "Maximum vertical displacement Uz_max (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
