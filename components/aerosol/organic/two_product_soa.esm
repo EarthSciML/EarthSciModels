@@ -1,0 +1,283 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "TwoProductSOA",
+        "description": "Two-product model for secondary organic aerosol (SOA) formation (Odum et al., 1996). Represents the complex mixture of oxidation products from a reactive organic gas (ROG) as two lumped surrogate products that partition between gas and aerosol phases according to an ideal-solution absorptive-partitioning equilibrium. Yields and saturation concentrations correspond to alpha-pinene oxidation from Seinfeld and Pandis (2006) Table 14.12.",
+        "tags": [
+            "aerosol",
+            "organic",
+            "soa",
+            "two-product",
+            "odum"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-q3b)"
+        ],
+        "references": [
+            {
+                "citation": "Odum, J. R. et al. (1996). Gas/Particle Partitioning and Secondary Organic Aerosol Yields. Environ. Sci. Technol., 30, 2580-2585."
+            },
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.2, Eqs. 14.39 and 14.43."
+            }
+        ]
+    },
+    "models": {
+        "TwoProductSOA": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.2, Eqs. 14.39 and 14.43 — two-product SOA model. Migrated from Aerosol.jl src/organic_aerosol.jl `TwoProductSOA` (esm-q3b).",
+                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:197\n\nUpstream `TwoProductSOA` is an MTK `@component` with four parameters (a_1, a_2, c_sat_1, c_sat_2) and four variables (ΔROG, c_aer, Y, ΔROG_threshold). The three algebraic equations are:\n  • Y ~ c_aer * (a_1 / (c_aer + c_sat_1) + a_2 / (c_aer + c_sat_2))   [Eq. 14.43]\n  • ΔROG_threshold ~ 1 / (a_1 / c_sat_1 + a_2 / c_sat_2)               [Eq. 14.39]\n  • c_aer ~ Y * ΔROG                                                     [mass balance]\n\nWith ΔROG as the external input (parameter in ESM), the system has 3 unknowns (c_aer, Y, ΔROG_threshold) and 3 equations. However, Eq. 14.43 and the mass balance are implicitly coupled (c_aer appears on the RHS of Eq. 14.43, Y appears on the RHS of the mass balance). The ESS topological substitution loop raises SimulationError on cycles, so implicit equations cannot be used directly.\n\nResolution — explicit quadratic formula: substituting Y = c_aer / ΔROG from the mass balance into Eq. 14.43 and rearranging gives:\n  1/ΔROG = a_1/(c_aer + c_sat_1) + a_2/(c_aer + c_sat_2)\nClearing denominators yields the quadratic in c_aer:\n  c_aer^2 + B*c_aer + C = 0\nwhere\n  B = c_sat_1 + c_sat_2 − ΔROG*(a_1 + a_2)\n  C = c_sat_1*c_sat_2 − ΔROG*(a_1*c_sat_2 + a_2*c_sat_1)\nThe physical (positive) root is:\n  c_aer = (−B + sqrt(B^2 − 4C)) / 2\nNote that −B = ΔROG*(a_1+a_2) − c_sat_1 − c_sat_2, and B^2 = (−B)^2, so the formula implemented here is:\n  c_aer = (ΔROG*(a_1+a_2) − c_sat_1 − c_sat_2 + sqrt((ΔROG*(a_1+a_2) − c_sat_1 − c_sat_2)^2 + 4*(ΔROG*(a_1*c_sat_2+a_2*c_sat_1) − c_sat_1*c_sat_2))) / 2\nWith c_aer explicit, Y = c_aer / ΔROG is also explicit. ΔROG_threshold depends only on parameters.\n\nThis gives three explicit algebraic equations with no cycles — the ESS substitution loop handles them without a DAE solver.\n\nDomain constraint: valid for ΔROG >= ΔROG_threshold (~1.27e-7 kg/m^3 for alpha-pinene defaults); below the threshold the quadratic gives c_aer < 0 which is unphysical (no aerosol forms). Tests use ΔROG well above the threshold.\n\nDefault parameters are for alpha-pinene oxidation from Table 14.12 of Seinfeld and Pandis (2006).\n\nTolerance rationale (model-level rel=1e-9): all three outputs are algebraic functions of parameters; no ODE integration. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "a_1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.038,
+                    "description": "Stoichiometric mass yield of product 1 (dimensionless). Alpha-pinene value from Seinfeld and Pandis (2006) Table 14.12."
+                },
+                "a_2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.326,
+                    "description": "Stoichiometric mass yield of product 2 (dimensionless). Alpha-pinene value from Seinfeld and Pandis (2006) Table 14.12."
+                },
+                "c_sat_1": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 5.8e-9,
+                    "description": "Effective saturation concentration of lumped product 1. Alpha-pinene value from Seinfeld and Pandis (2006) Table 14.12."
+                },
+                "c_sat_2": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 2.5e-7,
+                    "description": "Effective saturation concentration of lumped product 2. Alpha-pinene value from Seinfeld and Pandis (2006) Table 14.12."
+                },
+                "delta_ROG": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.0e-5,
+                    "description": "Reacted reactive organic gas (ROG) concentration. Input parameter — drives SOA formation. Must be >= delta_ROG_threshold for physical (non-negative) c_aer."
+                },
+                "c_aer": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Total organic aerosol mass concentration produced. Computed via the explicit quadratic solution to Eqs. 14.43 and 14.39."
+                },
+                "Y": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Aerosol mass yield (dimensionless). Fraction of reacted ROG that partitions into the aerosol phase: Y = c_aer / ΔROG."
+                },
+                "delta_ROG_threshold": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Threshold reacted ROG concentration for binary-solution SOA formation (Eq. 14.39). Below this threshold, no aerosol forms. Depends only on the model parameters, not on delta_ROG."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "delta_ROG_threshold",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            1,
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "/", "args": ["a_1", "c_sat_1"]},
+                                    {"op": "/", "args": ["a_2", "c_sat_2"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "c_aer",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            0.5,
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "delta_ROG",
+                                                    {"op": "+", "args": ["a_1", "a_2"]}
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [-1, {"op": "+", "args": ["c_sat_1", "c_sat_2"]}]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "delta_ROG",
+                                                                            {"op": "+", "args": ["a_1", "a_2"]}
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [-1, {"op": "+", "args": ["c_sat_1", "c_sat_2"]}]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            2
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            4,
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "delta_ROG",
+                                                                            {
+                                                                                "op": "+",
+                                                                                "args": [
+                                                                                    {"op": "*", "args": ["a_1", "c_sat_2"]},
+                                                                                    {"op": "*", "args": ["a_2", "c_sat_1"]}
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [-1, {"op": "*", "args": ["c_sat_1", "c_sat_2"]}]
+                                                                    }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Y",
+                    "rhs": {
+                        "op": "/",
+                        "args": ["c_aer", "delta_ROG"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "moderate_rog",
+                    "description": "Moderate ROG loading (delta_ROG = 1e-5 kg/m^3, ~10 μg/m^3). Typical urban alpha-pinene oxidation scenario. Expected: c_aer = 3.4171102637e-6 kg/m^3, Y = 0.3417110264, delta_ROG_threshold = 1.272957e-7 kg/m^3.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "delta_ROG": 1.0e-5
+                    },
+                    "assertions": [
+                        {"variable": "c_aer", "time": 0.0, "expected": 3.4171102637e-6, "tolerance": {"rel": 1.0e-6}},
+                        {"variable": "Y", "time": 0.0, "expected": 0.3417110264, "tolerance": {"rel": 1.0e-6}},
+                        {"variable": "delta_ROG_threshold", "time": 0.0, "expected": 1.272957e-7, "tolerance": {"rel": 1.0e-5}}
+                    ]
+                },
+                {
+                    "id": "high_rog",
+                    "description": "High ROG loading (delta_ROG = 1e-4 kg/m^3, ~100 μg/m^3). Yield approaches the sum a_1 + a_2 = 0.364 as c_aer >> c_sat_i. Expected: c_aer = 3.6175647399e-5 kg/m^3, Y = 0.3617564740.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "delta_ROG": 1.0e-4
+                    },
+                    "assertions": [
+                        {"variable": "c_aer", "time": 0.0, "expected": 3.6175647399e-5, "tolerance": {"rel": 1.0e-6}},
+                        {"variable": "Y", "time": 0.0, "expected": 0.3617564740, "tolerance": {"rel": 1.0e-6}},
+                        {"variable": "delta_ROG_threshold", "time": 0.0, "expected": 1.272957e-7, "tolerance": {"rel": 1.0e-5}}
+                    ]
+                },
+                {
+                    "id": "low_rog_near_threshold",
+                    "description": "Low ROG loading (delta_ROG = 5e-7 kg/m^3, ~4x the threshold). Yield is well below the high-ROG limit. Expected: c_aer = 3.7979970620e-8 kg/m^3, Y = 0.0759599412.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "delta_ROG": 5.0e-7
+                    },
+                    "assertions": [
+                        {"variable": "c_aer", "time": 0.0, "expected": 3.7979970620e-8, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "Y", "time": 0.0, "expected": 0.0759599412, "tolerance": {"rel": 1.0e-5}},
+                        {"variable": "delta_ROG_threshold", "time": 0.0, "expected": 1.272957e-7, "tolerance": {"rel": 1.0e-5}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "rog_loading_sweep",
+                    "description": "Sweep reacted ROG concentration from 1e-6 to 1e-3 kg/m^3 to show how aerosol mass concentration and yield vary with ROG loading. Y approaches a_1+a_2=0.364 at high loading as both products are fully in the aerosol phase.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "a_1": 0.038,
+                        "a_2": 0.326,
+                        "c_sat_1": 5.8e-9,
+                        "c_sat_2": 2.5e-7
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "delta_ROG",
+                                "range": {"start": 1.0e-6, "stop": 1.0e-3, "count": 60, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "aerosol_yield_vs_rog",
+                            "type": "line",
+                            "description": "Aerosol mass yield Y vs. reacted ROG concentration (log scale). Shows low yield near the formation threshold and approach to Y = a_1+a_2 = 0.364 at high loading.",
+                            "x": {"variable": "delta_ROG", "label": "ΔROG (kg/m³)"},
+                            "y": {"variable": "Y", "label": "Y (aerosol mass yield)"}
+                        },
+                        {
+                            "id": "aerosol_conc_vs_rog",
+                            "type": "line",
+                            "description": "Aerosol mass concentration c_aer vs. reacted ROG concentration (log-log scale). Shows nonlinear growth characteristic of the two-product absorptive partitioning framework.",
+                            "x": {"variable": "delta_ROG", "label": "ΔROG (kg/m³)"},
+                            "y": {"variable": "c_aer", "label": "c_aer (kg/m³)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
