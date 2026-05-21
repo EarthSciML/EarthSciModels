@@ -1,0 +1,144 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AbsorptivePartitioning",
+        "description": "Absorptive partitioning model for equilibrium gas–particle partitioning of semivolatile organic compounds. A compound distributes between the gas phase and an absorbing organic aerosol phase according to a mass-based partition coefficient K_om and the total absorbing organic aerosol mass C_oa. From Seinfeld and Pandis (2006), Chapter 9, Section 9.4, Equation 9.23.",
+        "tags": [
+            "aerosol",
+            "organic",
+            "absorptive-partitioning",
+            "soa"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-aez)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Section 9.4, Eq. 9.23."
+            },
+            {
+                "citation": "Pankow, J. F. (1994) An absorption model of the gas/aerosol partitioning involved in the formation of secondary organic aerosol. Atmospheric Environment, 28(2), 189–193."
+            }
+        ]
+    },
+    "models": {
+        "AbsorptivePartitioning": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Section 9.4, Eq. 9.23 — absorptive partitioning of a semivolatile organic between gas and particle phases. Migrated from Aerosol.jl src/organic_aerosol.jl `AbsorptivePartitioning` (esm-aez).",
+                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:125\nUpstream `AbsorptivePartitioning` is an MTK `@component` with two parameters (K_om, C_oa), one input variable (C_tot), and one output variable (F_p). The equation is:\n  • F_p ~ K_om * C_oa * C_tot / (1 + K_om * C_oa)  (derived from Eq. 9.23)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nDerivation: the partition equilibrium F_p / A_g = K_om * C_oa (Eq. 9.23) combined with mass balance C_tot = F_p + A_g gives F_p = K_om * C_oa * C_tot / (1 + K_om * C_oa), where A_g is gas-phase concentration and F_p is particle-phase concentration.\n\nObservability classification: observed-only — the single output F_p is given by an algebraic equation in terms of inputs K_om, C_oa, C_tot. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nESM representation note: in the upstream MTK component C_tot is an `@variable` supplied externally as the input; in this .esm it is represented as a `parameter` (not a state) so the system is well-posed under the schema's equation-count rule (one equation per state) and to match the observed-only pattern used elsewhere in this rig (see components/aerosol/organic/bet.esm). Tests vary C_tot via `parameter_overrides`, and the `partitioning_sweep` example sweeps K_om as a parameter dimension.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves only multiplication and division. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "K_om": {
+                    "type": "parameter",
+                    "units": "m^3 ug^-1",
+                    "default": 1.0,
+                    "description": "Mass-based partition coefficient for absorptive partitioning into organic aerosol"
+                },
+                "C_oa": {
+                    "type": "parameter",
+                    "units": "ug m^-3",
+                    "default": 10.0,
+                    "description": "Total absorbing organic aerosol mass concentration"
+                },
+                "C_tot": {
+                    "type": "parameter",
+                    "units": "ug m^-3",
+                    "default": 1.0,
+                    "description": "Total concentration of the compound (gas + particle phases). Input parameter — the observed-only model has one algebraic equation for F_p given C_tot."
+                },
+                "F_p": {
+                    "type": "state",
+                    "units": "ug m^-3",
+                    "description": "Particle-phase (aerosol) concentration of the compound"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "F_p",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_om", "C_oa", "C_tot"] },
+                            { "op": "+", "args": [1, { "op": "*", "args": ["K_om", "C_oa"] }] }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default conditions: K_om = 1.0 m³/µg, C_oa = 10.0 µg/m³, C_tot = 1.0 µg/m³. F_p = 1.0*10.0*1.0 / (1 + 1.0*10.0) = 10.0/11.0 = 0.9090909090909091 µg/m³.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "C_tot": 1.0
+                    },
+                    "assertions": [
+                        { "variable": "F_p", "time": 0.0, "expected": 0.9090909090909091, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "low_partitioning",
+                    "description": "Low partition coefficient (mostly gas phase): K_om = 0.001 m³/µg, C_oa = 10.0 µg/m³, C_tot = 1.0 µg/m³. F_p = 0.001*10.0*1.0 / (1 + 0.001*10.0) = 0.01/1.01 = 0.009900990099009901 µg/m³.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "K_om": 0.001,
+                        "C_tot": 1.0
+                    },
+                    "assertions": [
+                        { "variable": "F_p", "time": 0.0, "expected": 0.009900990099009901, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "high_partitioning",
+                    "description": "High partition coefficient (mostly particle phase): K_om = 100.0 m³/µg, C_oa = 10.0 µg/m³, C_tot = 1.0 µg/m³. F_p = 100.0*10.0*1.0 / (1 + 100.0*10.0) = 1000.0/1001.0 = 0.999000999000999 µg/m³.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "K_om": 100.0,
+                        "C_tot": 1.0
+                    },
+                    "assertions": [
+                        { "variable": "F_p", "time": 0.0, "expected": 0.999000999000999, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "partitioning_sweep",
+                    "description": "Sweep partition coefficient K_om from 0.001 to 1000 m³/µg (log scale) to show transition from gas-dominated (K_om*C_oa << 1) to particle-dominated (K_om*C_oa >> 1) regimes.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "C_oa": 10.0,
+                        "C_tot": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "K_om",
+                                "range": { "start": 0.001, "stop": 1000.0, "count": 50 }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "partitioning_curve",
+                            "type": "line",
+                            "description": "Absorptive partitioning: F_p vs K_om — shows sigmoid transition from gas-dominated (low K_om) to particle-dominated (high K_om) regime.",
+                            "x": { "variable": "K_om", "label": "K_om (m³/µg)" },
+                            "y": { "variable": "F_p", "label": "F_p (µg/m³)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
