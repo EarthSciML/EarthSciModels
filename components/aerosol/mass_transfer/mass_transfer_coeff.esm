@@ -1,0 +1,231 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MassTransferCoefficient",
+        "description": "Combined gas-phase and interfacial mass transfer coefficient k_mt for gas-particle exchange. k_mt is the inverse of the total resistance to mass transfer, which is the sum of two resistances in series: (1) gas-phase diffusion resistance tau_g = R_p²/(3 D_g), and (2) interfacial resistance tau_i = (R_p/3α) √(2πM_A/(RT)) arising from the finite accommodation probability and molecular speed. The reciprocal relation k_mt = 1/(tau_g + tau_i) (Seinfeld & Pandis 2006, Chapter 12, Eq. 12.116) determines the overall rate at which a gaseous species is transferred to or from the particle surface. Migrated from Aerosol.jl src/mass_transfer.jl `MassTransferCoefficient`.",
+        "tags": [
+            "aerosol",
+            "mass-transfer",
+            "diffusion",
+            "accommodation",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-f9f)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Eq. 12.116 (combined gas-phase and interfacial mass transfer coefficient)."
+            }
+        ]
+    },
+    "models": {
+        "MassTransferCoefficient": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.116 — combined gas-phase and interfacial mass transfer coefficient. Migrated from Aerosol.jl src/mass_transfer.jl `MassTransferCoefficient` (esm-f9f).",
+                "notes": "source_ref: Aerosol.jl@FWrvp:src/mass_transfer.jl:231\n\nUpstream `MassTransferCoefficient` is an MTK `@component` with 1 constant (R=8.314 J/(mol·K)), 5 parameters (R_p, D_g, α, M_A, T), and 3 algebraic variables (tau_g, tau_i, k_mt). All three variables are determined by explicit algebraic equations with no time derivative — purely observed.\n\nEquations (S&P 2006, Eq. 12.116):\n  tau_g = R_p² / (3 D_g)                        [gas-phase diffusion resistance, s]\n  tau_i = (R_p / 3α) × √(2π M_A / (R T))        [interfacial resistance, s]\n  k_mt  = 1 / (tau_g + tau_i)                    [mass transfer coefficient, s⁻¹]\n\nThe constant R = 8.314 J/(mol·K) and π = 3.141592653589793 are folded as floating-point literals into the tau_i expression.\n\nVariable renaming for ASCII compatibility: Julia `τ_g` → ESM `tau_g`; Julia `τ_i` → ESM `tau_i`. The parameter `α` retains Unicode (matching uptake_coeff.esm convention for the accommodation coefficient).\n\nPhysics: tau_g = R_p²/(3 D_g) is the characteristic time for a gas-phase molecule to diffuse through a shell of radius R_p; it scales as R_p² and is independent of molecular properties. tau_i = (R_p/3α) √(2πM_A/(RT)) is derived from the mean molecular speed c̄ = √(8RT/(πM_A)) via the free-molecular flux formula; it scales as R_p/α and increases with molecular weight (heavier molecules are slower). In the continuum limit (R_p large), tau_g ≫ tau_i and gas-phase diffusion limits; in the free-molecular limit (R_p small), tau_i can dominate if α is small. The interfacial term vanishes as α → 1 and R_p → 0 (fully accommodating small particles), leaving the free-molecular flux as the only limit.\n\nTopological substitution order: tau_g and tau_i each depend only on parameters and constants, so they resolve independently before k_mt. The dependency graph is acyclic — no SimulationError.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with no ODE integration. All expressions are finite compositions of *, /, ^(2), sqrt in float64; round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Particle or droplet radius. Default 10 µm is typical for cloud/fog droplets. tau_g scales as R_p² and tau_i scales as R_p, so both resistances increase with particle size but gas-phase diffusion grows faster for large particles."
+                },
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.0e-5,
+                    "description": "Gas-phase molecular diffusivity of the absorbing species. Default 2×10⁻⁵ m²/s is representative of mid-weight atmospheric trace gases. Larger D_g reduces the gas-phase diffusion resistance tau_g."
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Mass accommodation coefficient: probability that a molecule striking the particle surface is taken up. Dimensionless; range (0, 1]. Default 1.0 (perfect accommodation). Smaller α increases the interfacial resistance tau_i."
+                },
+                "M_A": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of the gas-phase species. Default 0.029 kg/mol is representative of dry air. Heavier molecules have lower mean thermal speed, which increases the interfacial resistance tau_i as √M_A."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature. Used in the interfacial resistance via the mean molecular speed factor √(M_A/(RT)). Higher temperature increases mean molecular speed, reducing tau_i."
+                },
+                "tau_g": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Gas-phase diffusion resistance: tau_g = R_p² / (3 D_g). Time scale for diffusion of the gas-phase species through a hemispherical shell of thickness R_p. Scales as R_p²/D_g; dominates for large particles or slowly diffusing species.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "^", "args": ["R_p", 2.0]},
+                            {"op": "*", "args": [3.0, "D_g"]}
+                        ]
+                    }
+                },
+                "tau_i": {
+                    "type": "observed",
+                    "units": "s",
+                    "description": "Interfacial (accommodation) resistance: tau_i = (R_p / (3α)) × √(2π M_A / (R T)). Time scale associated with the finite probability of surface accommodation; derived from the mean free-molecular flux. Scales as R_p / (α √T) and increases with molecular weight. Negligible for α ≈ 1 and large R_p.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {"op": "/", "args": ["R_p", {"op": "*", "args": [3.0, "α"]}]},
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {"op": "*", "args": [2.0, 3.141592653589793, "M_A"]},
+                                            {"op": "*", "args": [8.314, "T"]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "k_mt": {
+                    "type": "observed",
+                    "units": "s^-1",
+                    "description": "Combined mass transfer coefficient (Eq. 12.116): k_mt = 1 / (tau_g + tau_i). Reciprocal of the total resistance to mass transfer between the gas phase and the particle surface. Represents the rate constant for transfer of a gaseous species to or from the particle. High k_mt means fast transfer; low k_mt means slow transfer limited by diffusion or accommodation.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            1.0,
+                            {"op": "+", "args": ["tau_g", "tau_i"]}
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default parameters: R_p=10 µm, D_g=2×10⁻⁵ m²/s, α=1, M_A=0.029 kg/mol, T=298.15 K. tau_g = (1e-5)²/(3×2e-5) = 1e-10/6e-5 ≈ 1.6667×10⁻⁶ s dominates; tau_i = (1e-5/3)×√(2π×0.029/(8.314×298.15)) ≈ 2.858×10⁻⁸ s is ~60× smaller. k_mt = 1/(tau_g + tau_i) ≈ 5.899×10⁵ s⁻¹. Anchors all three computed quantities at the declared defaults.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "tau_g", "time": 0.0, "expected": 1.666666666666667e-6,  "tolerance": {"rel": 1e-12}},
+                        {"variable": "tau_i", "time": 0.0, "expected": 2.857888372453761e-8,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 5.898850463103912e5,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "large_particle",
+                    "description": "Large particle R_p = 100 µm = 10⁻⁴ m (10× the default). tau_g scales as R_p² → 100× larger (≈ 1.667×10⁻⁴ s). tau_i scales as R_p → 10× larger (≈ 2.858×10⁻⁷ s). Gas-phase diffusion completely dominates: k_mt ≈ 5.990×10³ s⁻¹, about 100× smaller than the default. Exercises R_p² scaling in tau_g.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-4},
+                    "assertions": [
+                        {"variable": "tau_g", "time": 0.0, "expected": 1.666666666666666e-4,  "tolerance": {"rel": 1e-12}},
+                        {"variable": "tau_i", "time": 0.0, "expected": 2.857888372453761e-7,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 5.989729213515929e3,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "low_accommodation",
+                    "description": "Reduced accommodation coefficient α = 0.1 (10% sticking probability). tau_g unchanged; tau_i scales as 1/α → 10× larger (≈ 2.858×10⁻⁷ s), now comparable to tau_g. k_mt drops from ≈5.899×10⁵ to ≈5.122×10⁵ s⁻¹. Isolates the 1/α scaling in the interfacial resistance.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"α": 0.1},
+                    "assertions": [
+                        {"variable": "tau_i", "time": 0.0, "expected": 2.857888372453760e-7,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 5.121755645628530e5,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "hot_temperature",
+                    "description": "High temperature T = 320 K. tau_i ∝ 1/√T decreases slightly (faster molecules → lower interfacial resistance). k_mt increases marginally from ≈5.899×10⁵ to ≈5.902×10⁵ s⁻¹ (sub-1% change since tau_g dominates). Exercises T wiring in tau_i via the thermal speed factor √(1/(RT)).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 320.0},
+                    "assertions": [
+                        {"variable": "tau_i", "time": 0.0, "expected": 2.758593313298192e-8,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 5.902307602291733e5,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "heavy_molecule",
+                    "description": "Heavy molecule M_A = 0.1 kg/mol (≈3.4× the default, analogous to SO₂ at 64 g/mol or roughly this value). tau_i ∝ √M_A increases by √(0.1/0.029) ≈ 1.856×: tau_i ≈ 5.307×10⁻⁸ s. k_mt drops from ≈5.899×10⁵ to ≈5.815×10⁵ s⁻¹. Exercises √M_A wiring in the interfacial term.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"M_A": 0.1},
+                    "assertions": [
+                        {"variable": "tau_i", "time": 0.0, "expected": 5.306965477950655e-8,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 5.814844912730998e5,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "perfect_accommodation_small_particle",
+                    "description": "Small particle R_p = 1 nm = 10⁻⁹ m with perfect accommodation α = 1. tau_g = (1e-9)²/(6e-5) ≈ 1.667×10⁻¹⁴ s (negligible); tau_i = (1e-9/3)×√(2π×0.029/(8.314×298.15)) ≈ 2.858×10⁻¹² s. k_mt ≈ 1/tau_i ≈ 3.498×10¹¹ s⁻¹ — extremely fast transfer at nanometer scale. Confirms that tau_g ≪ tau_i in the free-molecular limit for small, well-accommodated particles.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-9},
+                    "assertions": [
+                        {"variable": "tau_g", "time": 0.0, "expected": 1.666666666666666e-14,  "tolerance": {"rel": 1e-12}},
+                        {"variable": "tau_i", "time": 0.0, "expected": 2.857888372453761e-12,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "k_mt",  "time": 0.0, "expected": 3.478799279856495e11,    "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "k_mt_vs_particle_radius",
+                    "description": "Sweep particle radius R_p from 1 nm to 1 mm log-spaced at default conditions (D_g=2×10⁻⁵, α=1, M_A=0.029, T=298.15 K). For small R_p, tau_i dominates (proportional to R_p) and k_mt ∝ 1/R_p — the free-molecular regime. For large R_p, tau_g dominates (proportional to R_p²) and k_mt ∝ 1/R_p² — the continuum diffusion regime. The crossover occurs around R_p where tau_g ≈ tau_i, i.e., R_p ≈ D_g × √(2πM_A/(RT)) / α.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-3, "count": 61, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "k_mt_vs_rp",
+                            "type": "line",
+                            "description": "Mass transfer coefficient k_mt as a function of particle radius R_p. Shows transition from free-molecular regime (k_mt ∝ 1/R_p for small R_p, interfacial-limited) to continuum regime (k_mt ∝ 1/R_p² for large R_p, diffusion-limited).",
+                            "x": {"variable": "R_p",  "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "k_mt", "label": "Mass transfer coefficient k_mt (s⁻¹)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "k_mt_vs_accommodation",
+                    "description": "Sweep accommodation coefficient α from 0.001 to 1.0 log-spaced at default R_p = 10 µm. For α near 1, tau_i ≪ tau_g and k_mt is insensitive to α (diffusion-limited). As α decreases, tau_i grows as 1/α and eventually dominates, making k_mt ∝ α (accommodation-limited). The crossover is around α where tau_i ≈ tau_g.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "α",
+                                "range": {"start": 0.001, "stop": 1.0, "count": 51, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "k_mt_vs_alpha",
+                            "type": "line",
+                            "description": "Mass transfer coefficient k_mt vs. accommodation coefficient α. Shows plateau at diffusion-limited value for α near 1 and linear decrease k_mt ∝ α in the accommodation-limited regime for small α.",
+                            "x": {"variable": "α",    "label": "Accommodation coefficient α"},
+                            "y": {"variable": "k_mt", "label": "Mass transfer coefficient k_mt (s⁻¹)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
