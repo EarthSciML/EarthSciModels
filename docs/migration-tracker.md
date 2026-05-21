@@ -676,7 +676,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 | fuel_savr | `src/coupling.jl:123` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_savr` | — |
 | fuel_load | `src/coupling.jl:124` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_load` | — |
 | fuel_depth | `src/coupling.jl:125` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_depth` | — |
-| fuel_mce | `src/coupling.jl:126` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_mce` | — |
+| fuel_mce | `src/coupling.jl:126` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_mce` | — | **status: complete, sha: a158f4ea7a72f8e8a2ee37faba96484093e26d2c** (esm-hr2x; 20 tests / 20 assertions, 2 examples) |
 | fuel_heat | `src/coupling.jl:127` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_heat` | — |
 | fuel_weight | `src/coupling.jl:128` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_weight` | — | **status: complete, sha: 306e7780edcb02b97948a77ef6a3e314e60b6341** (esm-1rhq; 20 tests / 20 assertions, 2 examples) |
 | FuelModelLookup | `src/coupling.jl:155` | Model | variables, parameters, observed, registered_function calls (fuel_*) | gt-p3ep(lookup) | M | Y | Y | `components/wildland_fire/fuel_model_lookup.esm` | fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight |
