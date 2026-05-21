@@ -1,0 +1,385 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CloudKelvinEffect",
+        "description": "Kelvin effect on the equilibrium vapor pressure over a curved cloud droplet surface — Seinfeld & Pandis (2006), Ch. 17. Computes the Kelvin length parameter A_K = 4 σ_w M_w / (R T ρ_w) and the Kelvin saturation ratio S_K = exp(A_K / D_p), the factor by which surface curvature enhances equilibrium vapor pressure over a small droplet relative to a flat surface. Used as the curvature term in the Köhler equation (Eq. 17.27). Migrated from Aerosol.jl CloudKelvinEffect.",
+        "tags": [
+            "aerosol",
+            "cloud_physics",
+            "thermodynamics",
+            "vapor-pressure",
+            "kohler"
+        ]
+    },
+    "models": {
+        "CloudKelvinEffect": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 17. Kelvin equation curvature term used in Eq. 17.27 (Köhler equation).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:181\n\nUpstream `CloudKelvinEffect` is an MTK `@component`. It declares six scalar `@parameters` — `R` (universal gas constant, J/mol/K), `T` (temperature, K), `σ_w` (surface tension of water, N/m), `M_w` (molar mass of water, kg/mol), `ρ_w` (density of liquid water, kg/m³), `D_p` (droplet diameter, m) — and two scalar `@variables` (`A_K`, `S_K`, both dimensionless or with units m and 1 respectively). The two equations are `A_K ~ 4 σ_w M_w / (R T ρ_w)` and `S_K ~ exp(A_K / D_p)` (the Kelvin saturation ratio, the curvature term in the Köhler equation, Eq. 17.27).\n\nThe formula uses droplet diameter D_p (not radius R_p), matching the Ch. 17 convention in DropletGrowth (cloud_physics.jl) where S_eq is expanded as exp(4 M_w σ_w / (T R D_p ρ_w)) in the Köhler composite. The sibling sp_ch10 KelvinEffect (kelvin.esm) uses radius R_p; this Ch. 17 variant uses diameter D_p = 2 R_p, so A_K here is twice the sp_ch10 Kelvin length A (i.e., A_K/D_p = A/R_p).\n\nObserved classification: CloudKelvinEffect has no `D()` time-derivative — it is a purely-algebraic component. `A_K` and `S_K` are both algebraic outputs. After MTK `structural_simplify` the compiled system has zero ODE states and both become observed quantities. They are serialized as `type: observed` with an `expression`, and the `equations` array is empty, matching the sibling pure-algebraic pattern (zsr.esm, kelvin.esm).\n\nParameter defaults match the `DropletGrowth` component in the same cloud_physics.jl file: T=293.15 K, σ_w=0.0728 N/m, M_w=0.018015 kg/mol, ρ_w=997.0 kg/m³, D_p=1e-6 m.\n\nTolerance rationale (model-level rel=1e-9): the model is a small closed-form algebraic system — one division of two short products followed by one `exp` — so float64 evaluation roundoff is at the few-ULP (~1e-15 relative) level; rel=1e-9 leaves ample headroom and matches the sibling coagulation_rate.esm which has comparable arithmetic complexity."
+            },
+            "variables": {
+                "R": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Universal gas constant. Appears in the exponent denominator of Eq. 17.27."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Temperature of the droplet and surrounding vapor. A colder droplet has a larger Kelvin enhancement (A_K ∝ 1/T)."
+                },
+                "σ_w": {
+                    "type": "parameter",
+                    "units": "N/m",
+                    "default": 0.0728,
+                    "description": "Surface tension of liquid water. Default 0.0728 N/m at ~293 K (S&P 2006, Ch. 17). Appears linearly in the exponent numerator."
+                },
+                "M_w": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.018015,
+                    "description": "Molar mass of water. Default 0.018015 kg/mol."
+                },
+                "ρ_w": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 997.0,
+                    "description": "Density of liquid water. Default 997.0 kg/m³ at ~293 K."
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1e-06,
+                    "description": "Droplet diameter (Ch. 17 convention: uses diameter, not radius). Default 1 μm. The Kelvin enhancement grows as D_p shrinks and vanishes as D_p → ∞."
+                },
+                "A_K": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Kelvin length parameter (curvature coefficient): A_K = 4 σ_w M_w / (R T ρ_w). The Kelvin exponent is A_K / D_p (dimensionless). A_K ~ 2.16 nm at 293 K for water.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    4,
+                                    "σ_w",
+                                    "M_w"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R",
+                                    "T",
+                                    "ρ_w"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "S_K": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Kelvin saturation ratio: S_K = exp(A_K / D_p) — the ratio of equilibrium vapor pressure over the curved droplet surface to that over a flat surface. S_K ≥ 1 and S_K → 1 as D_p → ∞. Used as the curvature term in the Köhler equation (Eq. 17.27).",
+                    "expression": {
+                        "op": "exp",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "A_K",
+                                    "D_p"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-09
+            },
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Kelvin effect at the upstream default parameterization: a 1 μm water droplet at 293.15 K. A_K = 4×0.0728×0.018015 / (8.314×293.15×997) = 2.15889e-9 m. S_K = exp(2.15889e-9 / 1e-6) = 1.002161. Both outputs are algebraic and time-invariant; same values asserted at t=0 and t=1.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "A_K",
+                            "time": 0.0,
+                            "expected": 2.15889022577928e-09
+                        },
+                        {
+                            "variable": "A_K",
+                            "time": 1.0,
+                            "expected": 2.15889022577928e-09
+                        },
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.00216122230722
+                        },
+                        {
+                            "variable": "S_K",
+                            "time": 1.0,
+                            "expected": 1.00216122230722
+                        }
+                    ]
+                },
+                {
+                    "id": "small_droplet_strong_enhancement",
+                    "description": "For a small droplet the Kelvin effect is large. At D_p = 10 nm (0.01 μm) — 100× smaller than the default — the exponent A_K/D_p = 0.21589 and S_K = 1.24096, a 24% vapor-pressure enhancement.",
+                    "parameter_overrides": {
+                        "D_p": 1e-08
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.24096465230054
+                        }
+                    ]
+                },
+                {
+                    "id": "large_droplet_negligible_enhancement",
+                    "description": "For a large droplet the Kelvin effect is negligible. At D_p = 10 μm — 10× larger than the default — S_K = 1.000216, a 0.02% enhancement.",
+                    "parameter_overrides": {
+                        "D_p": 1e-05
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.00021591232829
+                        }
+                    ]
+                },
+                {
+                    "id": "sub_micron_100nm",
+                    "description": "At D_p = 100 nm (typical accumulation-mode aerosol), the Kelvin exponent is A_K/D_p = 0.02159, giving S_K = 1.02182. This illustrates the significance of curvature for sub-micrometre droplets.",
+                    "parameter_overrides": {
+                        "D_p": 1e-07
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.02182362872711
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_warm",
+                    "description": "The Kelvin enhancement weakens with temperature (A_K ∝ 1/T). At T = 300 K with the default D_p = 1 μm, A_K = 2.10960e-9 m and S_K = 1.002112 — slightly smaller than the default (1.002161 at 293.15 K).",
+                    "parameter_overrides": {
+                        "T": 300.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "A_K",
+                            "time": 0.0,
+                            "expected": 2.10959556562398e-09
+                        },
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.00211182232793
+                        }
+                    ]
+                },
+                {
+                    "id": "temperature_cold",
+                    "description": "At T = 273.15 K (freezing point), A_K = 2.31696e-9 m and S_K = 1.002320 — larger than the default (1.002161 at 293.15 K), confirming S_cold > S_default > S_warm.",
+                    "parameter_overrides": {
+                        "T": 273.15
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "A_K",
+                            "time": 0.0,
+                            "expected": 2.31696382825259e-09
+                        },
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.00231965006318
+                        }
+                    ]
+                },
+                {
+                    "id": "s_k_always_ge_1",
+                    "description": "The Kelvin effect always enhances vapor pressure (S_K ≥ 1). At the default parameters S_K = 1.002161 > 1. Asserting S_K ≥ 1.0 via the lower bound.",
+                    "parameter_overrides": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S_K",
+                            "time": 0.0,
+                            "expected": 1.00216122230722
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "kelvin_ratio_vs_droplet_diameter",
+                    "description": "The Kelvin saturation ratio rises steeply as the droplet shrinks (S_K = exp(A_K/D_p)). Sweeping D_p over 10 nm – 10 μm on a logarithmic axis traces the curvature enhancement decaying from a strong effect for the smallest droplets toward S_K → 1 for large droplets.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": {
+                                    "start": 1e-08,
+                                    "stop": 1e-05,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "s_k_vs_d_p",
+                            "type": "line",
+                            "description": "Kelvin saturation ratio S_K as a function of droplet diameter D_p (water droplet at T=293.15 K).",
+                            "x": {
+                                "variable": "D_p",
+                                "label": "Droplet diameter D_p (m)"
+                            },
+                            "y": {
+                                "variable": "S_K",
+                                "label": "Kelvin saturation ratio S_K (dimensionless)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "kelvin_ratio_vs_temperature",
+                    "description": "The Kelvin enhancement weakens with temperature (A_K ∝ 1/T). Sweeping T over 250–350 K at D_p = 1 μm traces S_K decreasing monotonically as the droplet warms.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 250.0,
+                                    "stop": 350.0,
+                                    "count": 50,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "s_k_vs_t",
+                            "type": "line",
+                            "description": "Kelvin saturation ratio S_K as a function of temperature T (water droplet at D_p = 1 μm).",
+                            "x": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "y": {
+                                "variable": "S_K",
+                                "label": "Kelvin saturation ratio S_K (dimensionless)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "kelvin_diameter_temperature_heatmap",
+                    "description": "Joint dependence of S_K on droplet diameter and temperature. The heatmap shows the enhancement strongest for small, cold droplets and fading toward unity for large, warm droplets.",
+                    "parameters": {},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": {
+                                    "start": 1e-08,
+                                    "stop": 1e-05,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "T",
+                                "range": {
+                                    "start": 250.0,
+                                    "stop": 350.0,
+                                    "count": 25,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "s_k_d_p_t_heatmap",
+                            "type": "heatmap",
+                            "description": "S_K(D_p, T) heatmap — Kelvin saturation ratio over droplet diameter and temperature.",
+                            "x": {
+                                "variable": "D_p",
+                                "label": "Droplet diameter D_p (m)"
+                            },
+                            "y": {
+                                "variable": "T",
+                                "label": "Temperature T (K)"
+                            },
+                            "value": {
+                                "variable": "S_K",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
