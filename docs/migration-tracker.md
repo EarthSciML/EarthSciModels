@@ -197,7 +197,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| Nucleation | `src/nucleation.jl:35` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/nucleation/nucleation.esm` | — |
+| Nucleation | `src/nucleation.jl:35` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/nucleation/nucleation.esm` | — | **status: complete** (esm-4ed — `components/aerosol/nucleation/nucleation.esm` committed on `main`, inline-test gate passes: 5P/0F/0E.)
 | WaterProperties | `src/nucleation.jl:117` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/nucleation/water_properties.esm` | — | **status: complete** (esm-nu8du sweep — already migrated; `components/aerosol/nucleation/water_properties.esm` committed on `main`, inline-test gate passes.)
 | CriticalCluster | `src/nucleation.jl:200` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/nucleation/critical_cluster.esm` | — | **status: complete** (esm-b13 — `components/aerosol/nucleation/critical_cluster.esm` committed on `main`, inline-test gate passes.)
 | ClassicalNucleationRate | `src/nucleation.jl:257` | Model | variables, parameters, observed | none | M | Y | Y | `components/aerosol/nucleation/classical_rate.esm` | — |
