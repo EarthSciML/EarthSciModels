@@ -1,0 +1,340 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AerosolExtinction",
+        "description": "Extinction, scattering, and absorption coefficients for a monodisperse aerosol population, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 15, Eqs. 15.6 and 15.27-15.30. For a monodisperse population the bulk optical coefficients (b_ext, b_scat, b_abs) are the product of the single-particle cross-section area (pi/4)*D_p^2 times the number concentration N times the corresponding Mie efficiency (Q_ext, Q_scat, Q_abs). The single-scattering albedo omega = b_scat / b_ext completes the optical description. The Mie efficiencies Q_ext and Q_scat are accepted as input parameters (their default values correspond to the Mie solution at D_p = 0.5 um, lambda = 550 nm, n_refr = 1.5, k_refr = 0 using the Bohren & Huffman algorithm). The size parameter alpha = pi * D_p / lambda is computed as an algebraic observed output for reference. Migrated from Aerosol.jl AerosolExtinction.",
+        "tags": [
+            "aerosol",
+            "mie",
+            "optical",
+            "extinction",
+            "scattering",
+            "seinfeld_pandis_ch15"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-nyn)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 15. Size parameter: Eq. 15.6. Extinction/scattering/absorption coefficients: Eqs. 15.27-15.29. Single-scattering albedo: Eq. 15.5."
+            }
+        ]
+    },
+    "models": {
+        "AerosolExtinction": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/mie_scattering.jl:206\n\nUpstream `AerosolExtinction` is an MTK `@component` with two `@constants` (π_val = Float64(π), four = 4.0), six `@parameters` (D_p, λ, n_refr, k_refr, ρ_p, N), and eight `@variables` (α, Q_ext, Q_scat, Q_abs, b_ext, b_scat, b_abs, ω). The eight equations are:\n  • α ~ π_val * D_p / λ  (Eq. 15.6, size parameter)\n  • Q_ext ~ mie_Q_ext(α, n_refr, k_refr)  (@register_symbolic Mie function)\n  • Q_scat ~ mie_Q_scat(α, n_refr, k_refr)  (@register_symbolic Mie function)\n  • Q_abs ~ Q_ext - Q_scat\n  • b_ext ~ (π_val / four) * D_p^2 * N * Q_ext  (Eq. 15.27)\n  • b_scat ~ (π_val / four) * D_p^2 * N * Q_scat  (Eq. 15.28)\n  • b_abs ~ (π_val / four) * D_p^2 * N * Q_abs  (Eq. 15.29)\n  • ω ~ b_scat / b_ext  (Eq. 15.5)\n\nThe two Mie efficiency equations use @register_symbolic functions (mie_Q_ext, mie_Q_scat) that cannot be expressed as algebraic AST compositions in the ESS schema. The migration resolves this by lifting Q_ext and Q_scat to input `type: parameter` fields with default values taken from the Bohren & Huffman Mie calculation at the upstream default parameter values (D_p = 0.5e-6 m, λ = 550e-9 m, n_refr = 1.5, k_refr = 0): Q_ext = 8.136639625628797, Q_scat = 8.136639625628797. The size parameter α, though used as an argument to the removed Mie function calls, is still a well-defined algebraic expression (π_val * D_p / λ) and is preserved as `type: observed` for reference.\n\nUnused-parameter pruning: the upstream `@parameter` ρ_p (particle density, 1500 kg/m³) appears in none of the eight equations and is omitted per the unused-parameter rule (identical treatment to the ρ_p pruning in components/aerosol/size/free_troposphere.esm and related migrations). Similarly, n_refr and k_refr (refractive index real and imaginary parts) appear only in the Mie function calls mie_Q_ext and mie_Q_scat, which are replaced by the lifted parameters Q_ext and Q_scat; n_refr and k_refr do not appear in any remaining algebraic equation and are therefore also omitted.\n\n@constants handling: π_val (Float64(π) = 3.141592653589793) and four (4.0) are upstream `@constants` entries. The ESS schema has no constant variable type; each migrates as `type: parameter` with a fixed numeric default, consistent with the rig-wide convention for @constants (e.g., π_val in components/aerosol/particle_dyn/mobility.esm, components/aerosol/size/free_troposphere.esm).\n\nObserved-only classification: the component is purely algebraic — no D() time-derivatives appear. After lifting Q_ext and Q_scat to parameters, the remaining six computed quantities (α, Q_abs, b_ext, b_scat, b_abs, ω) are each defined by one algebraic relation and are serialized as `type: observed` with an `expression`; the `equations` array is empty.\n\nTests: the upstream mie_scattering_test.jl verifies structural properties and Mie function behavior, not the bulk coefficient equations. The inline `tests` block is therefore authored from the algebraic equations themselves. The default-parameters test pins all six observed outputs at the upstream defaults (D_p = 0.5e-6 m, λ = 550e-9 m, N = 1e9 m⁻³, Q_ext = Q_scat = 8.136639625628797); ω = 1.0 and b_abs = 0.0 because the default Mie call has k_refr = 0 (non-absorbing). The absorbing-particle test uses Q_ext = 3.0, Q_scat = 2.5 (Q_abs = 0.5, ω = 5/6) to verify the absorption branch. The size-parameter test verifies α = π * D_p / λ at a different (D_p, λ). The half-N test scales N to 5e8 and uses Q_ext = Q_scat = 2.0 to confirm linearity of b_ext in N. Expected values are computed in float64 arithmetic from the same algebraic expressions as the ESM; float64 round-off is ~1e-15 relative, so rel=1e-9 leaves ample headroom.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic, each observed output is a chain of +, -, *, /, ^ over float64 parameters. Float64 round-off is ~1e-15; rel=1e-9 leaves six orders of magnitude of headroom and absorbs any associativity difference in the multi-factor products."
+            },
+            "tolerance": {
+                "rel": 1e-09
+            },
+            "variables": {
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Pi (dimensionless). Upstream MTK @constants entry π_val = Float64(π); migrated as a fixed-default parameter."
+                },
+                "four": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 4.0,
+                    "description": "Constant 4 for the single-particle cross-section denominator (pi/4)*D_p^2. Upstream MTK @constants entry four = 4.0; migrated as a fixed-default parameter."
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5e-07,
+                    "description": "Particle diameter. Default 0.5 µm (0.5e-6 m) — the upstream default."
+                },
+                "λ": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5.5e-07,
+                    "description": "Wavelength of incident radiation. Default 550 nm (550e-9 m) — visible green light, the upstream default."
+                },
+                "N": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 1000000000.0,
+                    "description": "Particle number concentration of the aerosol population. Default 1e9 m⁻³ (1000 cm⁻³) — a typical urban aerosol loading, the upstream default."
+                },
+                "Q_ext": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 8.136639625628797,
+                    "description": "Extinction efficiency (dimensionless). Upstream MTK variable; migrated to parameter because the defining equation Q_ext ~ mie_Q_ext(α, n_refr, k_refr) uses a @register_symbolic Mie function that cannot be expressed in the ESS algebraic AST. Default value is the Bohren & Huffman Mie solution at D_p = 0.5e-6 m, λ = 550e-9 m, n_refr = 1.5, k_refr = 0 (size parameter α = π×0.5e-6/550e-9 ≈ 2.856)."
+                },
+                "Q_scat": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 8.136639625628797,
+                    "description": "Scattering efficiency (dimensionless). Upstream MTK variable; migrated to parameter because the defining equation Q_scat ~ mie_Q_scat(α, n_refr, k_refr) uses a @register_symbolic Mie function that cannot be expressed in the ESS algebraic AST. Default value equals Q_ext because k_refr = 0 (non-absorbing) at the upstream defaults."
+                },
+                "α": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Size parameter α = π D_p / λ (dimensionless) — the ratio of particle circumference to wavelength (Seinfeld & Pandis 2006, Eq. 15.6). Governs the Mie regime: α << 1 is Rayleigh, α ~ 1 is resonance, α >> 1 is geometric optics.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "π_val",
+                                    "D_p"
+                                ]
+                            },
+                            "λ"
+                        ]
+                    }
+                },
+                "Q_abs": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Absorption efficiency Q_abs = Q_ext - Q_scat (dimensionless). Zero for non-absorbing particles (k_refr = 0).",
+                    "expression": {
+                        "op": "-",
+                        "args": [
+                            "Q_ext",
+                            "Q_scat"
+                        ]
+                    }
+                },
+                "b_ext": {
+                    "type": "observed",
+                    "units": "m^-1",
+                    "description": "Extinction coefficient b_ext = (π/4) D_p² N Q_ext (m⁻¹) — the fraction of incident radiation extinguished (scattered + absorbed) per unit path length (Seinfeld & Pandis 2006, Eq. 15.27). For a monodisperse population this is the single-particle cross section (π/4)*D_p²*Q_ext times the number concentration N.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "π_val",
+                                    "four"
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    "D_p",
+                                    2
+                                ]
+                            },
+                            "N",
+                            "Q_ext"
+                        ]
+                    }
+                },
+                "b_scat": {
+                    "type": "observed",
+                    "units": "m^-1",
+                    "description": "Scattering coefficient b_scat = (π/4) D_p² N Q_scat (m⁻¹) — the fraction of incident radiation scattered per unit path length (Seinfeld & Pandis 2006, Eq. 15.28). Equal to b_ext for non-absorbing particles.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "π_val",
+                                    "four"
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    "D_p",
+                                    2
+                                ]
+                            },
+                            "N",
+                            "Q_scat"
+                        ]
+                    }
+                },
+                "b_abs": {
+                    "type": "observed",
+                    "units": "m^-1",
+                    "description": "Absorption coefficient b_abs = (π/4) D_p² N Q_abs (m⁻¹) — the fraction of incident radiation absorbed per unit path length (Seinfeld & Pandis 2006, Eq. 15.29). Zero for non-absorbing particles.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    "π_val",
+                                    "four"
+                                ]
+                            },
+                            {
+                                "op": "^",
+                                "args": [
+                                    "D_p",
+                                    2
+                                ]
+                            },
+                            "N",
+                            "Q_abs"
+                        ]
+                    }
+                },
+                "ω": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Single-scattering albedo ω = b_scat / b_ext = Q_scat / Q_ext (dimensionless). The fraction of total extinction that is due to scattering rather than absorption (Seinfeld & Pandis 2006, Eq. 15.5). Ranges from 0 (pure absorber) to 1 (pure scatterer). Equal to 1 for non-absorbing particles (k_refr = 0).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            "b_scat",
+                            "b_ext"
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_params_all_outputs",
+                    "description": "All parameters at their declared defaults: D_p = 0.5e-6 m, λ = 550e-9 m, N = 1e9 m⁻³, Q_ext = Q_scat = 8.136639625628797 (Mie solution at D_p = 0.5 µm, λ = 550 nm, n_refr = 1.5, k_refr = 0). Pins all six observed outputs. α = π×0.5e-6/550e-9 ≈ 2.856. Q_abs = 0 (non-absorbing, k=0). ω = 1 (pure scatterer). b_ext = b_scat = (π/4)×(0.5e-6)²×1e9×8.137 ≈ 1.598e-3 m⁻¹. b_abs = 0. All outputs are algebraic and time-independent; α and ω are also asserted at t=1 to confirm time-invariance.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "α",
+                            "time": 0.0,
+                            "expected": 2.855993321445266
+                        },
+                        {
+                            "variable": "Q_abs",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "b_ext",
+                            "time": 0.0,
+                            "expected": 0.0015976254545489396
+                        },
+                        {
+                            "variable": "b_scat",
+                            "time": 0.0,
+                            "expected": 0.0015976254545489396
+                        },
+                        {
+                            "variable": "b_abs",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "ω",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "α",
+                            "time": 1.0,
+                            "expected": 2.855993321445266
+                        },
+                        {
+                            "variable": "ω",
+                            "time": 1.0,
+                            "expected": 1.0
+                        }
+                    ]
+                },
+                {
+                    "id": "absorbing_particle",
+                    "description": "Absorbing aerosol: Q_ext = 3.0, Q_scat = 2.5, so Q_abs = 0.5, ω = Q_scat/Q_ext = 5/6 ≈ 0.8333. Verifies that the absorption branch is correctly wired (b_abs > 0 and ω < 1). All bulk coefficients scale linearly with N: at N = 1e9 m⁻³, D_p = 0.5e-6 m, the geometric cross section per particle is (π/4)×(0.5e-6)² = 1.9635e-13 m².",
+                    "parameter_overrides": {
+                        "Q_ext": 3.0,
+                        "Q_scat": 2.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "Q_abs",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "b_ext",
+                            "time": 0.0,
+                            "expected": 0.0005890486225480862
+                        },
+                        {
+                            "variable": "b_scat",
+                            "time": 0.0,
+                            "expected": 0.0004908738521234051
+                        },
+                        {
+                            "variable": "b_abs",
+                            "time": 0.0,
+                            "expected": 9.817477042468103e-05
+                        },
+                        {
+                            "variable": "ω",
+                            "time": 0.0,
+                            "expected": 0.8333333333333333
+                        }
+                    ]
+                },
+                {
+                    "id": "size_parameter_ratio",
+                    "description": "Size parameter α = π D_p / λ at D_p = 1e-6 m (1 µm) and λ = 500e-9 m (500 nm): α = π × 1e-6 / 500e-9 = 2π ≈ 6.283. Tests the Eq. 15.6 formula independently of the Mie efficiencies.",
+                    "parameter_overrides": {
+                        "D_p": 1e-06,
+                        "λ": 5e-07
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "α",
+                            "time": 0.0,
+                            "expected": 6.283185307179586
+                        }
+                    ]
+                },
+                {
+                    "id": "bulk_coefficient_linearity_N",
+                    "description": "Linearity of bulk coefficients in N: N = 5e8 m⁻³ (half the default), Q_ext = Q_scat = 2.0, D_p = 0.5e-6 m. b_ext should be (π/4)×(0.5e-6)²×5e8×2 ≈ 1.963e-4 m⁻¹ — half what it would be at N = 1e9 with the same Q_ext, confirming the linear N scaling. ω = 1, b_abs = 0 (non-absorbing).",
+                    "parameter_overrides": {
+                        "N": 500000000.0,
+                        "Q_ext": 2.0,
+                        "Q_scat": 2.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "b_ext",
+                            "time": 0.0,
+                            "expected": 0.00019634954084936205
+                        },
+                        {
+                            "variable": "b_abs",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "ω",
+                            "time": 0.0,
+                            "expected": 1.0
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
