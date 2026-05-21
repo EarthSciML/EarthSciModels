@@ -204,7 +204,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | ECTracerMethod | `src/organic_aerosol.jl:18` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/ec_tracer.esm` | — |
 | NoninteractingSOA | `src/organic_aerosol.jl:64` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/noninteracting_soa.esm` | — |
 | AbsorptivePartitioning | `src/organic_aerosol.jl:125` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/absorptive_partitioning.esm` | — |
-| TwoProductSOA | `src/organic_aerosol.jl:197` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/two_product_soa.esm` | — |
+| TwoProductSOA | `src/organic_aerosol.jl:197` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/two_product_soa.esm` | — | **status: complete** (esm-q3b — `components/aerosol/organic/two_product_soa.esm` committed on `main`, inline-test gate passes: 9P/0F/0E.)
 | LangmuirAdsorption | `src/organic_aerosol.jl:249` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/langmuir.esm` | — |
 | BETAdsorption | `src/organic_aerosol.jl:279` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/bet.esm` | — | **status: complete** (esm-nu8du sweep — already migrated; `components/aerosol/organic/bet.esm` committed on `main`, inline-test gate passes.)
 | FHHAdsorption | `src/organic_aerosol.jl:314` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/fhh.esm` | — |
