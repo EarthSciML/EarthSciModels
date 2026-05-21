@@ -199,7 +199,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 |---|---|---|---|---|---|---|---|---|---|
 | Nucleation | `src/nucleation.jl:35` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/nucleation/nucleation.esm` | — |
 | WaterProperties | `src/nucleation.jl:117` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/nucleation/water_properties.esm` | — | **status: complete** (esm-nu8du sweep — already migrated; `components/aerosol/nucleation/water_properties.esm` committed on `main`, inline-test gate passes.)
-| CriticalCluster | `src/nucleation.jl:200` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/nucleation/critical_cluster.esm` | — |
+| CriticalCluster | `src/nucleation.jl:200` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/nucleation/critical_cluster.esm` | — | **status: complete** (esm-b13 — `components/aerosol/nucleation/critical_cluster.esm` committed on `main`, inline-test gate passes.)
 | ClassicalNucleationRate | `src/nucleation.jl:257` | Model | variables, parameters, observed | none | M | Y | Y | `components/aerosol/nucleation/classical_rate.esm` | — |
 | ECTracerMethod | `src/organic_aerosol.jl:18` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/ec_tracer.esm` | — |
 | NoninteractingSOA | `src/organic_aerosol.jl:64` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/organic/noninteracting_soa.esm` | — |
