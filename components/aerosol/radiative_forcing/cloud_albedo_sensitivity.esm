@@ -1,0 +1,429 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CloudAlbedoSensitivity",
+        "description": "Twomey susceptibility and cloud albedo sensitivity to cloud droplet number concentration — Seinfeld & Pandis (2006) Ch. 24 §24.8.2, Eqs. 24.40–24.41.",
+        "tags": [
+            "aerosol",
+            "radiative_forcing"
+        ]
+    },
+    "models": {
+        "CloudAlbedoSensitivity": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 24, Section 24.8.2, Equations 24.40–24.41.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aerosol_radiative_forcing.jl:254\nTwomey susceptibility S = dR_c/d(ln N) = R_c·(1−R_c)/3 (Eq. 24.41) and cloud-albedo sensitivity dR_c/dN = R_c·(1−R_c)/(3N) (Eq. 24.40). Both are closed-form algebraic relations of the cloud albedo R_c and cloud droplet number concentration N. The maximum susceptibility S = 1/12 occurs at R_c = 0.5. After MTK structural_simplify both variables become observed bindings and the compiled system has zero ODE states.\n\nTolerance rationale (model-level rel=1e-8 / abs=1e-12): both expressions are simple rational functions of R_c and N, so 1e-8 captures float64 roundoff throughout. abs=1e-12 floors the small-susceptibility limits near R_c = 0 or R_c = 1 where S → 0."
+            },
+            "variables": {
+                "R_c": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Cloud albedo (dimensionless)"
+                },
+                "N": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 100000000.0,
+                    "description": "Cloud droplet number concentration"
+                },
+                "dRc_dN": {
+                    "type": "observed",
+                    "units": "m^3",
+                    "description": "Sensitivity of cloud albedo to CDNC: dR_c/dN = R_c·(1−R_c)/(3N).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_c",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "R_c"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    "N"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "S": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Twomey susceptibility dR_c/d(ln N) = R_c·(1−R_c)/3. Maximum value 1/12 occurs at R_c = 0.5.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "R_c",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "R_c"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            3
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-8,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "maximum_susceptibility_at_Rc05",
+                    "description": "Reproduces the upstream Aerosol.jl `Twomey Susceptibility - Eq. 24.40-24.41 Validation` testitem. At R_c = 0.5 (maximum susceptibility) and N = 100×10⁶ m⁻³: S = 1/12 ≈ 0.0833 and dRc_dN = 0.25/(3×100×10⁶). Both are pinned to exact float64 values.",
+                    "parameter_overrides": {
+                        "R_c": 0.5,
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.08333333333333333
+                        },
+                        {
+                            "variable": "S",
+                            "time": 1.0,
+                            "expected": 0.08333333333333333
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 8.333333333333334e-10
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 1.0,
+                            "expected": 8.333333333333334e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "symmetry_Rc01",
+                    "description": "Symmetry verification: S(R_c=0.1) ≈ S(R_c=0.9) (upstream asserts rtol=0.01). R_c=0.1: S = 0.1·0.9/3 = 0.03.",
+                    "parameter_overrides": {
+                        "R_c": 0.1,
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.030000000000000002
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 3.0000000000000005e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "symmetry_Rc03",
+                    "description": "Symmetry verification: S(R_c=0.3) ≈ S(R_c=0.7) (upstream asserts rtol=0.01). R_c=0.3: S = 0.3·0.7/3 = 0.07.",
+                    "parameter_overrides": {
+                        "R_c": 0.3,
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.06999999999999999
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 7e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "symmetry_Rc07",
+                    "description": "Symmetry verification: S(R_c=0.7) ≈ S(R_c=0.3). R_c=0.7: S = 0.7·0.3/3 = 0.07.",
+                    "parameter_overrides": {
+                        "R_c": 0.7,
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.07
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 7.000000000000001e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "symmetry_Rc09",
+                    "description": "Symmetry verification: S(R_c=0.9) ≈ S(R_c=0.1). R_c=0.9: S = 0.9·0.1/3 = 0.03.",
+                    "parameter_overrides": {
+                        "R_c": 0.9,
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.029999999999999995
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 2.9999999999999995e-10
+                        }
+                    ]
+                },
+                {
+                    "id": "N_sensitivity_low_N",
+                    "description": "N-sensitivity: dRc_dN ∝ 1/N. At R_c=0.5 and N=50×10⁶ m⁻³, dRc_dN doubles relative to N=100×10⁶.",
+                    "parameter_overrides": {
+                        "R_c": 0.5,
+                        "N": 50000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.08333333333333333
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 1.6666666666666668e-9
+                        }
+                    ]
+                },
+                {
+                    "id": "N_sensitivity_high_N",
+                    "description": "N-sensitivity: dRc_dN ∝ 1/N. At R_c=0.5 and N=200×10⁶ m⁻³, dRc_dN halves relative to N=100×10⁶. S is N-independent.",
+                    "parameter_overrides": {
+                        "R_c": 0.5,
+                        "N": 200000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "S",
+                            "time": 0.0,
+                            "expected": 0.08333333333333333
+                        },
+                        {
+                            "variable": "dRc_dN",
+                            "time": 0.0,
+                            "expected": 4.166666666666667e-10
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "twomey_susceptibility_vs_Rc",
+                    "description": "Twomey susceptibility S = R_c·(1−R_c)/3 as a function of cloud albedo R_c at fixed N = 100×10⁶ m⁻³. The curve is a parabola peaking at R_c = 0.5 (S_max = 1/12 ≈ 0.0833) and symmetric about R_c = 0.5. Reproduces the key result from Seinfeld & Pandis (2006) §24.8.2 that the cloud albedo effect is strongest for intermediate-albedo clouds.",
+                    "parameters": {
+                        "N": 100000000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_c",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.99,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_vs_Rc",
+                            "type": "line",
+                            "description": "Twomey susceptibility S as a function of cloud albedo R_c. Peaks at R_c = 0.5.",
+                            "x": {
+                                "variable": "R_c",
+                                "label": "Cloud albedo R_c"
+                            },
+                            "y": {
+                                "variable": "S",
+                                "label": "Twomey susceptibility S = dR_c/d(ln N)"
+                            }
+                        },
+                        {
+                            "id": "dRcdN_vs_Rc",
+                            "type": "line",
+                            "description": "Cloud albedo sensitivity dR_c/dN as a function of R_c at N = 100×10⁶ m⁻³.",
+                            "x": {
+                                "variable": "R_c",
+                                "label": "Cloud albedo R_c"
+                            },
+                            "y": {
+                                "variable": "dRc_dN",
+                                "label": "dR_c/dN (m³)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "dRcdN_vs_N_at_max_susceptibility",
+                    "description": "Cloud albedo sensitivity dR_c/dN as a function of cloud droplet number concentration N at fixed R_c = 0.5 (maximum susceptibility). Shows the 1/N inverse dependence: adding droplets to an already-droplet-rich cloud has diminishing effect on albedo.",
+                    "parameters": {
+                        "R_c": 0.5
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N",
+                                "range": {
+                                    "start": 10000000.0,
+                                    "stop": 1000000000.0,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "dRcdN_vs_N",
+                            "type": "line",
+                            "description": "dR_c/dN vs N (log-log scale reveals the 1/N slope).",
+                            "x": {
+                                "variable": "N",
+                                "label": "Cloud droplet number concentration N (m⁻³)"
+                            },
+                            "y": {
+                                "variable": "dRc_dN",
+                                "label": "dR_c/dN (m³)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "Rc_N_joint_sweep",
+                    "description": "Joint sensitivity of Twomey susceptibility S to cloud albedo R_c and droplet number concentration N. Since S is independent of N, the heatmap confirms that all N-rows at a given R_c have the same value, with S peaking along the R_c = 0.5 column.",
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_c",
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.95,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            },
+                            {
+                                "parameter": "N",
+                                "range": {
+                                    "start": 10000000.0,
+                                    "stop": 500000000.0,
+                                    "count": 20,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_heatmap",
+                            "type": "heatmap",
+                            "description": "S(R_c, N) heatmap — confirms N-independence of S.",
+                            "x": {
+                                "variable": "R_c",
+                                "label": "Cloud albedo R_c"
+                            },
+                            "y": {
+                                "variable": "N",
+                                "label": "Cloud droplet number concentration N (m⁻³)"
+                            },
+                            "value": {
+                                "variable": "S",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
