@@ -1,0 +1,513 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "H2O2Equilibria",
+        "description": "H2O2 gas-aqueous dissolution and (weak) dissociation equilibria with van't Hoff temperature dependence. Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:519 (`H2O2Equilibria` @component). Implements Seinfeld & Pandis Ch 7 §7.3.6: K_H(H2O2, 298 K) = 1.0×10⁵ M/atm, ΔH_sol = −14.5 kcal/mol; K_h1(H2O2, 298 K) = 2.2×10⁻¹² M (temperature-independent, very weak). Parameterized as observed-only: T, H_plus, and p_H2O2 are inputs; H_H2O2, K_h1, H2O2_aq, HO2_minus, H2O2_total, H_H2O2_eff are algebraic outputs.",
+        "tags": [
+            "aerosol",
+            "aqueous_equilibria",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-cm8)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Section 7.3.6 (H2O2 dissolution/dissociation) and Table 7.4 (equilibrium-constant temperature dependence). ISBN 978-1-118-94740-1."
+            }
+        ]
+    },
+    "models": {
+        "H2O2Equilibria": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:519\n\nUpstream `H2O2Equilibria` is an MTK `@component` where T, H_plus, and p_H2O2 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), T, H_plus, and p_H2O2 are declared as parameters here — matching the bead's `(S, observed-only)` classification. The six algebraic equations are unchanged from upstream.\n\nKey difference from SO2/CO2/NH3: K_h1 is temperature-independent (upstream `K_h1 ~ K_h1_298` with no van't Hoff correction). H2O2 is a very weak acid (pKa ≈ 11.6 at 298 K), so dissociation is negligible at typical atmospheric pH 3–7 (K_h1/H_plus ≤ 2.2×10⁻⁵ at pH 7, rising to 2.2 at pH 11).\n\nH_H2O2_298 = 1.0×10⁵ M/atm × 1000 mol·m⁻³/M ÷ 101325 Pa/atm = 986.9233 mol/(m³·Pa). K_h1_298 = 2.2×10⁻¹² M × 1000 = 2.2×10⁻⁹ mol/m³.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the exp/multiply expression of the van't Hoff H_H2O2(T) closed form. K_h1 is constant; the dissociation and totals are simple products/sums."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Temperature"
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0001,
+                    "description": "Hydrogen ion concentration (1e-4 mol/m³ = pH 7 in pure water at 298 K)"
+                },
+                "p_H2O2": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 1.0,
+                    "description": "Partial pressure of H2O2"
+                },
+                "R_gas": {
+                    "type": "parameter",
+                    "units": "J/mol/K",
+                    "default": 8.314,
+                    "description": "Gas constant"
+                },
+                "T_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.0,
+                    "description": "Reference temperature"
+                },
+                "H_H2O2_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 986.9232667160128,
+                    "description": "Henry's law constant for H2O2 at 298 K (1.0×10⁵ M/atm converted to mol/(m³·Pa): 1.0e5 / 101325.0 * 1000.0)"
+                },
+                "dH_H_H2O2": {
+                    "type": "parameter",
+                    "units": "J/mol",
+                    "default": -60668.0,
+                    "description": "Heat of dissolution for H2O2 (-14.5 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+                },
+                "K_h1_298": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 2.2e-9,
+                    "description": "Dissociation constant for H2O2 → H⁺ + HO2⁻ at 298 K (2.2×10⁻¹² M converted to mol/m³; very weak, temperature-independent in upstream source)"
+                },
+                "H_H2O2": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Temperature-dependent Henry's law constant for H2O2"
+                },
+                "K_h1": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Dissociation constant H2O2 → H⁺ + HO2⁻ (temperature-independent: K_h1 = K_h1_298)"
+                },
+                "H2O2_aq": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Aqueous H2O2 concentration"
+                },
+                "HO2_minus": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Hydroperoxide anion concentration [HO2-]"
+                },
+                "H2O2_total": {
+                    "type": "state",
+                    "units": "mol/m^3",
+                    "description": "Total dissolved hydrogen peroxide: [H2O2(aq)] + [HO2-]"
+                },
+                "H_H2O2_eff": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Effective Henry's law constant for H2O2 accounting for dissociation: H_H2O2 × (1 + K_h1/[H+])"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_H2O2",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_H2O2_298",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            { "op": "/", "args": ["dH_H_H2O2", "R_gas"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    { "op": "/", "args": [1, "T_ref"] },
+                                                    { "op": "/", "args": [-1, "T"] }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "K_h1",
+                    "rhs": "K_h1_298"
+                },
+                {
+                    "lhs": "H2O2_aq",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["H_H2O2", "p_H2O2"]
+                    }
+                },
+                {
+                    "lhs": "HO2_minus",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["K_h1", "H2O2_aq"] },
+                            "H_plus"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "H2O2_total",
+                    "rhs": {
+                        "op": "+",
+                        "args": ["H2O2_aq", "HO2_minus"]
+                    }
+                },
+                {
+                    "lhs": "H_H2O2_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_H2O2",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    { "op": "/", "args": ["K_h1", "H_plus"] }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "reference_298K_pH7",
+                    "description": "Reference state at 298 K (T_ref) with neutral water (pH 7) and 1 Pa H2O2. At T=T_ref the van't Hoff exponent is zero so H_H2O2 = H_H2O2_298. K_h1 is temperature-independent and equals K_h1_298. The dissociation correction K_h1/H_plus = 2.2e-9/1e-4 = 2.2e-5 is negligible — HO2_minus is ~0.002% of H2O2_aq.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",     "time": 0.0, "expected": 986.9232667160128 },
+                        { "variable": "K_h1",        "time": 0.0, "expected": 2.2e-9 },
+                        { "variable": "H2O2_aq",     "time": 0.0, "expected": 986.9232667160128 },
+                        { "variable": "HO2_minus",   "time": 0.0, "expected": 0.02171231186775228 },
+                        { "variable": "H2O2_total",  "time": 0.0, "expected": 986.9449790278805 },
+                        { "variable": "H_H2O2_eff",  "time": 0.0, "expected": 986.9449790278805 }
+                    ]
+                },
+                {
+                    "id": "cold_273K_pH7",
+                    "description": "Cold cloud water at 273.15 K (0°C), pH 7. H2O2 has a very large negative ΔH_sol (−14.5 kcal/mol = −60668 J/mol), so solubility increases sharply with cooling — H_H2O2 grows ~9.3× relative to 298 K. K_h1 is unchanged (temperature-independent).",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",     "time": 0.0, "expected": 9157.256660439376 },
+                        { "variable": "K_h1",        "time": 0.0, "expected": 2.2e-9 },
+                        { "variable": "H2O2_aq",     "time": 0.0, "expected": 9157.256660439376 },
+                        { "variable": "HO2_minus",   "time": 0.0, "expected": 0.20145964652966625 },
+                        { "variable": "H2O2_total",  "time": 0.0, "expected": 9157.458120085907 },
+                        { "variable": "H_H2O2_eff",  "time": 0.0, "expected": 9157.458120085905 }
+                    ]
+                },
+                {
+                    "id": "cold_280K_pH7",
+                    "description": "Intermediate cold-water reference (280 K), pH 7. H_H2O2 ≈ 4763.6 mol/(m³·Pa), roughly 4.8× the 298 K value.",
+                    "parameter_overrides": {
+                        "T": 280.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",   "time": 0.0, "expected": 4763.550867474284 },
+                        { "variable": "H2O2_aq",  "time": 0.0, "expected": 4763.550867474284 }
+                    ]
+                },
+                {
+                    "id": "warm_310K_pH7",
+                    "description": "Warm-cloud reference (310 K), pH 7. H2O2 solubility falls with warming (large negative ΔH_sol): H_H2O2 ≈ 382.5 mol/(m³·Pa), about 0.39× the 298 K value.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",     "time": 0.0, "expected": 382.4940875002585 },
+                        { "variable": "H2O2_aq",     "time": 0.0, "expected": 382.4940875002585 },
+                        { "variable": "HO2_minus",   "time": 0.0, "expected": 0.008414869925005687 },
+                        { "variable": "H_H2O2_eff",  "time": 0.0, "expected": 382.5025023701835 }
+                    ]
+                },
+                {
+                    "id": "hot_318K_pH7",
+                    "description": "Upper-range reference (318 K, 45°C) for warm aqueous-phase chemistry.",
+                    "parameter_overrides": {
+                        "T": 318.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",   "time": 0.0, "expected": 211.56603164215167 },
+                        { "variable": "H2O2_aq",  "time": 0.0, "expected": 211.56603164215167 }
+                    ]
+                },
+                {
+                    "id": "van_t_hoff_ratio_check",
+                    "description": "Explicit van't Hoff ratio: H_H2O2(273.15) / H_H2O2(298) = exp((-60668/8.314) × (1/298 - 1/273.15)) ≈ 9.27. Verified via the ratio of the cold_273K and reference_298K test values: 9157.26/986.92 ≈ 9.27. States H_H2O2_eff matches H_H2O2 × (1 + K_h1/H_plus) at a p=2 Pa case.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 2.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",    "time": 0.0, "expected": 9157.256660439376 },
+                        { "variable": "H2O2_aq",   "time": 0.0, "expected": 18314.513320878752 },
+                        { "variable": "HO2_minus", "time": 0.0, "expected": 0.4029192930593325 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH4_298K",
+                    "description": "Acidic cloud water (pH 4, [H+] = 0.1 mol/m³) at 298 K. K_h1/H_plus = 2.2e-9/0.1 = 2.2e-8 — even smaller fraction dissociated than at pH 7. H_H2O2_eff → H_H2O2 to excellent approximation.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 0.1,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 986.9232667160128 },
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 2.171231186775228e-05 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 986.9232884283247 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 986.9232884283247 }
+                    ]
+                },
+                {
+                    "id": "acidic_pH2_298K",
+                    "description": "Strongly acidic regime (pH 2, [H+] = 10 mol/m³) at 298 K. K_h1/H_plus = 2.2e-10 — dissociation completely negligible. Stress-tests the HO2_minus and H_H2O2_eff expressions at the far-acidic tail.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 10.0,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 2.1712311867752282e-07 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 986.9232669331359 }
+                    ]
+                },
+                {
+                    "id": "basic_pH11_298K",
+                    "description": "Basic regime (pH 11, [H+] = 1e-8 mol/m³) at 298 K. K_h1/H_plus = 2.2e-9/1e-8 = 0.22 — dissociation is now ~22% of H2O2_aq, comparable. H_H2O2_eff is ~1.22× H_H2O2.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-8,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 986.9232667160128 },
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 217.12311867752283 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 1204.0463853935357 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 1204.0463853935355 }
+                    ]
+                },
+                {
+                    "id": "basic_pH12_298K",
+                    "description": "Basic regime (pH 12, [H+] = 1e-9 mol/m³) at 298 K. K_h1/H_plus = 2.2 — dissociation is now substantial: HO2_minus ≈ 2.2× H2O2_aq. H_H2O2_eff ≈ 3.2× H_H2O2. Exercises the high-pH enhancement of the effective Henry's constant.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-9,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 2171.2311867752283 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 3158.154453491241 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 3158.1544534912405 }
+                    ]
+                },
+                {
+                    "id": "high_p_H2O2",
+                    "description": "Henry's-law linearity check: 10× p_H2O2 at fixed T and H_plus scales H2O2_aq, HO2_minus, H2O2_total by 10× while leaving H_H2O2, K_h1, H_H2O2_eff unchanged.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 9869.232667160128 },
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 0.2171231186775228 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 9869.449790278804 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 986.9449790278805 }
+                    ]
+                },
+                {
+                    "id": "low_p_H2O2",
+                    "description": "Henry's-law linearity check at low partial pressure: p_H2O2 = 0.01 Pa scales H2O2_aq by 0.01× from baseline. H_H2O2_eff is independent of p_H2O2.",
+                    "parameter_overrides": {
+                        "T": 298.0,
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 0.01
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 9.869232667160128 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 9.869449790278805 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 986.9449790278805 }
+                    ]
+                },
+                {
+                    "id": "coupled_cold_acidic",
+                    "description": "Cross-check: cold (273.15 K) AND acidic (pH 4). Combines the van't Hoff temperature shift (H_H2O2 grows ~9.3×) with the acidic suppression of HO2_minus. Dissociation is negligible at pH 4 regardless of T.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "H_plus": 0.1,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",     "time": 0.0, "expected": 9157.256660439376 },
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 9157.256660439376 },
+                        { "variable": "H2O2_total", "time": 0.0, "expected": 9157.256861899023 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 9157.256861899023 }
+                    ]
+                },
+                {
+                    "id": "coupled_warm_basic",
+                    "description": "Cross-check: warm (310 K) AND basic (pH 11). Reduced H_H2O2 (lower T reduces solubility) combined with elevated dissociation at high pH. K_h1/H_plus = 2.2e-9/1e-8 = 0.22 → HO2_minus ≈ 84 mol/m³, H_H2O2_eff ≈ 1.22× H_H2O2.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "H_plus": 1.0e-8,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "H_H2O2",     "time": 0.0, "expected": 382.4940875002585 },
+                        { "variable": "H2O2_aq",    "time": 0.0, "expected": 382.4940875002585 },
+                        { "variable": "HO2_minus",  "time": 0.0, "expected": 84.14869925005686 },
+                        { "variable": "H_H2O2_eff", "time": 0.0, "expected": 466.64278675031534 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "H_H2O2_vs_temperature",
+                    "description": "Van't Hoff temperature dependence of the H2O2 Henry's law constant (S&P Table 7.3). With ΔH_sol = −14.5 kcal/mol, H2O2 is one of the most strongly temperature-sensitive atmospheric gases — H_H2O2 increases ~43× from 45°C (318 K) to 0°C (273 K), much larger than SO2 (~2.6×) or CO2 (~2.1×). This strong temperature sensitivity controls H2O2 partitioning between gas and cloud-droplet phases.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_plus": 1.0e-4,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 20, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "H_H2O2_curve",
+                            "type": "line",
+                            "description": "H_H2O2(T) — van't Hoff curve showing steep increase of H2O2 solubility at low T.",
+                            "x": { "variable": "T",      "label": "Temperature (K)" },
+                            "y": { "variable": "H_H2O2", "label": "H_H2O2 (mol/(m³·Pa))" }
+                        },
+                        {
+                            "id": "H2O2_aq_curve",
+                            "type": "line",
+                            "description": "Aqueous H2O2 concentration vs temperature at 1 Pa partial pressure.",
+                            "x": { "variable": "T",       "label": "Temperature (K)" },
+                            "y": { "variable": "H2O2_aq", "label": "[H2O2(aq)] (mol/m³)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "H_H2O2_eff_vs_pH",
+                    "description": "Effective Henry's law constant H*_H2O2 = H_H2O2 × (1 + K_h1/[H+]) vs [H+] at 298 K. H2O2 pKa ≈ 11.6, so the dissociation enhancement is negligible below pH 10 and only becomes noticeable above pH 11. At pH 12, H*_H2O2 ≈ 3.2× H_H2O2. This is in stark contrast to SO2 (pKa1 ≈ 1.9) where dissociation enhances H*_SO2 by many orders of magnitude across the atmospheric pH range.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "T": 298.0,
+                        "p_H2O2": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 1.0e-10, "stop": 1.0, "count": 25, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Hstar_curve",
+                            "type": "line",
+                            "description": "H*_H2O2 vs [H+] — flat until pH > 10, then rises steeply above the pKa ≈ 11.6.",
+                            "x": { "variable": "H_plus",    "label": "[H⁺] (mol/m³, log scale)" },
+                            "y": { "variable": "H_H2O2_eff", "label": "H*_H2O2 (mol/(m³·Pa), log scale)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "coupled_T_p_sweep",
+                    "description": "Henry's law: aqueous H2O2 concentration as a function of both temperature (van't Hoff) and partial pressure (linearity). Sweeping T from 273 K to 318 K and p_H2O2 from 1e-5 to 1.0 Pa shows the joint T-p surface that determines cloud-droplet H2O2 in atmospheric models.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_plus": 1.0e-4
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 273.15, "stop": 318.0, "count": 10, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "p_H2O2",
+                                "range": { "start": 1.0e-5, "stop": 1.0, "count": 15, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "H2O2_aq_heatmap",
+                            "type": "heatmap",
+                            "description": "[H2O2(aq)] as a function of T and p_H2O2.",
+                            "x": { "variable": "T",       "label": "Temperature (K)" },
+                            "y": { "variable": "p_H2O2",  "label": "p(H2O2) (Pa, log scale)" },
+                            "value": { "variable": "H2O2_aq", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
