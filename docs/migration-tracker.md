@@ -149,7 +149,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | EquilibriumConstants | `src/isorropia/equilibria.jl:22` | Model | variables, coupling.couple | none | S | Y | Y | `components/aerosol/isorropia/equilibrium_constants.esm` | EqConst |
 | Solid | `src/isorropia/solid.jl:6` | Model | variables, parameters | none | S | Y | Y | `components/aerosol/isorropia/solid.esm` | — |
 | Solids | `src/isorropia/solid.jl:22` | Model | variables, coupling.couple | none | S | Y | Y | `components/aerosol/isorropia/solids.esm` | Solid |
-| Species | `src/isorropia/isorropia.jl:100` | Model | variables, parameters | none | S | Y | Y | `components/aerosol/isorropia/species.esm` | — |
+| Species | `src/isorropia/isorropia.jl:100` | Model | variables, parameters | none | S | Y | Y | `components/aerosol/isorropia/species.esm` | — | **status: complete** (esm-bvu — `components/aerosol/isorropia/species.esm` committed on `main`, inline-test gate passes: 11P/0F/0E.)
 | Isorropia | `src/isorropia/isorropia.jl:110` | Model | variables, parameters, equations, initialization_equations, guesses, coupling.couple | **gt-ebuq(init_eq/system_kind)** | **XL** | Y | Y | `components/aerosol/isorropia/isorropia.esm` | Gases, Aqueous, Solids, EquilibriumConstants |
 
 ### 1.8 ISORROPIA-II (isorropia_ii_fn2007.jl) — 1 component + 8 @register_symbolic helpers
