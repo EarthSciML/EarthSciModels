@@ -30,7 +30,7 @@ schema-gap blockers. This manifest drives per-component Phase-2 migration beads.
 
 | Bucket | Components | Notes |
 |---|---:|---|
-| **Migrated to date** (`status: complete`) | **136** | 136 component `.esm` files committed on `main` — 135 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
+| **Migrated to date** (`status: complete`) | **137** | 137 component `.esm` files committed on `main` — 136 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
 | **Migrate today** (`none`) | **215** | Clean ODE/algebraic `@component` models. No schema gaps. Migration is well underway — see the *Migrated to date* row above. |
 | Blocked on `gt-p3ep` (lookup / @register_symbolic) | 26 | AtmDep lookup tables, GasChem Fast-JX, EarthSciData interpolators, WildlandFire fuel tables, Aerosol ISORROPIA-II helpers. `FastJX_interpolation_troposphere` is migrated (`fastjx.esm`) — its lookup gap was resolved by recovering registered functions as AST compositions of the v0.3 `interp.*` named primitives. |
 | Blocked on `gt-kuxo` (brownian / SDE) | 2 | StagePrognosis (Vegetation), BoundaryLayerMixingKC (EnvTransport) |
@@ -131,7 +131,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | ElementalCarbon | `src/elemental_carbon.jl:13` | Model | variables, parameters, equations (with `DataInterpolations.LinearInterpolation`) | none (data is constants in-place) | S | Y | Y | `components/aerosol/elemental_carbon.esm` | — |
 | HenrysLaw | `src/henrys_law.jl:101` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/henrys_law.esm` | — |
 | HenrysLawTemperature | `src/henrys_law.jl:155` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/henrys_law_temperature.esm` | — |
-| EffectiveHenrysLaw | `src/henrys_law.jl:240` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/effective_henrys_law.esm` | — |
+| EffectiveHenrysLaw | `src/henrys_law.jl:240` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/effective_henrys_law.esm` | — | **status: complete** (esm-kon — `components/aerosol/henrys_law/effective_henrys_law.esm` committed on `main`, inline-test gate passes: 4P/0F/0E.)
 
 ### 1.7 ISORROPIA (v1, directory `src/isorropia/`) — 13 components
 
