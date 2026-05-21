@@ -673,7 +673,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| fuel_savr | `src/coupling.jl:123` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_savr` | — |
+| fuel_savr | `src/coupling.jl:123` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `components/wildland_fire/registered_functions/fuel_savr.esm` | — | **status: complete, sha: 5606574** (esm-yokw; Anderson 13 SAVR lookup via ifelse+interp.linear: ifelse(1≤code≤13, interp.linear(table,[1..13],code), 3500/0.3048); gt-p3ep resolved by wrapping interp.linear in ifelse for discrete integer lookup with default; 9 tests/9 assertions, 1 sweep example) |
 | fuel_load | `src/coupling.jl:124` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_load` | — |
 | fuel_depth | `src/coupling.jl:125` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_depth` | — | **status: complete, sha: 1045b5183d476e2202983bbcef1f56d774b95fee** (esm-5180; Anderson 13 fuel-bed depth lookup via ifelse+interp.linear over [1..13], ft→m conversion (×0.3048); out-of-range codes return FM1 default 0.3048 m; 11 tests / 11 assertions, 2 examples) |
 | fuel_mce | `src/coupling.jl:126` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_mce` | — | **status: complete, sha: a158f4ea7a72f8e8a2ee37faba96484093e26d2c** (esm-hr2x; 20 tests / 20 assertions, 2 examples) |
