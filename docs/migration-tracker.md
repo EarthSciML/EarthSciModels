@@ -89,7 +89,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
 | AqueousDiffusionReaction | `src/aqueous_transport.jl:14` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/transport/aqueous_diffusion_reaction.esm` | — |
-| MassTransportLimitation | `src/aqueous_transport.jl:53` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/transport/mass_transport_limitation.esm` | — |
+| MassTransportLimitation | `src/aqueous_transport.jl:53` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/transport/mass_transport_limitation.esm` | — | **status: complete** (esm-2gy — migrated; `components/aerosol/transport/mass_transport_limitation.esm` committed on `polecat/esm-2gy`, 24 inline-test assertions pass.)
 | DropletMassBalance | `src/aqueous_transport.jl:112` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/transport/droplet_mass_balance.esm` | — |
 
 ### 1.4 cloud_chemistry.jl (3), cloud_physics.jl (9)
