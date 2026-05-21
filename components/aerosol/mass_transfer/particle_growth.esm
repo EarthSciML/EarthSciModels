@@ -1,0 +1,168 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "ParticleGrowthRate",
+    "description": "Rate of change of particle radius due to condensation or evaporation of a trace gas. Models diffusion-limited radial growth in the continuum regime via Eq. 12.14 of Seinfeld & Pandis (2006): dR_p/dt = (D_g M_A / (ρ_p R_p)) (c_∞ − c_s). The quadratic-in-R_p growth law R_p(t)² = R_p0² + 2Kt (K = D_g M_A (c_∞ − c_s)/ρ_p) is the classical result for condensation onto an absorbing sphere in the continuum limit. Migrated from Aerosol.jl src/mass_transfer.jl `ParticleGrowthRate`.",
+    "tags": [
+      "aerosol",
+      "mass-transfer",
+      "condensation",
+      "evaporation",
+      "particle-growth",
+      "seinfeld-pandis"
+    ],
+    "created": "2026-05-21T00:00:00Z",
+    "authors": [
+      "Aerosol.jl contributors",
+      "EarthSciModels migration (esm-6vn)"
+    ],
+    "references": [
+      {
+        "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Eq. 12.14 (condensation growth rate for a particle in the continuum regime)."
+      }
+    ]
+  },
+  "models": {
+    "ParticleGrowthRate": {
+      "reference": {
+        "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.14 — diffusion-limited condensation growth rate for a spherical particle in the continuum regime. Migrated from Aerosol.jl src/mass_transfer.jl `ParticleGrowthRate` (esm-6vn).",
+        "notes": "source_ref: Aerosol.jl@c8c640bb:src/mass_transfer.jl:200\n\nUpstream `ParticleGrowthRate` is an MTK @component with 5 parameters (D_g=2e-5 m²/s, M_A=0.029 kg/mol, ρ_p=1000 kg/m³, c_inf=1e-6 mol/m³, c_s=0.0 mol/m³) and 1 state variable R_p(t) [m] driven by a single ODE:\n\n  dR_p/dt = (D_g M_A / (ρ_p R_p)) (c_inf − c_s)     [Eq. 12.14]\n\nThis is the continuum-regime condensation growth law. Defining K = D_g M_A (c_inf − c_s) / ρ_p [m²/s], the ODE separates to R_p dR_p = K dt, giving the analytical solution:\n\n  R_p(t) = √(R_p0² + 2Kt)\n\nPhysics: The driving force is the concentration difference (c_inf − c_s) between the bulk gas and the particle surface. When c_inf > c_s the particle grows (condensation); when c_inf < c_s it shrinks (evaporation). The 1/R_p factor arises from the geometry of diffusion to a sphere: the diffusive flux (mol/s) to the surface scales as D_g R_p (c_inf − c_s), and converting flux to radius growth rate divides by the surface volume increment 4π R_p² ρ_p / M_A, giving the 1/R_p dependence. Larger particles therefore grow slower in radius but faster in mass (dM_p/dt ∝ R_p).\n\nUnits: D_g [m²/s] × M_A [kg/mol] × (c_inf − c_s) [mol/m³] / ρ_p [kg/m³] / R_p [m] = [m/s]. ✓\n\nESM variable name: ρ_p → rho_p (Unicode ρ serialised as ASCII for JSON compatibility, matching the convention used in diameter_growth.esm).\n\nTolerance rationale (model-level rel=1e-4): single nonlinear ODE integrated numerically. The ESS Python runner uses an adaptive ODE solver that introduces ~5e-6 relative error at the sampled time points against the analytical solution R_p(t)² = R_p0² + 2Kt. The expected values in the tests are taken from the runner output (not the exact analytical formula) so they are correct by construction; rel=1e-4 provides headroom for solver-version drift while catching any regression larger than ~0.01%."
+      },
+      "tolerance": {
+        "rel": 1e-4
+      },
+      "variables": {
+        "D_g": {
+          "type": "parameter",
+          "units": "m^2/s",
+          "default": 2.0e-5,
+          "description": "Gas-phase molecular diffusivity of the condensing/evaporating species. Default 2×10⁻⁵ m²/s is representative of mid-weight atmospheric trace gases in air at 298 K."
+        },
+        "M_A": {
+          "type": "parameter",
+          "units": "kg/mol",
+          "default": 0.029,
+          "description": "Molar mass of the condensing/evaporating species. Default 0.029 kg/mol matches air (nitrogen-dominated mixture); replace with the actual species molar mass (e.g. 0.098 kg/mol for H₂SO₄)."
+        },
+        "rho_p": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "default": 1000.0,
+          "description": "Particle (condensed-phase) density. Default 1000 kg/m³ is liquid water; use ~1770 kg/m³ for ammonium sulfate, ~1840 kg/m³ for H₂SO₄·H₂O."
+        },
+        "c_inf": {
+          "type": "parameter",
+          "units": "mol/m^3",
+          "default": 1.0e-6,
+          "description": "Bulk (far-field) gas-phase molar concentration of the condensing species. Default 1×10⁻⁶ mol/m³ ≈ 22 ppb at 1 atm and 298 K."
+        },
+        "c_s": {
+          "type": "parameter",
+          "units": "mol/m^3",
+          "default": 0.0,
+          "description": "Gas-phase concentration at the particle surface (saturation or equilibrium concentration). When c_s = 0 the particle is a perfect absorber. When c_s = c_inf there is no net flux (equilibrium). When c_s > c_inf the particle evaporates."
+        },
+        "R_p": {
+          "type": "state",
+          "units": "m",
+          "description": "Particle radius. Evolves according to dR_p/dt = (D_g M_A / (rho_p R_p)) (c_inf − c_s). Must be positive; initialise with a physically meaningful radius (e.g. 1e-8 m for 10 nm nuclei up to 1e-4 m for cloud droplets)."
+        }
+      },
+      "equations": [
+        {
+          "_comment": "Eq. 12.14 — dR_p/dt = (D_g * M_A / (rho_p * R_p)) * (c_inf − c_s). Singular at R_p = 0; the model is valid while R_p > 0.",
+          "lhs": {"op": "D", "wrt": "t", "args": ["R_p"]},
+          "rhs": {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {"op": "*", "args": ["D_g", "M_A"]},
+                  {"op": "*", "args": ["rho_p", "R_p"]}
+                ]
+              },
+              {"op": "-", "args": ["c_inf", "c_s"]}
+            ]
+          }
+        }
+      ],
+      "tests": [
+        {
+          "id": "analytical_small_particle_trajectory",
+          "description": "Default parameters (D_g=2×10⁻⁵ m²/s, M_A=0.029 kg/mol, ρ_p=1000 kg/m³, c_inf=1×10⁻⁶ mol/m³, c_s=0) with R_p0=100 nm. The growth constant K = D_g M_A c_inf / ρ_p = 5.8×10⁻¹⁶ m²/s. Analytical solution R_p(t) = √(R_p0² + 2Kt). At t=0: R_p = 1×10⁻⁷ m (initial). At t=100 s: R_p = √(10⁻¹⁴ + 1.16×10⁻¹³) = 3.5496×10⁻⁷ m. At t=500 s: R_p = 7.6811×10⁻⁷ m. At t=1000 s: R_p = 1.0817×10⁻⁶ m. Anchors all five parameters at their defaults and verifies the full quadratic-in-R_p growth trajectory.",
+          "time_span": {"start": 0.0, "end": 1000.0},
+          "initial_conditions": {
+            "R_p": 1.0e-7
+          },
+          "assertions": [
+            {"variable": "R_p", "time": 0.0,    "expected": 1.0e-7},
+            {"variable": "R_p", "time": 100.0,  "expected": 3.549666004765621e-7},
+            {"variable": "R_p", "time": 500.0,  "expected": 7.681175387799371e-7},
+            {"variable": "R_p", "time": 1000.0, "expected": 1.0816687641903738e-6}
+          ]
+        },
+        {
+          "id": "equilibrium_no_net_flux",
+          "description": "When c_inf = c_s the concentration gradient vanishes and the driving force K = D_g M_A (c_inf − c_s) / ρ_p = 0. The ODE reduces to dR_p/dt = 0 — the particle neither grows nor shrinks. Setting c_s = 1×10⁻⁶ mol/m³ (= c_inf default) while keeping all other parameters at defaults. R_p must equal its initial value 1×10⁻⁷ m at every time, including t = 1000 s. Verifies the c_s wiring: a non-zero surface concentration correctly cancels the bulk concentration.",
+          "time_span": {"start": 0.0, "end": 1000.0},
+          "parameter_overrides": {"c_s": 1.0e-6},
+          "initial_conditions": {
+            "R_p": 1.0e-7
+          },
+          "assertions": [
+            {"variable": "R_p", "time": 0.0,    "expected": 1.0e-7},
+            {"variable": "R_p", "time": 1000.0, "expected": 1.0e-7}
+          ]
+        },
+        {
+          "id": "large_particle_slower_radial_growth",
+          "description": "Initial radius R_p0 = 10 µm = 1×10⁻⁵ m (large accumulation-mode / small cloud droplet). Same K = 5.8×10⁻¹⁶ m²/s as the default case. Because R_p(t) = √(R_p0² + 2Kt) and R_p0 = 100× the 100 nm case, the fractional change ΔR_p/R_p0 is negligible: at t=10000 s, R_p ≈ 1.0564×10⁻⁵ m (+5.6%). Confirms that the 1/R_p factor in the ODE correctly slows radial growth for large particles.",
+          "time_span": {"start": 0.0, "end": 10000.0},
+          "initial_conditions": {
+            "R_p": 1.0e-5
+          },
+          "assertions": [
+            {"variable": "R_p", "time": 0.0,     "expected": 1.0e-5},
+            {"variable": "R_p", "time": 1000.0,  "expected": 1.005783312670516e-5},
+            {"variable": "R_p", "time": 5000.0,  "expected": 1.0285912197910431e-5},
+            {"variable": "R_p", "time": 10000.0, "expected": 1.0564089247872079e-5}
+          ]
+        },
+        {
+          "id": "concentration_scaling",
+          "description": "c_inf = 1×10⁻⁵ mol/m³ (10× the default) with c_s = 0. The growth constant K is exactly 10× larger: K = 5.8×10⁻¹⁵ m²/s. The R_p(t)² trajectory advances 10× faster, so R_p at t=10 s equals R_p at t=100 s in the default-concentration case (both = 3.5496×10⁻⁷ m). At t=100 s, R_p = 1.0817×10⁻⁶ m (the default-case t=1000 s value). Verifies that K ∝ (c_inf − c_s) is correctly wired into the growth rate.",
+          "time_span": {"start": 0.0, "end": 500.0},
+          "parameter_overrides": {"c_inf": 1.0e-5},
+          "initial_conditions": {
+            "R_p": 1.0e-7
+          },
+          "assertions": [
+            {"variable": "R_p", "time": 0.0,   "expected": 1.0e-7},
+            {"variable": "R_p", "time": 10.0,  "expected": 3.549663495654633e-7},
+            {"variable": "R_p", "time": 100.0, "expected": 1.0816687381923178e-6},
+            {"variable": "R_p", "time": 500.0, "expected": 2.4103944737454402e-6}
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "growth_trajectory_small_particle",
+          "description": "Time evolution of particle radius R_p for a 100 nm particle (R_p0 = 1×10⁻⁷ m) condensing at default atmospheric conditions (c_inf = 1×10⁻⁶ mol/m³ ≈ 22 ppb, c_s = 0). The R_p(t)² = R_p0² + 2Kt law means R_p grows rapidly at first (high rate when R_p is small) and slows as the particle enlarges.",
+          "initial_state": {"type": "per_variable", "values": {"R_p": 1.0e-7}},
+          "parameters": {},
+          "time_span": {"start": 0.0, "end": 1000.0},
+          "plots": [
+            {
+              "id": "Rp_vs_time",
+              "type": "line",
+              "description": "Particle radius R_p (m) versus time. Rapid initial growth slows as 1/R_p factor reduces the growth rate.",
+              "x": {"variable": "t",   "label": "Time (s)"},
+              "y": {"variable": "R_p", "label": "Particle radius R_p (m)"}
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
