@@ -1,0 +1,217 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AqueousDiffusionReaction",
+        "description": "Correction factor Q for the aqueous-phase reaction rate when intra-droplet diffusion limits access to the reactive interior (Seinfeld & Pandis 2006, Chapter 12, Eqs. 12.105 and 12.110). Computes the dimensionless Hatta number q = R_p √(k_rxn/D_aq) and the corresponding correction factor Q = 3(q·coth q − 1)/q², which scales the effective reaction rate from the well-mixed limit (Q = 1) down toward zero as the droplet becomes increasingly diffusion-limited. Migrated from Aerosol.jl src/aqueous_transport.jl:14.",
+        "tags": [
+            "aerosol",
+            "aqueous_transport",
+            "diffusion_reaction",
+            "hatta_number",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-x0e)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 12, Eq. 12.105 (Hatta number q = R_p √(k_rxn/D_aq)) and Eq. 12.110 (correction factor Q = 3(q·coth q − 1)/q²)."
+            }
+        ]
+    },
+    "models": {
+        "AqueousDiffusionReaction": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd ed., Wiley. Ch. 12, Eqs. 12.105 and 12.110. Migrated from Aerosol.jl:src/aqueous_transport.jl:14 (esm-x0e).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:14\n\nUpstream `AqueousDiffusionReaction` is an MTK `@component` with three `@parameters` (R_p, k_rxn, D_aq) and two `@variables` (q, Q), both algebraic (no `D()` time-derivative). The `eqs` array uses `~` (algebraic constraint) for both:\n  q ~ R_p * sqrt(k_rxn / D_aq)         [Eq. 12.105 — Hatta number]\n  Q ~ 3 * ((exp(q)+exp(-q))/(exp(q)-exp(-q))/q - 1/q^2)  [Eq. 12.110 — correction factor]\n\nPhysical interpretation: the Hatta number q = R_p√(k_rxn/D_aq) compares the reacto-diffusive length scale l_d = √(D_aq/k_rxn) to the droplet radius R_p. When q << 1 (slow reaction or small droplet), species diffuses freely throughout the interior before reacting and Q → 1 (no correction). When q >> 1 (fast reaction or large droplet), the reaction is confined near the droplet surface because the interior is depleted, and Q → 3/q → 0. The factor Q multiplies the bulk aqueous-phase reaction rate to give the effective rate; it appears as the `Q` parameter in the sibling `DropletMassBalance` component (src/aqueous_transport.jl:112).\n\nBoth variables become observed quantities after MTK `structural_simplify`: `q` is an explicit function of parameters only; `Q` is an explicit function of `q` (and hence also of parameters only). The ESM serializes both as `type: observed` following the established convention for purely-algebraic MTK components (cf. sibling `MassTransportLimitation.esm` and `AqueousEquilibrationTimescale.esm`). The `equations` array is empty.\n\nDependency ordering: `Q` references `q` in its expression. The ESM runtime topologically sorts observed variables, so `q` is evaluated first, then `Q`.\n\ncoth encoding: Julia has no built-in `coth` function in MTK symbolic form; the upstream code uses the ratio `(exp(q)+exp(-q))/(exp(q)-exp(-q))` directly. The ESM expression mirrors this exactly. For the default parameterization (q ≈ 0.316) both exponentials are well-conditioned. For large q (fast reaction), the formula evaluates to 3*(1/q − 1/q²) ≈ 3/q → 0, and exp(-q) is negligible — no underflow issues in the atmospheric range.\n\nTolerance rationale (model-level rel=1e-9): the model is a composition of sqrt and exp over parameters, plus simple arithmetic. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom, matching sibling observed-only ESMs (mass_transport_limitation, aqueous_diffusion_timescale)."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Droplet radius (Eq. 12.105 term R_p). The Hatta number scales as R_p, so larger droplets are more susceptible to intra-droplet diffusion limitation. Default 1e-5 m is a 10 μm cloud droplet."
+                },
+                "k_rxn": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 1.0,
+                    "description": "First-order aqueous-phase reaction rate constant (Eq. 12.105 term k_rxn). Faster reactions increase q and reduce Q, driving the system toward surface-limited uptake."
+                },
+                "D_aq": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-9,
+                    "description": "Aqueous-phase molecular diffusivity of the dissolved species (Eq. 12.105 term D_aq). Higher diffusivity reduces q and increases Q toward 1. Default 1e-9 m²/s is a typical small-solute aqueous diffusivity."
+                },
+                "q": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Hatta number (dimensionless reaction-diffusion parameter, Eq. 12.105): q = R_p √(k_rxn/D_aq). The ratio of the droplet radius to the reacto-diffusive length scale l_d = √(D_aq/k_rxn). q < 1: kinetically controlled (well-mixed interior); q > 1: diffusion-limited (surface-confined reaction).",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "R_p",
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": ["k_rxn", "D_aq"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "Q": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Aqueous diffusion correction factor (Eq. 12.110): Q = 3(q·coth q − 1)/q² = 3((exp(q)+exp(−q))/((exp(q)−exp(−q))·q) − 1/q²). Ranges from 1 (q→0, kinetically controlled, no correction) to 0 (q→∞, strongly diffusion-limited). Applied as a multiplier on the aqueous-phase reaction rate in the sibling DropletMassBalance component.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            3,
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {"op": "exp", "args": ["q"]},
+                                                    {"op": "exp", "args": [{"op": "-", "args": ["q"]}]}
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            {"op": "exp", "args": ["q"]},
+                                                            {"op": "exp", "args": [{"op": "-", "args": ["q"]}]}
+                                                        ]
+                                                    },
+                                                    "q"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [1, {"op": "^", "args": ["q", 2]}]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Default parameters (R_p=1e-5 m, k_rxn=1 s⁻¹, D_aq=1e-9 m²/s). Hatta number q = 1e-5 × √(1/1e-9) = 0.31623 (moderate diffusion-reaction coupling). Correction factor Q = 3(coth(0.31623)/0.31623 − 1/0.31623²) ≈ 0.9934 — a small (0.7%) reduction from unity, meaning diffusion barely limits the reaction at these default conditions.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 0.31622776601683796},
+                        {"variable": "Q", "time": 0.0, "expected": 0.993396196825245}
+                    ]
+                },
+                {
+                    "id": "diffusion_limited_fast_reaction",
+                    "description": "Fast reaction k_rxn=1e6 s⁻¹ (k_rxn increased 1e6-fold). Hatta number q = 1e-5 × √(1e6/1e-9) = 316.23 >> 1: the reacto-diffusive length l_d = √(D_aq/k_rxn) = √(1e-9/1e6) = 1e-7.5 m is ~0.03 μm, far smaller than the 10 μm droplet. Correction factor Q ≈ 3/q ≈ 0.00946 — the reaction is strongly surface-confined, reducing the effective rate by ~99%.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 1.0e6},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 316.22776601683796},
+                        {"variable": "Q", "time": 0.0, "expected": 0.009456832980505137}
+                    ]
+                },
+                {
+                    "id": "kinetically_controlled_slow_reaction",
+                    "description": "Slow reaction k_rxn=1e-4 s⁻¹ (k_rxn reduced 1e4-fold). Hatta number q = 0.003162 << 1: the reacto-diffusive length l_d >> R_p so the species fully equilibrates across the droplet interior before reacting. Q ≈ 1 − q²/15 ≈ 0.999999 — diffusion correction is negligible, well-mixed limit applies.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 1.0e-4},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 0.003162277660168379},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9999993361125229}
+                    ]
+                },
+                {
+                    "id": "low_diffusivity_intermediate_hatta",
+                    "description": "Low aqueous-phase diffusivity D_aq=1e-10 m²/s (10× lower than default; representative of a larger or more complex solute molecule). Hatta number q = 1e-5 × √(1/1e-10) = 1.0 exactly (the droplet radius equals the reacto-diffusive length). Correction factor Q = 3(coth(1) − 1) = 3((e²+1)/(e²−1) − 1) ≈ 0.9391 — a notable 6% reduction.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"D_aq": 1.0e-10},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 1.0},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9391058564979942}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "correction_factor_vs_reaction_rate",
+                    "description": "Correction factor Q and Hatta number q as a function of aqueous-phase reaction rate constant k_rxn (log sweep 1e-4 to 1e6 s⁻¹) at default R_p=1e-5 m, D_aq=1e-9 m²/s. Q decreases from ~1 (slow reaction, kinetically controlled) toward 0 (fast reaction, diffusion-limited). The transition occurs near q=1, i.e. k_rxn ≈ D_aq/R_p² = 1e-9/(1e-5)² = 10 s⁻¹.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_rxn",
+                                "range": {"start": 1.0e-4, "stop": 1.0e6, "count": 40, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Q_vs_k_rxn",
+                            "type": "line",
+                            "description": "Correction factor Q vs reaction rate k_rxn. Shows the transition from Q=1 (kinetically controlled) to Q→0 (diffusion-limited) near k_rxn ~ D_aq/R_p² = 10 s⁻¹.",
+                            "x": {"variable": "k_rxn", "label": "k_rxn (s⁻¹)"},
+                            "y": {"variable": "Q", "label": "Q (dimensionless)"}
+                        },
+                        {
+                            "id": "q_vs_k_rxn",
+                            "type": "line",
+                            "description": "Hatta number q vs reaction rate k_rxn (log-log slope 0.5, since q ∝ √k_rxn). The q=1 threshold marks the onset of significant diffusion limitation.",
+                            "x": {"variable": "k_rxn", "label": "k_rxn (s⁻¹)"},
+                            "y": {"variable": "q", "label": "q (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "correction_factor_vs_droplet_radius",
+                    "description": "Correction factor Q as a function of droplet radius R_p (log sweep 0.1 μm to 100 μm) at default k_rxn=1 s⁻¹, D_aq=1e-9 m²/s. Larger droplets have larger q = R_p/l_d and lower Q — they are more diffusion-limited because the interior is harder to reach. Small droplets (R_p < l_d = √(D_aq/k_rxn) = 31.6 μm) are kinetically controlled (Q ≈ 1).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-7, "stop": 1.0e-4, "count": 40, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Q_vs_Rp",
+                            "type": "line",
+                            "description": "Correction factor Q vs droplet radius R_p. Q is near 1 for small droplets (R_p << reacto-diffusive length) and decreases for larger droplets.",
+                            "x": {"variable": "R_p", "label": "R_p (m)"},
+                            "y": {"variable": "Q", "label": "Q (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

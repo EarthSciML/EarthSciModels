@@ -88,7 +88,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| AqueousDiffusionReaction | `src/aqueous_transport.jl:14` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/transport/aqueous_diffusion_reaction.esm` | — |
+| AqueousDiffusionReaction | `src/aqueous_transport.jl:14` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/transport/aqueous_diffusion_reaction.esm` | — | **status: complete** (esm-x0e; 8 assertions, 4 tests, 2 examples; Hatta number q and correction factor Q, both type:observed, all assertions pass)
 | MassTransportLimitation | `src/aqueous_transport.jl:53` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/transport/mass_transport_limitation.esm` | — | **status: complete** (esm-2gy — migrated; `components/aerosol/transport/mass_transport_limitation.esm` committed on `polecat/esm-2gy`, 24 inline-test assertions pass.)
 | DropletMassBalance | `src/aqueous_transport.jl:112` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/transport/droplet_mass_balance.esm` | — | **status: complete** (esm-c3w; 28 assertions, 4 tests, 3 examples; mass conservation verified)
 
