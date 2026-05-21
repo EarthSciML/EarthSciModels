@@ -1,0 +1,299 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "BinaryMolality",
+    "description": "Binary aqueous molality of an inorganic salt as a function of relative humidity, using the 5th-order polynomial fit from Table 7 of Fountoukis and Nenes (2007). The polynomial m_aw(RH) = (k_0 + k_1*RH + k_2*RH^2 + k_3*RH^3 + k_4*RH^4 + k_5*RH^5) * m_one is used in Equation 16 of ISORROPIA II to compute the ZSR water content contribution from each salt. Multiple BinaryMolality instances (one per salt) are composed into the Aqueous component. Migrated from Aerosol.jl src/isorropia/aqueous.jl BinaryMolality (esm-406).",
+    "tags": [
+      "aerosol",
+      "isorropia",
+      "aqueous-phase",
+      "thermodynamics",
+      "inorganic-aerosol",
+      "water-activity",
+      "fountoukis-nenes"
+    ]
+  },
+  "models": {
+    "BinaryMolality": {
+      "reference": {
+        "citation": "Fountoukis, C. and Nenes, A. (2007). ISORROPIA II: a computationally efficient thermodynamic equilibrium model for K+-Ca2+-Mg2+-NH4+-Na+-SO42--NO3--Cl--H2O aerosols. Atmospheric Chemistry and Physics, 7(17), 4639-4659. https://doi.org/10.5194/acp-7-4639-2007",
+        "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/isorropia/aqueous.jl:179\n\nUpstream `BinaryMolality` is an MTK `@component` that takes seven constructor keyword arguments k_0 through k_6 (no defaults — all required). The component defines two `@variables`: `RH(t)` (relative humidity, guess 0.3) and `m_aw(t)` (binary molality in mol/kg, guess 1.0). The single equation is:\n\n  m_aw ~ (k_0 + k_1*RH + k_2*RH^2 + k_3*RH^3 + k_4*RH^4 + k_5*RH^5) * m_one\n\nwhere m_one = 1.0 mol/kg is a unit-normalisation constant (declared as an MTK `@constant` to carry SI units through symbolic algebra).\n\nNote on k_6: the coefficient k_6 is declared as an MTK `@constant` in the source and appears as a constructor argument, but it does NOT appear in the polynomial equation. The polynomial terminates at k_5*RH^5 (5th order). Table 7 of Fountoukis and Nenes (2007) lists coefficients through k_5 for most salts; a few salts (NaCl, Na2SO4, NH4NO3) carry a 6th coefficient in the upstream instantiation comments but it remains unused in the equation. This ESM faithfully omits k_6 from the expression, but retains it as a declared parameter for API compatibility with the upstream constructor signature.\n\nRole in ISORROPIA II (Equation 16, ZSR): In the parent `Aqueous` component, one `BinaryMolality` instance is created per salt (18 instances total). Each instance receives RH from the parent and returns m_aw, which is used in the ZSR aerosol water content formula:\n\n  W = sum_s (M_s / m_aw_s)\n\nwhere M_s is the aqueous molarity of salt s (mol/m^3) and m_aw_s is the binary molality of salt s (mol/kg). The polynomial coefficients are given in Table 7 of the paper for each salt.\n\nDefault parameters (NaCl): The ESM default parametrisation uses NaCl (sodium chloride) values from Table 7 of Fountoukis and Nenes (2007), as NaCl is a representative common inorganic aerosol salt with a well-characterised water activity curve. Users composing BinaryMolality into Aqueous must override k_0 through k_5 with the salt-specific coefficients from Table 7.\n\nTest strategy: All tests exercise the polynomial directly by setting parameter_overrides for k_0...k_5 and RH. Since the model is purely algebraic (no ODE state variables), all assertions are at t=0. Tests cover three salts (NaCl, NH42SO4, CaNO32) spanning the range of polynomial behaviour: NaCl with moderate variation, NH42SO4 with a near-unity flat response, and CaNO32 with large coefficients. For each salt, two or three RH values are tested including RH=0 (which collapses to k_0 alone) and a mid-range value."
+      },
+      "tolerance": {
+        "rel": 1e-10
+      },
+      "variables": {
+        "k_0": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0084,
+          "description": "0th-order polynomial fit coefficient for the binary molality vs. relative humidity curve (Table 7, Fountoukis & Nenes 2007). Dimensionless; the coefficient is multiplied by m_one (1 mol/kg) to obtain units. Default: NaCl value from Table 7."
+        },
+        "k_1": {
+          "type": "parameter",
+          "units": "1",
+          "default": -0.04939,
+          "description": "1st-order polynomial fit coefficient (coefficient of RH). Dimensionless. Default: NaCl value from Table 7."
+        },
+        "k_2": {
+          "type": "parameter",
+          "units": "1",
+          "default": 0.008888,
+          "description": "2nd-order polynomial fit coefficient (coefficient of RH^2). Dimensionless. Default: NaCl value from Table 7."
+        },
+        "k_3": {
+          "type": "parameter",
+          "units": "1",
+          "default": -0.002157,
+          "description": "3rd-order polynomial fit coefficient (coefficient of RH^3). Dimensionless. Default: NaCl value from Table 7."
+        },
+        "k_4": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.617e-4,
+          "description": "4th-order polynomial fit coefficient (coefficient of RH^4). Dimensionless. Default: NaCl value from Table 7."
+        },
+        "k_5": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.99e-6,
+          "description": "5th-order polynomial fit coefficient (coefficient of RH^5). Dimensionless. Default: NaCl value from Table 7."
+        },
+        "k_6": {
+          "type": "parameter",
+          "units": "1",
+          "default": -1.142e-7,
+          "description": "6th-order polynomial fit coefficient. Declared in the upstream MTK source for constructor API compatibility, but NOT used in the polynomial equation (which terminates at k_5*RH^5). Retained here for interface parity. Default: NaCl Table 7 value."
+        },
+        "m_one": {
+          "type": "parameter",
+          "units": "mol/kg",
+          "default": 1.0,
+          "description": "Unit molality normalisation constant (1 mol/kg). Upstream MTK @constant used to carry units through symbolic algebra. In the polynomial m_aw = (k_0 + ... + k_5*RH^5) * m_one, m_one = 1 gives m_aw its mol/kg units while keeping the k_i coefficients dimensionless."
+        },
+        "RH": {
+          "type": "parameter",
+          "units": "1",
+          "default": 0.3,
+          "description": "Relative humidity (dimensionless, 0–1). Upstream MTK @variables entry with guess = 0.3. In the parent Aqueous component this is connected via maw_<salt>.RH ~ RH. For standalone use, set RH to the ambient relative humidity."
+        },
+        "m_aw": {
+          "type": "observed",
+          "units": "mol/kg",
+          "description": "Binary molality of the salt in an aqueous solution at the given relative humidity (mol/kg). Computed via the 5th-order polynomial fit m_aw = (k_0 + k_1*RH + k_2*RH^2 + k_3*RH^3 + k_4*RH^4 + k_5*RH^5) * m_one. Used in the ZSR water content formula (Equation 16 of Fountoukis & Nenes 2007) as a denominator: W = sum_s M_s / m_aw_s.",
+          "expression": {
+            "op": "*",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "k_0",
+                  {
+                    "op": "*",
+                    "args": ["k_1", "RH"]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_2",
+                      {"op": "^", "args": ["RH", 2]}
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_3",
+                      {"op": "^", "args": ["RH", 3]}
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_4",
+                      {"op": "^", "args": ["RH", 4]}
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_5",
+                      {"op": "^", "args": ["RH", 5]}
+                    ]
+                  }
+                ]
+              },
+              "m_one"
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "nacl_rh_zero",
+          "description": "NaCl binary molality at RH=0. The polynomial collapses to k_0 alone (all higher-order terms vanish). Verifies that m_aw equals k_0 = 1.0084 mol/kg at RH=0, the limiting dry-aerosol value.",
+          "parameter_overrides": {
+            "k_0": 1.0084,
+            "k_1": -4.939e-2,
+            "k_2": 8.888e-3,
+            "k_3": -2.157e-3,
+            "k_4": 1.617e-4,
+            "k_5": 1.99e-6,
+            "k_6": -1.142e-7,
+            "RH": 0.0
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 1.0084,
+              "tolerance": {"rel": 1e-12}
+            }
+          ]
+        },
+        {
+          "id": "nacl_rh_moderate",
+          "description": "NaCl binary molality at RH=0.3 (typical continental aerosol humidity). Tests the polynomial at an interior RH value representative of real-world conditions. Expected m_aw = k_0 + k_1*0.3 + k_2*0.09 + k_3*0.027 + k_4*0.0081 + k_5*0.00243 ≈ 0.994326 mol/kg.",
+          "parameter_overrides": {
+            "k_0": 1.0084,
+            "k_1": -4.939e-2,
+            "k_2": 8.888e-3,
+            "k_3": -2.157e-3,
+            "k_4": 1.617e-4,
+            "k_5": 1.99e-6,
+            "k_6": -1.142e-7,
+            "RH": 0.3
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 0.9943259956057,
+              "tolerance": {"rel": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "nacl_rh_high",
+          "description": "NaCl binary molality at RH=0.8 (high relative humidity, near-deliquescence regime). Tests the polynomial near the upper end of the physically relevant humidity range. Expected m_aw ≈ 0.97354 mol/kg.",
+          "parameter_overrides": {
+            "k_0": 1.0084,
+            "k_1": -4.939e-2,
+            "k_2": 8.888e-3,
+            "k_3": -2.157e-3,
+            "k_4": 1.617e-4,
+            "k_5": 1.99e-6,
+            "k_6": -1.142e-7,
+            "RH": 0.8
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 0.9735388204032,
+              "tolerance": {"rel": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "nh42so4_rh_moderate",
+          "description": "Ammonium sulfate (NH42SO4) binary molality at RH=0.5. NH42SO4 has a near-unity, slowly varying m_aw curve (k_0 ≈ 1) that remains close to 1 mol/kg across the humidity range. Tests a different salt to verify per-salt parameterisation. Expected m_aw ≈ 0.98192 mol/kg.",
+          "parameter_overrides": {
+            "k_0": 0.9968,
+            "k_1": -2.969e-2,
+            "k_2": 1.735e-5,
+            "k_3": -3.253e-4,
+            "k_4": 3.571e-5,
+            "k_5": -9.787e-7,
+            "k_6": 0.0,
+            "RH": 0.5
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 0.981920876290625,
+              "tolerance": {"rel": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "cano32_rh_zero",
+          "description": "Calcium nitrate Ca(NO3)2 binary molality at RH=0 (dry limit). CaNO32 has very large polynomial coefficients (k_0=36.356) representing its high hygroscopicity. At RH=0 the polynomial collapses to k_0 = 36.356 mol/kg, which is the limiting molality at zero humidity.",
+          "parameter_overrides": {
+            "k_0": 36.356,
+            "k_1": -165.66,
+            "k_2": 447.46,
+            "k_3": -673.55,
+            "k_4": 510.91,
+            "k_5": -155.56,
+            "k_6": 0.0,
+            "RH": 0.0
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 36.356,
+              "tolerance": {"rel": 1e-12}
+            }
+          ]
+        },
+        {
+          "id": "cano32_rh_moderate",
+          "description": "Calcium nitrate Ca(NO3)2 binary molality at RH=0.5. CaNO32 has large polynomial coefficients with alternating signs, making this a non-trivial evaluation. Expected m_aw = 36.356 + (-165.66)*0.5 + 447.46*0.25 + (-673.55)*0.125 + 510.91*0.0625 + (-155.56)*0.03125 = 8.267875 mol/kg.",
+          "parameter_overrides": {
+            "k_0": 36.356,
+            "k_1": -165.66,
+            "k_2": 447.46,
+            "k_3": -673.55,
+            "k_4": 510.91,
+            "k_5": -155.56,
+            "k_6": 0.0,
+            "RH": 0.5
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "assertions": [
+            {
+              "variable": "m_aw",
+              "time": 0.0,
+              "expected": 8.267875,
+              "tolerance": {"rel": 1e-10}
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "nacl_molality_vs_rh",
+          "description": "NaCl binary molality m_aw (mol/kg) versus relative humidity RH from 0 to 1, using the polynomial fit coefficients from Table 7 of Fountoukis and Nenes (2007). Shows the mildly decreasing m_aw with increasing RH: NaCl is diluted as more water condenses. Starting from 1.0084 mol/kg at RH=0 (dry) down to ~0.966 mol/kg at RH=1.",
+          "parameters": {
+            "k_0": 1.0084,
+            "k_1": -4.939e-2,
+            "k_2": 8.888e-3,
+            "k_3": -2.157e-3,
+            "k_4": 1.617e-4,
+            "k_5": 1.99e-6,
+            "k_6": -1.142e-7
+          },
+          "time_span": {"start": 0.0, "end": 1.0},
+          "initial_state": {"type": "per_variable", "values": {}},
+          "plots": [
+            {
+              "id": "m_aw_vs_RH",
+              "type": "line",
+              "description": "Binary molality m_aw (mol/kg) of NaCl versus relative humidity RH. The gentle downward slope reflects dilution of the salt solution as atmospheric water content increases.",
+              "x": {"variable": "t", "label": "RH (dimensionless, mapped to time)"},
+              "y": {"variable": "m_aw", "label": "Binary molality m_aw (mol/kg)"}
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
