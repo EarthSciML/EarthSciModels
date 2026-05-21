@@ -1,0 +1,219 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EqConst",
+        "description": "Temperature-dependent equilibrium constant for one ISORROPIA v1 reaction, following Equation 5 of Fountoukis and Nenes (2007). Computes the natural log of the equilibrium constant logK_eq at temperature T from three dimensionless parameters: logK0 (ln K at the reference temperature T0 = 298.15 K), H_plus (= ΔH⁰/(R·T₀), thermal sensitivity), and C_plus (= ΔCₚ⁰/R, heat-capacity correction). This component is a building block: EquilibriumConstants instantiates 27 named copies of it, one for each reaction pair from Table 2 of Fountoukis and Nenes (2007). Migrated from Aerosol.jl src/isorropia/equilibria.jl EqConst.",
+        "tags": [
+            "aerosol",
+            "isorropia",
+            "thermodynamic-equilibrium",
+            "inorganic-chemistry",
+            "temperature-dependence",
+            "fountoukis-nenes"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-q32)"
+        ],
+        "references": [
+            {
+                "citation": "Fountoukis, C. and Nenes, A. (2007). ISORROPIA II: a computationally efficient thermodynamic equilibrium model for K+–Ca2+–Mg2+–NH4+–Na+–SO42−–NO3−–Cl−–H2O aerosols. Atmospheric Chemistry and Physics, 7(17), pp. 4639–4659. https://doi.org/10.5194/acp-7-4639-2007"
+            }
+        ]
+    },
+    "models": {
+        "EqConst": {
+            "reference": {
+                "citation": "Fountoukis, C. and Nenes, A. (2007) ISORROPIA II, Atmos. Chem. Phys. 7(17), 4639–4659 — Eq. 5 and Table 2.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/isorropia/equilibria.jl:5\n\nUpstream `EqConst` is an MTK @component with constructor keywords `logK⁰`, `H⁺`, `C⁺` (all required, no defaults). These are declared as MTK `@constants` (compile-time fixed values), not `@parameters`, because each EqConst instance is specialized for one specific ISORROPIA reaction from Table 2. In the ESM they are represented as `parameter` variables with illustrative defaults drawn from the r1 reaction (NH4NO3 → 2 NH4+ + NO3−, or similar; the actual assignment is in EquilibriumConstants).\n\nTwo `@variables` are declared: `T(t)` (temperature, driven externally in coupled mode) and `logK_eq(t)` (algebraic output). One algebraic equation connects them:\n  logK_eq = logK0 + H_plus * (T0/T − 1) + C_plus * (1 + log(T0/T) − T0/T)\n\nwhere `log` is the natural logarithm (Julia's `log` function). This is Eq. 5 of Fountoukis and Nenes (2007), a modified van't Hoff form accounting for heat-capacity changes. The three coefficient groups:\n  • logK0 = ln K(T0): intercept at standard temperature\n  • H_plus = ΔH⁰/(R·T₀): dimensionless enthalpy term\n  • C_plus = ΔCₚ⁰/R:    dimensionless heat-capacity term\n\nAt T = T0: the equation simplifies to logK_eq = logK0 (both correction terms vanish), providing a clean unit test.\n\nIn the standalone ESM, `T` is declared as a `parameter` (fixed input) so the component is self-contained and testable. In the full EquilibriumConstants system, each instance's T is coupled to the shared temperature variable via `ri.T ~ T`.\n\nDefault parameter values use the r1 entry from Table 2 of Fountoukis and Nenes (2007): logK0 = ln(6.067×10⁵) ≈ 13.3158, H_plus = −11.299, C_plus = 0.0. Users constructing EquilibriumConstants should override all three to the values for their specific reaction.\n\nTolerance rationale (rel=1e-9): the algebraic system has a single equation with a closed-form RHS involving two divisions and one log. At atmospheric temperatures (270–320 K) and with the F&N(2007) coefficient magnitudes, roundoff in the log/divide chain is bounded well below 1e-9 relative error. The tight tolerance guards against any future runner regression on the log(T0/T) term near T = T0 (where the argument approaches 1)."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "logK0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 13.31578971393039,
+                    "description": "Natural log of the equilibrium constant at the standard temperature T0 = 298.15 K (dimensionless). Corresponds to logK⁰ = ln(K(298.15 K)) in Eq. 5 of Fountoukis and Nenes (2007), and to the A* column of their Table 2. Default: ln(6.067×10⁵), the r1 value from EquilibriumConstants."
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -11.299,
+                    "description": "Dimensionless enthalpy coefficient H⁺ = ΔH⁰/(R·T₀), where ΔH⁰ is the standard enthalpy of reaction and R is the gas constant. Controls the linear temperature dependence of ln K. Default: −11.299 (r1 from Table 2 of Fountoukis and Nenes 2007)."
+                },
+                "C_plus": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Dimensionless heat-capacity coefficient C⁺ = ΔCₚ⁰/R, where ΔCₚ⁰ is the standard heat capacity change of reaction. Adds a non-linear temperature correction. Zero for reactions where ΔCₚ⁰ is negligible (rows r1–r3, r8–r10 of Table 2). Default: 0.0 (r1 from Table 2 of Fountoukis and Nenes 2007)."
+                },
+                "T0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Standard reference temperature (298.15 K). Fixed in Fountoukis and Nenes (2007); should not be changed."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Ambient temperature at which logK_eq is evaluated. In the full EquilibriumConstants system this variable is coupled to the shared temperature input via ri.T ~ T; in standalone use it is a fixed parameter."
+                },
+                "logK_eq": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Natural log of the equilibrium constant at temperature T (dimensionless), computed from Eq. 5 of Fountoukis and Nenes (2007): logK_eq = logK0 + H_plus*(T0/T − 1) + C_plus*(1 + ln(T0/T) − T0/T). At T = T0, logK_eq = logK0 exactly."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "logK_eq",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "logK0",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "H_plus",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {"op": "/", "args": ["T0", "T"]},
+                                            -1
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "C_plus",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {"op": "log", "args": [{"op": "/", "args": ["T0", "T"]}]},
+                                            {"op": "*", "args": [-1, {"op": "/", "args": ["T0", "T"]}]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "identity_at_reference_temperature",
+                    "description": "At T = T0 = 298.15 K, both correction terms in Eq. 5 vanish (T0/T = 1, log(T0/T) = 0), so logK_eq must equal logK0 exactly. Uses r1 defaults. Tested at t=0 and t=1 to confirm the algebraic result is time-independent.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {
+                            "variable": "logK_eq",
+                            "time": 0.0,
+                            "expected": 13.31578971393039,
+                            "tolerance": {"rel": 1e-10}
+                        },
+                        {
+                            "variable": "logK_eq",
+                            "time": 1.0,
+                            "expected": 13.31578971393039,
+                            "tolerance": {"rel": 1e-10}
+                        }
+                    ]
+                },
+                {
+                    "id": "warm_temperature_r1",
+                    "description": "T = 310 K (warm case) with r1 coefficients (logK0 = ln(6.067e5), H_plus = −11.299, C_plus = 0.0). The negative H_plus means logK_eq increases above logK0 when T > T0 (T0/T < 1, so T0/T − 1 < 0, and H_plus * negative < 0 ... wait, H_plus = −11.299 and T0/T − 1 = −0.03823, product = +0.4319, so logK_eq > logK0). Expected: 13.315789713881027 + (−11.299) * (298.15/310 − 1) = 13.7477031010.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 310.0},
+                    "assertions": [
+                        {
+                            "variable": "logK_eq",
+                            "time": 0.0,
+                            "expected": 13.747703101027165
+                        }
+                    ]
+                },
+                {
+                    "id": "cold_temperature_r1",
+                    "description": "T = 280 K (cold case) with r1 coefficients. At T < T0, T0/T > 1, so T0/T − 1 > 0 and H_plus * positive < 0, giving logK_eq < logK0. Expected: 12.5833723925.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 280.0},
+                    "assertions": [
+                        {
+                            "variable": "logK_eq",
+                            "time": 0.0,
+                            "expected": 12.583372392501818
+                        }
+                    ]
+                },
+                {
+                    "id": "nonzero_heat_capacity_r4",
+                    "description": "T = 310 K with r4 coefficients from Table 2 of Fountoukis and Nenes (2007): logK0 = ln(1.569e-2) ≈ −4.1547, H_plus = −9.589, C_plus = 45.807. Exercises the non-linear C_plus correction term. Expected logK_eq ≈ −3.8225294186.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "logK0": -4.154731712237196,
+                        "H_plus": -9.589,
+                        "C_plus": 45.807,
+                        "T": 310.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "logK_eq",
+                            "time": 0.0,
+                            "expected": -3.8225294185985446
+                        }
+                    ]
+                },
+                {
+                    "id": "identity_nonzero_heat_capacity",
+                    "description": "At T = T0 = 298.15 K with r4 coefficients (C_plus = 45.807), logK_eq must still equal logK0 exactly — the C_plus term also vanishes at T = T0 because 1 + log(1) − 1 = 0. Confirms the identity holds for non-zero C_plus.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "logK0": -4.154731712237196,
+                        "H_plus": -9.589,
+                        "C_plus": 45.807
+                    },
+                    "assertions": [
+                        {
+                            "variable": "logK_eq",
+                            "time": 0.0,
+                            "expected": -4.154731712237196,
+                            "tolerance": {"rel": 1e-10}
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "logK_vs_temperature",
+                    "description": "Natural log of the r1 equilibrium constant versus temperature from 270 K to 330 K. Illustrates the linear temperature response (C_plus = 0) and the sign convention: negative H_plus means logK_eq increases with T (reaction favoured at higher temperatures).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 270.0, "stop": 330.0, "count": 61, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "logK_eq_vs_T",
+                            "type": "line",
+                            "description": "ln K_eq versus temperature T (K) for the r1 coefficients (logK0 = ln(6.067×10⁵), H_plus = −11.299, C_plus = 0). The straight-line shape confirms that C_plus = 0 reduces Eq. 5 to a purely linear function of T₀/T.",
+                            "x": {"variable": "T", "label": "Temperature T (K)"},
+                            "y": {"variable": "logK_eq", "label": "ln K_eq (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
