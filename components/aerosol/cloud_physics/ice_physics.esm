@@ -1,0 +1,431 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "IcePhysics",
+        "tags": [
+            "aerosol",
+            "cloud_physics"
+        ],
+        "description": "Ice nucleation and ice-water equilibrium thermodynamics (Seinfeld & Pandis 2006, Eqs. 17.100-17.103). Computes freezing point depression for solutions, equilibrium freezing temperature from water activity, Kelvin curvature factor for ice particles, and empirical ice-nuclei concentration."
+    },
+    "models": {
+        "IcePhysics": {
+            "variables": {
+                "M_w": {
+                    "default": 0.018015,
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "description": "Molecular weight of water"
+                },
+                "R": {
+                    "default": 8.314,
+                    "type": "parameter",
+                    "units": "J/(mol*K)",
+                    "description": "Universal gas constant"
+                },
+                "ρ_i": {
+                    "default": 917.0,
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "description": "Density of ice"
+                },
+                "T_freeze": {
+                    "default": 273.15,
+                    "type": "parameter",
+                    "units": "K",
+                    "description": "Freezing point of pure water"
+                },
+                "ΔH_m_mass": {
+                    "default": 333500.0,
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "description": "Latent heat of fusion of water"
+                },
+                "K_f": {
+                    "default": 1.86,
+                    "type": "parameter",
+                    "units": "K*kg/mol",
+                    "description": "Cryoscopic constant of water"
+                },
+                "IN_ref": {
+                    "default": 1000.0,
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "description": "Ice nuclei concentration reference at T_IN_ref"
+                },
+                "IN_coeff": {
+                    "default": 0.6,
+                    "type": "parameter",
+                    "units": "1/K",
+                    "description": "Ice nuclei exponential temperature coefficient"
+                },
+                "T_IN_ref": {
+                    "default": 253.0,
+                    "type": "parameter",
+                    "units": "K",
+                    "description": "Reference temperature for ice nuclei parameterization"
+                },
+                "dim_eps": {
+                    "default": 1.0e-30,
+                    "type": "parameter",
+                    "units": "1",
+                    "description": "Small dimensionless value added to water activity to prevent log(0)"
+                },
+                "T": {
+                    "default": 263.15,
+                    "type": "parameter",
+                    "units": "K",
+                    "description": "Temperature"
+                },
+                "σ_ia": {
+                    "default": 0.106,
+                    "type": "parameter",
+                    "units": "N/m",
+                    "description": "Ice-air surface tension"
+                },
+                "D_p": {
+                    "default": 1.0e-6,
+                    "type": "parameter",
+                    "units": "m",
+                    "description": "Ice particle diameter"
+                },
+                "a_w": {
+                    "default": 1.0,
+                    "type": "parameter",
+                    "units": "1",
+                    "description": "Water activity (dimensionless)"
+                },
+                "molality": {
+                    "default": 0.0,
+                    "type": "parameter",
+                    "units": "mol/kg",
+                    "description": "Solute molality of the solution"
+                },
+                "ΔT_f": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Freezing point depression of the solution"
+                },
+                "T_e": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Equilibrium freezing temperature from water activity (Kelvin equation)"
+                },
+                "kelvin_ice": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Kelvin curvature factor for ice particle vapor pressure (dimensionless, always > 1)"
+                },
+                "IN": {
+                    "type": "state",
+                    "units": "1/m^3",
+                    "description": "Ice nuclei concentration (empirical exponential parameterization)"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "ΔT_f",
+                    "rhs": {
+                        "op": "*",
+                        "args": ["K_f", "molality"]
+                    }
+                },
+                {
+                    "lhs": "T_e",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "T_freeze",
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "R",
+                                                    {"op": "^", "args": ["T_freeze", 2]}
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": ["ΔH_m_mass", "M_w"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {"op": "+", "args": ["a_w", "dim_eps"]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "kelvin_ice",
+                    "rhs": {
+                        "op": "exp",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [4, "M_w", "σ_ia"]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": ["R", "T", "ρ_i", "D_p"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "IN",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "IN_ref",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "IN_coeff",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "T_IN_ref",
+                                                    {"op": "*", "args": [-1, "T"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@9899a7e8:src/cloud_physics.jl:525\nSeinfeld, J. H. and Pandis, S. N. (2006), Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Wiley, Ch. 17. Key equations: 17.100 (freezing point depression, K_f * molality); 17.101 (equilibrium freezing temperature from water activity, Raoult/Kelvin); 17.102 (ice Kelvin curvature factor, exp(4*Mw*sigma_ia/(R*T*rho_i*D_p))); 17.103 (ice nuclei concentration, IN_ref * exp(coeff*(T_ref - T))).\n\nTolerance rationale (model-level rel=1e-8 / abs=1e-12): time-independent algebraic system (zero ODE states after MTK structural_simplify; RHS depends only on parameters). rel=1e-8 captures float64 roundoff in exp, log, and arithmetic. abs=1e-12 floors the pure-water case (molality=0 → ΔT_f=0) where rel comparison is undefined. See `defaults_all_variables` and `nacl_freezing_point_depression` tests for per-assertion abs=1e-12 overrides on ΔT_f=0."
+            },
+            "tolerance": {
+                "rel": 1.0e-8,
+                "abs": 1.0e-12
+            },
+            "tests": [
+                {
+                    "id": "defaults_all_variables",
+                    "description": "Reference run at upstream Aerosol.jl defaults (T=263.15 K, molality=0, a_w=1.0, sigma_ia=0.106 N/m, D_p=1e-6 m). Reproduces upstream Aerosol test/cloud_physics_test.jl 'IcePhysics physical behavior' pure-water case: ΔT_f=0, T_e=273.15 K, kelvin_ice>1, and IN concentration at cold T. Sampled at t=0, 60, 600, 3600 s to confirm algebraic constraints hold across the full tspan (RHS is time-independent, so every sample must return the same constants).",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "ΔT_f",      "time":    0.0, "expected": 0.0,                    "tolerance": {"abs": 1.0e-12} },
+                        { "variable": "ΔT_f",      "time":   60.0, "expected": 0.0,                    "tolerance": {"abs": 1.0e-12} },
+                        { "variable": "ΔT_f",      "time":  600.0, "expected": 0.0,                    "tolerance": {"abs": 1.0e-12} },
+                        { "variable": "ΔT_f",      "time": 3600.0, "expected": 0.0,                    "tolerance": {"abs": 1.0e-12} },
+                        { "variable": "T_e",        "time":    0.0, "expected": 273.15 },
+                        { "variable": "T_e",        "time":   60.0, "expected": 273.15 },
+                        { "variable": "T_e",        "time":  600.0, "expected": 273.15 },
+                        { "variable": "T_e",        "time": 3600.0, "expected": 273.15 },
+                        { "variable": "kelvin_ice", "time":    0.0, "expected": 1.0038145595610195 },
+                        { "variable": "kelvin_ice", "time":   60.0, "expected": 1.0038145595610195 },
+                        { "variable": "kelvin_ice", "time":  600.0, "expected": 1.0038145595610195 },
+                        { "variable": "kelvin_ice", "time": 3600.0, "expected": 1.0038145595610195 },
+                        { "variable": "IN",         "time":    0.0, "expected": 2.265408914814352 },
+                        { "variable": "IN",         "time":   60.0, "expected": 2.265408914814352 },
+                        { "variable": "IN",         "time":  600.0, "expected": 2.265408914814352 },
+                        { "variable": "IN",         "time": 3600.0, "expected": 2.265408914814352 }
+                    ]
+                },
+                {
+                    "id": "nacl_freezing_point_depression",
+                    "description": "1 mol/kg NaCl solution: ΔT_f = K_f * molality = 1.86 * 1.0 = 1.86 K. Reproduces upstream Aerosol test/cloud_physics_test.jl 'IcePhysics physical behavior' salt-solution case. Validates cryoscopic constant K_f = 1.86 K·kg/mol against S&P Eq. 17.100.",
+                    "parameter_overrides": {
+                        "molality": 1.0
+                    },
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "assertions": [
+                        { "variable": "ΔT_f", "time":   60.0, "expected": 1.86 },
+                        { "variable": "ΔT_f", "time":  600.0, "expected": 1.86 },
+                        { "variable": "ΔT_f", "time": 3600.0, "expected": 1.86 }
+                    ]
+                },
+                {
+                    "id": "solution_equilibrium_freezing_temperature",
+                    "description": "Water activity a_w=0.9 (representative dilute-solution value). T_e = T_freeze + (R*T_freeze^2/(ΔH_m*M_w))*ln(0.9) = 273.15 - 10.88 K ≈ 262.27 K. Tests the log(a_w) thermodynamic depression of freezing point from S&P Eq. 17.101. Complementary to the cryoscopic formula tested by nacl_freezing_point_depression: activity-based (thermodynamic) vs molality-based (colligative) routes to freezing point depression.",
+                    "parameter_overrides": {
+                        "a_w": 0.9
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "T_e", "time":  60.0, "expected": 262.2717205118178 },
+                        { "variable": "T_e", "time": 600.0, "expected": 262.2717205118178 }
+                    ]
+                },
+                {
+                    "id": "kelvin_effect_small_particle",
+                    "description": "D_p=1e-7 m (100 nm ice particle, 10x smaller than default 1 μm). Kelvin exponent scales as 1/D_p, so the exponent is 10x larger and kelvin_ice = exp(10 * default_exponent) ≈ 1.039, compared to 1.0038 at 1 μm. Exercises the S&P Eq. 17.102 size-scaling: smaller ice crystals have substantially enhanced saturation vapor pressure. Reproduces upstream Aerosol test/cloud_physics_test.jl Kelvin-effect assertion (kelvin_ice > 1).",
+                    "parameter_overrides": {
+                        "D_p": 1.0e-7
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "kelvin_ice", "time":  60.0, "expected": 1.0388070898029664 },
+                        { "variable": "kelvin_ice", "time": 600.0, "expected": 1.0388070898029664 }
+                    ]
+                },
+                {
+                    "id": "ice_nuclei_cold_surge",
+                    "description": "T=243.15 K (T_IN_ref - T = 9.85 K below reference). IN = IN_ref * exp(IN_coeff * 9.85) = 1000 * exp(5.91) ≈ 368706 m^-3. Reproduces upstream Aerosol test/cloud_physics_test.jl IN temperature-dependence assertion: IN(cold) >> IN(warm). Tests the upper end of the S&P Eq. 17.103 exponential ramp: 10 K of additional cooling increases IN by ~163x relative to defaults.",
+                    "parameter_overrides": {
+                        "T": 243.15
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "IN", "time":  60.0, "expected": 368706.1554093557 },
+                        { "variable": "IN", "time": 600.0, "expected": 368706.1554093557 }
+                    ]
+                },
+                {
+                    "id": "ice_nuclei_warm_temperature",
+                    "description": "T=273.15 K (melting point of pure water, 20 K above T_IN_ref=253 K). IN = 1000 * exp(0.6*(253 - 273.15)) = 1000 * exp(-12.09) ≈ 0.0056 m^-3. Tests the lower tail of S&P Eq. 17.103: near-melting temperatures yield negligibly few ice nuclei. Complementary to ice_nuclei_cold_surge.",
+                    "parameter_overrides": {
+                        "T": 273.15
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "IN", "time":  60.0, "expected": 0.005615387278635454 },
+                        { "variable": "IN", "time": 600.0, "expected": 0.005615387278635454 }
+                    ]
+                },
+                {
+                    "id": "kelvin_effect_large_particle",
+                    "description": "D_p=1e-5 m (10 μm ice particle, 10x larger than default). Kelvin exponent scales as 1/D_p, so the exponent is 10x smaller and kelvin_ice is much closer to 1. Confirms that macroscopic ice crystals have negligible curvature correction relative to sub-micron particles. Exercises the lower end of S&P Eq. 17.102.",
+                    "parameter_overrides": {
+                        "D_p": 1.0e-5
+                    },
+                    "time_span": { "start": 0.0, "end": 600.0 },
+                    "assertions": [
+                        { "variable": "kelvin_ice", "time":  60.0, "expected": 1.0003808027447276 },
+                        { "variable": "kelvin_ice", "time": 600.0, "expected": 1.0003808027447276 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "defaults_trajectory",
+                    "description": "Reference-run trajectories of all four IcePhysics state variables at upstream Aerosol.jl defaults over a 1-hour window. All states are time-independent under S&P Eqs. 17.100-17.103 (algebraic system after MTK structural_simplify), so each plot is a horizontal line, making the parameter-driven algebraic structure of the model visually clear.",
+                    "time_span": { "start": 0.0, "end": 3600.0 },
+                    "plots": [
+                        {
+                            "id": "freezing_point_depression_vs_time",
+                            "type": "line",
+                            "description": "ΔT_f stays at 0 K for the full hour (pure water, molality=0).",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "ΔT_f", "label": "ΔT_f (K)" }
+                        },
+                        {
+                            "id": "equilibrium_freeze_temp_vs_time",
+                            "type": "line",
+                            "description": "T_e stays at 273.15 K for the full hour (a_w=1.0, pure water).",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "T_e", "label": "T_e (K)" }
+                        },
+                        {
+                            "id": "kelvin_factor_vs_time",
+                            "type": "line",
+                            "description": "kelvin_ice is constant at ~1.00381 (D_p=1 μm, T=263.15 K).",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "kelvin_ice", "label": "kelvin_ice (dimensionless)" }
+                        },
+                        {
+                            "id": "ice_nuclei_vs_time",
+                            "type": "line",
+                            "description": "IN stays at ~2.27 m^-3 for the full hour (T=263.15 K, 10 K below T_IN_ref).",
+                            "x": { "variable": "t", "label": "time (s)" },
+                            "y": { "variable": "IN", "label": "IN (m^-3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "ice_nuclei_temperature_sweep",
+                    "description": "Sweep temperature from 233 K to 273 K at fixed IN_ref=1000 m^-3 and IN_coeff=0.6 K^-1. IN = IN_ref * exp(IN_coeff * (T_IN_ref - T)) spans ~7 orders of magnitude over this 40 K range, covering the exponential activation behavior of S&P Eq. 17.103. On a log-y axis the trajectory is a straight line — the slope equals IN_coeff = 0.6 K^-1.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": { "start": 233.15, "stop": 273.15, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "IN_vs_temperature",
+                            "type": "line",
+                            "description": "Ice nuclei concentration as a function of temperature (S&P Eq. 17.103 exponential ramp).",
+                            "x": { "variable": "T", "label": "T (K)" },
+                            "y": { "variable": "IN", "label": "IN (m^-3)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "kelvin_particle_size_sweep",
+                    "description": "Sweep ice particle diameter D_p from 10 nm to 100 μm at fixed T=263.15 K and σ_ia=0.106 N/m. kelvin_ice = exp(4*Mw*sigma/(R*T*rho_i*D_p)) scales as exp(1/D_p): small particles have a much larger Kelvin correction. On a log-x axis the exponent is linear in 1/D_p. At D_p=1 μm the correction is ~0.4%, at 10 nm it exceeds 40%.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-8, "stop": 1.0e-4, "count": 41, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "kelvin_vs_diameter",
+                            "type": "line",
+                            "description": "Kelvin curvature factor vs ice particle diameter (S&P Eq. 17.102).",
+                            "x": { "variable": "D_p", "label": "D_p (m)" },
+                            "y": { "variable": "kelvin_ice", "label": "kelvin_ice (dimensionless)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "equilibrium_temperature_activity_sweep",
+                    "description": "Sweep water activity a_w from 0.5 to 1.0. T_e = T_freeze + (R*T_freeze^2/(ΔH_m*M_w))*ln(a_w) decreases monotonically: solutions with lower activity (higher solute loading) freeze at lower temperatures. T_e = 273.15 K at a_w=1 (pure water) and drops by ~103 K for a unit decrease in ln(a_w). This is the thermodynamic route to freezing point depression (S&P Eq. 17.101), complementing the colligative route (K_f * molality) in ΔT_f.",
+                    "time_span": { "start": 0.0, "end": 60.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "a_w",
+                                "range": { "start": 0.5, "stop": 1.0, "count": 26, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Te_vs_water_activity",
+                            "type": "line",
+                            "description": "Equilibrium freezing temperature as a function of water activity (S&P Eq. 17.101).",
+                            "x": { "variable": "a_w", "label": "water activity a_w (dimensionless)" },
+                            "y": { "variable": "T_e", "label": "T_e (K)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
