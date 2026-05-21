@@ -1,0 +1,265 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AqueousDiffusionReaction",
+        "description": "Correction factor Q for aqueous-phase reaction rate when intra-droplet diffusion limits the reaction (Seinfeld & Pandis 2006, Ch. 12, Eqs. 12.105, 12.110). Computes the dimensionless reaction-diffusion parameter q and the Thiele modulus correction factor Q, which reduces the effective reaction rate when fast reactions near the droplet surface deplete reactants faster than diffusion can replenish them. Q → 1 for slow reactions (small q); Q → 3/q for diffusion-limited reactions (large q). Migrated from Aerosol.jl src/aqueous_transport.jl:14.",
+        "tags": [
+            "aerosol",
+            "aqueous_transport",
+            "diffusion_reaction",
+            "thiele_modulus",
+            "observed-only",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-x0e)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd ed. Wiley. Chapter 12, Eq. 12.105 (reaction-diffusion parameter q = R_p √(k/D_aq)); Eq. 12.110 (correction factor Q = 3(coth(q)/q − 1/q²))."
+            }
+        ]
+    },
+    "models": {
+        "AqueousDiffusionReaction": {
+            "reference": {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd ed., Wiley. Ch. 12, Eqs. 12.105, 12.110. Migrated from Aerosol.jl:src/aqueous_transport.jl:14 (esm-x0e).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:14\n\nUpstream `AqueousDiffusionReaction` is an MTK `@component` with three `@parameters` (R_p, k_rxn, D_aq) and two `@variables` (q, Q). Both variables are purely algebraic (no D() time-derivative), so they are classified as `observed` with inline expressions.\n\nEquations (S&P 2006, Ch. 12):\n  q = R_p √(k_rxn / D_aq)                              [Eq. 12.105 — reaction-diffusion parameter]\n  Q = 3 (coth(q)/q − 1/q²)                             [Eq. 12.110 — diffusion correction factor]\n\nwhere coth(q) = (exp(q) + exp(−q)) / (exp(q) − exp(−q)).\n\nPhysical interpretation: q is the Thiele modulus for the droplet — it measures the ratio of the reaction rate to the aqueous-phase diffusion rate. When q ≪ 1 (slow reaction), concentration gradients within the droplet are negligible and Q ≈ 1 (no correction needed). When q ≫ 1 (fast reaction), reactants near the surface are depleted faster than diffusion can supply them from the droplet interior, and Q ≈ 3/q < 1 (effective rate is reduced).\n\nTolerance rationale (rel=1e-9): purely algebraic system involving exp, sqrt, and division. Float64 round-off is ~1e-15; rel=1e-9 gives six orders of headroom consistent with sibling observed-only ESMs."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Droplet radius."
+                },
+                "k_rxn": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0,
+                    "description": "First-order aqueous-phase reaction rate constant."
+                },
+                "D_aq": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-9,
+                    "description": "Aqueous-phase diffusivity of the reacting species."
+                },
+                "q": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Dimensionless reaction-diffusion parameter (Thiele modulus) for the droplet (Eq. 12.105). q = R_p √(k_rxn/D_aq). Characterises whether the reaction is diffusion-limited (q ≫ 1) or kinetically controlled (q ≪ 1).",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "R_p",
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": ["k_rxn", "D_aq"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "Q": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Aqueous diffusion correction factor (Eq. 12.110). Q = 3(coth(q)/q − 1/q²). Multiplies the reaction rate to account for intra-droplet concentration gradients. Q = 1 when diffusion is fast relative to reaction; Q < 1 when the reaction is diffusion-limited.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            3,
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            {"op": "exp", "args": ["q"]},
+                                                            {"op": "exp", "args": [{"op": "*", "args": [-1, "q"]}]}
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            {"op": "exp", "args": ["q"]},
+                                                            {"op": "exp", "args": [{"op": "*", "args": [-1, "q"]}]}
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "q"
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {"op": "^", "args": ["q", 2]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Default parameters (R_p=1e-5 m, k_rxn=1.0 s⁻¹, D_aq=1e-9 m²/s). q = 1e-5 × √(1/1e-9) = √0.1 ≈ 0.31623. At this moderate Thiele modulus, diffusion is not strongly limiting and Q ≈ 0.9934 (close to 1). Reproduces the upstream 'AqueousDiffusionReaction Q limiting values' test case.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 0.31622776601683794},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9933961968252447}
+                    ]
+                },
+                {
+                    "id": "slow_reaction_kinetic_limit",
+                    "description": "Very slow reaction k_rxn=0.01 s⁻¹ (R_p=1e-5 m, D_aq=1e-9 m²/s). q = 1e-5 × √(0.01/1e-9) ≈ 0.03162 ≪ 1. In this kinetic-control regime the Thiele correction Q → 1: Q ≈ 0.99993, confirming that diffusion gradients within the droplet are negligible.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 0.01},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 0.031622776601683793},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9999333396788188}
+                    ]
+                },
+                {
+                    "id": "fast_reaction_diffusion_limit",
+                    "description": "Very fast reaction k_rxn=1e6 s⁻¹ (R_p=1e-5 m, D_aq=1e-9 m²/s). q = √(1e6/1e-9) × 1e-5 = 316.23 ≫ 1. In the diffusion-limited regime Q ≈ 3/q ≈ 0.009487. The computed Q=0.009457 is within ~0.3% of 3/q, confirming the asymptotic behaviour.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 1.0e6},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 316.22776601683796},
+                        {"variable": "Q", "time": 0.0, "expected": 0.009456832980505137}
+                    ]
+                },
+                {
+                    "id": "intermediate_thiele_modulus",
+                    "description": "k_rxn=10 s⁻¹ (R_p=1e-5 m, D_aq=1e-9 m²/s). q = R_p × √(10/1e-9) = 1.0 exactly. At q=1 the correction is Q ≈ 0.9391 — noticeably below 1, indicating modest diffusion limitation. Provides a clean test point where q^2 = 1.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 10.0},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 1.0},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9391058564979937}
+                    ]
+                },
+                {
+                    "id": "droplet_radius_scaling",
+                    "description": "Larger droplet R_p=5e-5 m (k_rxn=1.0 s⁻¹, D_aq=1e-9 m²/s). q = 5e-5 × √(1/1e-9) ≈ 1.5811, which is 5× the default q. Q drops to ≈ 0.8651, showing that larger droplets have stronger diffusion limitation because the diffusion path is longer.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 5.0e-5},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 1.5811388300841898},
+                        {"variable": "Q", "time": 0.0, "expected": 0.8650944812945047}
+                    ]
+                },
+                {
+                    "id": "low_aqueous_diffusivity",
+                    "description": "Reduced aqueous diffusivity D_aq=1e-10 m²/s (R_p=1e-5 m, k_rxn=1.0 s⁻¹). q = 1e-5 × √(1/1e-10) = 1.0. Identical q to the k_rxn=10 test (both give q=1), confirming that q depends only on the ratio k_rxn/D_aq and Q ≈ 0.9391.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"D_aq": 1.0e-10},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 1.0},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9391058564979937}
+                    ]
+                },
+                {
+                    "id": "high_reaction_rate_moderate_q",
+                    "description": "k_rxn=100 s⁻¹ (R_p=1e-5 m, D_aq=1e-9 m²/s). q = 1e-5 × √(100/1e-9) ≈ 3.1623. Q ≈ 0.6521 — substantially below 1, illustrating significant diffusion limitation at moderate q values.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 100.0},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 3.1622776601683795},
+                        {"variable": "Q", "time": 0.0, "expected": 0.6520890312659067}
+                    ]
+                },
+                {
+                    "id": "small_droplet",
+                    "description": "Small droplet R_p=1e-6 m (k_rxn=1.0 s⁻¹, D_aq=1e-9 m²/s). q = 1e-6 × √(1/1e-9) ≈ 0.03162. Very small Thiele modulus → Q ≈ 0.99993, nearly identical to the slow-reaction case. Smaller droplets are always closer to the kinetic-control limit.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-6},
+                    "assertions": [
+                        {"variable": "q", "time": 0.0, "expected": 0.031622776601683793},
+                        {"variable": "Q", "time": 0.0, "expected": 0.9999333396781367}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "Q_vs_thiele_modulus",
+                    "description": "Correction factor Q as a function of the Thiele modulus q, swept by varying k_rxn over six orders of magnitude (1e-4 to 1e6 s⁻¹) at default R_p=1e-5 m and D_aq=1e-9 m²/s. This traces Q from ≈1 (kinetic control, small q) to Q ≈ 3/q (diffusion-limited, large q), illustrating the full operating range of the correction factor.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "k_rxn",
+                                "range": {"start": 1.0e-4, "stop": 1.0e6, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Q_vs_k_rxn",
+                            "type": "line",
+                            "description": "Correction factor Q vs reaction rate constant k_rxn. Q decreases from ~1 (kinetically controlled) toward 0 as k_rxn increases (diffusion-limited).",
+                            "x": {"variable": "k_rxn", "label": "Reaction rate k_rxn (s⁻¹)"},
+                            "y": {"variable": "Q",     "label": "Correction factor Q (dimensionless)"}
+                        },
+                        {
+                            "id": "q_vs_k_rxn",
+                            "type": "line",
+                            "description": "Thiele modulus q vs reaction rate constant k_rxn (slope 0.5 on log-log: q ∝ √k_rxn).",
+                            "x": {"variable": "k_rxn", "label": "Reaction rate k_rxn (s⁻¹)"},
+                            "y": {"variable": "q",     "label": "Thiele modulus q (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "Q_vs_droplet_radius",
+                    "description": "Correction factor Q as a function of droplet radius R_p (log sweep 0.1 µm to 100 µm) at k_rxn=1.0 s⁻¹ and D_aq=1e-9 m²/s. Larger droplets have longer diffusion paths and hence stronger diffusion limitation (lower Q). At R_p=0.1 µm, Q≈1; at R_p=100 µm, Q≈3/q ≪ 1.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-7, "stop": 1.0e-4, "count": 40, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Q_vs_Rp",
+                            "type": "line",
+                            "description": "Correction factor Q vs droplet radius. Q → 1 for small droplets; Q decreases for large droplets.",
+                            "x": {"variable": "R_p", "label": "Droplet radius R_p (m)"},
+                            "y": {"variable": "Q",   "label": "Correction factor Q (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
