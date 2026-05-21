@@ -179,7 +179,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | Dahneke | `src/mass_transfer.jl:145` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/dahneke.esm` | — |
 | MaxwellianFlux | `src/mass_transfer.jl:173` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/maxwellian_flux.esm` | — |
 | ParticleGrowthRate | `src/mass_transfer.jl:200` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/mass_transfer/particle_growth.esm` | — |
-| MassTransferCoefficient | `src/mass_transfer.jl:231` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mass_transfer_coeff.esm` | — |
+| MassTransferCoefficient | `src/mass_transfer.jl:231` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mass_transfer_coeff.esm` | — | **status: complete** (esm-f9f — `components/aerosol/mass_transfer/mass_transfer_coeff.esm` committed on `main`, inline-test gate passes: 15P/0F/0E.)
 | UptakeCoefficient | `src/mass_transfer.jl:272` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/uptake_coeff.esm` | — | **status: complete** (esm-jyo — `components/aerosol/mass_transfer/uptake_coeff.esm` committed on `main`, inline-test gate passes: 13P/0F/0E.)
 | MassTransfer | `src/mass_transfer.jl:319` | Model | variables, parameters, coupling.couple | none | M | Y | Y | `components/aerosol/mass_transfer/mass_transfer.esm` | MeanMolecularSpeed, Knudsen, FuchsSutugin |
 
