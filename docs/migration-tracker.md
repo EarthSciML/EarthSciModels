@@ -113,7 +113,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| DahnekeMassTransportCorrection | `src/dahneke_brownian_diffusion.jl:33` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dahneke/mass_transport.esm` | — |
+| DahnekeMassTransportCorrection | `src/dahneke_brownian_diffusion.jl:33` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dahneke/mass_transport.esm` | — | **status: complete** (esm-xn1 — `components/aerosol/dahneke/mass_transport.esm` committed on `main`, inline-test gate passes: 16P/0F/0E.)
 | DahnekeHeatTransportCorrection | `src/dahneke_brownian_diffusion.jl:93` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dahneke/heat_transport.esm` | — |
 | DahnekeCondensationEvaporation | `src/dahneke_brownian_diffusion.jl:157` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/dahneke/condensation_evaporation.esm` | — |
 | DahnekeCoagulationRate | `src/dahneke_brownian_diffusion.jl:235` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/dahneke/coagulation_rate.esm` | — |
