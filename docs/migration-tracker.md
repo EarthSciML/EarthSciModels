@@ -30,7 +30,7 @@ schema-gap blockers. This manifest drives per-component Phase-2 migration beads.
 
 | Bucket | Components | Notes |
 |---|---:|---|
-| **Migrated to date** (`status: complete`) | **134** | 134 component `.esm` files committed on `main` — 133 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
+| **Migrated to date** (`status: complete`) | **135** | 135 component `.esm` files committed on `main` — 134 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
 | **Migrate today** (`none`) | **215** | Clean ODE/algebraic `@component` models. No schema gaps. Migration is well underway — see the *Migrated to date* row above. |
 | Blocked on `gt-p3ep` (lookup / @register_symbolic) | 26 | AtmDep lookup tables, GasChem Fast-JX, EarthSciData interpolators, WildlandFire fuel tables, Aerosol ISORROPIA-II helpers. `FastJX_interpolation_troposphere` is migrated (`fastjx.esm`) — its lookup gap was resolved by recovering registered functions as AST compositions of the v0.3 `interp.*` named primitives. |
 | Blocked on `gt-kuxo` (brownian / SDE) | 2 | StagePrognosis (Vegetation), BoundaryLayerMixingKC (EnvTransport) |
@@ -172,7 +172,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| MeanMolecularSpeed | `src/mass_transfer.jl:12` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mean_molecular_speed.esm` | — |
+| MeanMolecularSpeed | `src/mass_transfer.jl:12` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mean_molecular_speed.esm` | — | **status: complete** (esm-1i9 — `components/aerosol/mass_transfer/mean_molecular_speed.esm` committed on `main`, inline-test gate passes: 4P/0F/0E.)
 | MeanFreePathMassTransfer | `src/mass_transfer.jl:45` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mean_free_path.esm` | — | **status: complete** (esm-me7 — `components/aerosol/mass_transfer/mean_free_path.esm` committed on `main`, inline-test gate passes: 10P/0F/0E.)
 | KnudsenNumber | `src/mass_transfer.jl:87` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/knudsen.esm` | — | **status: complete** (esm-1wd — `components/aerosol/mass_transfer/knudsen.esm` committed on `main`, inline-test gate passes: 5P/0F/0E.)
 | FuchsSutugin | `src/mass_transfer.jl:117` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/fuchs_sutugin.esm` | — | **status: complete** (esm-wrq — `components/aerosol/mass_transfer/fuchs_sutugin.esm` committed on `main`, inline-test gate passes: 5P/0F/0E.)
