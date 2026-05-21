@@ -191,7 +191,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | RayleighScattering | `src/mie_scattering.jl:111` | Model | variables, parameters, observed, registered_function calls (`_rayleigh_Q_*`) | gt-p3ep(lookup) | M | Y | Y | `components/aerosol/mie/rayleigh_scattering.esm` | — |
 | AerosolExtinction | `src/mie_scattering.jl:206` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mie/aerosol_extinction.esm` | — |
 | Visibility | `src/mie_scattering.jl:273` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mie/visibility.esm` | — |
-| RayleighAtmosphere | `src/mie_scattering.jl:329` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mie/rayleigh_atmosphere.esm` | — |
+| RayleighAtmosphere | `src/mie_scattering.jl:329` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mie/rayleigh_atmosphere.esm` | — | **status: complete** (esm-8sm sweep — migrated; `components/aerosol/mie/rayleigh_atmosphere.esm` committed on `esm-8sm/rayleigh-atmosphere`, inline-test gate passes: 10/10.)
 
 ### 1.11 nucleation.jl (4, `none`), organic_aerosol.jl (7, `none`)
 
