@@ -1,0 +1,132 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "KnudsenNumber",
+        "description": "Knudsen number Kn = λ/R_p — the ratio of the gas mean free path λ to the particle radius R_p. Kn determines the transport regime: Kn ≪ 1 (continuum, Fick's law applies), Kn ≫ 1 (free-molecular, kinetic theory applies), Kn ~ 1 (transition regime, interpolation formulas such as Fuchs-Sutugin required). At standard atmospheric conditions λ ≈ 65 nm; Kn ≈ 0.65 for a 100 nm particle and Kn ≈ 0.0065 for a 10 µm droplet. Migrated from Aerosol.jl src/mass_transfer.jl `KnudsenNumber`.",
+        "tags": [
+            "aerosol",
+            "mass-transfer",
+            "knudsen-number",
+            "transport-regime",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-1wd)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Eq. 12.31 (Knudsen number definition)."
+            }
+        ]
+    },
+    "models": {
+        "KnudsenNumber": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.31 — Knudsen number Kn = λ/R_p. Migrated from Aerosol.jl src/mass_transfer.jl `KnudsenNumber` (esm-1wd).",
+                "notes": "source_ref: Aerosol.jl@FWrvp:src/mass_transfer.jl:87\n\nUpstream `KnudsenNumber` is an MTK `@component` with 2 parameters (λ, R_p) and 1 algebraic variable Kn(t) determined by one explicit equation with no time derivative — purely observed.\n\nEquation (S&P 2006, Eq. 12.31):\n  Kn = λ / R_p   [dimensionless]\n\nPhysics: The Knudsen number is the key dimensionless parameter that controls which regime governs aerosol mass transfer:\n  Kn ≪ 1 (continuum): particle radius ≫ mean free path; continuous-fluid equations (Fick's law) apply; gas-phase diffusivity D_g sets the rate.\n  Kn ≫ 1 (free-molecular): particle radius ≪ mean free path; the particle sees individual molecular collisions; kinetic theory (Maxwell flux) applies.\n  Kn ~ 1 (transition): interpolation formulas (Fuchs-Sutugin, Dahneke) are required — see fuchs_sutugin.esm and dahneke.esm.\n\nAt standard atmospheric conditions (T = 298 K, P = 101325 Pa) the mean free path of air is λ ≈ 65–70 nm. Sub-micron aerosol particles (R_p = 0.01–0.5 µm) typically have Kn in the range 0.07–65, spanning all three regimes. Cloud/fog droplets (R_p ~ 10 µm) have Kn ≈ 0.006, firmly in the continuum regime.\n\nDefault values: λ = 6.5×10⁻⁸ m (65 nm, representative mean free path at standard conditions), R_p = 1.0×10⁻⁷ m (100 nm particle), giving Kn = 0.65 — solidly in the transition regime where Fuchs-Sutugin corrections are most important.\n\nTolerance rationale (model-level rel=1e-12): Kn is a single floating-point division λ/R_p. Round-off is ~1 ULP ≈ 1e-16 relative. rel=1e-12 provides four orders of magnitude of headroom above machine epsilon."
+            },
+            "tolerance": {
+                "rel": 1e-12
+            },
+            "variables": {
+                "λ": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 6.5e-8,
+                    "description": "Mean free path of gas molecules. At standard atmospheric conditions (T = 298 K, P = 101325 Pa), λ ≈ 65 nm for air. May be computed from MeanFreePathMassTransfer. Default 6.5×10⁻⁸ m."
+                },
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Particle radius. Sub-micron aerosol spans R_p ≈ 10 nm–500 nm; cloud droplets are R_p ≈ 1–20 µm. Default 1.0×10⁻⁷ m (100 nm), placing Kn = 0.65 in the transition regime."
+                },
+                "Kn": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Knudsen number Kn = λ/R_p (Eq. 12.31). Dimensionless. Kn ≪ 1: continuum regime; Kn ≫ 1: free-molecular regime; Kn ~ 1: transition regime requiring interpolation correction factors.",
+                    "expression": {
+                        "op": "/",
+                        "args": ["λ", "R_p"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default parameters: λ=6.5e-8 m, R_p=1.0e-7 m. Kn = 6.5e-8/1.0e-7 = 0.65. Represents a 100 nm aerosol particle at standard conditions — solidly in the transition regime.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "Kn", "time": 0.0, "expected": 0.65, "tolerance": {"rel": 1e-12}}
+                    ]
+                },
+                {
+                    "id": "continuum_regime",
+                    "description": "Large particle: λ=6.5e-8 m, R_p=1.0e-5 m. Kn = 0.0065 ≪ 1. Represents a 10 µm cloud droplet where the continuum approximation is valid and gas-phase diffusion governs.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-5},
+                    "assertions": [
+                        {"variable": "Kn", "time": 0.0, "expected": 0.0065, "tolerance": {"rel": 1e-12}}
+                    ]
+                },
+                {
+                    "id": "free_molecular_regime",
+                    "description": "Ultrafine particle: λ=6.5e-8 m, R_p=6.5e-10 m (0.65 nm). Kn = 100.0 ≫ 1. Deep free-molecular regime where kinetic theory applies. Verifies large Kn handled correctly.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 6.5e-10},
+                    "assertions": [
+                        {"variable": "Kn", "time": 0.0, "expected": 100.0, "tolerance": {"rel": 1e-12}}
+                    ]
+                },
+                {
+                    "id": "transition_unity",
+                    "description": "Kn = 1: λ=1.0e-7 m, R_p=1.0e-7 m. Kn = 1.0 exactly — the nominal boundary between regimes. Transition-regime corrections are largest near Kn = 1.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"λ": 1.0e-7, "R_p": 1.0e-7},
+                    "assertions": [
+                        {"variable": "Kn", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1e-12}}
+                    ]
+                },
+                {
+                    "id": "elevated_mean_free_path",
+                    "description": "Larger mean free path: λ=1.3e-7 m (doubled), R_p=1.0e-7 m. Kn = 1.3. Exercises λ variation, as occurs at lower pressure (higher altitude) where λ ∝ 1/P increases.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"λ": 1.3e-7},
+                    "assertions": [
+                        {"variable": "Kn", "time": 0.0, "expected": 1.3, "tolerance": {"rel": 1e-12}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "Kn_vs_Rp",
+                    "description": "Knudsen number as a function of particle radius R_p (log-spaced from 1 nm to 100 µm) at λ = 6.5×10⁻⁸ m (standard atmospheric conditions). Kn decreases from ~65 (free-molecular) for nanoparticles through the transition regime (0.1 < Kn < 10, roughly 6.5 nm–650 nm) to the continuum limit (Kn < 0.01) for particles larger than ~6.5 µm.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-4, "count": 61, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "Kn_vs_Rp_plot",
+                            "type": "line",
+                            "description": "Knudsen number Kn vs particle radius R_p (log-log scale). Kn = 1 at R_p = λ ≈ 65 nm; slope = -1 on log-log scale (linear inverse relationship).",
+                            "x": {"variable": "R_p", "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "Kn", "label": "Knudsen number Kn (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
