@@ -1,0 +1,313 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EqConst",
+        "description": "Equilibrium constant parameterized by Equation 5 of Fountoukis and Nenes (2007): log K(T) = log K(T0) + H_coeff*(T0/T - 1) + C_coeff*(1 + ln(T0/T) - T0/T), where T0 = 298.15 K. Migrated from Aerosol.jl@c8c640bb src/isorropia/equilibria.jl:5 (`EqConst` @component). Parameters logK0, H_coeff, and C_coeff are reaction-specific values from Table 2 of Fountoukis and Nenes (2007). T is an input (driven by parent EquilibriumConstants in the coupled system); logK_eq is an algebraically observed output.",
+        "tags": [
+            "aerosol",
+            "isorropia",
+            "equilibrium",
+            "thermodynamics",
+            "inorganic-aerosol",
+            "fountoukis-nenes-2007"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-q32)"
+        ],
+        "references": [
+            {
+                "citation": "Fountoukis, C. and Nenes, A. (2007). ISORROPIA II: a computationally efficient thermodynamic equilibrium model for K+-Ca2+-Mg2+-NH4+-Na+-SO42--NO3--Cl--H2O aerosols. Atmospheric Chemistry and Physics, 7(17), 4639-4659. https://doi.org/10.5194/acp-7-4639-2007. Equation 5 and Table 2."
+            }
+        ]
+    },
+    "models": {
+        "EqConst": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/isorropia/equilibria.jl:5\n\nUpstream `EqConst` is an MTK `@component` parameterized by three compile-time @constants (logK0, H_coeff=H+, C_coeff=C+) and the reference temperature T0=298.15 K. It has two @variables: T(t) (temperature input, driven by parent EquilibriumConstants) and logK_eq(t) (the observed equilibrium-constant output). After MTK structural_simplify, logK_eq becomes a pure algebraic observed because it depends only on T and the constants. There are no ODE states in the compiled system.\n\nStandalone serialization: T is declared as a parameter (not a state) so the component is well-posed in isolation. logK0, H_coeff, C_coeff, and T0 are also parameters. The default values correspond to reaction r1 from EquilibriumConstants (NH4HSO4 dissolution, Fountoukis & Nenes Table 2).\n\nEquation: logK_eq = logK0 + H_coeff*(T0/T - 1) + C_coeff*(1 + log(T0/T) - T0/T) where log is the natural logarithm. At T = T0 = 298.15 K, the two temperature-correction terms vanish and logK_eq = logK0 exactly.\n\nTolerance rationale (rel=1e-8): observed-only algebraic system with no ODE integration; 1e-8 covers float64 roundoff in the two chained temperature-correction terms across the atmospheric T range (250-330 K)."
+            },
+            "tolerance": {
+                "rel": 1e-8
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature"
+                },
+                "logK0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 13.315789713930389,
+                    "description": "Log of the equilibrium constant at 298.15 K (dimensionless). Default is log(6.067e5) = r1 in Fountoukis & Nenes (2007) Table 2."
+                },
+                "H_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -11.299,
+                    "description": "Enthalpy correction coefficient ΔH⁰/(R·T₀) (dimensionless). Default is r1 in Fountoukis & Nenes (2007) Table 2."
+                },
+                "C_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Heat-capacity correction coefficient ΔC⁰ₚ/R (dimensionless). Default is r1 in Fountoukis & Nenes (2007) Table 2 (zero for many reactions)."
+                },
+                "T0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Standard (reference) temperature"
+                },
+                "logK_eq": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Log of the equilibrium constant at temperature T (dimensionless). Computed via Equation 5 of Fountoukis & Nenes (2007).",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            "logK0",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "H_coeff",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {"op": "/", "args": ["T0", "T"]},
+                                            -1
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "C_coeff",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {"op": "log", "args": [{"op": "/", "args": ["T0", "T"]}]},
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {"op": "/", "args": ["T0", "T"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "r1_identity_at_T0",
+                    "description": "At T = T0 = 298.15 K, both temperature-correction terms vanish and logK_eq = logK0 exactly. Uses r1 parameters (Fountoukis & Nenes Table 2: NH4HSO4 dissolution). Verifies the T=T0 identity for C_coeff=0.",
+                    "parameter_overrides": {
+                        "T": 298.15,
+                        "logK0": 13.315789713930389,
+                        "H_coeff": -11.299,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 13.315789713930389},
+                        {"variable": "logK_eq", "time": 1.0, "expected": 13.315789713930389}
+                    ]
+                },
+                {
+                    "id": "r1_cold_250K",
+                    "description": "r1 parameters at T = 250 K. H_coeff = -11.299 < 0 drives logK_eq down (more negative correction) as T drops below T0. C_coeff = 0 so only the H term acts.",
+                    "parameter_overrides": {
+                        "T": 250.0,
+                        "logK0": 13.315789713930389,
+                        "H_coeff": -11.299,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 11.139602313930391}
+                    ]
+                },
+                {
+                    "id": "r1_cold_273K",
+                    "description": "r1 parameters at T = 273.15 K (standard ice-point). Tests the H-only (C=0) temperature correction at a typical cold-cloud temperature.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "logK0": 13.315789713930389,
+                        "H_coeff": -11.299,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 12.281650962328705}
+                    ]
+                },
+                {
+                    "id": "r1_warm_310K",
+                    "description": "r1 parameters at T = 310 K. H_coeff < 0 and T > T0 gives a positive correction, increasing logK_eq.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "logK0": 13.315789713930389,
+                        "H_coeff": -11.299,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 13.747703101027165}
+                    ]
+                },
+                {
+                    "id": "r4_identity_at_T0",
+                    "description": "At T = T0 = 298.15 K, logK_eq = logK0 regardless of H_coeff and C_coeff. Uses r4 parameters (Fountoukis & Nenes Table 2: C_coeff = 45.807, nonzero). Verifies the identity holds for the general (H,C) case.",
+                    "parameter_overrides": {
+                        "T": 298.15,
+                        "logK0": -4.154731712237196,
+                        "H_coeff": -9.589,
+                        "C_coeff": 45.807
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": -4.154731712237196}
+                    ]
+                },
+                {
+                    "id": "r4_cold_250K",
+                    "description": "r4 parameters at T = 250 K. Both H and C terms are active. C_coeff = 45.807 > 0 adds a significant extra correction at low T. Combined effect shifts logK_eq from -4.155 to -6.756.",
+                    "parameter_overrides": {
+                        "T": 250.0,
+                        "logK0": -4.154731712237196,
+                        "H_coeff": -9.589,
+                        "C_coeff": 45.807
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": -6.755748826678665}
+                    ]
+                },
+                {
+                    "id": "r4_cold_273K",
+                    "description": "r4 parameters at T = 273.15 K. Both H and C correction terms are exercised at a typical cold-cloud temperature.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "logK0": -4.154731712237196,
+                        "H_coeff": -9.589,
+                        "C_coeff": 45.807
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": -5.213263252845522}
+                    ]
+                },
+                {
+                    "id": "r4_warm_310K",
+                    "description": "r4 parameters at T = 310 K. T > T0, both corrections are active. C_coeff > 0 partially counteracts the negative H correction.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "logK0": -4.154731712237196,
+                        "H_coeff": -9.589,
+                        "C_coeff": 45.807
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": -3.822529418598545}
+                    ]
+                },
+                {
+                    "id": "r8_positive_H_273K",
+                    "description": "r8 parameters (Fountoukis & Nenes Table 2: H_coeff = 36.798, C_coeff = 0). H_coeff > 0 means logK_eq increases as T drops below T0. Tests the sign-flip relative to r1/r4.",
+                    "parameter_overrides": {
+                        "T": 273.15,
+                        "logK0": 11.588960151246226,
+                        "H_coeff": 36.798,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 14.956889860197354}
+                    ]
+                },
+                {
+                    "id": "r8_positive_H_310K",
+                    "description": "r8 parameters at T = 310 K. H_coeff > 0 and T > T0 gives a negative correction, decreasing logK_eq below logK0.",
+                    "parameter_overrides": {
+                        "T": 310.0,
+                        "logK0": 11.588960151246226,
+                        "H_coeff": 36.798,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "logK_eq", "time": 0.0, "expected": 10.182326925439771}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "logK_vs_temperature_r1",
+                    "description": "logK_eq as a function of temperature for r1 parameters (H_coeff = -11.299, C_coeff = 0). The curve is linear in T0/T - 1 and monotonically decreasing as T falls, since H_coeff < 0. This is the simplest EqConst case (no heat-capacity correction).",
+                    "parameters": {
+                        "logK0": 13.315789713930389,
+                        "H_coeff": -11.299,
+                        "C_coeff": 0.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 250.0, "stop": 330.0, "count": 40, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "logK_vs_T_r1",
+                            "type": "line",
+                            "description": "log K_eq as a function of temperature for r1 parameters.",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "logK_eq", "label": "log K_eq (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "logK_vs_temperature_r4",
+                    "description": "logK_eq as a function of temperature for r4 parameters (H_coeff = -9.589, C_coeff = 45.807). The nonzero C_coeff introduces curvature relative to the r1 linear case.",
+                    "parameters": {
+                        "logK0": -4.154731712237196,
+                        "H_coeff": -9.589,
+                        "C_coeff": 45.807
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 250.0, "stop": 330.0, "count": 40, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "logK_vs_T_r4",
+                            "type": "line",
+                            "description": "log K_eq as a function of temperature for r4 parameters (H and C both active).",
+                            "x": {"variable": "T", "label": "Temperature (K)"},
+                            "y": {"variable": "logK_eq", "label": "log K_eq (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

@@ -145,7 +145,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | Salt | `src/isorropia/aqueous.jl:26` | Model | variables, parameters, equations | none | M | Y | Y | `components/aerosol/isorropia/salt.esm` | Ion |
 | BinaryMolality | `src/isorropia/aqueous.jl:179` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/isorropia/binary_molality.esm` | — |
 | Aqueous | `src/isorropia/aqueous.jl:201` | Model | variables, parameters, equations, coupling.couple | gt-ebuq(init_eq/system_kind) | L | Y | Y | `components/aerosol/isorropia/aqueous.esm` | Ion, Salt, BinaryMolality |
-| EqConst | `src/isorropia/equilibria.jl:5` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/isorropia/eq_const.esm` | — |
+| EqConst | `src/isorropia/equilibria.jl:5` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/isorropia/eq_const.esm` | — | **status: complete** (esm-q32 — migrated; `components/aerosol/isorropia/eq_const.esm`, inline-test gate passes.)
 | EquilibriumConstants | `src/isorropia/equilibria.jl:22` | Model | variables, coupling.couple | none | S | Y | Y | `components/aerosol/isorropia/equilibrium_constants.esm` | EqConst |
 | Solid | `src/isorropia/solid.jl:6` | Model | variables, parameters | none | S | Y | Y | `components/aerosol/isorropia/solid.esm` | — | **status: complete** (esm-tmg — migrated; `components/aerosol/isorropia/solid.esm` committed on `polecat/esm-tmg`, inline-test gate passes: 8/8.)
 | Solids | `src/isorropia/solid.jl:22` | Model | variables, coupling.couple | none | S | Y | Y | `components/aerosol/isorropia/solids.esm` | Solid |
