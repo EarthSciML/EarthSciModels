@@ -1,0 +1,196 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "EffectiveHenrysLaw",
+        "description": "Effective Henry's law constant for species that dissociate in water, accounting for the enhancement due to aqueous dissociation products. The effective constant H* exceeds the intrinsic H because dissolved dissociation products add to the total aqueous loading. Covers diprotic species (CO₂, SO₂) and monoprotic species (HNO₃, K₂=0). From Seinfeld & Pandis Chapter 7, Equations 7.24 (CO₂), 7.41 (SO₂), 7.61 (HNO₃).",
+        "tags": [
+            "aerosol",
+            "henrys-law",
+            "aqueous-chemistry",
+            "dissociation"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-kon)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 7, Equations 7.24, 7.41, 7.61 — effective Henry's law constants for CO₂, SO₂, and HNO₃."
+            }
+        ]
+    },
+    "models": {
+        "EffectiveHenrysLaw": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 7, Eq. 7.24/7.41/7.61 — effective Henry's law constant for dissociating species. Migrated from Aerosol.jl src/henrys_law.jl `EffectiveHenrysLaw` (esm-kon).",
+                "notes": "source_ref: Aerosol.jl@main:src/henrys_law.jl:240\nUpstream `EffectiveHenrysLaw` is an MTK `@component` with three parameters (H_intrinsic, K_1, K_2), and two variables (H_plus, H_eff). The equation is:\n  • H_eff ~ H_intrinsic * (1 + K_1/H_plus + K_1*K_2/H_plus^2)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only — the single output H_eff is given by an algebraic equation in terms of input H_plus and three parameters. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nESM representation note: in the upstream MTK component H_plus is an `@variable` supplied externally as the input; in this .esm it is represented as a `parameter` (not a state) so the system is well-posed under the schema's equation-count rule (one equation per state) and to match the observed-only pattern used elsewhere in this rig (see components/aerosol/organic/bet.esm). Tests vary H_plus via `parameter_overrides`, and the `ph_sweep` example sweeps H_plus as a parameter dimension.\n\nMonoprotic acid limit: setting K_2=0 collapses the third term, giving H_eff = H_intrinsic*(1 + K_1/H_plus), which models HNO₃-like singly dissociating species (Eq. 7.61).\n\nAll concentrations (H_intrinsic, K_1, K_2, H_plus) use SI units mol/m³ and mol/m³/Pa so the ratios K_1/H_plus and K_1*K_2/H_plus² are dimensionless.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves only arithmetic operations. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "H_intrinsic": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 1.0,
+                    "description": "Intrinsic (physical) Henry's law constant at reference conditions"
+                },
+                "K_1": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0,
+                    "description": "First dissociation constant (e.g., K_s1 for SO₂, K_c1 for CO₂, K_n1 for HNO₃)"
+                },
+                "K_2": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0,
+                    "description": "Second dissociation constant (e.g., K_s2 for SO₂, K_c2 for CO₂). Set to 0 for monoprotic acids."
+                },
+                "H_plus": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0,
+                    "description": "Hydrogen ion concentration [H⁺]. Input parameter — the observed-only model has one algebraic equation for H_eff given H_plus. Higher H_plus (lower pH) reduces enhancement; lower H_plus (higher pH) increases enhancement."
+                },
+                "H_eff": {
+                    "type": "state",
+                    "units": "mol/m^3/Pa",
+                    "description": "Effective Henry's law constant accounting for dissociation. Always >= H_intrinsic."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_eff",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "H_intrinsic",
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "/",
+                                                "args": ["K_1", "H_plus"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["K_1", "K_2"]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": ["H_plus", 2]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "unit_parameters",
+                    "description": "All parameters equal to 1.0. H_eff = 1.0 * (1 + 1/1 + 1*1/1^2) = 3.0 mol/m^3/Pa.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "H_intrinsic": 1.0,
+                        "K_1": 1.0,
+                        "K_2": 1.0,
+                        "H_plus": 1.0
+                    },
+                    "assertions": [
+                        { "variable": "H_eff", "time": 0.0, "expected": 3.0, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "monoprotic_acid",
+                    "description": "Monoprotic acid limit (K_2=0): H_eff = H_intrinsic*(1 + K_1/H_plus). With H_intrinsic=2.0, K_1=3.0, K_2=0.0, H_plus=1.0: H_eff = 2.0*(1+3) = 8.0 mol/m^3/Pa.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "H_intrinsic": 2.0,
+                        "K_1": 3.0,
+                        "K_2": 0.0,
+                        "H_plus": 1.0
+                    },
+                    "assertions": [
+                        { "variable": "H_eff", "time": 0.0, "expected": 8.0, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "high_ph_large_enhancement",
+                    "description": "Low H_plus (high pH) gives large enhancement. H_intrinsic=1.0, K_1=1.0, K_2=1.0, H_plus=0.1: H_eff = 1*(1 + 10 + 100) = 111.0 mol/m^3/Pa.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "H_intrinsic": 1.0,
+                        "K_1": 1.0,
+                        "K_2": 1.0,
+                        "H_plus": 0.1
+                    },
+                    "assertions": [
+                        { "variable": "H_eff", "time": 0.0, "expected": 111.0, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                },
+                {
+                    "id": "low_ph_minimal_enhancement",
+                    "description": "High H_plus (low pH) → enhancement ≈ 1. H_intrinsic=1.0, K_1=1.0, K_2=1.0, H_plus=100.0: H_eff = 1*(1 + 0.01 + 0.0001) = 1.0101 mol/m^3/Pa.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_overrides": {
+                        "H_intrinsic": 1.0,
+                        "K_1": 1.0,
+                        "K_2": 1.0,
+                        "H_plus": 100.0
+                    },
+                    "assertions": [
+                        { "variable": "H_eff", "time": 0.0, "expected": 1.0101, "tolerance": { "rel": 1.0e-6 } }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ph_sweep",
+                    "description": "Sweep H⁺ concentration from 0.01 to 10.0 mol/m³ (pH sweep from high to low) to show how the effective Henry's law constant decreases as H_plus increases. At low H_plus the dissociation terms dominate, greatly amplifying solubility. SO₂-like parameters: H_intrinsic=1.0, K_1=1.0, K_2=0.01.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "H_intrinsic": 1.0,
+                        "K_1": 1.0,
+                        "K_2": 0.01
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_plus",
+                                "range": { "start": 0.01, "stop": 10.0, "count": 50 }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "effective_heff_vs_hplus",
+                            "type": "line",
+                            "description": "Effective Henry's law constant H_eff vs H⁺ concentration — shows strong enhancement at low H_plus (high pH) where dissociation products dominate.",
+                            "x": { "variable": "H_plus", "label": "H⁺ (mol/m³)" },
+                            "y": { "variable": "H_eff", "label": "H_eff (mol/m³/Pa)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
