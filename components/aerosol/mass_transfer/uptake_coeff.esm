@@ -1,0 +1,267 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "UptakeCoefficient",
+        "description": "Effective uptake coefficient γ for gas-particle mass transfer. γ is the net probability that a gas molecule striking the particle surface is irreversibly taken up; it accounts for three resistances in series: (1) gas-phase diffusion to the surface (term_diff), (2) surface accommodation (term_acc), and (3) aqueous-phase reaction-diffusion within the droplet (term_rxn). The reciprocal relation 1/γ = term_diff + term_acc + term_rxn (Seinfeld & Pandis 2006, Chapter 12, Eq. 12.121) expresses resistances additively, analogous to resistors in series. Migrated from Aerosol.jl src/mass_transfer.jl `UptakeCoefficient`.",
+        "tags": [
+            "aerosol",
+            "mass-transfer",
+            "uptake",
+            "reactive-uptake",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-jyo)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Eq. 12.121 (uptake coefficient via three-resistance model)."
+            }
+        ]
+    },
+    "models": {
+        "UptakeCoefficient": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.121 — effective uptake coefficient for reactive gas-aerosol mass transfer. Migrated from Aerosol.jl src/mass_transfer.jl `UptakeCoefficient` (esm-jyo).",
+                "notes": "source_ref: Aerosol.jl@FWrvp:src/mass_transfer.jl:272\n\nUpstream `UptakeCoefficient` is an MTK `@component` with 1 constant (R=8.314 J/(mol·K)), 8 parameters (R_p, D_g, α, c_bar, T, H_star, k_rxn, D_aq), and 4 algebraic variables (term_diff, term_acc, term_rxn, γ). All four variables are determined by explicit algebraic equations with no time derivative — purely observed.\n\nEquations (S&P 2006, Eq. 12.121):\n  term_diff = (R_p × c_bar) / (4 × D_g)           [gas-phase diffusion resistance]\n  term_acc  = 1 / α                                  [surface accommodation resistance]\n  term_rxn  = c_bar / (4 R T H* √(k_rxn D_aq))     [reaction-diffusion resistance]\n  γ         = 1 / (term_diff + term_acc + term_rxn)  [effective uptake coefficient]\n\nThe constant R = 8.314 J/(mol·K) is folded as a floating-point literal into the term_rxn expression. All other constants are parameters with explicit default values.\n\nPhysics: In the continuum limit (Kn ≪ 1), term_diff = R_p c̄/(4 D_g). In the free-molecular limit (Kn ≫ 1) gas-phase diffusion is fast and term_diff → 0, leaving accommodation and reaction-diffusion as the limiting resistances. term_rxn arises from the Schwartz (1986) framework for reactive uptake into an aqueous droplet: the denominator 4 R T H* √(k D_{aq}) quantifies the combined solubility-reaction-diffusion capacity; larger H* or k_rxn reduces this resistance.\n\nParameter renaming: upstream Julia `α` → ESM `α` (Unicode preserved, matching rayleigh_atmosphere.esm convention for Greek-letter parameter names).\n\nTopological substitution order: term_diff, term_acc, and term_rxn each depend only on parameters, so they resolve before γ. The dependency graph is acyclic — no SimulationError.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with no ODE integration. All expressions are finite compositions of *, /, ^(1/2) in float64; round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Particle or droplet radius. Default 10 µm is typical for cloud/fog droplets."
+                },
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.0e-5,
+                    "description": "Gas-phase molecular diffusivity of the absorbing species. Default 2×10⁻⁵ m²/s is representative of mid-weight atmospheric trace gases."
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Mass accommodation coefficient: probability that a molecule that strikes the surface is adsorbed. Dimensionless; range (0, 1]. Default 1.0 (perfect accommodation)."
+                },
+                "c_bar": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 300.0,
+                    "description": "Mean molecular speed of the gas-phase species. Typical range 200–500 m/s for atmospheric trace gases at 200–300 K. May be computed from MeanMolecularSpeed."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature. Used in the reaction-diffusion term via the ideal-gas factor R T."
+                },
+                "H_star": {
+                    "type": "parameter",
+                    "units": "mol/(m^3*Pa)",
+                    "default": 1.0e5,
+                    "description": "Effective (reactive) Henry's law coefficient H* = H_cc × (1 + K_eq [OH⁻] + …). Encodes combined solubility and liquid-phase equilibrium chemistry. Larger H* → stronger driving force for dissolution → smaller reaction-diffusion resistance."
+                },
+                "k_rxn": {
+                    "type": "parameter",
+                    "units": "s^-1",
+                    "default": 1.0,
+                    "description": "First-order (or pseudo-first-order) aqueous-phase reaction rate constant for the absorbed species. Larger k_rxn reduces the reaction-diffusion resistance term_rxn."
+                },
+                "D_aq": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 1.0e-9,
+                    "description": "Aqueous-phase diffusivity of the absorbed species. Typical value ~10⁻⁹ m²/s for small ions/molecules in water."
+                },
+                "term_diff": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Gas-phase diffusion resistance term: term_diff = (R_p × c_bar) / (4 × D_g). Dimensionless resistance contribution from gas-phase transport to the particle surface. Large for large particles or slow gas-phase diffusion.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["R_p", "c_bar"]},
+                            {"op": "*", "args": [4.0, "D_g"]}
+                        ]
+                    }
+                },
+                "term_acc": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Surface accommodation resistance term: term_acc = 1/α. Dimensionless resistance from the finite probability of a gas molecule sticking to the surface. Equals 1 when α = 1 (perfect accommodation); grows large as α → 0.",
+                    "expression": {
+                        "op": "/",
+                        "args": [1.0, "α"]
+                    }
+                },
+                "term_rxn": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Reaction-diffusion resistance term: term_rxn = c_bar / (4 R T H* √(k_rxn D_aq)). Dimensionless resistance from the combined aqueous-phase solubility and reactive loss. Decreases as H*, k_rxn, or D_aq increase (stronger aqueous-phase sink).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            "c_bar",
+                            {
+                                "op": "*",
+                                "args": [
+                                    4.0,
+                                    8.314,
+                                    "T",
+                                    "H_star",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {"op": "*", "args": ["k_rxn", "D_aq"]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "γ": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Effective uptake coefficient (Eq. 12.121): γ = 1 / (term_diff + term_acc + term_rxn). Dimensionless probability that a gas molecule striking the particle is irreversibly taken up. Range (0, 1]; approaches α when gas-phase diffusion and reaction resistances are negligible, and approaches 4 D_g / (R_p c_bar) when accommodation and reaction are fast.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            1.0,
+                            {"op": "+", "args": ["term_diff", "term_acc", "term_rxn"]}
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default parameters: R_p=10 µm, D_g=2×10⁻⁵ m²/s, α=1, c_bar=300 m/s, T=298.15 K, H*=10⁵ mol/(m³·Pa), k_rxn=1 s⁻¹, D_aq=10⁻⁹ m²/s. term_diff = (1e-5×300)/(4×2e-5) = 37.5 dominates; term_acc = 1.0; term_rxn ≈ 0.00957 (small). γ = 1/(37.5+1+0.00957) ≈ 0.02597. Anchors all four computed quantities at the declared defaults.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "term_diff", "time": 0.0, "expected": 37.5,                     "tolerance": {"rel": 1e-15}},
+                        {"variable": "term_acc",  "time": 0.0, "expected": 1.0,                      "tolerance": {"rel": 1e-15}},
+                        {"variable": "term_rxn",  "time": 0.0, "expected": 0.009567895636782389,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "γ",         "time": 0.0, "expected": 0.025967572596765028,     "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "low_accommodation",
+                    "description": "Reduced accommodation coefficient α = 0.1 (10 % sticking probability). term_acc = 1/0.1 = 10 rises from 1 to 10, and now term_acc + term_diff = 47.5 dominates. γ drops from ≈0.02597 to ≈0.02105. Isolates the 1/α resistance wiring.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"α": 0.1},
+                    "assertions": [
+                        {"variable": "term_acc", "time": 0.0, "expected": 10.0,                  "tolerance": {"rel": 1e-15}},
+                        {"variable": "γ",        "time": 0.0, "expected": 0.02104839181439574,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "large_particle",
+                    "description": "Large particle R_p = 100 µm = 10⁻⁴ m (10× the default). term_diff scales ∝ R_p to 375, making gas-phase diffusion even more limiting. γ drops to ≈0.00266, roughly ten times smaller than the default. Exercises the R_p wiring in the diffusion term.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-4},
+                    "assertions": [
+                        {"variable": "term_diff", "time": 0.0, "expected": 375.0,                    "tolerance": {"rel": 1e-15}},
+                        {"variable": "γ",         "time": 0.0, "expected": 0.002659506792863193,     "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "fast_reaction",
+                    "description": "Very fast aqueous-phase reaction k_rxn = 10¹⁰ s⁻¹. term_rxn ∝ 1/√k_rxn drops to ≈9.6×10⁻⁸ — negligible. γ approaches the diffusion+accommodation limit 1/(37.5+1) ≈ 0.025974 and is insensitive to further increases in k_rxn. Exercises the √k_rxn dependence of term_rxn.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"k_rxn": 1.0e10},
+                    "assertions": [
+                        {"variable": "γ", "time": 0.0, "expected": 0.025974025909476162, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "cold_temperature",
+                    "description": "Cold temperature T = 273.15 K (0 °C). term_rxn ∝ 1/T increases slightly (less thermal driving force for dissolution). γ decreases marginally from ≈0.02597 to ≈0.02597 (sub-1 % change). Exercises the T wiring in the reaction-diffusion term.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 273.15},
+                    "assertions": [
+                        {"variable": "γ", "time": 0.0, "expected": 0.025966982112857077, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "slow_aqueous_diffusion",
+                    "description": "Very low aqueous diffusivity D_aq = 10⁻¹⁵ m²/s (∼1 million× smaller than the default; analogous to a viscous glassy particle). term_rxn ∝ 1/√D_aq rises to ≈9.57 — now the dominant resistance alongside term_diff=37.5. γ drops from ≈0.02597 to ≈0.02080. Confirms √D_aq wiring in term_rxn.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"D_aq": 1.0e-15},
+                    "assertions": [
+                        {"variable": "term_rxn", "time": 0.0, "expected": 9.567895636782389, "tolerance": {"rel": 1e-9}},
+                        {"variable": "γ",        "time": 0.0, "expected": 0.02080390636520361, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "accommodation_dominated",
+                    "description": "Near-zero particle size R_p = 1 nm = 10⁻⁹ m with fast reaction k_rxn = 10²⁰ s⁻¹. term_diff = (1e-9×300)/(4×2e-5) = 3.75×10⁻³ ≈ 0 and term_rxn ≈ 0, so 1/γ ≈ term_acc = 1/α = 1. γ → α = 1 — the model correctly reduces to the pure accommodation limit. Verifies that γ ≤ α always.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-9, "k_rxn": 1.0e20},
+                    "assertions": [
+                        {"variable": "γ", "time": 0.0, "expected": 0.9962640099616905, "tolerance": {"rel": 1e-6}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "gamma_vs_particle_radius",
+                    "description": "Sweep particle radius R_p from 1 nm to 100 µm log-spaced at default atmospheric conditions. term_diff ∝ R_p; for small particles term_diff ≪ 1 and γ is accommodation-limited (γ → α = 1); for large particles term_diff ≫ 1 and γ ∝ D_g/(R_p c_bar) — the classical diffusion-limited plateau. The crossover occurs around R_p ≈ 4 D_g / c_bar ≈ 0.27 µm where term_diff ≈ 1.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-4, "count": 51, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "gamma_vs_rp",
+                            "type": "line",
+                            "description": "Effective uptake coefficient γ as a function of particle radius R_p. Approaches α = 1 for small particles (accommodation-limited) and falls as 4D_g/(R_p c_bar) for large particles (diffusion-limited).",
+                            "x": {"variable": "R_p", "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "γ",   "label": "Uptake coefficient γ (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "gamma_vs_accommodation",
+                    "description": "Sweep accommodation coefficient α from 0.001 to 1.0 log-spaced at the default R_p = 10 µm. For α close to 1, accommodation resistance is small and γ is diffusion-limited (γ ≈ 0.02597). As α decreases, 1/α grows and γ ∝ α (accommodation-limited). The crossover is around α ≈ 1/37.5 ≈ 0.027 where term_acc ≈ term_diff.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "α",
+                                "range": {"start": 0.001, "stop": 1.0, "count": 51, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "gamma_vs_alpha",
+                            "type": "line",
+                            "description": "Effective uptake coefficient γ vs. accommodation coefficient α. Shows transition from accommodation-limited (γ ≈ α for small α) to diffusion-limited (γ ≈ const for α near 1) regime.",
+                            "x": {"variable": "α", "label": "Accommodation coefficient α"},
+                            "y": {"variable": "γ", "label": "Uptake coefficient γ (dimensionless)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
