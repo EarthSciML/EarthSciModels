@@ -1,0 +1,472 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "KohlerTheory",
+        "description": "Köhler theory for equilibrium vapor pressure over solution droplets, combining the Kelvin (curvature) effect and Raoult (solute) effect. Includes the exact Köhler equation with log-form saturation ratio (ln_S), critical activation diameter (D_pc), and critical supersaturation (S_c), plus the extension for partially insoluble particles (d_u). Migrated from Aerosol.jl src/cloud_physics.jl:232 (S&P 2006, §17.3–17.4, Eqs. 17.27–17.40).",
+        "tags": [
+            "aerosol",
+            "cloud_physics",
+            "kohler",
+            "ccn-activation",
+            "thermodynamics",
+            "kelvin-effect",
+            "raoult-effect",
+            "insoluble-core"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-xa3)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, §17.3–17.4. Eqs. 17.27–17.40."
+            }
+        ]
+    },
+    "models": {
+        "KohlerTheory": {
+            "reference": {
+                "citation": "Seinfeld & Pandis (2006) §17.3–17.4, Eqs. 17.27–17.40. Migrated from Aerosol.jl@c8c640bb:src/cloud_physics.jl:232 (esm-xa3).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/cloud_physics.jl:232\n\nUpstream @constants (M_w, R, ρ_w, π_val, vol_eps) migrated as fixed-default parameters (ESM schema has no constant type). The upstream constant dim_eps (a numerical guard for ε_m/(1-ε_m+dim_eps) when ε_m→1) is NOT migrated because the d_u expression is reformulated to avoid the singularity entirely — see d_u notes below.\n\nAll 9 algebraic observed variables faithfully migrated:\n  A     — Kelvin parameter, Eq. 17.28\n  n_s   — moles of solute, Eq. 17.40\n  B     — Raoult coefficient, Eq. 17.29\n  d_u   — insoluble core diameter, reformulated from Eq. 17.39 (see below)\n  ln_S  — log saturation, Eq. 17.38\n  S     — saturation ratio = exp(ln_S)\n  D_pc  — critical activation diameter, Eq. 17.30\n  ln_S_c — log critical saturation, Eq. 17.32\n  S_c   — critical saturation ratio = exp(ln_S_c)\n\nAll 9 upstream @parameters retained: T, σ_w, D_p, d_s, ν_s, M_s, ρ_s, ε_m, ρ_u.\n\nd_u reformulation: The upstream source formula is\n  d_u = d_s × (1 / ((ρ_u/ρ_s)×(ε_m/(1−ε_m+dim_eps)) + 1))^(1/3)\nwhere dim_eps=1e-30 guards against the singularity at ε_m=1. In Python/NumPy the sum (−ε_m + dim_eps + 1) is evaluated left-to-right: −1.0 + 1e-30 = −1.0 (1e-30 < machine_eps, catastrophic cancellation), then −1.0 + 1.0 = 0, causing a ZeroDivisionError. This ESM uses the algebraically equivalent form\n  d_u = d_s × ((1−ε_m)/ρ_u / (ε_m/ρ_s + (1−ε_m)/ρ_u))^(1/3)\nwhich is nonsingular at ε_m=1 (numerator = 0, denominator = 1/ρ_s ≠ 0, so d_u = 0 exactly) and at ε_m=0 (= d_s, fully insoluble). Mathematically identical to the source for ε_m ∈ (0,1); at ε_m=1 gives d_u=0 vs the source's ≈5e-18 m (< machine epsilon × d_s — physically identical).\n\nEvaluation order (acyclic): constants+params → A; params → n_s → B; params → d_u; A,B,D_p,d_u → ln_S → S; A,B → D_pc; A,B → ln_S_c → S_c."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "M_w": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.018015,
+                    "description": "Molecular weight of water. From upstream @constants block."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "J/(mol*K)",
+                    "default": 8.314,
+                    "description": "Universal gas constant. From upstream @constants block."
+                },
+                "ρ_w": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 997.0,
+                    "description": "Density of liquid water. From upstream @constants block."
+                },
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Pi. From upstream @constants block."
+                },
+                "vol_eps": {
+                    "type": "parameter",
+                    "units": "m^3",
+                    "default": 1.0e-60,
+                    "description": "Small volume guard in the denominator of ln_S (Eq. 17.38): D_p³ − d_u³ + vol_eps. Prevents division by zero when D_p = d_u. From upstream @constants block."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Temperature. Enters the Kelvin coefficient A in the denominator — cooler air gives a larger Kelvin enhancement."
+                },
+                "σ_w": {
+                    "type": "parameter",
+                    "units": "N/m",
+                    "default": 0.0728,
+                    "description": "Surface tension of water (S&P Table 17.1). Enters the Kelvin coefficient A linearly."
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Wet droplet diameter at which to evaluate the Köhler saturation ratio S (S&P Eq. 17.27)."
+                },
+                "d_s": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 5.0e-8,
+                    "description": "Dry particle diameter. Used to compute n_s (Eq. 17.40) and d_u (Eq. 17.39)."
+                },
+                "ν_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2.0,
+                    "description": "Van't Hoff factor (number of ions per formula unit). Default 2.0 for NaCl."
+                },
+                "M_s": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.05844,
+                    "description": "Molecular weight of solute. Default 0.05844 kg/mol for NaCl."
+                },
+                "ρ_s": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 2165.0,
+                    "description": "Density of solute. Default 2165 kg/m³ for NaCl."
+                },
+                "ε_m": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Mass fraction of soluble material (dimensionless). 1.0 = fully soluble; < 1.0 introduces an insoluble core of diameter d_u."
+                },
+                "ρ_u": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 2000.0,
+                    "description": "Density of insoluble material. Used in d_u (Eq. 17.39) and n_s (Eq. 17.40) for mixed particles."
+                },
+                "A": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Kelvin parameter (S&P Eq. 17.28): A = 4 M_w σ_w / (R T ρ_w). Encodes the vapor-pressure enhancement over a curved droplet surface.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [4, "M_w", "σ_w"]},
+                            {"op": "*", "args": ["R", "T", "ρ_w"]}
+                        ]
+                    }
+                },
+                "n_s": {
+                    "type": "observed",
+                    "units": "mol",
+                    "description": "Moles of solute in the particle (S&P Eq. 17.40): n_s = (ε_m/M_s) × ν_s × π × d_s³ / (6 × (ε_m/ρ_s + (1−ε_m)/ρ_u)). For fully soluble particles (ε_m=1) reduces to Eq. 17.33.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {"op": "/", "args": ["ε_m", "M_s"]},
+                                    "ν_s",
+                                    "π_val",
+                                    {"op": "^", "args": ["d_s", 3]}
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    6,
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            {"op": "/", "args": ["ε_m", "ρ_s"]},
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [1, {"op": "*", "args": [-1, "ε_m"]}]
+                                                    },
+                                                    "ρ_u"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "B": {
+                    "type": "observed",
+                    "units": "m^3",
+                    "description": "Raoult (solute) parameter (S&P Eq. 17.29): B = 6 n_s M_w / (π ρ_w). Encodes the water-activity suppression due to dissolved solute.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [6, "n_s", "M_w"]},
+                            {"op": "*", "args": ["π_val", "ρ_w"]}
+                        ]
+                    }
+                },
+                "d_u": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Diameter of the insoluble core (reformulated from S&P Eq. 17.39): d_u = d_s × ((1−ε_m)/ρ_u / (ε_m/ρ_s + (1−ε_m)/ρ_u))^(1/3). Algebraically equivalent to the source formula for ε_m ∈ (0,1); evaluates to 0 at ε_m=1 (fully soluble) and to d_s at ε_m=0 (fully insoluble). See reference notes for the dim_eps reformulation rationale.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "d_s",
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [1, {"op": "*", "args": [-1, "ε_m"]}]
+                                                    },
+                                                    "ρ_u"
+                                                ]
+                                            },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {"op": "/", "args": ["ε_m", "ρ_s"]},
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            {
+                                                                "op": "+",
+                                                                "args": [1, {"op": "*", "args": [-1, "ε_m"]}]
+                                                            },
+                                                            "ρ_u"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {"op": "/", "args": [1, 3]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "ln_S": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Log saturation ratio at diameter D_p (S&P Eq. 17.38): ln_S = A/D_p − B/(D_p³ − d_u³ + vol_eps). The extended Köhler equation accounting for an insoluble core.",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            {"op": "/", "args": ["A", "D_p"]},
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "B",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {"op": "^", "args": ["D_p", 3]},
+                                                    {"op": "*", "args": [-1, {"op": "^", "args": ["d_u", 3]}]},
+                                                    "vol_eps"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "S": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Saturation ratio at diameter D_p (S&P Eq. 17.27): S = exp(ln_S). Values > 1 are supersaturated; < 1 subsaturated.",
+                    "expression": {
+                        "op": "exp",
+                        "args": ["ln_S"]
+                    }
+                },
+                "D_pc": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Critical activation diameter (S&P Eq. 17.30): D_pc = sqrt(3B/A). The Köhler curve peaks at D_pc — droplets grown past this size activate spontaneously.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {"op": "/", "args": [{"op": "*", "args": [3, "B"]}, "A"]}
+                        ]
+                    }
+                },
+                "ln_S_c": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Log critical saturation ratio (S&P Eq. 17.32): ln_S_c = sqrt(4A³/(27B)). Derived from dS/dD_p = 0 at D_pc.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [4, {"op": "^", "args": ["A", 3]}]},
+                                    {"op": "*", "args": [27, "B"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "S_c": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Critical saturation ratio: S_c = exp(ln_S_c). An ambient saturation S_v > S_c causes spontaneous CCN activation past the critical diameter D_pc.",
+                    "expression": {
+                        "op": "exp",
+                        "args": ["ln_S_c"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Source defaults: T=293.15 K, D_p=100 nm, d_s=50 nm NaCl (ν_s=2, M_s=0.05844 kg/mol, ρ_s=2165 kg/m³), ε_m=1.0. A≈2.159 nm; n_s≈4.849e-18 mol; B≈1.674e-22 m³; d_u=0 (fully soluble, ε_m=1); ln_S≈−0.1458 (D_p < D_pc, subsaturated); D_pc≈482 nm; S_c≈1.00299 (0.30% critical supersaturation). All purely algebraic — values constant in time.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "A",      "time": 0.0, "expected": 2.1588902257792764e-9},
+                        {"variable": "A",      "time": 1.0, "expected": 2.1588902257792764e-9},
+                        {"variable": "n_s",    "time": 0.0, "expected": 4.849381199393895e-18},
+                        {"variable": "B",      "time": 0.0, "expected": 1.6735042138736534e-22},
+                        {"variable": "d_u",    "time": 0.0, "expected": 0.0},
+                        {"variable": "ln_S",   "time": 0.0, "expected": -1.4576151912957258e-1},
+                        {"variable": "S",      "time": 0.0, "expected": 8.6436381284151310e-1},
+                        {"variable": "D_pc",   "time": 0.0, "expected": 4.8223502743833670e-7},
+                        {"variable": "ln_S_c", "time": 0.0, "expected": 2.9845616113059223e-3},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0029890198495040e0},
+                        {"variable": "S_c",    "time": 1.0, "expected": 1.0029890198495040e0}
+                    ]
+                },
+                {
+                    "id": "nacl_100nm",
+                    "description": "NaCl dry particle, d_s=100 nm. n_s is 8× larger than the 50-nm default (n_s ∝ d_s³). D_pc≈1364 nm > d_s ✓. S_c≈1.001056 (0.106%) < S_c(50 nm)=1.002989 — confirming larger particles activate at lower supersaturation.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"d_s": 1.0e-7},
+                    "assertions": [
+                        {"variable": "n_s",    "time": 0.0, "expected": 3.8795049595151160e-17},
+                        {"variable": "B",      "time": 0.0, "expected": 1.3388033710989227e-21},
+                        {"variable": "D_pc",   "time": 0.0, "expected": 1.3639666321466934e-6},
+                        {"variable": "ln_S_c", "time": 0.0, "expected": 1.0552018771047779e-3},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0010557588396256e0}
+                    ]
+                },
+                {
+                    "id": "ammonium_sulfate_100nm",
+                    "description": "(NH4)2SO4 dry particle: d_s=100 nm, M_s=0.13214 kg/mol, ρ_s=1770 kg/m³, ν_s=3. n_s≈2.104e-17 mol; S_c≈1.001434 (0.143%) — slightly higher than NaCl 100nm (0.106%), consistent with (NH4)2SO4 being less hygroscopic per unit dry volume at this size.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"d_s": 1.0e-7, "M_s": 0.13214, "ρ_s": 1770.0, "ν_s": 3.0},
+                    "assertions": [
+                        {"variable": "n_s",    "time": 0.0, "expected": 2.1040634921218937e-17},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0014338558126866e0}
+                    ]
+                },
+                {
+                    "id": "insoluble_half_nacl_100nm",
+                    "description": "NaCl 100 nm, half-insoluble (ε_m=0.5, ρ_u=2000 kg/m³). Insoluble core d_u≈80.4 nm (Eq. 17.39 reformulated). Fewer moles of solute (n_s≈1.863e-17 mol vs 3.880e-17 for ε_m=1). S_c≈1.001524 (0.152%) > S_c(ε_m=1.0)=1.001056 — more insoluble material makes CCN activation harder.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"d_s": 1.0e-7, "ε_m": 0.5},
+                    "assertions": [
+                        {"variable": "n_s",    "time": 0.0, "expected": 1.8629075435823084e-17},
+                        {"variable": "d_u",    "time": 0.0, "expected": 8.0404612820891810e-8},
+                        {"variable": "B",      "time": 0.0, "expected": 6.4288277123597740e-22},
+                        {"variable": "D_pc",   "time": 0.0, "expected": 9.4517285613524090e-7},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0015239080480496e0}
+                    ]
+                },
+                {
+                    "id": "cold_temperature",
+                    "description": "T=263.15 K (−10 °C) with upstream defaults (d_s=50 nm NaCl). Colder air gives A ∝ 1/T: A rises from 2.159 nm to 2.405 nm. Larger Kelvin coefficient → smaller D_pc (457 nm vs 482 nm) and higher S_c (1.00352 vs 1.00299). Cold clouds need higher supersaturation to activate the same CCN.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 263.15},
+                    "assertions": [
+                        {"variable": "A",      "time": 0.0, "expected": 2.4050110951234834e-9},
+                        {"variable": "D_pc",   "time": 0.0, "expected": 4.5689403731897570e-7},
+                        {"variable": "ln_S_c", "time": 0.0, "expected": 3.5092178911226840e-3},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0035153823908040e0}
+                    ]
+                },
+                {
+                    "id": "size_scaling",
+                    "description": "Verify n_s ∝ d_s³ and S_c ∝ d_s^(−3/2) scalings (S&P §17.4). d_s=1e-7 has 8× the dry volume of default d_s=5e-8, so n_s is 8× larger. D_pc ∝ n_s^(1/2) ∝ d_s^(3/2): ratio D_pc(100nm)/D_pc(50nm) = 1364/482 ≈ 2.83 ≈ 2√2 ✓. sc ∝ n_s^(−1/2): ratio (S_c−1)(50nm)/(S_c−1)(100nm) ≈ 0.002989/0.001056 ≈ 2.83 ✓.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"d_s": 1.0e-7},
+                    "assertions": [
+                        {"variable": "n_s",    "time": 0.0, "expected": 3.8795049595151160e-17},
+                        {"variable": "D_pc",   "time": 0.0, "expected": 1.3639666321466934e-6},
+                        {"variable": "S_c",    "time": 0.0, "expected": 1.0010557588396256e0}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "kohler_curve",
+                    "description": "The classic Köhler curve: saturation ratio S vs droplet diameter D_p for a 50 nm NaCl CCN at T=293.15 K (source defaults). S rises from < 1 (Raoult-dominated, small D_p), peaks near D_pc ≈ 482 nm (S_c ≈ 1.003), then falls back toward 1 from above. Droplets in an environment with S_v > S_c grow spontaneously past D_pc and activate as cloud droplets.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": {"start": 5.0e-8, "stop": 5.0e-6, "count": 80, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_vs_D_p",
+                            "type": "line",
+                            "description": "Köhler curve S vs D_p for 50 nm NaCl at 293 K. Peak marks the critical activation point (D_pc, S_c).",
+                            "x": {"variable": "D_p", "label": "Droplet diameter D_p (m)"},
+                            "y": {"variable": "S",   "label": "Saturation ratio S (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "critical_supersaturation_vs_size",
+                    "description": "Critical supersaturation (S_c − 1) vs dry particle diameter d_s for NaCl at T=293.15 K. S_c − 1 ∝ d_s^(−3/2): larger CCN activate at lower supersaturation. Straight line on log-log axes with slope −3/2 (S&P §17.4).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "d_s",
+                                "range": {"start": 1.0e-8, "stop": 5.0e-7, "count": 40, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_c_vs_d_s",
+                            "type": "line",
+                            "description": "Critical saturation S_c vs dry diameter d_s (NaCl, 293 K). Log-log slope −3/2 from S&P §17.4.",
+                            "x": {"variable": "d_s", "label": "Dry diameter d_s (m)"},
+                            "y": {"variable": "S_c", "label": "Critical saturation S_c (dimensionless)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "insoluble_fraction_effect",
+                    "description": "Effect of insoluble mass fraction ε_m on S_c for a 100 nm dry particle (NaCl, 293 K). As ε_m decreases from 1 (fully soluble) to 0.1 (mostly insoluble), n_s decreases and S_c increases — harder to activate. The insoluble core d_u grows toward d_s as ε_m → 0.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "ε_m",
+                                "range": {"start": 0.1, "stop": 1.0, "count": 20, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "S_c_vs_eps_m",
+                            "type": "line",
+                            "description": "Critical saturation S_c vs soluble fraction ε_m (d_s=100 nm NaCl, 293 K). S_c rises as ε_m decreases.",
+                            "x": {"variable": "ε_m", "label": "Soluble mass fraction ε_m (dimensionless)"},
+                            "y": {"variable": "S_c", "label": "Critical saturation S_c (dimensionless)"}
+                        },
+                        {
+                            "id": "d_u_vs_eps_m",
+                            "type": "line",
+                            "description": "Insoluble core diameter d_u vs ε_m (d_s=100 nm NaCl). Approaches 0 as ε_m→1 (reformulated Eq. 17.39).",
+                            "x": {"variable": "ε_m", "label": "Soluble mass fraction ε_m (dimensionless)"},
+                            "y": {"variable": "d_u", "label": "Insoluble core diameter d_u (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
