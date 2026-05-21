@@ -1,0 +1,397 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MassTransfer",
+        "description": "Complete transition-regime mass transfer model combining mean molecular speed, air density, mean free path, Knudsen number, Fuchs-Sutugin correction, and continuum-regime flux to produce the transition-regime corrected molar flow rate J for particle growth/evaporation across all Knudsen number regimes (Seinfeld & Pandis 2006, Chapter 12, Sections 12.1.1–12.1.4, Eqs. 12.12, 12.24, 12.31, 12.43). Migrated from Aerosol.jl src/mass_transfer.jl `MassTransfer` (esm-44h).",
+        "tags": [
+            "aerosol",
+            "mass-transfer",
+            "kinetic-theory",
+            "knudsen",
+            "fuchs-sutugin",
+            "transition-regime",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-44h)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Sections 12.1.1–12.1.4 (mass transfer), Eq. 12.12 (continuum flux), Eq. 12.24 (mean molecular speed), Eq. 12.31 (Knudsen number), Eq. 12.43 (Fuchs-Sutugin correction)."
+            }
+        ]
+    },
+    "models": {
+        "MassTransfer": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12 — transition-regime mass transfer. Eq. 12.24 (mean molecular speed), Eq. 12.12 (continuum flux), Eq. 12.31 (Knudsen number), Eq. 12.43 (Fuchs-Sutugin correction). Migrated from Aerosol.jl src/mass_transfer.jl `MassTransfer` (esm-44h).",
+                "notes": "source_ref: Aerosol.jl@YeW6d:src/mass_transfer.jl:319\n\nUpstream `MassTransfer` is an MTK `@component` with 3 constants (R=8.314, k_B=1.380649e-23, N_Av=6.02214076e23), 10 parameters (T, P, M_A, M_air, μ, R_p, D_g, α, c_inf, c_s), and 7 algebraic variables (c_bar, ρ_air, λ, Kn, f_FS, J_c, J). It returns `System(eqs, t; name)` with no subsystems — a flat system with no `couple` call. The migration-tracker `coupling.couple` feature tag and `depends_on: MeanMolecularSpeed, Knudsen, FuchsSutugin` describe a conceptual relationship, not an implementation dependency; the source equations use only the component's own parameters and constants. The component is therefore migrated as a standalone flat model, following the same rig convention as wet_deposition_flux.esm.\n\nAll 7 source `@variables` are purely algebraic (no time derivative appears on any left-hand side in the `eqs` array), so each is migrated as `type: observed` with an inline `expression`. The `equations` array is empty; the ESS runner evaluates observed values by direct expression substitution in topological order.\n\nConstant folding:\n- R = 8.314 J/(mol·K) — appears in ρ_air and λ. Folded as the numeric literal 8.314.\n- k_B = 1.380649e-23 J/K, N_Av = 6.02214076e23 mol⁻¹ — appear only in c_bar as the product k_B·N_Av. They are NOT folded to R (8.31446261815324) because the upstream uses k_B and N_Av separately with their own values and the product k_B·N_Av ≠ R (upstream R=8.314 is slightly different from k_B·N_Av=8.31446261815324). Both constants are retained as their exact upstream literal values in the c_bar expression.\n- π is inlined as the Float64 literal 3.141592653589793 (Julia `pi`).\n\nDynamic viscosity μ is a `@parameter` in the upstream (default 1.81e-5 Pa·s), not a `@constant`, so it is migrated as a parameter.\n\nEquation mapping (one observed expression per source equation):\n  - c_bar ~ sqrt(8·k_B·T·N_Av/(π·M_A))  → Eq. 12.24 — mean molecular speed of species A\n  - ρ_air ~ P·M_air/(R·T)                → ideal gas law for air density\n  - λ ~ 2·μ/(ρ_air·sqrt(8·R·T/(π·M_air))) → mean free path of air (μ is viscosity, ρ_air is computed above)\n  - Kn ~ λ/R_p                            → Eq. 12.31 — Knudsen number\n  - f_FS ~ 0.75·α·(1+Kn)/(Kn²+Kn+0.283·Kn·α+0.75·α) → Eq. 12.43 — Fuchs-Sutugin correction\n  - J_c ~ 4·π·R_p·D_g·(c_inf-c_s)        → Eq. 12.12 — continuum-regime molar flow rate\n  - J ~ f_FS·J_c                           → transition-regime corrected molar flow rate\n\nTopological order of the observed chain: c_bar ← {T, M_A}; rho_air ← {P, M_air, T}; λ ← {μ, rho_air, T, M_air}; Kn ← {λ, R_p}; f_FS ← {α, Kn}; J_c ← {R_p, D_g, c_inf, c_s}; J ← {f_FS, J_c}. Note: c_bar does not feed into λ — the λ formula uses sqrt(8·R·T/(π·M_air)) for the mean speed of air molecules, not c_bar (which uses M_A for species A). These coincide when M_A = M_air (the default case) but are distinct in general. The density variable is spelled rho_air (ASCII) rather than ρ_air (Unicode) following the sibling mean_free_path.esm convention.\n\nRegime notes: For Kn ≪ 1 (large particles, continuum regime), f_FS → 1 and J → J_c. For Kn ≫ 1 (small particles, kinetic regime), f_FS → 0 and J ≪ J_c. At the default R_p=100 nm, Kn ≈ 0.65 (transition regime); f_FS ≈ 0.615. At R_p=10 μm (continuum), Kn ≈ 0.0065 and f_FS ≈ 0.995. At R_p=10 nm (kinetic), Kn ≈ 6.5 and f_FS ≈ 0.109.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with no ODE integration — each observed variable is evaluated by Float64 arithmetic (sqrt, *, /, +, -). Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of magnitude headroom, matching the sibling mean_molecular_speed.esm."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature of the gas. Affects mean molecular speed (∝ √T), air density (∝ 1/T), mean free path (∝ √T/ρ_air ∝ T^(3/2)/P), and Knudsen number."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Total air pressure. Affects air density (∝ P) and mean free path (∝ 1/P via ρ_air)."
+                },
+                "M_A": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of the diffusing species A. Affects mean molecular speed c_bar only (∝ M_A^{-1/2}). Default 0.029 kg/mol is dry air."
+                },
+                "M_air": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of air. Used in the ideal-gas air density and in the mean-free-path expression for the thermal speed of air molecules. Independent of M_A."
+                },
+                "μ": {
+                    "type": "parameter",
+                    "units": "Pa*s",
+                    "default": 1.81e-5,
+                    "description": "Dynamic viscosity of air. Used in the mean free path λ = 2μ/(ρ_air·c̄_air). Typical range 1.7–1.95×10⁻⁵ Pa·s over 250–350 K."
+                },
+                "R_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Particle radius. Controls the Knudsen number Kn = λ/R_p and the continuum flux J_c = 4πR_p D_g Δc. Default 100 nm is a typical accumulation-mode aerosol."
+                },
+                "D_g": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.0e-5,
+                    "description": "Gas-phase diffusivity of species A in air. Controls the continuum-regime flux J_c (∝ D_g)."
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Mass accommodation (sticking) coefficient. Range (0, 1]. α=1 means every collision results in uptake; smaller α reduces the Fuchs-Sutugin correction and the transition-regime flux."
+                },
+                "c_inf": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 1.0e-6,
+                    "description": "Bulk gas-phase molar concentration of species A far from the particle."
+                },
+                "c_s": {
+                    "type": "parameter",
+                    "units": "mol/m^3",
+                    "default": 0.0,
+                    "description": "Molar concentration of species A at the particle surface. The driving force for mass transfer is c_inf - c_s."
+                },
+                "c_bar": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "description": "Mean molecular speed of gas species A: c̄ = √(8k_B N_Av T/(π M_A)) = √(8RT/(π M_A)) using the literal k_B and N_Av values. Identical to the standalone MeanMolecularSpeed component (esm-1i9). Positive-definite for T > 0.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [8, 1.380649e-23, 6.02214076e23, "T"]},
+                                    {"op": "*", "args": [3.141592653589793, "M_A"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "rho_air": {
+                    "type": "observed",
+                    "units": "kg/m^3",
+                    "description": "Air density from the ideal gas law: rho_air = P·M_air/(R·T), with R=8.314 J/(mol·K) (upstream @constant value, upstream variable name ρ_air). At standard conditions (T=298.15 K, P=101325 Pa, M_air=0.029 kg/mol), rho_air ≈ 1.185 kg/m³.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["P", "M_air"]},
+                            {"op": "*", "args": [8.314, "T"]}
+                        ]
+                    }
+                },
+                "λ": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Mean free path of air molecules: λ = 2μ/(rho_air·c̄_air) where c̄_air = √(8RT/(π M_air)) is the mean speed of air molecules (using M_air, distinct from c_bar which uses M_A). At standard conditions, λ ≈ 65 nm.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [2, "μ"]},
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho_air",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {"op": "*", "args": [8, 8.314, "T"]},
+                                                    {"op": "*", "args": [3.141592653589793, "M_air"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "Kn": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Knudsen number: Kn = λ/R_p (Eq. 12.31). Kn ≪ 1 → continuum regime; Kn ≫ 1 → kinetic regime; Kn ~ 1 → transition regime. At 100 nm radius and standard conditions, Kn ≈ 0.65.",
+                    "expression": {
+                        "op": "/",
+                        "args": ["λ", "R_p"]
+                    }
+                },
+                "f_FS": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Fuchs-Sutugin transition-regime correction factor (Eq. 12.43): f_FS = 0.75α(1+Kn)/(Kn²+Kn+0.283Kn·α+0.75α). In the continuum limit (Kn→0), f_FS→1. In the kinetic limit (Kn→∞), f_FS→0. At Kn=1 and α=1, f_FS≈0.494.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.75,
+                                    "α",
+                                    {"op": "+", "args": [1, "Kn"]}
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "^", "args": ["Kn", 2]},
+                                    "Kn",
+                                    {"op": "*", "args": [0.283, "Kn", "α"]},
+                                    {"op": "*", "args": [0.75, "α"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "J_c": {
+                    "type": "observed",
+                    "units": "mol/s",
+                    "description": "Continuum-regime molar flow rate to a spherical particle (Eq. 12.12): J_c = 4πR_p D_g (c_inf - c_s). Positive when c_inf > c_s (net condensation). Independent of temperature and viscosity.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            4,
+                            3.141592653589793,
+                            "R_p",
+                            "D_g",
+                            {"op": "-", "args": ["c_inf", "c_s"]}
+                        ]
+                    }
+                },
+                "J": {
+                    "type": "observed",
+                    "units": "mol/s",
+                    "description": "Transition-regime corrected molar flow rate: J = f_FS·J_c. Equals J_c in the continuum limit (f_FS→1) and approaches 0 in the kinetic limit (f_FS→0). The physically realised flux for particle growth/evaporation across all Knudsen number regimes.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["f_FS", "J_c"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Default parameters: T=298.15 K, P=101325 Pa, M_A=M_air=0.029 kg/mol, μ=1.81e-5 Pa·s, R_p=100 nm, D_g=2e-5 m²/s, α=1, c_inf=1e-6 mol/m³, c_s=0. Kn≈0.655 — transition regime. Anchors all seven observed variables at standard atmospheric conditions.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "c_bar",    "time": 0.0, "expected": 466.5579107928379,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.1854132477839954,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ",      "time": 0.0, "expected": 6.545537554702463e-8,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn",     "time": 0.0, "expected": 0.6545537554702464,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.6148523302653344,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 2.5132741228718345e-17,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 1.5452924510433117e-17,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "continuum_regime_large_particle",
+                    "description": "Large particle R_p=10 μm: Kn=λ/R_p≈0.0065 ≪ 1 (continuum regime). Fuchs-Sutugin correction f_FS→1 and J≈J_c. Exercises the continuum limit of the correction factor. J/J_c > 0.99.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-5},
+                    "assertions": [
+                        {"variable": "Kn",     "time": 0.0, "expected": 0.0065455375547024625,    "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.9953435842005406,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 2.513274122871835e-15,    "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 2.501571273537722e-15,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "kinetic_regime_small_particle",
+                    "description": "Small particle R_p=10 nm: Kn=λ/R_p≈6.55 ≫ 1 (kinetic regime). Fuchs-Sutugin correction f_FS≈0.109 and J≈0.109·J_c. J/J_c < 0.15 as expected for the kinetic limit.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"R_p": 1.0e-8},
+                    "assertions": [
+                        {"variable": "Kn",     "time": 0.0, "expected": 6.545537554702463,        "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.10884664234173425,      "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 2.5132741228718344e-18,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 2.735614495589664e-19,    "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "partial_accommodation",
+                    "description": "Partial accommodation α=0.1: the Fuchs-Sutugin factor is reduced by ~83% compared to α=1 at the same Kn≈0.655 (f_FS drops from 0.615 to 0.105). Exercises the α dependence of the correction factor; J follows proportionally.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"α": 0.1},
+                    "assertions": [
+                        {"variable": "Kn",     "time": 0.0, "expected": 0.6545537554702464,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.10547352931380244,      "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 2.5132741228718345e-17,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 2.6508389187234356e-18,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "hot_atmosphere_350K",
+                    "description": "High temperature T=350 K: c_bar increases as √T (≈505.5 m/s), ρ_air decreases (≈1.010 kg/m³), λ increases (≈70.9 nm), Kn rises (≈0.709), and f_FS drops slightly (≈0.593). J_c is unchanged (no T dependence). Exercises the full temperature dependence of the thermodynamic chain.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 350.0},
+                    "assertions": [
+                        {"variable": "c_bar",    "time": 0.0, "expected": 505.5011790653896,      "tolerance": {"rel": 1e-9}},
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.0098027423622806,      "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ",      "time": 0.0, "expected": 7.091889077384121e-8,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn",     "time": 0.0, "expected": 0.7091889077384121,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.5926895669140232,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 2.5132741228718345e-17,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 1.4895913514211292e-17,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "heavy_species_SO2",
+                    "description": "Heavy diffusing species (M_A=0.064 kg/mol, representative of SO₂). c_bar decreases as M_A^{-1/2} (≈314.1 m/s vs 466.6 m/s for air). λ, Kn, f_FS, J_c, and J are unchanged because they depend on M_air (not M_A). Tests that c_bar varies independently of the mass-transfer chain.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"M_A": 0.064},
+                    "assertions": [
+                        {"variable": "c_bar",  "time": 0.0, "expected": 314.06140521147375,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ",      "time": 0.0, "expected": 6.545537554702463e-8,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 1.5452924510433117e-17,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "nonzero_surface_concentration",
+                    "description": "Surface concentration c_s=0.5e-6 mol/m³ (half of c_inf). The continuum flux J_c = 4πR_p D_g (c_inf-c_s) is halved relative to the default (c_s=0) case, and J follows proportionally. Tests that the (c_inf-c_s) driving force is correctly captured.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"c_s": 5.0e-7},
+                    "assertions": [
+                        {"variable": "Kn",     "time": 0.0, "expected": 0.6545537554702464,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_FS",   "time": 0.0, "expected": 0.6148523302653344,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "J_c",    "time": 0.0, "expected": 1.2566370614359173e-17,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "J",      "time": 0.0, "expected": 7.726462255216558e-18,    "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "flux_vs_particle_radius",
+                    "description": "Transition-regime corrected flux J and Fuchs-Sutugin factor f_FS as a function of particle radius R_p, swept log-spaced from 1 nm to 10 μm. Traces the crossover from the kinetic regime (Kn≫1, f_FS→0, J≪J_c) through the transition regime to the continuum regime (Kn≪1, f_FS→1, J≈J_c). The classical two-regime behaviour is captured by the Eq. 12.43 correction.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-5, "count": 41, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "fFS_vs_Rp",
+                            "type": "line",
+                            "description": "Fuchs-Sutugin correction factor f_FS vs particle radius R_p. Approaches 1 in the continuum limit (R_p≫λ) and 0 in the kinetic limit (R_p≪λ).",
+                            "x": {"variable": "R_p",  "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "f_FS", "label": "Fuchs-Sutugin factor f_FS"}
+                        },
+                        {
+                            "id": "J_vs_Rp",
+                            "type": "line",
+                            "description": "Transition-regime corrected molar flow rate J vs particle radius R_p. Scales as R_p in the continuum limit (J≈J_c∝R_p) and is suppressed by f_FS in the kinetic limit.",
+                            "x": {"variable": "R_p", "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "J",   "label": "Molar flow rate J (mol/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "flux_vs_accommodation_coefficient",
+                    "description": "Transition-regime flux J as a function of the mass accommodation coefficient α, swept from 0.001 to 1 (log scale) at the default particle radius (100 nm, transition regime). Shows how incomplete accommodation suppresses the flux: at α=1 (perfect accommodation) J is highest; at small α the Fuchs-Sutugin factor collapses and J decreases substantially.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "α",
+                                "range": {"start": 0.001, "stop": 1.0, "count": 31, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "J_vs_alpha",
+                            "type": "line",
+                            "description": "Transition-regime molar flow rate J vs accommodation coefficient α at R_p=100 nm (transition regime). Higher α → higher f_FS → higher J.",
+                            "x": {"variable": "α", "label": "Accommodation coefficient α"},
+                            "y": {"variable": "J", "label": "Molar flow rate J (mol/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "flux_over_radius_and_accommodation",
+                    "description": "Two-dimensional sweep of the transition-regime flux J over particle radius R_p (1 nm to 10 μm, log) and accommodation coefficient α (0.01 to 1, log). Surfaces the joint dependence: the Fuchs-Sutugin regime boundary shifts with both parameters, and partial accommodation becomes increasingly important in the kinetic regime.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "R_p",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-5, "count": 20, "scale": "log"}
+                            },
+                            {
+                                "parameter": "α",
+                                "range": {"start": 0.01, "stop": 1.0, "count": 10, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "J_heatmap",
+                            "type": "heatmap",
+                            "description": "Molar flow rate J (mol/s) over particle radius R_p and accommodation coefficient α.",
+                            "x": {"variable": "R_p", "label": "Particle radius R_p (m)"},
+                            "y": {"variable": "α",   "label": "Accommodation coefficient α"},
+                            "value": {"variable": "J", "reduce": "final"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
