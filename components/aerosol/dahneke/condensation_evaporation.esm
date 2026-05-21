@@ -1,0 +1,430 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DahnekeCondensationEvaporation",
+        "description": "Coupled mass and heat transport model for stationary condensation or evaporation of a droplet using Dahneke (1983) transition-regime correction factors. Computes the Maxwell (continuum) molecular growth rate I_M = 4πrD_v(n_∞−n_s) and heat conduction rate Q_M = 4πrκ(T_∞−T_o), then corrects each for non-continuum effects via the mass-transport correction factor β (Eq. 5.5) and heat-transport correction factor β_q (Eq. 5.7) respectively. Inlines DahnekeMassTransportCorrection and DahnekeHeatTransportCorrection as a single flat model. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:157.",
+        "tags": [
+            "aerosol",
+            "dahneke",
+            "condensation",
+            "evaporation",
+            "mass-transfer",
+            "heat-transfer",
+            "transition-regime",
+            "knudsen-number"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-ivb)"
+        ],
+        "references": [
+            {
+                "citation": "Dahneke, B. (1983). Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols. In Theory of Dispersed Multiphase Flow (pp. 97–133). Academic Press. Eqs. 2.1–2.3, 5.4–5.8."
+            }
+        ]
+    },
+    "models": {
+        "DahnekeCondensationEvaporation": {
+            "reference": {
+                "citation": "Dahneke, B. (1983) Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols, in Theory of Dispersed Multiphase Flow, Academic Press, pp. 97–133. Eqs. 2.1–2.3, 5.4–5.8. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:157 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-ivb).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/dahneke_brownian_diffusion.jl:157\n\nUpstream DahnekeCondensationEvaporation is an MTK @component that composes DahnekeMassTransportCorrection and DahnekeHeatTransportCorrection as subsystems, then wires them to the top-level condensation/evaporation equations. This ESM inlines both subsystems as a single flat algebraic model (all variables are observed) with 15 parameters and 10 observed variables.\n\nMass transport correction chain (Dahneke Eq. 5.5, from DahnekeMassTransportCorrection):\n  c_bar_v = sqrt(8 k_B T_inf / (π m_v))           [Eq. 6.2: mean thermal velocity of vapor]\n  ell_D   = 2 D_v / c_bar_v                         [Eq. 3.6: diffusional mean-free-path]\n  Kn_D    = ell_D / r                               [mass-transfer diffusion Knudsen number]\n  β       = (Kn_D+1) / (2 Kn_D(Kn_D+1)/δ_m + 1)  [Eq. 5.5: mass-transport correction]\n\nHeat transport correction chain (Dahneke Eq. 5.7, from DahnekeHeatTransportCorrection):\n  Kn_K    = 2 κ / (c_bar_gas n_gas m_gas c_v r)    [Eq. 5.7: heat-transfer Knudsen number]\n  β_q     = (Kn_K+1) / (2 Kn_K(Kn_K+1)/α + 1)    [Eq. 5.7: heat-transport correction]\n\nCondensation/evaporation equations:\n  I_M = 4π r D_v (n_inf − n_s)        [Eq. 2.1: Maxwell molecular growth rate]\n  I   = β · I_M                       [Eq. 5.4: corrected molecular growth rate]\n  Q_M = 4π r κ (T_inf − T_o)          [Eq. 2.2: Maxwell heat conduction rate]\n  Q   = β_q · Q_M                     [Eq. 5.6: corrected heat conduction rate]\n\nNote: L_vap (molecular latent heat of vaporization) is declared as a parameter but appears in no internal equation. It is provided for external energy-balance use (Eq. 5.8 relates β·I_M and β_q·Q_M/L externally to determine the steady droplet surface temperature T_o).\n\nConnections from MTK source:\n  mass_corr.r  = r        (shared droplet radius)\n  mass_corr.Dv = D_v      (shared vapor diffusivity)\n  mass_corr.T  = T_inf    (mass transport uses ambient temperature)\n  heat_corr.r  = r        (shared droplet radius)\n  heat_corr.κ  = κ        (shared thermal conductivity)\n\nTopological evaluation order: m_v, T_inf → c_bar_v → ell_D → Kn_D → β → I_M → I; κ, r, n_gas, c_bar_gas, m_gas, c_v → Kn_K → β_q → Q_M → Q. Dependency graph is acyclic; all equations are purely explicit.\n\nk_B = 1.380649e-23 J/K and π = 3.14159265358979 are folded as floating-point literals.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with finite compositions of sqrt, *, /, + in float64. Round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom above machine epsilon."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "T_inf": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Gas temperature at infinity (ambient temperature). Used in the mass-transport correction (mean thermal velocity of vapor) and in Q_M."
+                },
+                "T_o": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Droplet surface temperature. Determines the heat conduction driving force T_inf − T_o."
+                },
+                "n_inf": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 1.0e21,
+                    "description": "Vapor number concentration at infinity. Default 1×10²¹ m⁻³ (approximately 40 Pa partial pressure of water vapor at 298 K)."
+                },
+                "n_s": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 0.0,
+                    "description": "Saturation vapor number concentration at the droplet surface. Determines condensation driving force n_inf − n_s. Default 0 (maximum condensation driving force)."
+                },
+                "L_vap": {
+                    "type": "parameter",
+                    "units": "J",
+                    "default": 7.48e-20,
+                    "description": "Molecular latent heat of vaporization. Default 7.48×10⁻²⁰ J per molecule (water at ~298 K). Provided for external energy-balance use (Eq. 5.8: β·I_M = β_q·Q_M/L_vap for stationary droplet); not used internally in any equation."
+                },
+                "r": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Droplet (sphere) radius. Shared by both mass and heat transport subsystems. Default 100 nm — transition-regime aerosol."
+                },
+                "D_v": {
+                    "type": "parameter",
+                    "units": "m^2/s",
+                    "default": 2.0e-5,
+                    "description": "Diffusion coefficient of vapor molecules in the carrier gas. Default 2×10⁻⁵ m²/s (water vapor in air at 298 K, 1 atm)."
+                },
+                "κ": {
+                    "type": "parameter",
+                    "units": "W/(m*K)",
+                    "default": 0.026,
+                    "description": "Thermal conductivity of the carrier gas. Default 0.026 W/(m·K) (air at 298 K)."
+                },
+                "m_v": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 4.81e-26,
+                    "description": "Mass of a single vapor molecule. Default 4.81×10⁻²⁶ kg (water, M=18 g/mol → m = 18/6.022×10²³ × 10⁻³ ≈ 2.99×10⁻²⁶ kg; the default 4.81×10⁻²⁶ kg corresponds to a somewhat heavier molecule used in the source model). Used to compute the mean thermal velocity c_bar_v = sqrt(8kT/(πm_v))."
+                },
+                "δ_m": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Condensation-evaporation (sticking) coefficient. Dimensionless; range (0, 1]. Default 1.0 (perfect accommodation). Smaller δ_m reduces β and hence I; represents the fraction of vapor molecule collisions that result in actual condensation/evaporation."
+                },
+                "n_gas": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 2.46e25,
+                    "description": "Number concentration of the suspending gas molecules. Default 2.46×10²⁵ m⁻³ (air at NTP, 1 atm, 293 K). Used in the heat-transfer Knudsen number Kn_K."
+                },
+                "c_bar_gas": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 500.0,
+                    "description": "Mean thermal velocity of the carrier gas molecules. Default 500 m/s (air at ~293 K). Used in the heat-transfer Knudsen number Kn_K."
+                },
+                "c_v": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 718.0,
+                    "description": "Specific heat at constant volume of the carrier gas (per unit mass). Default 718 J/(kg·K) (air). Used in Kn_K = 2κ/(c_bar_gas n_gas m_gas c_v r)."
+                },
+                "m_gas": {
+                    "type": "parameter",
+                    "units": "kg",
+                    "default": 4.81e-26,
+                    "description": "Mass of a single carrier gas molecule. Default 4.81×10⁻²⁶ kg (approximately nitrogen, M≈28 g/mol → m ≈ 4.65×10⁻²⁶ kg; the default follows the upstream source). Used in Kn_K."
+                },
+                "α": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Thermal accommodation coefficient. Dimensionless; range (0, 1]. Default 1.0 (perfect thermal accommodation). Smaller α reduces β_q and hence Q."
+                },
+                "c_bar_v": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "description": "Mean thermal velocity of vapor molecules (Eq. 6.2): c_bar_v = sqrt(8 k_B T_inf / (π m_v)). k_B = 1.380649×10⁻²³ J/K and π = 3.14159265358979 folded as literals. Used to compute the diffusional mean-free-path ell_D = 2 D_v / c_bar_v.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [8, 1.380649e-23, "T_inf"]},
+                                    {"op": "*", "args": [3.14159265358979, "m_v"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "ell_D": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Diffusional mean-free-path of vapor molecules (Eq. 3.6): ell_D = 2 D_v / c_bar_v. Characterises the transition between the continuum diffusion regime (r ≫ ell_D, Kn_D ≪ 1) and the free-molecular regime (r ≪ ell_D, Kn_D ≫ 1).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [2, "D_v"]},
+                            "c_bar_v"
+                        ]
+                    }
+                },
+                "Kn_D": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Mass-transfer diffusion Knudsen number: Kn_D = ell_D / r. Dimensionless; Kn_D ≪ 1 is the continuum limit (β → 1); Kn_D ≫ 1 is the free-molecular limit (β → δ_m·c_bar_v·r/(4·D_v)).",
+                    "expression": {
+                        "op": "/",
+                        "args": ["ell_D", "r"]
+                    }
+                },
+                "β": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Mass-transport correction factor (Eq. 5.5): β = (Kn_D+1) / (2 Kn_D(Kn_D+1)/δ_m + 1). Dimensionless; β → 1 for Kn_D → 0 (continuum) and β → δ_m/(2 Kn_D) → 0 for Kn_D → ∞ (free-molecular). Corrects Maxwell continuum rate I_M by accounting for kinetic-theory limitations near the droplet surface.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "+", "args": ["Kn_D", 1]},
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [2, "Kn_D", {"op": "+", "args": ["Kn_D", 1]}]
+                                            },
+                                            "δ_m"
+                                        ]
+                                    },
+                                    1
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "Kn_K": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Heat-transfer Knudsen number (Eq. 5.7): Kn_K = 2κ / (c_bar_gas n_gas m_gas c_v r). Dimensionless; characterises whether heat conduction to the sphere is in the continuum (Kn_K ≪ 1, β_q → 1) or free-molecular (Kn_K ≫ 1) regime.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [2, "κ"]},
+                            {"op": "*", "args": ["c_bar_gas", "n_gas", "m_gas", "c_v", "r"]}
+                        ]
+                    }
+                },
+                "β_q": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Heat-transport correction factor (Eq. 5.7): β_q = (Kn_K+1) / (2 Kn_K(Kn_K+1)/α + 1). Dimensionless; β_q → 1 for Kn_K → 0 (continuum) and β_q → α/(2 Kn_K) → 0 for Kn_K → ∞ (free-molecular). Analogous to β for mass transport, with Kn_K in place of Kn_D and α in place of δ_m.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "+", "args": ["Kn_K", 1]},
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [2, "Kn_K", {"op": "+", "args": ["Kn_K", 1]}]
+                                            },
+                                            "α"
+                                        ]
+                                    },
+                                    1
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "I_M": {
+                    "type": "observed",
+                    "units": "1/s",
+                    "description": "Maxwell (continuum) molecular growth rate (Eq. 2.1): I_M = 4π r D_v (n_inf − n_s). The rate at which vapor molecules condense onto the droplet in the continuum limit. 4π folded as the literal 12.566370614359172.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            12.566370614359172, "r", "D_v",
+                            {"op": "-", "args": ["n_inf", "n_s"]}
+                        ]
+                    }
+                },
+                "I": {
+                    "type": "observed",
+                    "units": "1/s",
+                    "description": "Corrected molecular growth rate (Eq. 5.4): I = β · I_M. The actual condensation rate accounting for non-continuum effects. I ≤ I_M, with I → I_M in the continuum limit (β → 1).",
+                    "expression": {
+                        "op": "*",
+                        "args": ["β", "I_M"]
+                    }
+                },
+                "Q_M": {
+                    "type": "observed",
+                    "units": "W",
+                    "description": "Maxwell (continuum) heat conduction rate (Eq. 2.2): Q_M = 4π r κ (T_inf − T_o). The rate of heat flow to the droplet surface in the continuum limit. 4π folded as the literal 12.566370614359172.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            12.566370614359172, "r", "κ",
+                            {"op": "-", "args": ["T_inf", "T_o"]}
+                        ]
+                    }
+                },
+                "Q": {
+                    "type": "observed",
+                    "units": "W",
+                    "description": "Corrected heat conduction rate (Eq. 5.6): Q = β_q · Q_M. The actual heat transfer rate to the droplet accounting for non-continuum effects. Q ≤ Q_M, with Q → Q_M in the continuum limit (β_q → 1).",
+                    "expression": {
+                        "op": "*",
+                        "args": ["β_q", "Q_M"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_parameters",
+                    "description": "Default parameters: T_inf=298.15 K, T_o=293.15 K, n_inf=1e21 m⁻³, n_s=0, r=100 nm, D_v=2e-5 m²/s, κ=0.026 W/(m·K), m_v=4.81e-26 kg, δ_m=1, n_gas=2.46e25 m⁻³, c_bar_gas=500 m/s, c_v=718 J/(kg·K), m_gas=4.81e-26 kg, α=1. Tests the full chain: c_bar_v=466.83 m/s, ell_D=85.68 nm, Kn_D=0.857, β=0.4440; Kn_K=1.224, β_q=0.3451; I_M=2.513e10 s⁻¹, I=1.116e10 s⁻¹; Q_M=1.634e-7 W, Q=5.637e-8 W.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "c_bar_v", "time": 0.0, "expected": 4.668276456276172e2,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "ell_D",   "time": 0.0, "expected": 8.568472834598901e-8,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn_D",    "time": 0.0, "expected": 8.568472834598901e-1,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "β",       "time": 0.0, "expected": 4.440020569957207e-1,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn_K",    "time": 0.0, "expected": 1.224133298323121e0,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "β_q",     "time": 0.0, "expected": 3.450798590680775e-1,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "I_M",     "time": 0.0, "expected": 2.513274122871835e10,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "I",       "time": 0.0, "expected": 1.115898880349210e10,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Q_M",     "time": 0.0, "expected": 1.633628179866692e-7,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Q",       "time": 0.0, "expected": 5.637321820780381e-8,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "continuum_limit",
+                    "description": "Large droplet (r=100 µm): Kn_D=8.57×10⁻⁴ ≪ 1 and Kn_K=1.22×10⁻³ ≪ 1 → both correction factors approach 1 (continuum limit). Confirms β=0.9991 and β_q=0.9988, so I ≈ I_M and Q ≈ Q_M to within 0.15%.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"r": 1.0e-4},
+                    "assertions": [
+                        {"variable": "Kn_D",  "time": 0.0, "expected": 8.568472834598901e-4, "tolerance": {"rel": 1e-9}},
+                        {"variable": "β",     "time": 0.0, "expected": 9.991431539725586e-1,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn_K",  "time": 0.0, "expected": 1.224133298323121e-3,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "β_q",   "time": 0.0, "expected": 9.987758703614391e-1,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "I_M",   "time": 0.0, "expected": 2.513274122871834e13,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "I",     "time": 0.0, "expected": 2.511120633923780e13,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Q_M",   "time": 0.0, "expected": 1.633628179866692e-4,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Q",     "time": 0.0, "expected": 1.631628407193329e-4,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "small_sticking_coefficient",
+                    "description": "Small condensation-evaporation sticking coefficient δ_m=0.1 at r=100 nm: β drops from 0.444 (δ_m=1) to 0.0566, reducing the corrected condensation rate I by a factor of ~7.8 compared to perfect accommodation. Confirms that imperfect accommodation can dominate the kinetic correction.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"δ_m": 0.1},
+                    "assertions": [
+                        {"variable": "β",  "time": 0.0, "expected": 5.657550850298151e-2, "tolerance": {"rel": 1e-9}},
+                        {"variable": "I",  "time": 0.0, "expected": 1.421897615088589e9,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "small_thermal_accommodation",
+                    "description": "Partial thermal accommodation α=0.5 at r=100 nm: β_q drops from 0.3451 (α=1) to 0.1871, reducing corrected heat transfer Q by a factor of ~1.85. Confirms the heat transport correction is sensitive to the thermal accommodation coefficient in the transition regime.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"α": 0.5},
+                    "assertions": [
+                        {"variable": "β_q", "time": 0.0, "expected": 1.870506155873780e-1, "tolerance": {"rel": 1e-9}},
+                        {"variable": "Q",   "time": 0.0, "expected": 3.055711566849527e-8,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "no_concentration_gradient",
+                    "description": "Saturation: n_s = n_inf → concentration difference is zero → I_M = 0 and I = 0. The droplet is at vapour equilibrium; no net condensation occurs.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"n_s": 1.0e21},
+                    "assertions": [
+                        {"variable": "I_M", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1e-3}},
+                        {"variable": "I",   "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1e-3}}
+                    ]
+                },
+                {
+                    "id": "no_temperature_gradient",
+                    "description": "Isothermal: T_o = T_inf → temperature difference is zero → Q_M = 0 and Q = 0. No net heat exchange between the droplet and the surrounding gas.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T_o": 298.15},
+                    "assertions": [
+                        {"variable": "Q_M", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1e-20}},
+                        {"variable": "Q",   "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1e-20}}
+                    ]
+                },
+                {
+                    "id": "heavier_vapor_molecule",
+                    "description": "10× heavier vapor molecule m_v=4.81e-25 kg: c_bar_v = sqrt(1/10) × default = 147.6 m/s → ell_D increases by sqrt(10) → Kn_D increases by sqrt(10) (2.709 vs 0.857 default) → β decreases (0.176 vs 0.444). Confirms that heavier vapour molecules have a longer mean free path (slower c_bar_v → larger ell_D = 2D_v/c_bar_v) leading to a stronger kinetic correction.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"m_v": 4.81e-25},
+                    "assertions": [
+                        {"variable": "c_bar_v", "time": 0.0, "expected": 1.476238634917215e2,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn_D",    "time": 0.0, "expected": 2.709589022661174e0,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "β",       "time": 0.0, "expected": 1.757855513343002e-1, "tolerance": {"rel": 1e-9}},
+                        {"variable": "I",       "time": 0.0, "expected": 4.417972773432552e9,  "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "correction_factors_vs_radius",
+                    "description": "Mass-transport (β) and heat-transport (β_q) correction factors vs droplet radius r (log sweep 1 nm to 1 mm). Both factors increase from their free-molecular values toward 1 as r grows. β and β_q differ because the diffusional mean-free-path (ell_D = 2D_v/c_bar_v) and the heat-transfer length scale (2κ/(c_bar_gas n_gas m_gas c_v)) are different, so the two Knudsen numbers Kn_D and Kn_K transition at different radii.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "r",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-3, "count": 61, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "beta_vs_r",
+                            "type": "line",
+                            "description": "Mass-transport correction factor β vs droplet radius r. β → 1 for large r (continuum) and decreases toward 0 for small r (free-molecular), illustrating the transition-regime interpolation of Dahneke Eq. 5.5.",
+                            "x": {"variable": "r",    "label": "Droplet radius r (m)"},
+                            "y": {"variable": "β",    "label": "Mass-transport correction factor β"}
+                        },
+                        {
+                            "id": "beta_q_vs_r",
+                            "type": "line",
+                            "description": "Heat-transport correction factor β_q vs droplet radius r. Analogous to β but for heat conduction; transitions at a different radius because Kn_K uses the thermal mean-free-path.",
+                            "x": {"variable": "r",    "label": "Droplet radius r (m)"},
+                            "y": {"variable": "β_q",  "label": "Heat-transport correction factor β_q"}
+                        }
+                    ]
+                },
+                {
+                    "id": "rates_vs_radius",
+                    "description": "Corrected condensation rate I and heat transfer rate Q vs droplet radius r (log sweep 1 nm to 1 µm). Illustrates the departure from the Maxwell continuum rates I_M and Q_M in the transition and free-molecular regimes at small radii.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "r",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-6, "count": 61, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "I_vs_r",
+                            "type": "line",
+                            "description": "Corrected molecular growth rate I and Maxwell rate I_M vs r. At large r, I ≈ I_M; at small r, I ≪ I_M because β ≪ 1 in the free-molecular regime.",
+                            "x": {"variable": "r",   "label": "Droplet radius r (m)"},
+                            "y": {"variable": "I",   "label": "Corrected condensation rate I (s⁻¹)"}
+                        },
+                        {
+                            "id": "Q_vs_r",
+                            "type": "line",
+                            "description": "Corrected heat transfer rate Q and Maxwell rate Q_M vs r. At large r, Q ≈ Q_M; at small r, Q ≪ Q_M because β_q ≪ 1.",
+                            "x": {"variable": "r",   "label": "Droplet radius r (m)"},
+                            "y": {"variable": "Q",   "label": "Corrected heat transfer rate Q (W)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
