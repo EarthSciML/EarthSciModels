@@ -674,7 +674,7 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
 | fuel_savr | `src/coupling.jl:123` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_savr` | — |
-| fuel_load | `src/coupling.jl:124` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_load` | — |
+| fuel_load | `src/coupling.jl:124` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `components/wildland_fire/registered_functions/fuel_load.esm` | — | **status: complete** (esm-uowy; Anderson 13 fuel load w0 in kg/m² via ifelse+interp.linear; 8 tests/8 assertions, 2 examples; gt-p3ep resolved as in fuel_savr/depth/mce pattern) |
 | fuel_depth | `src/coupling.jl:125` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_depth` | — |
 | fuel_mce | `src/coupling.jl:126` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/fuel_mce` | — |
 | fuel_heat | `src/coupling.jl:127` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `components/wildland_fire/registered_functions/fuel_heat.esm` | — | **status: complete, sha: 095d459501b2454582cb582e27f89f452c5b5007** (esm-6qk7; Anderson 13 all share h=8000 BTU/lb=18,608,000 J/kg — uniform constant lets fuel_heat degenerate to ifelse/and step function without table_lookup; 6 tests/6 assertions, 1 example; TODO_GAP gt-p3ep remains for fuel_savr/load/depth/mce/weight which need discrete-categorical integer lookup with default) |
