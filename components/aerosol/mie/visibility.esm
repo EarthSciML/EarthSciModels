@@ -1,0 +1,229 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "Visibility",
+    "description": "Visibility calculation from extinction coefficient. Computes visual range using the Koschmeider equation (Eq. 15.36) and related visibility metrics. Visual range is the distance at which a black object against a white background reaches the threshold contrast of 0.02.",
+    "authors": ["EarthSciML"],
+    "created": "2026-05-21T00:00:00Z",
+    "tags": ["aerosol", "visibility", "mie-scattering", "optical", "seinfeld-pandis"],
+    "references": [
+      {
+        "citation": "Seinfeld, J.H. and Pandis, S.N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 15, Equations 15.31-15.36."
+      }
+    ]
+  },
+  "models": {
+    "Visibility": {
+      "coupletype": "Visibility",
+      "variables": {
+        "Koschmeider_const": {
+          "type": "parameter",
+          "units": "1",
+          "default": 3.912,
+          "description": "Koschmeider constant = -ln(0.02) (dimensionless)"
+        },
+        "one_km": {
+          "type": "parameter",
+          "units": "m",
+          "default": 1000.0,
+          "description": "One kilometer in meters"
+        },
+        "b_ext": {
+          "type": "parameter",
+          "units": "m^-1",
+          "default": 0.0001,
+          "description": "Total extinction coefficient"
+        },
+        "b_sg": {
+          "type": "parameter",
+          "units": "m^-1",
+          "default": 0.0000132,
+          "description": "Rayleigh scattering coefficient (gas)"
+        },
+        "b_ag": {
+          "type": "parameter",
+          "units": "m^-1",
+          "default": 0.0,
+          "description": "Absorption coefficient due to gases (mainly NO2)"
+        },
+        "x_v": {
+          "type": "observed",
+          "units": "m",
+          "description": "Visual range",
+          "expression": {
+            "op": "/",
+            "args": ["Koschmeider_const", "b_ext"]
+          }
+        },
+        "τ_per_km": {
+          "type": "observed",
+          "units": "1",
+          "description": "Optical depth per kilometer (dimensionless)",
+          "expression": {
+            "op": "*",
+            "args": ["b_ext", "one_km"]
+          }
+        },
+        "b_sp": {
+          "type": "observed",
+          "units": "m^-1",
+          "description": "Scattering coefficient due to particles",
+          "expression": {
+            "op": "-",
+            "args": [
+              {
+                "op": "-",
+                "args": ["b_ext", "b_sg"]
+              },
+              "b_ag"
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "koschmeider_default",
+          "description": "Visual range at default parameters (b_ext=1e-4 m^-1): x_v = 3.912 / 1e-4 = 39120 m",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "assertions": [
+            {
+              "variable": "x_v",
+              "time": 0,
+              "expected": 39120.0,
+              "tolerance": {"abs": 0.01}
+            }
+          ]
+        },
+        {
+          "id": "optical_depth_default",
+          "description": "Optical depth per km at default parameters (b_ext=1e-4): tau_per_km = 1e-4 x 1000 = 0.1",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "assertions": [
+            {
+              "variable": "τ_per_km",
+              "time": 0,
+              "expected": 0.1,
+              "tolerance": {"abs": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "particle_scattering_default",
+          "description": "Particle scattering at defaults: b_sp = 1e-4 - 13.2e-6 - 0 = 8.68e-5 m^-1",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "assertions": [
+            {
+              "variable": "b_sp",
+              "time": 0,
+              "expected": 8.68e-5,
+              "tolerance": {"abs": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "rayleigh_clean_atmosphere",
+          "description": "Clean Rayleigh atmosphere (S&P p.705): b_ext = b_sg = 13.2e-6 m^-1, x_v = 3.912 / 13.2e-6 = 296363.6 m (~296 km), no particle contribution",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "parameter_overrides": {
+            "b_ext": 1.32e-5,
+            "b_sg": 1.32e-5,
+            "b_ag": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "x_v",
+              "time": 0,
+              "expected": 296363.636,
+              "tolerance": {"rel": 0.001}
+            },
+            {
+              "variable": "b_sp",
+              "time": 0,
+              "expected": 0.0,
+              "tolerance": {"abs": 1e-12}
+            }
+          ]
+        },
+        {
+          "id": "urban_polluted",
+          "description": "Urban polluted conditions (b_ext=2e-4 m^-1): x_v = 3.912 / 2e-4 = 19560 m (~20 km), tau_per_km = 0.2",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "parameter_overrides": {
+            "b_ext": 2e-4
+          },
+          "assertions": [
+            {
+              "variable": "x_v",
+              "time": 0,
+              "expected": 19560.0,
+              "tolerance": {"abs": 0.01}
+            },
+            {
+              "variable": "τ_per_km",
+              "time": 0,
+              "expected": 0.2,
+              "tolerance": {"abs": 1e-10}
+            }
+          ]
+        },
+        {
+          "id": "gas_absorption_contribution",
+          "description": "With NO2 absorption (b_ag=5e-6 m^-1): b_sp = 1e-4 - 13.2e-6 - 5e-6 = 8.18e-5 m^-1",
+          "time_span": {"start": 0.0, "end": 0.0},
+          "parameter_overrides": {
+            "b_ag": 5e-6
+          },
+          "assertions": [
+            {
+              "variable": "b_sp",
+              "time": 0,
+              "expected": 8.18e-5,
+              "tolerance": {"abs": 1e-10}
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "koschmeider_curve",
+          "description": "Koschmeider equation (Eq. 15.36): visual range x_v vs extinction coefficient b_ext. At sea level in a clean Rayleigh atmosphere (b_ext ~13.2e-6 m^-1), maximum visual range is ~296 km. Urban conditions (b_ext ~1e-4 to 1e-3 m^-1) reduce visibility to 4-40 km. Reproduces the characteristic curve from S&P Chapter 15.",
+          "initial_state": {
+            "type": "per_variable",
+            "values": {}
+          },
+          "time_span": {"start": 0.0, "end": 0.0},
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "b_ext",
+                "range": {
+                  "start": 1e-5,
+                  "stop": 1e-3,
+                  "count": 50,
+                  "scale": "log"
+                }
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "visual_range_vs_extinction",
+              "type": "line",
+              "description": "Visual range x_v (m) vs extinction coefficient b_ext (m^-1), reproducing the Koschmeider relationship (Eq. 15.36).",
+              "x": {
+                "variable": "b_ext",
+                "label": "Extinction coefficient b_ext (m^-1)"
+              },
+              "y": {
+                "variable": "x_v",
+                "label": "Visual range x_v (m)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
