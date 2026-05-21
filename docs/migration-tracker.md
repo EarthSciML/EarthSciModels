@@ -120,7 +120,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | DahnekeCapillaryPenetration | `src/dahneke_brownian_diffusion.jl:372` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dahneke/capillary_penetration.esm` | — |
 | DiameterGrowthRate | `src/dynamics.jl:22` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dynamics/diameter_growth.esm` | — | **status: complete** (esm-nu8du sweep — already migrated; `components/aerosol/dynamics/diameter_growth.esm` committed on `main`, inline-test gate passes.)
 | BrownianCoagulationCoefficient | `src/dynamics.jl:75` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/dynamics/brownian_coag_coeff.esm` | — |
-| MonodisperseCoagulation | `src/dynamics.jl:178` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/dynamics/monodisperse_coag.esm` | — |
+| MonodisperseCoagulation | `src/dynamics.jl:178` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/dynamics/monodisperse_coag.esm` | — | **status: complete** (esm-7pd — `components/aerosol/dynamics/monodisperse_coag.esm` committed on `main`, inline-test gate passes.)
 | DiscreteCoagulation | `src/dynamics.jl:221` | Model | variables, parameters, equations (parameterized `n_bins`) | none | M | Y | Y | `components/aerosol/dynamics/discrete_coag.esm` | — |
 | AerosolDynamics | `src/dynamics.jl:279` | Model | variables, parameters, equations, coupling.couple | none | L | Y | Y | `components/aerosol/dynamics/aerosol_dynamics.esm` | DiameterGrowthRate, BrownianCoagulationCoefficient |
 
