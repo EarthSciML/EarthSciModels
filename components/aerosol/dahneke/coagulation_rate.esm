@@ -1,0 +1,448 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "DahnekeCoagulationRate",
+        "description": "Transition-regime Brownian coagulation rate constant K for two aerosol particle species using the Dahneke (1983) non-continuum correction formula (Eqs. 8.8, 8.13, 8.15). Computes particle masses, Stokes friction coefficients, Einstein diffusion coefficients, mean thermal velocities, mutual transport quantities, collision radius, diffusion Knudsen number Kn_D, continuum-limit coagulation constant K_o, and the Dahneke non-continuum correction β₂ as intermediate observed variables before assembling K. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:235.",
+        "tags": [
+            "aerosol",
+            "dynamics",
+            "coagulation",
+            "brownian",
+            "dahneke",
+            "transition-regime",
+            "knudsen-number"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-cva)"
+        ],
+        "references": [
+            {
+                "citation": "Dahneke, B. (1983). Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols. In R. E. Meyer (Ed.), Theory of Dispersed Multiphase Flow (pp. 97–133). Academic Press. Equations 6.2, 6.5, 8.8, 8.13, 8.14, 8.15 and pp. 114–115."
+            }
+        ]
+    },
+    "models": {
+        "DahnekeCoagulationRate": {
+            "reference": {
+                "citation": "Dahneke, B. (1983) Simple Kinetic Theory of Brownian Diffusion in Vapors and Aerosols, in Theory of Dispersed Multiphase Flow, Academic Press, pp. 97–133. Eqs. 6.2, 6.5, 8.8, 8.13, 8.14, 8.15. Migrated from Aerosol.jl src/dahneke_brownian_diffusion.jl:235 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-cva).",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/dahneke_brownian_diffusion.jl:235\n\nUpstream DahnekeCoagulationRate is an MTK @component with 1 constant (k_B=1.380649e-23 J/K), 9 parameters (T, μ, r_1, r_2, ρ_1, ρ_2, δ_p, C_s1, C_s2), and 16 algebraic variables determined by explicit equations with no time derivative — all purely observed.\n\nConstant k_B is folded as the floating-point literal 1.380649e-23, and π is folded as 3.14159265358979.\n\nEquation chain:\n  m_i     = ρ_i (4π/3) r_i³                               [particle mass, Eq. 6.2]\n  f_i     = 6π μ r_i / C_si                                [Stokes friction, Eq. 6.4]\n  D_i     = k_B T / f_i                                    [Einstein diffusion, Eq. 6.5]\n  D_mut   = D_1 + D_2                                      [mutual diffusivity, p. 115]\n  c̄_i     = √(8 k_B T / (π m_i))                          [mean thermal velocity, Eq. 6.2]\n  c̄       = √(c̄_1² + c̄_2²)                               [combined velocity, p. 115]\n  f_mut   = f_1 f_2 / (f_1 + f_2)                          [mutual friction, p. 115]\n  R_coll  = r_1 + r_2                                      [collision radius, p. 114]\n  Kn_D    = 2 k_B T / (c̄ f_mut R_coll)                    [diffusion Knudsen number, p. 115]\n  K_o     = 4π R_coll D_mut                                [continuum K, Eq. 8.8]\n  β₂      = (Kn_D+1) / (1 + 2 Kn_D(Kn_D+1) / δ_p)       [non-continuum correction, Eq. 8.15]\n  K       = K_o β₂                                         [coagulation rate constant, Eq. 8.13]\n\nAll 16 variables are algebraic — no state variables, no ODEs.\n\nNote on parameters: C_s1, C_s2 (Cunningham slip corrections) are provided as parameters rather than computed internally; callers should supply values from a slip-correction model (e.g. components/aerosol/mass_transfer/slip_correction.esm) or use the default of 1.0 for the continuum regime.\n\nPhysics: The Dahneke (1983) formula for K interpolates between the Smoluchowski continuum limit (Kn_D → 0, K → K_o = 8kT/(3μ) for equal-size particles with C_s=1) and the free-molecular limit (Kn_D → ∞, K → K_o δ_p/(2 Kn_D)). The formula is analogous to the Dahneke mass-transfer correction f_D (dahneke.esm) with Kn_D playing the role of the gas-phase Knudsen number.\n\nTopological evaluation order: m_i → f_i → D_i → D_mut, c̄_i → c̄, f_mut, R_coll → Kn_D → K_o → β₂ → K. The dependency graph is acyclic.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with finite compositions of *, /, ^, sqrt in float64. Round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom — same as brownian_coag_coeff.esm with comparable arithmetic complexity."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature. Default 298.15 K (25 °C), standard atmospheric."
+                },
+                "μ": {
+                    "type": "parameter",
+                    "units": "Pa*s",
+                    "default": 1.84e-5,
+                    "description": "Dynamic viscosity of the suspending gas. Default 1.84×10⁻⁵ Pa·s (air at 298 K)."
+                },
+                "r_1": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Radius of particle species 1. Default 100 nm — transition-regime aerosol."
+                },
+                "r_2": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-7,
+                    "description": "Radius of particle species 2. Default 100 nm — transition-regime aerosol."
+                },
+                "ρ_1": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of particle species 1. Default 1000 kg/m³ (liquid water / ammonium sulfate)."
+                },
+                "ρ_2": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1000.0,
+                    "description": "Density of particle species 2. Default 1000 kg/m³."
+                },
+                "δ_p": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Particle sticking probability (accommodation coefficient for coagulation). Dimensionless; range (0, 1]. Default 1.0 (perfect sticking). Smaller δ_p reduces β₂ and thus K, reflecting partial reflection at contact."
+                },
+                "C_s1": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Cunningham slip correction factor for particle 1. Dimensionless; C_s ≥ 1. Default 1.0 (no slip correction, continuum limit). Supply from a slip-correction model (e.g., 1 + Kn(1.257 + 0.4 exp(-1.1/Kn))) for finite Knudsen numbers."
+                },
+                "C_s2": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Cunningham slip correction factor for particle 2. Dimensionless; C_s ≥ 1. Default 1.0 (continuum limit)."
+                },
+                "m_1": {
+                    "type": "observed",
+                    "units": "kg",
+                    "description": "Mass of particle 1 (Eq. 6.2): m_1 = ρ_1 (4π/3) r_1³. Derived from radius assuming a sphere.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["ρ_1", 4.1887902047863905, {"op": "^", "args": ["r_1", 3]}]
+                    }
+                },
+                "m_2": {
+                    "type": "observed",
+                    "units": "kg",
+                    "description": "Mass of particle 2 (Eq. 6.2): m_2 = ρ_2 (4π/3) r_2³.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["ρ_2", 4.1887902047863905, {"op": "^", "args": ["r_2", 3]}]
+                    }
+                },
+                "f_1": {
+                    "type": "observed",
+                    "units": "kg/s",
+                    "description": "Stokes friction coefficient of particle 1 (Eq. 6.4): f_1 = 6π μ r_1 / C_s1. Includes the Cunningham slip correction C_s1 in the denominator.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [18.84955592153876, "μ", "r_1"]},
+                            "C_s1"
+                        ]
+                    }
+                },
+                "f_2": {
+                    "type": "observed",
+                    "units": "kg/s",
+                    "description": "Stokes friction coefficient of particle 2 (Eq. 6.4): f_2 = 6π μ r_2 / C_s2.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [18.84955592153876, "μ", "r_2"]},
+                            "C_s2"
+                        ]
+                    }
+                },
+                "D_1": {
+                    "type": "observed",
+                    "units": "m^2/s",
+                    "description": "Einstein diffusion coefficient of particle 1 (Eq. 6.5): D_1 = k_B T / f_1. k_B = 1.380649×10⁻²³ J/K folded as literal. Accounts for slip correction via f_1.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [1.380649e-23, "T"]},
+                            "f_1"
+                        ]
+                    }
+                },
+                "D_2": {
+                    "type": "observed",
+                    "units": "m^2/s",
+                    "description": "Einstein diffusion coefficient of particle 2 (Eq. 6.5): D_2 = k_B T / f_2.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [1.380649e-23, "T"]},
+                            "f_2"
+                        ]
+                    }
+                },
+                "D_mutual": {
+                    "type": "observed",
+                    "units": "m^2/s",
+                    "description": "Mutual diffusion coefficient (p. 115): D_mutual = D_1 + D_2. Governs relative diffusion of the two-particle pair.",
+                    "expression": {
+                        "op": "+",
+                        "args": ["D_1", "D_2"]
+                    }
+                },
+                "c_bar_1": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "description": "Mean thermal velocity of particle 1 (Eq. 6.2): c̄_1 = √(8 k_B T / (π m_1)). k_B = 1.380649×10⁻²³ J/K and π = 3.14159265358979 folded as literals.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [8, 1.380649e-23, "T"]},
+                                    {"op": "*", "args": [3.14159265358979, "m_1"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "c_bar_2": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "description": "Mean thermal velocity of particle 2 (Eq. 6.2): c̄_2 = √(8 k_B T / (π m_2)).",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [8, 1.380649e-23, "T"]},
+                                    {"op": "*", "args": [3.14159265358979, "m_2"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "c_bar": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "description": "Combined mean thermal velocity (p. 115): c̄ = √(c̄_1² + c̄_2²). Used in the diffusion Knudsen number Kn_D.",
+                    "expression": {
+                        "op": "sqrt",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": [
+                                    {"op": "^", "args": ["c_bar_1", 2]},
+                                    {"op": "^", "args": ["c_bar_2", 2]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "f_mutual": {
+                    "type": "observed",
+                    "units": "kg/s",
+                    "description": "Mutual friction coefficient (p. 115): f_mutual = f_1 f_2 / (f_1 + f_2). Harmonic mean of the two friction coefficients; governs the relative diffusive motion of the particle pair.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["f_1", "f_2"]},
+                            {"op": "+", "args": ["f_1", "f_2"]}
+                        ]
+                    }
+                },
+                "R_coll": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Collision radius (p. 114): R_coll = r_1 + r_2. The center-to-center distance at contact.",
+                    "expression": {
+                        "op": "+",
+                        "args": ["r_1", "r_2"]
+                    }
+                },
+                "Kn_D": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Diffusion Knudsen number (p. 115): Kn_D = 2 k_B T / (c̄ f_mutual R_coll). Dimensionless; characterizes the relative importance of diffusive and free-molecular transport. Kn_D ≪ 1: continuum diffusion dominates; Kn_D ≫ 1: free-molecular regime.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [2, 1.380649e-23, "T"]},
+                            {"op": "*", "args": ["c_bar", "f_mutual", "R_coll"]}
+                        ]
+                    }
+                },
+                "K_o": {
+                    "type": "observed",
+                    "units": "m^3/s",
+                    "description": "Continuum coagulation rate constant (Eq. 8.8): K_o = 4π R_coll D_mutual. Smoluchowski result corrected for slip via the diffusion coefficients D_1, D_2 (which include C_s). For equal-size particles with C_s=1, K_o = 8 k_B T / (3μ) independent of r.",
+                    "expression": {
+                        "op": "*",
+                        "args": [4, 3.14159265358979, "R_coll", "D_mutual"]
+                    }
+                },
+                "β₂": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Dahneke non-continuum correction factor (Eq. 8.15): β₂ = (Kn_D+1) / (1 + 2 Kn_D(Kn_D+1) / δ_p). Dimensionless; β₂ → 1 for Kn_D → 0 (continuum, no correction) and β₂ → δ_p/(2 Kn_D) → 0 for Kn_D → ∞ (free-molecular, coagulation limited by accommodation). Analogous to the mass-transfer correction f_D (dahneke.esm) with Kn_D → Kn and δ_p → α.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "+", "args": ["Kn_D", 1]},
+                            {
+                                "op": "+",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    2,
+                                                    "Kn_D",
+                                                    {"op": "+", "args": ["Kn_D", 1]}
+                                                ]
+                                            },
+                                            "δ_p"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "K": {
+                    "type": "observed",
+                    "units": "m^3/s",
+                    "description": "Dahneke transition-regime coagulation rate constant (Eq. 8.13): K = K_o β₂. Units m³/s; the rate of doublet formation per unit concentration squared: d(N_1 N_2)/dt = -K N_1 N_2. Ranges from K_o at Kn_D = 0 down to K_o δ_p/(2 Kn_D) in the free-molecular limit.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["K_o", "β₂"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default parameters: T=298.15 K, μ=1.84×10⁻⁵ Pa·s, r_1=r_2=100 nm, ρ=1000 kg/m³, δ_p=1, C_s=1. Checks the full equation chain: masses, friction coefficients, diffusion coefficients, thermal velocities, mutual quantities, Kn_D, K_o, β₂, and K. K_smoluchowski = 8kT/(3μ) = 5.9658×10⁻¹⁶ m³/s; K = K_o β₂ = 5.766×10⁻¹⁶ m³/s (β₂ = 0.967 at Kn_D = 0.034).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "m_1",     "time": 0.0, "expected": 4.18879020478639e-18,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "m_2",     "time": 0.0, "expected": 4.18879020478639e-18,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_1",     "time": 0.0, "expected": 3.468318289563132e-11,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_2",     "time": 0.0, "expected": 3.468318289563132e-11,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "D_1",     "time": 0.0, "expected": 1.1868590624704463e-10, "tolerance": {"rel": 1e-9}},
+                        {"variable": "D_2",     "time": 0.0, "expected": 1.1868590624704463e-10, "tolerance": {"rel": 1e-9}},
+                        {"variable": "D_mutual","time": 0.0, "expected": 2.3737181249408926e-10, "tolerance": {"rel": 1e-9}},
+                        {"variable": "c_bar_1", "time": 0.0, "expected": 0.0500247354591296,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "c_bar_2", "time": 0.0, "expected": 0.0500247354591296,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "c_bar",   "time": 0.0, "expected": 0.07074565934042737,    "tolerance": {"rel": 1e-9}},
+                        {"variable": "f_mutual","time": 0.0, "expected": 1.734159144781566e-11,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "R_coll",  "time": 0.0, "expected": 2.0e-7,                 "tolerance": {"rel": 1e-9}},
+                        {"variable": "Kn_D",    "time": 0.0, "expected": 0.03355284475502004,    "tolerance": {"rel": 1e-9}},
+                        {"variable": "K_o",     "time": 0.0, "expected": 5.965804338405798e-16,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "β₂",      "time": 0.0, "expected": 0.9665178024864903,     "tolerance": {"rel": 1e-9}},
+                        {"variable": "K",       "time": 0.0, "expected": 5.766056099220342e-16,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "continuum_limit",
+                    "description": "Large equal particles (r_1=r_2=100 µm, C_s=1): Kn_D = 1.06×10⁻³ ≪ 1, firmly continuum. β₂ → 1, so K → K_o = 8kT/(3μ) = 5.9658×10⁻¹⁶ m³/s (Smoluchowski limit). The K/K_o ratio should exceed 0.999. Also confirms that K_o is independent of r for equal-size particles with C_s=1.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"r_1": 1.0e-4, "r_2": 1.0e-4},
+                    "assertions": [
+                        {"variable": "Kn_D", "time": 0.0, "expected": 1.0610341140389781e-3,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "K_o",  "time": 0.0, "expected": 5.965804338405798e-16,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "K",    "time": 0.0, "expected": 5.959474430707237e-16,  "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "unequal_particles",
+                    "description": "Strongly unequal particles (r_1=10 nm, r_2=1 µm, default other params): the small particle has a much larger D_1 and c̄_1, dominating D_mutual and c̄. K = 1.519×10⁻¹⁴ m³/s — about 26× larger than the equal-100-nm baseline (5.77×10⁻¹⁶ m³/s). Confirms the size-differential enhancement in transition-regime coagulation.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"r_1": 1.0e-8, "r_2": 1.0e-6},
+                    "assertions": [
+                        {"variable": "D_1",    "time": 0.0, "expected": 1.1868590624704462e-9,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "D_2",    "time": 0.0, "expected": 1.1868590624704464e-11, "tolerance": {"rel": 1e-9}},
+                        {"variable": "K_o",    "time": 0.0, "expected": 1.521429251401938e-14,  "tolerance": {"rel": 1e-9}},
+                        {"variable": "K",      "time": 0.0, "expected": 1.5191463143321573e-14, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "free_molecular_limit",
+                    "description": "Very small particles (r=1 nm) with high slip correction (C_s=1000): Kn_D = 335.5 ≫ 1, free-molecular regime. β₂ ≈ δ_p/(2 Kn_D) = 1.490×10⁻³ (within 0.01% of the asymptotic formula). K = K_o β₂ = 8.890×10⁻¹⁶ m³/s.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"r_1": 1.0e-9, "r_2": 1.0e-9, "C_s1": 1000.0, "C_s2": 1000.0},
+                    "assertions": [
+                        {"variable": "Kn_D", "time": 0.0, "expected": 335.5284475502004,       "tolerance": {"rel": 1e-9}},
+                        {"variable": "β₂",   "time": 0.0, "expected": 0.0014901800118679344,   "tolerance": {"rel": 1e-9}},
+                        {"variable": "K",    "time": 0.0, "expected": 8.890122379807326e-16,   "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "delta_p_sensitivity",
+                    "description": "Sticking probability δ_p=0.01 (near-specular reflection) vs default δ_p=1.0 at r=100 nm: K(δ=0.01) = 7.770×10⁻¹⁷ m³/s — 7.4× smaller than K(δ=1)=5.766×10⁻¹⁶ m³/s. Confirms that partial accommodation reduces the non-continuum coagulation rate via β₂.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"δ_p": 0.01},
+                    "assertions": [
+                        {"variable": "K", "time": 0.0, "expected": 7.769891222697653e-17, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "table2_kn1",
+                    "description": "Validate against Dahneke (1983) Table 2, p. 120 at Kn=1.0: r=0.22 µm, T=298.15 K, μ=1.84×10⁻⁵ Pa·s, ρ=917 kg/m³, C_s=2.406, δ=1. Table 2 lists β = K/K_Smoluchowski = 2.282. Computed: K = 1.361×10⁻¹⁵ m³/s, β = K/(8kT/3μ) = 2.281 (within 0.04% of table).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "r_1": 2.2e-7, "r_2": 2.2e-7,
+                        "ρ_1": 917.0, "ρ_2": 917.0,
+                        "C_s1": 2.406, "C_s2": 2.406
+                    },
+                    "assertions": [
+                        {"variable": "K", "time": 0.0, "expected": 1.3609282250018786e-15, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "table2_kn10",
+                    "description": "Validate against Dahneke (1983) Table 2, p. 120 at Kn=10: r=0.22 µm, C_s=17.13, δ=1. Table 2 β = 11.65. Computed: K = 6.945×10⁻¹⁵ m³/s, β = 11.641 (within 0.08% of table). This regime is deeply non-continuum.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "r_1": 2.2e-7, "r_2": 2.2e-7,
+                        "ρ_1": 917.0, "ρ_2": 917.0,
+                        "C_s1": 17.13, "C_s2": 17.13
+                    },
+                    "assertions": [
+                        {"variable": "K", "time": 0.0, "expected": 6.94488930534971e-15, "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "K_vs_radius",
+                    "description": "Coagulation rate constant K vs particle 1 radius r_1 (log sweep 1 nm to 10 µm) with r_2 fixed at 100 nm. Illustrates the three regimes: free-molecular enhancement at very small r_1 (high D_1 and c̄_1), a minimum near r_1 = r_2, and modest increase for large r_1 (larger R_coll). Demonstrates the size-differential effect in Dahneke's transition-regime formula.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "r_1",
+                                "range": {"start": 1.0e-9, "stop": 1.0e-5, "count": 61, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "K_vs_r1",
+                            "type": "line",
+                            "description": "K vs particle 1 radius r_1 (r_2=100 nm fixed). Shows the regime dependence: free-molecular enhancement at small r_1, transition near r_1 ~ r_2, modest increase at large r_1.",
+                            "x": {"variable": "r_1", "label": "Particle 1 radius r_1 (m)"},
+                            "y": {"variable": "K",   "label": "K (m³/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "K_vs_delta_p",
+                    "description": "K vs sticking probability δ_p (linear sweep 0.01 to 1.0) for r=100 nm, T=298 K. Illustrates how partial accommodation (δ_p < 1) suppresses K relative to the perfect-sticking limit, particularly in the transition regime where β₂ is sensitive to δ_p.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "δ_p",
+                                "range": {"start": 0.01, "stop": 1.0, "count": 50, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "K_vs_delta_p_plot",
+                            "type": "line",
+                            "description": "K vs sticking probability δ_p for equal 100 nm particles. Shows the monotonic increase of K with δ_p, from partial-accommodation suppression at δ_p → 0 to the perfect-sticking limit at δ_p = 1.",
+                            "x": {"variable": "δ_p", "label": "Sticking probability δ_p"},
+                            "y": {"variable": "K",   "label": "K (m³/s)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
