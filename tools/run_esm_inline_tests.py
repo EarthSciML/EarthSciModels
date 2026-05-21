@@ -123,6 +123,9 @@ CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
     # correctness verified against a parallel Python forward
     # evaluator (rel ≤ 5e-15) before listing here.
     "heat_momentum_fluxes.esm",
+    # urban_canopy_model.esm (esm-vmik): inlines HeatMomentumFluxes with 78
+    # algebraic states; inherits same substitution-loop cliff as above.
+    "urban_canopy_model.esm",
 })
 
 
