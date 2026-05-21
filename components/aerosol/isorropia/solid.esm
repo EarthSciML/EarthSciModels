@@ -1,0 +1,165 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "Solid",
+    "description": "A solid-phase aerosol species placeholder in the ISORROPIA II inorganic thermodynamic equilibrium model. Holds the molarity of a single solid salt in air. In isolation the concentration is conserved (D(M)/dt = 0); source and sink terms are added through the coupling mechanism when Solid instances are composed into the full Isorropia system. Reference: Fountoukis and Nenes (2007), ISORROPIA II.",
+    "tags": [
+      "aerosol",
+      "isorropia",
+      "solid-phase",
+      "thermodynamics",
+      "inorganic-aerosol"
+    ]
+  },
+  "models": {
+    "Solid": {
+      "reference": {
+        "citation": "Fountoukis, C. and Nenes, A. (2007). ISORROPIA II: a computationally efficient thermodynamic equilibrium model for K+-Ca2+-Mg2+-NH4+-Na+-SO42--NO3--Cl--H2O aerosols. Atmospheric Chemistry and Physics, 7(17), 4639-4659. https://doi.org/10.5194/acp-7-4639-2007",
+        "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/isorropia/solid.jl:6\n\nUpstream `Solid` is a minimal MTK `@component` — `System(eqs, t; name)` with `eqs = []` — that declares a single scalar `@variables` entry: `M(t)` with `description = \"Molarity of the solid in air\"`, `unit = u\"mol/m^3\"`, and `guess = 1.0e-20`. There are no `@parameters` and no `@constants` blocks.\n\nRole in ISORROPIA II: `Solid` is a building-block fragment. In the full `Isorropia` system, multiple named `Solid` instances (CaNO32, CaCl2, NH4NO3, etc.) are composed into a `Solids` aggregate and coupled to the parent system, which supplies the source/sink equations for each `M`. In isolation `M` has no equation, so the standalone ESM adds `D(M)/dt = 0` — the conserved-tracer convention used across EarthSciModels (cf. elemental_carbon.esm) — so that the component is self-contained and its inline tests are mechanically runnable.\n\nEquation choice: `D(M)/dt = 0` is the only equation consistent with the empty `eqs = []` upstream body and the requirement that a standalone `.esm` model be testable. It is not asserted as a physical law of the coupled Isorropia system; it represents the behaviour of this fragment when driven by no external coupling.\n\nguess = 1.0e-20: the upstream `@variables` metadata carries an initial-guess seed of 1.0e-20 mol/m^3 for the ISORROPIA II nonlinear solver. This hint is preserved in the `guesses` block at the model level for fidelity; it is not used by the ODE runner for the standalone D(M)/dt = 0 tests but is available to runners that use nonlinear initialization.\n\nTest strategy: D(M)/dt = 0 means M equals its initial condition at all times. Tests pin M at the upstream guess value (1e-20 mol/m^3), a representative physically meaningful concentration (1.0 mol/m^3), and zero (no solid present). The zero case uses an absolute tolerance because a relative tolerance is ill-conditioned when the expected value is exactly zero.\n\nNot migrated: the companion `Solids` component at src/isorropia/solid.jl:22, which couples multiple named `Solid` instances, is tracked separately (target: components/aerosol/isorropia/solids.esm)."
+      },
+      "tolerance": {
+        "rel": 1e-09
+      },
+      "guesses": {
+        "M": 1e-20
+      },
+      "variables": {
+        "M": {
+          "type": "state",
+          "units": "mol/m^3",
+          "description": "Molarity of the solid in air. Conserved tracer in this standalone component (D(M)/dt = 0); source and sink terms are added through coupling in the full Isorropia system."
+        }
+      },
+      "equations": [
+        {
+          "lhs": {
+            "op": "D",
+            "args": [
+              "M"
+            ],
+            "wrt": "t"
+          },
+          "rhs": 0
+        }
+      ],
+      "tests": [
+        {
+          "id": "guess_ic_conserved",
+          "description": "Initial condition M = 1e-20 mol/m^3, the upstream guess value. D(M)/dt = 0 means M is conserved at its initial value at all times. Checks at t = 0, 0.5, and 1 s.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "initial_conditions": {
+            "M": 1e-20
+          },
+          "assertions": [
+            {
+              "variable": "M",
+              "time": 0.0,
+              "expected": 1e-20
+            },
+            {
+              "variable": "M",
+              "time": 0.5,
+              "expected": 1e-20
+            },
+            {
+              "variable": "M",
+              "time": 1.0,
+              "expected": 1e-20
+            }
+          ]
+        },
+        {
+          "id": "unit_concentration_conserved",
+          "description": "Initial condition M = 1.0 mol/m^3, a representative aerosol solid concentration. D(M)/dt = 0 means M remains 1.0 mol/m^3 at all times.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "initial_conditions": {
+            "M": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "M",
+              "time": 0.0,
+              "expected": 1.0
+            },
+            {
+              "variable": "M",
+              "time": 0.5,
+              "expected": 1.0
+            },
+            {
+              "variable": "M",
+              "time": 1.0,
+              "expected": 1.0
+            }
+          ]
+        },
+        {
+          "id": "zero_concentration_conserved",
+          "description": "Initial condition M = 0.0 mol/m^3 (no solid present). D(M)/dt = 0 means M stays zero at all times. Uses an absolute tolerance because the expected value is exactly zero.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "initial_conditions": {
+            "M": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "M",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "abs": 1e-20
+              }
+            },
+            {
+              "variable": "M",
+              "time": 1.0,
+              "expected": 0.0,
+              "tolerance": {
+                "abs": 1e-20
+              }
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "solid_concentration_vs_time",
+          "description": "Solid aerosol molarity M versus time. Starting from M0 = 1.0 mol/m^3 and integrating D(M)/dt = 0, M is conserved at M0 for all t. Illustrates the conserved-tracer behaviour of the standalone Solid component.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "initial_state": {
+            "type": "per_variable",
+            "values": {
+              "M": 1.0
+            }
+          },
+          "plots": [
+            {
+              "id": "M_vs_t",
+              "type": "line",
+              "description": "Solid molarity M (mol/m^3) versus time t (s). The flat line confirms D(M)/dt = 0.",
+              "x": {
+                "variable": "t",
+                "label": "Time (s)"
+              },
+              "y": {
+                "variable": "M",
+                "label": "Solid molarity M (mol/m^3)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
