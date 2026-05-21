@@ -1,0 +1,159 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "HenrysLaw",
+        "description": "Basic Henry's law equilibrium at fixed temperature (Seinfeld & Pandis 2006, Chapter 7, Eq. 7.3). Computes the aqueous-phase concentration C_aq = H_A × p_A, where H_A is the Henry's law constant at the reference temperature and p_A is the gas-phase partial pressure of species A. Migrated from Aerosol.jl src/henrys_law.jl `HenrysLaw` (esm-3ro).",
+        "tags": [
+            "aerosol",
+            "henrys-law",
+            "gas-liquid-equilibrium",
+            "aqueous-chemistry",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-3ro)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 7, Eq. 7.3 — basic Henry's law: [A(aq)] = H_A × p_A."
+            }
+        ]
+    },
+    "models": {
+        "HenrysLaw": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 7, Eq. 7.3 — basic Henry's law equilibrium: C_aq = H_A × p_A. Migrated from Aerosol.jl src/henrys_law.jl `HenrysLaw` (esm-3ro).",
+                "notes": "source_ref: Aerosol.jl@main:src/henrys_law.jl:101\n\nUpstream `HenrysLaw` is an MTK `@component` with 1 parameter (H_A, mol/m³/Pa) and 2 variables (p_A(t) Pa, C_aq(t) mol/m³). The single equation is:\n  C_aq ~ H_A * p_A\n\nTopological note: C_aq depends only on parameter H_A and driving variable p_A with no ODE integration. The system is purely algebraic (observed variable only). p_A is an `@variable` in the upstream MTK component supplied externally as the input; in this .esm it is represented as a `parameter` so the system is well-posed under the schema's equation-count rule (one equation per state) and to match the observed-only pattern used elsewhere in this rig (see components/aerosol/mass_transfer/mean_molecular_speed.esm, components/aerosol/henrys_law/effective_henrys_law.esm). Tests vary p_A via `parameter_overrides`.\n\nPhysics: Eq. 7.3 is the fundamental Henry's law: the equilibrium aqueous-phase concentration of a dissolved gas equals the product of its Henry's law constant and its gas-phase partial pressure. H_A has units mol/m³/Pa (SI), obtained by converting the tabulated M/atm values (Table 7.2) via ×1000/101325. For fixed-temperature applications only; see HenrysLawTemperature for the van't Hoff temperature correction.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with a single multiplication. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of magnitude headroom."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "H_A": {
+                    "type": "parameter",
+                    "units": "mol/m^3/Pa",
+                    "default": 1.0,
+                    "description": "Henry's law constant for species A at the reference temperature. Determines the solubility of the gas: higher H_A means the species partitions more strongly into the aqueous phase. SI value obtained by converting the tabulated M/atm constant (Table 7.2) via ×1000/101325."
+                },
+                "p_A": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 1.0,
+                    "description": "Gas-phase partial pressure of species A. Input parameter — the observed-only model has one algebraic equation for C_aq given p_A. Higher p_A drives more species into the aqueous phase proportionally. Tests vary p_A via parameter_overrides."
+                },
+                "C_aq": {
+                    "type": "observed",
+                    "units": "mol/m^3",
+                    "description": "Aqueous-phase concentration of species A at equilibrium: C_aq = H_A × p_A (Eq. 7.3). Positive-definite for positive H_A and p_A. Scales linearly with both inputs.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["H_A", "p_A"]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "unit_params",
+                    "description": "Both H_A=1.0 mol/m³/Pa and p_A=1.0 Pa. C_aq = 1.0 × 1.0 = 1.0 mol/m³. Verifies the equation at unit values.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "C_aq", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "pressure_proportionality",
+                    "description": "H_A=1.0, p_A=500.0 Pa. C_aq = 500.0 mol/m³. Verifies linear scaling with partial pressure.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "p_A": 500.0
+                    },
+                    "assertions": [
+                        {"variable": "C_aq", "time": 0.0, "expected": 500.0, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "constant_proportionality",
+                    "description": "H_A=4.0 mol/m³/Pa, p_A=1.0 Pa. C_aq = 4.0 × 1.0 = 4.0 mol/m³. Verifies linear scaling with the Henry's law constant.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "H_A": 4.0
+                    },
+                    "assertions": [
+                        {"variable": "C_aq", "time": 0.0, "expected": 4.0, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "product_check",
+                    "description": "H_A=2.0 mol/m³/Pa, p_A=50.0 Pa. C_aq = 2.0 × 50.0 = 100.0 mol/m³. Verifies both parameters simultaneously.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "H_A": 2.0,
+                        "p_A": 50.0
+                    },
+                    "assertions": [
+                        {"variable": "C_aq", "time": 0.0, "expected": 100.0, "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "concentration_vs_pressure",
+                    "description": "Sweep partial pressure p_A from 0.1 Pa to 1000 Pa at H_A=1.0 mol/m³/Pa. C_aq scales linearly with p_A; the slope in a log-log plot is exactly 1.0. Illustrates the direct proportionality of aqueous-phase loading to gas-phase partial pressure.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {
+                        "H_A": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "p_A",
+                                "range": {"start": 0.1, "stop": 1000.0, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "C_aq_vs_p_A",
+                            "type": "line",
+                            "description": "Aqueous-phase concentration C_aq as a function of partial pressure p_A at H_A=1.0 mol/m³/Pa. Linear relationship; log-log slope is exactly 1.",
+                            "x": {"variable": "p_A",  "label": "Partial pressure p_A (Pa)"},
+                            "y": {"variable": "C_aq", "label": "Aqueous concentration C_aq (mol/m³)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "solubility_comparison",
+                    "description": "Sweep H_A from 1e-7 mol/m³/Pa (low-solubility gas like O₂: ~1.3e-7) to 2.1e-3 mol/m³/Pa (high-solubility gas like HNO₃: ~2.07e-3) at fixed p_A=1.0 Pa. Illustrates how Henry's law constant controls equilibrium partitioning across three decades of solubility.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {
+                        "p_A": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_A",
+                                "range": {"start": 1e-7, "stop": 2.1e-3, "count": 50, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "C_aq_vs_H_A",
+                            "type": "line",
+                            "description": "Aqueous-phase concentration C_aq as a function of the Henry's law constant H_A at p_A=1.0 Pa. Covers O₂-like (low solubility) to HNO₃-like (high solubility) species.",
+                            "x": {"variable": "H_A",  "label": "Henry's law constant H_A (mol/m³/Pa)"},
+                            "y": {"variable": "C_aq", "label": "Aqueous concentration C_aq (mol/m³)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
