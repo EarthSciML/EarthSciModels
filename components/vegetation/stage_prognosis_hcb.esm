@@ -1,0 +1,337 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "StagePrognosisHCB",
+        "description": "Stage (1973) static regression model for height to crown base (HCB) of lodgepole pine. Predicts HCB from tree height, stand density (CCF), elevation, relative tree size (DBH/RMSQD), and habitat type. Single explicit-algebraic equation: HCB = one_foot*(b0 + b1*HT_ft + b2*ln(CCF) + b3*EL_100ft + b4*DBH_in/RMSQD_in + HAB). All regression coefficients are in feet-space; result converted to meters. Migrated from Vegetation.jl@010c3774dc5646d81806c6119c8a029a70f6c9a0:src/stage_prognosis.jl:257.",
+        "tags": [
+            "vegetation",
+            "forest_growth",
+            "stage1973",
+            "crown",
+            "height-to-crown-base",
+            "lodgepole-pine",
+            "algebraic"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Vegetation.jl contributors",
+            "EarthSciModels migration (esm-qwcy)"
+        ],
+        "references": [
+            {
+                "citation": "Stage, A.R. (1973). Prognosis model for stand development. USDA Forest Service Research Paper INT-137. Intermountain Forest and Range Experiment Station, Ogden, Utah. 32 p. (HCB equation, p. 16)"
+            }
+        ]
+    },
+    "models": {
+        "StagePrognosisHCB": {
+            "reference": {
+                "notes": "source_ref: Vegetation.jl@010c3774dc5646d81806c6119c8a029a70f6c9a0:src/stage_prognosis.jl:257\n\nUpstream `StagePrognosisHCB` is an MTK `@component` implementing the Stage (1973, p. 16) regression equation for height to crown base (HCB) as a function of tree and stand characteristics. The component declares 6 `@parameters` (HT_input, DBH_input, CCF, EL, RMSQD, HAB), 3 unit-conversion `@constants` (one_inch=0.0254 m, one_foot=0.3048 m, hundred_feet=30.48 m), 5 regression `@constants` (b_HCB_0=-29.26, b_HCB_HT=0.61, b_HCB_CCF=9.178, b_HCB_EL=-0.222, b_HCB_DBH_RMSQD=-5.8), and 1 algebraic `@variable` (HCB_pred), with 1 equation returning `System(eqs, t; name)`. The upstream Julia tests (`runtests.jl`) confirm `length(unknowns(mtkcompile(sys))) == 0` for all-algebraic System objects after structural simplification.\n\nSystem kind: the single equation `HCB_pred ~ one_foot*(b_HCB_0 + b_HCB_HT*(HT_input/one_foot) + b_HCB_CCF*log(CCF) + b_HCB_EL*(EL/hundred_feet) + b_HCB_DBH_RMSQD*(DBH_input/one_inch)/(RMSQD/one_inch) + HAB)` is an explicit closed-form assignment. HCB_pred depends only on parameters (all RHS terms are parameters or constants) — a triangular single-variable system with zero iterations, no Newton solve, no `initialization_equations`, no `guesses`. `system_kind` is left unset (default 'ode', zero differential states), identical to components/geodynamics/mogi.esm and other explicit-algebraic components.\n\nNote on migration tracker blocking gap. The tracker lists this bead as `gt-ebuq (init_eq/system_kind=nonlinear)`. Investigation of the upstream source confirms the equation is EXPLICITLY algebraic — HCB_pred is a direct closed-form function of 6 parameters with no implicit coupling. The blocking label was applied conservatively to the entire Vegetation gt-ebuq group; StagePrognosisHCB does not use NonlinearSystem semantics in practice (MTK may compile an all-algebraic `System(eqs,t)` to a `NonlinearProblem` internally, but the physical equation requires no iteration). Migration uses the explicit-algebraic path without `system_kind`, exactly as for components/geodynamics/mogi.esm.\n\nNote on constants vs parameters. All 8 @constants (3 unit-conversion + 5 regression) are encoded as `type: parameter` with their upstream default values. The ESM schema has no `constant` type — this follows the same convention as components/vegetation/landis_biomass.esm (e1, B_MAX_ratio, one_yr encoded as parameters) and components/geodynamics/mogi.esm.\n\nEquation faithfulness. The equation from src/stage_prognosis.jl:294-301 is preserved verbatim:\n  HCB_pred = one_foot * (b_HCB_0\n             + b_HCB_HT  * (HT_input  / one_foot)\n             + b_HCB_CCF * log(CCF)\n             + b_HCB_EL  * (EL / hundred_feet)\n             + b_HCB_DBH_RMSQD * (DBH_input / one_inch) / (RMSQD / one_inch)\n             + HAB)\n\nDefault parameters reproduce the upstream Julia defaults: HT_input = 60 ft = 18.288 m, DBH_input = 6 in = 0.1524 m, CCF = 100, EL = 43 hundreds-of-ft = 1310.64 m, RMSQD = 7 in = 0.1778 m, HAB = 0 (Abies/Xerophyllum). Default HCB_pred ≈ 10.6951 m = 35.09 ft.\n\nThe upstream source lists four habitat type adjustments (in feet-space): HAB=0.0 (Abies/Xerophyllum), HAB=-4.24 (Abies/Vaccinium), HAB=-3.86 (Abies/Pachistima), HAB=-5.47 (Pseudotsuga/Calamagrostis). All four are covered by inline tests.\n\nTolerance rationale. Closed-form algebraic evaluation — single explicit assignment, no ODE integration, no implicit solve — so there is no integrator error. rel=1e-6 covers float64 round-off in the log/multiply/divide chains; consistent with mogi.esm and atmospheric_diffusion.esm."
+            },
+            "tolerance": {
+                "rel": 1.0e-6
+            },
+            "variables": {
+                "one_inch": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.0254,
+                    "description": "Reference length: 1 inch in meters. Used to non-dimensionalize DBH and RMSQD for the regression equation (upstream @constant)."
+                },
+                "one_foot": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.3048,
+                    "description": "Reference length: 1 foot in meters. Used to non-dimensionalize HT for the regression equation and to convert the result from feet-space back to meters (upstream @constant)."
+                },
+                "hundred_feet": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 30.48,
+                    "description": "Reference length: 100 feet in meters. Used to non-dimensionalize EL for the regression equation (upstream @constant)."
+                },
+                "b_HCB_0": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -29.26,
+                    "description": "HCB regression intercept in feet-space (Stage 1973, p. 16). Dimensionless (upstream @constant)."
+                },
+                "b_HCB_HT": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.61,
+                    "description": "HCB regression coefficient on tree height in feet-space (Stage 1973, p. 16). Dimensionless (upstream @constant)."
+                },
+                "b_HCB_CCF": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 9.178,
+                    "description": "HCB regression coefficient on ln(CCF) (Stage 1973, p. 16). Dimensionless (upstream @constant)."
+                },
+                "b_HCB_EL": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -0.222,
+                    "description": "HCB regression coefficient on elevation in hundreds of feet (Stage 1973, p. 16). Dimensionless (upstream @constant)."
+                },
+                "b_HCB_DBH_RMSQD": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": -5.8,
+                    "description": "HCB regression coefficient on the ratio DBH_in/RMSQD_in (Stage 1973, p. 16). Dimensionless (upstream @constant)."
+                },
+                "HT_input": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 18.288,
+                    "description": "Total tree height. Default 60 ft = 18.288 m (60 * 0.3048), a representative lodgepole pine height used in Stage (1973)."
+                },
+                "DBH_input": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1524,
+                    "description": "Diameter at breast height. Default 6 in = 0.1524 m (6 * 0.0254), a representative lodgepole pine DBH from Stage (1973)."
+                },
+                "CCF": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 100.0,
+                    "description": "Crown competition factor (dimensionless). Measures stand density as a fraction of full stocking; 100 represents fully stocked stand."
+                },
+                "EL": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1310.64,
+                    "description": "Elevation above sea level. Default 43 hundreds-of-feet = 1310.64 m (43 * 30.48), representative of the Idaho/Montana lodgepole pine range in Stage (1973)."
+                },
+                "RMSQD": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1778,
+                    "description": "Diameter of the tree of mean basal area in the stand. Default 7 in = 0.1778 m (7 * 0.0254). Used to compute the relative size ratio DBH_input/RMSQD."
+                },
+                "HAB": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Habitat type adjustment in feet-space (Stage 1973, p. 16). Dimensionless additive term. Four forest habitat types: 0.0 (Abies/Xerophyllum, default), -4.24 (Abies/Vaccinium), -3.86 (Abies/Pachistima), -5.47 (Pseudotsuga/Calamagrostis)."
+                },
+                "HCB_pred": {
+                    "type": "state",
+                    "units": "m",
+                    "description": "Predicted height to the base of the live crown (Stage 1973 Eq., p. 16). Explicit algebraic function of HT_input, DBH_input, CCF, EL, RMSQD, and HAB. With default parameters ≈ 10.695 m (≈ 35.09 ft)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "HCB_pred",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "one_foot",
+                            {
+                                "op": "+",
+                                "args": [
+                                    "b_HCB_0",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "b_HCB_HT",
+                                            {
+                                                "op": "/",
+                                                "args": ["HT_input", "one_foot"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "b_HCB_CCF",
+                                            {
+                                                "op": "log",
+                                                "args": ["CCF"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "b_HCB_EL",
+                                            {
+                                                "op": "/",
+                                                "args": ["EL", "hundred_feet"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "b_HCB_DBH_RMSQD",
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": ["DBH_input", "one_inch"]
+                                                    },
+                                                    {
+                                                        "op": "/",
+                                                        "args": ["RMSQD", "one_inch"]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "HAB"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_parameters_baseline",
+                    "description": "Default parameters (HT=60 ft, DBH=6 in, CCF=100, EL=43 hundreds-ft, RMSQD=7 in, HAB=0): HCB = one_foot*(-29.26 + 0.61*60 + 9.178*ln(100) - 0.222*43 - 5.8*6/7 + 0) = 0.3048 * 35.0888... ≈ 10.6951 m. Pins the equation at the upstream-documented default point.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 10.695073371014400}
+                    ]
+                },
+                {
+                    "id": "hab_type_vaccinium",
+                    "description": "Habitat type Abies/Vaccinium (HAB=-4.24): subtracts 4.24 ft from the feet-space sum, giving HCB_pred = default - 4.24*0.3048 ≈ 10.6951 - 1.2923 = 9.4027 m. Confirms HAB shifts the crown base prediction downward for denser/shadier habitat types.",
+                    "parameter_overrides": {
+                        "HAB": -4.24
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.402721371014400}
+                    ]
+                },
+                {
+                    "id": "hab_type_pachistima",
+                    "description": "Habitat type Abies/Pachistima (HAB=-3.86): HCB_pred = default - 3.86*0.3048 ≈ 10.6951 - 1.1765 = 9.5185 m.",
+                    "parameter_overrides": {
+                        "HAB": -3.86
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.518545371014400}
+                    ]
+                },
+                {
+                    "id": "hab_type_calamagrostis",
+                    "description": "Habitat type Pseudotsuga/Calamagrostis (HAB=-5.47): HCB_pred = default - 5.47*0.3048 ≈ 10.6951 - 1.6673 = 9.0278 m. This is the lowest HCB of the four habitat types listed in Stage (1973).",
+                    "parameter_overrides": {
+                        "HAB": -5.47
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.027817371014400}
+                    ]
+                },
+                {
+                    "id": "taller_tree_raises_crown",
+                    "description": "HT=120 ft = 36.576 m: b_HCB_HT*HT_ft increases from 0.61*60=36.6 to 0.61*120=73.2 ft, shifting HCB up by 18.288 m. HCB_pred = default + (73.2-36.6)*0.3048 ≈ 10.6951 + 11.1557 = 21.8508 m. Validates linear HT response.",
+                    "parameter_overrides": {
+                        "HT_input": 36.576
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 21.850753371014400}
+                    ]
+                },
+                {
+                    "id": "larger_dbh_lowers_crown",
+                    "description": "DBH=12 in = 0.3048 m: DBH_in/RMSQD_in ratio goes from 6/7 to 12/7 ≈ 1.7143. b_HCB_DBH_RMSQD changes contribution from -5.8*6/7 to -5.8*12/7, shifting HCB down. HCB_pred = default - 5.8*(12/7 - 6/7)*0.3048 ≈ 10.6951 - 1.5153 = 9.1798 m. Confirms larger trees relative to stand mean have lower predicted crown base (denser competition effect).",
+                    "parameter_overrides": {
+                        "DBH_input": 0.3048
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.179781942443257}
+                    ]
+                },
+                {
+                    "id": "dbh_equals_rmsqd",
+                    "description": "DBH=RMSQD=7 in: ratio DBH_in/RMSQD_in=1, b_HCB_DBH_RMSQD term is -5.8. HCB_pred = one_foot*(-29.26 + 0.61*60 + 9.178*ln(100) - 0.222*43 - 5.8*1 + 0) = 0.3048 * 34.281... ≈ 10.4425 m. Pinpoints the crown base when the focal tree is exactly the stand mean.",
+                    "parameter_overrides": {
+                        "DBH_input": 0.1778
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 10.442524799542534}
+                    ]
+                },
+                {
+                    "id": "higher_ccf_raises_crown",
+                    "description": "CCF=200 (denser stand): ln(200) > ln(100), b_HCB_CCF*ln(CCF) increases. HCB_pred = default + 9.178*(ln(200)-ln(100))*0.3048 ≈ 10.6951 + 1.9390 = 12.6341 m. Confirms denser stands (higher CCF) push the crown base higher due to competition-driven self-pruning.",
+                    "parameter_overrides": {
+                        "CCF": 200.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "HCB_pred", "time": 0.0, "expected": 12.634121001131695}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "habitat_type_comparison",
+                    "description": "Sweep HAB across the four Stage (1973) habitat types (Abies/Xerophyllum 0.0, Abies/Vaccinium -4.24, Abies/Pachistima -3.86, Pseudotsuga/Calamagrostis -5.47) with default tree and stand parameters. Shows the additive shift in predicted crown base height across habitat types; negative HAB values (shadier habitats) lower the predicted HCB.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HAB",
+                                "values": [0.0, -3.86, -4.24, -5.47]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "hcb_by_habitat",
+                            "type": "line",
+                            "description": "Predicted HCB over time (constant, since purely algebraic) for each of the four Stage (1973) habitat types. Demonstrates the habitat adjustment shift.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "HCB_pred", "label": "HCB_pred (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "hcb_vs_tree_height",
+                    "description": "Sweep HT_input from 20 ft (6.096 m) to 120 ft (36.576 m) with default stand parameters and HAB=0. Shows the linear relationship between tree height and predicted crown base height (b_HCB_HT=0.61 ft/ft = 61% of height increments go to raising the crown base).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "HT_input",
+                                "range": {"start": 6.096, "stop": 36.576, "count": 6, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "hcb_vs_ht",
+                            "type": "line",
+                            "description": "Predicted HCB_pred (m) for tree heights from 20 ft to 120 ft. Linear response with slope b_HCB_HT = 0.61 ft/ft.",
+                            "x": {"variable": "t", "label": "time (s)"},
+                            "y": {"variable": "HCB_pred", "label": "HCB_pred (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
