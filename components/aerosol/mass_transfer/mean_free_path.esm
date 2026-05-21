@@ -1,0 +1,212 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "MeanFreePathMassTransfer",
+        "description": "Mean free path of gas molecules in air for aerosol mass transfer. Uses the kinetic-theory relation λ = 2μ/(ρ_air c̄_air) where μ is the dynamic viscosity, ρ_air = PM_air/(RT) is the ideal-gas air density, and c̄_air = √(8RT/(πM_air)) is the mean molecular speed of air (S&P 2006, Chapter 12, Section 12.1.3). The resulting λ is the mean free path used to compute the Knudsen number Kn = λ/R_p (see knudsen.esm) and hence the appropriate mass-transfer regime (continuum, transition, or free-molecular). At standard conditions (T=298.15 K, P=101325 Pa) λ ≈ 65 nm. Migrated from Aerosol.jl src/mass_transfer.jl `MeanFreePathMassTransfer`.",
+        "tags": [
+            "aerosol",
+            "mass-transfer",
+            "mean-free-path",
+            "kinetic-theory",
+            "seinfeld-pandis"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-me7)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition. John Wiley & Sons. Chapter 12, Section 12.1.3 (mean free path for aerosol mass transfer from dynamic viscosity and mean molecular speed)."
+            }
+        ]
+    },
+    "models": {
+        "MeanFreePathMassTransfer": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Section 12.1.3 — mean free path λ = 2μ/(ρ_air c̄_air) for aerosol mass transfer. Migrated from Aerosol.jl src/mass_transfer.jl `MeanFreePathMassTransfer` (esm-me7).",
+                "notes": "source_ref: Aerosol.jl@FWrvp:src/mass_transfer.jl:45\n\nUpstream `MeanFreePathMassTransfer` is an MTK `@component` with 1 constant (R=8.314 J/(mol·K)), 5 parameters (T, P, M_A, M_air, μ), and 2 algebraic variables ρ_air(t) and λ(t). Both variables are determined by explicit algebraic equations with no time derivative — purely observed.\n\nEquations (S&P 2006, Chapter 12, Section 12.1.3):\n  ρ_air = P × M_air / (R × T)                        [ideal gas law for air density, kg/m³]\n  λ     = 2μ / (ρ_air × √(8RT/(πM_air)))             [mean free path, m]\n\nThe constant R = 8.314 J/(mol·K) is folded as a floating-point literal throughout; π is inlined as 3.141592653589793.\n\nNote on M_A: the upstream component declares M_A (molecular weight of species A) as a parameter with the same default as M_air (0.029 kg/mol), but M_A does not appear in either equation. It is preserved here to maintain API parity with the upstream component, which likely reserves M_A for future coupling with downstream components that parametrize a specific species. Changing M_A has no effect on the computed λ.\n\nPhysics derivation: The mean free path of a gas relates to its transport properties via λ = 2μ/(ρ c̄). This follows from the Chapman-Enskog result that the dynamic viscosity of a hard-sphere gas is μ ≈ (1/2) ρ c̄ λ, solved for λ. Combining the ideal gas law ρ = PM/(RT) with the Maxwell mean speed c̄ = √(8RT/(πM)) gives the fully explicit formula:\n  λ = 2μ R T / (P M_air √(8RT/(πM_air)))\n    = 2μ / P × √(πRT/(8M_air))\n\nScaling laws:\n  λ ∝ √T  (at fixed P, μ, M_air): faster molecules at higher T diffuse farther, so λ grows with T.\n  λ ∝ 1/P (at fixed T, μ, M_air): higher pressure → higher density → shorter mean free path.\n  λ ∝ μ   (at fixed T, P, M_air): more viscous gas means longer mean free path.\n\nAt standard conditions (T=298.15 K, P=101325 Pa, M_air=0.029 kg/mol, μ=1.81×10⁻⁵ Pa·s):\n  ρ_air ≈ 1.185 kg/m³ and λ ≈ 65.5 nm, consistent with the well-known ~65 nm atmospheric mean free path.\n\nThe intermediate variable rho_air is exposed as an observed quantity (matching the upstream model structure) so that downstream components can read air density directly if needed without recomputing it.\n\nASCII renaming: upstream Julia `ρ_air` → ESM `rho_air` (compound subscript name; consistent with MassTransferCoefficient pattern of tau_g/tau_i for τ_g/τ_i). Julia `λ` and `μ` retain their Unicode forms, consistent with the convention across the aerosol/mass_transfer migration family.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system. Both equations are finite compositions of ×, /, sqrt in float64; round-off is ~1e-15 relative. rel=1e-9 leaves six orders of magnitude of headroom, consistent with MeanMolecularSpeed (same complexity class)."
+            },
+            "tolerance": {
+                "rel": 1e-9
+            },
+            "variables": {
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature of the gas. Standard atmosphere 298.15 K. λ scales as √T at fixed pressure — higher temperature means faster molecules and a longer mean free path."
+                },
+                "P": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Pressure of the gas. Standard atmosphere 101325 Pa. λ scales as 1/P at fixed temperature — higher pressure means higher density and a shorter mean free path."
+                },
+                "M_A": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of diffusing species A. Default 0.029 kg/mol (dry air). Declared for API parity with the upstream Aerosol.jl component but does not appear in the mean-free-path equations — only M_air is used. May be relevant for future coupled systems that parametrize the species."
+                },
+                "M_air": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.029,
+                    "description": "Molar mass of air. Default 0.029 kg/mol (dry air). Appears in both the density equation (ρ_air = PM_air/(RT)) and the mean-speed denominator (c̄ = √(8RT/(πM_air))). Increasing M_air reduces the mean molecular speed, which increases λ slightly (the density and speed effects partially cancel)."
+                },
+                "μ": {
+                    "type": "parameter",
+                    "units": "Pa*s",
+                    "default": 1.81e-5,
+                    "description": "Dynamic viscosity of air. Default 1.81×10⁻⁵ Pa·s at 298 K. λ is proportional to μ — more viscous gas implies a longer mean free path. Varies weakly with temperature (roughly as T^0.7 for air)."
+                },
+                "rho_air": {
+                    "type": "observed",
+                    "units": "kg/m^3",
+                    "description": "Air density from the ideal gas law: ρ_air = P M_air / (R T), where R = 8.314 J/(mol·K). Intermediate quantity used in the mean-free-path calculation; exposed as an observed variable to match the upstream model structure and allow downstream components to read air density directly.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["P", "M_air"]},
+                            {"op": "*", "args": [8.314, "T"]}
+                        ]
+                    }
+                },
+                "λ": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Mean free path of gas molecules in air: λ = 2μ / (ρ_air × √(8RT/(πM_air))). At standard conditions (T=298.15 K, P=101325 Pa, μ=1.81×10⁻⁵ Pa·s, M_air=0.029 kg/mol), λ ≈ 65.5 nm. Used to compute the Knudsen number Kn = λ/R_p (knudsen.esm), which determines the aerosol mass-transfer regime.",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": [2.0, "μ"]},
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho_air",
+                                    {
+                                        "op": "sqrt",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    {"op": "*", "args": [8.0, 8.314, "T"]},
+                                                    {"op": "*", "args": [3.141592653589793, "M_air"]}
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            },
+            "equations": [],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default parameters: T=298.15 K, P=101325 Pa, M_air=0.029 kg/mol, μ=1.81×10⁻⁵ Pa·s. ρ_air = 101325×0.029/(8.314×298.15) ≈ 1.1854 kg/m³. λ ≈ 65.5 nm, consistent with the well-known atmospheric mean free path at standard conditions. Anchors the model at its declared defaults.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "assertions": [
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.185413247783995, "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ", "time": 0.0, "expected": 6.545537554702463e-8, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "high_temperature",
+                    "description": "Elevated temperature: T=350 K, all other parameters at default. λ scales as √T: λ(350)/λ(298.15) = √(350/298.15) ≈ 1.0835. λ ≈ 70.9 nm. ρ_air decreases as 1/T (gas expands). Exercises the T dependence in both equations.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"T": 350.0},
+                    "assertions": [
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.009802742362281, "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ", "time": 0.0, "expected": 7.091889077384121e-8, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "low_pressure",
+                    "description": "Half-atmosphere pressure: P=50662.5 Pa, all other parameters at default. λ scales as 1/P exactly (density halves, mean speed unchanged). ρ_air ≈ 0.5927 kg/m³; λ ≈ 130.9 nm — exactly double the standard-condition value. Confirms the 1/P scaling.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"P": 50662.5},
+                    "assertions": [
+                        {"variable": "rho_air", "time": 0.0, "expected": 5.927066238919977e-1, "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ", "time": 0.0, "expected": 1.309107510940493e-7, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "higher_viscosity",
+                    "description": "Increased dynamic viscosity: μ=2.0×10⁻⁵ Pa·s (representative of air at ~380 K), all other parameters at default. λ scales linearly with μ: λ(2e-5)/λ(1.81e-5) = 2e-5/1.81e-5 ≈ 1.1050. λ ≈ 72.3 nm. ρ_air unchanged. Confirms the linear μ dependence.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"μ": 2.0e-5},
+                    "assertions": [
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.185413247783995, "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ", "time": 0.0, "expected": 7.232638181991674e-8, "tolerance": {"rel": 1e-9}}
+                    ]
+                },
+                {
+                    "id": "nitrogen_molar_mass",
+                    "description": "Pure nitrogen carrier gas: M_air=0.028 kg/mol (N₂, slightly lighter than dry air at 0.029 kg/mol). ρ_air decreases ∝ M_air; c̄_air increases ∝ M_air^{-1/2}. Net effect: λ ∝ M_air^{-1/2}, so λ(0.028)/λ(0.029) = √(0.029/0.028) ≈ 1.0175. λ ≈ 66.6 nm. Exercises the M_air wiring in both equations.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {"M_air": 0.028},
+                    "assertions": [
+                        {"variable": "rho_air", "time": 0.0, "expected": 1.144536928894892, "tolerance": {"rel": 1e-9}},
+                        {"variable": "λ", "time": 0.0, "expected": 6.661396771485982e-8, "tolerance": {"rel": 1e-9}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "lambda_vs_temperature",
+                    "description": "Sweep temperature T from 200 K to 400 K log-spaced at standard pressure (P=101325 Pa). λ ∝ √T — the mean free path grows monotonically with temperature as the gas expands and molecules move faster. At 200 K λ ≈ 53.7 nm; at 400 K λ ≈ 75.8 nm.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 200.0, "stop": 400.0, "count": 41, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_vs_T",
+                            "type": "line",
+                            "description": "Mean free path λ (nm) as a function of temperature T (K) at P=101325 Pa. λ ∝ √T; the dashed reference curve √(T/298.15) × λ₀ overlaps the model output to confirm scaling.",
+                            "x": {"variable": "T", "label": "Temperature T (K)"},
+                            "y": {"variable": "λ", "label": "Mean free path λ (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "lambda_vs_pressure",
+                    "description": "Sweep pressure P from 10000 Pa (stratosphere) to 200000 Pa (deep troposphere/surface) log-spaced at T=298.15 K. λ ∝ 1/P exactly — doubling pressure halves the mean free path. At 10000 Pa λ ≈ 663 nm; at 101325 Pa λ ≈ 65.5 nm; at 200000 Pa λ ≈ 33.2 nm.",
+                    "initial_state": {"type": "per_variable", "values": {}},
+                    "parameters": {},
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "P",
+                                "range": {"start": 10000.0, "stop": 200000.0, "count": 41, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_vs_P",
+                            "type": "line",
+                            "description": "Mean free path λ (m) as a function of pressure P (Pa) on a log-log scale. λ ∝ 1/P; slope = -1 on log-log. Higher pressure corresponds to lower altitude in the atmosphere.",
+                            "x": {"variable": "P", "label": "Pressure P (Pa)"},
+                            "y": {"variable": "λ", "label": "Mean free path λ (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
