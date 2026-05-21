@@ -1,0 +1,180 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "ECTracerMethod",
+        "description": "Elemental carbon (EC) tracer method for estimating secondary organic carbon (OC) from measurements of total OC and EC. Primary OC is estimated as combustion-related OC (proportional to EC via the OC-to-EC ratio) plus noncombustion OC; secondary OC is the non-negative remainder. From Seinfeld and Pandis (2006), Chapter 14, Section 14.3.2, Equations 14.3–14.4.",
+        "tags": [
+            "aerosol",
+            "organic",
+            "ec-tracer",
+            "secondary-organic-carbon"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-sgh)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.3.2, Eqs. 14.3–14.4."
+            }
+        ]
+    },
+    "models": {
+        "ECTracerMethod": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.3.2, Eqs. 14.3–14.4 — EC tracer method. Migrated from Aerosol.jl src/organic_aerosol.jl `ECTracerMethod` (esm-sgh).",
+                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:18\n\nUpstream `ECTracerMethod` is an MTK `@component` with two parameters (OC_EC_ratio, OC_NC), one constant (zero_conc = 0.0 kg/m^3 for unit consistency in the max call), and four variables (OC, EC, OC_primary, OC_secondary). The two algebraic equations are:\n  • OC_primary  ~ OC_EC_ratio * EC + OC_NC           (Eq. 14.4)\n  • OC_secondary ~ max(zero_conc, OC - OC_primary)   (Eq. 14.3)\n\nOC and EC are externally supplied `@variables` in the upstream component; in this ESM they are represented as parameters (observed-only pattern — see also bet.esm, two_product_soa.esm). The system has two algebraic states (OC_primary, OC_secondary) and two equations — well-posed, no ODE integration.\n\nEquation ordering for the ESS topological substitution loop: OC_primary depends only on parameters, so it resolves first; OC_secondary then depends on OC_primary (now known) and OC (a parameter), so it resolves second. The dependency graph is acyclic — no SimulationError.\n\nThe `max(0, ...)` floor enforces non-negativity: when total OC is less than estimated primary OC (measurement noise / model mismatch), secondary OC is clamped to zero rather than going negative. The upstream constant zero_conc = 0.0 serves no purpose beyond unit-consistency annotation in MTK; in the ESM the literal 0 is used directly.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration). Eq. 14.4 is a linear combination of parameters; Eq. 14.3 adds a max. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom. The zero-secondary test uses absolute tolerance since the expected value is exactly 0."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "OC_EC_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.7,
+                    "description": "OC-to-EC ratio for combustion sources (dimensionless). Typical value for urban environments."
+                },
+                "OC_NC": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 9.0e-10,
+                    "description": "Noncombustion primary OC concentration (background biogenic and other non-combustion sources)."
+                },
+                "OC": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 3.0e-9,
+                    "description": "Total organic carbon concentration. Input parameter — measured total OC driving the EC tracer calculation."
+                },
+                "EC": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.0e-9,
+                    "description": "Elemental carbon concentration. Input parameter — measured EC used to estimate primary OC."
+                },
+                "OC_primary": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Primary organic carbon concentration. Estimated as OC_EC_ratio * EC + OC_NC (Eq. 14.4)."
+                },
+                "OC_secondary": {
+                    "type": "state",
+                    "units": "kg/m^3",
+                    "description": "Secondary organic carbon concentration. Non-negative remainder after subtracting primary OC from total OC (Eq. 14.3)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "OC_primary",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {"op": "*", "args": ["OC_EC_ratio", "EC"]},
+                            "OC_NC"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "OC_secondary",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            0,
+                            {
+                                "op": "+",
+                                "args": [
+                                    "OC",
+                                    {"op": "*", "args": [-1, "OC_primary"]}
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "typical_urban",
+                    "description": "Typical urban conditions: EC = 1 μg/m^3, OC = 3 μg/m^3 (OC_EC_ratio = 1.7, OC_NC = 0.9e-9). OC_primary = 1.7*1e-9 + 0.9e-9 = 2.6e-9 kg/m^3; OC_secondary = max(0, 3e-9 - 2.6e-9) = 4.0e-10 kg/m^3.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "EC": 1.0e-9,
+                        "OC": 3.0e-9
+                    },
+                    "assertions": [
+                        {"variable": "OC_primary",   "time": 0.0, "expected": 2.6e-9,  "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "OC_secondary",  "time": 0.0, "expected": 4.0e-10, "tolerance": {"rel": 1.0e-6}}
+                    ]
+                },
+                {
+                    "id": "zero_secondary",
+                    "description": "OC below estimated primary OC: EC = 1 μg/m^3, OC = 2 μg/m^3. OC_primary = 2.6e-9 > OC, so OC_secondary = max(0, 2e-9 - 2.6e-9) = 0.0 kg/m^3 (max floor).",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "EC": 1.0e-9,
+                        "OC": 2.0e-9
+                    },
+                    "assertions": [
+                        {"variable": "OC_primary",   "time": 0.0, "expected": 2.6e-9,  "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "OC_secondary",  "time": 0.0, "expected": 0.0,     "tolerance": {"abs": 1.0e-20}}
+                    ]
+                },
+                {
+                    "id": "high_ec",
+                    "description": "High EC environment: EC = 5 μg/m^3, OC = 15 μg/m^3. OC_primary = 1.7*5e-9 + 0.9e-9 = 9.4e-9 kg/m^3; OC_secondary = max(0, 15e-9 - 9.4e-9) = 5.6e-9 kg/m^3.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_overrides": {
+                        "EC": 5.0e-9,
+                        "OC": 1.5e-8
+                    },
+                    "assertions": [
+                        {"variable": "OC_primary",   "time": 0.0, "expected": 9.4e-9,  "tolerance": {"rel": 1.0e-9}},
+                        {"variable": "OC_secondary",  "time": 0.0, "expected": 5.6e-9,  "tolerance": {"rel": 1.0e-6}}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "ec_oc_sweep",
+                    "description": "Sweep EC concentration from 0.5 to 10 μg/m^3 with fixed total OC = 10 μg/m^3, showing how increasing EC (and thus primary OC) reduces secondary OC. When EC > ~5.4 μg/m^3, OC_primary exceeds total OC and OC_secondary is clamped to zero.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "parameters": {
+                        "OC_EC_ratio": 1.7,
+                        "OC_NC": 9.0e-10,
+                        "OC": 1.0e-8
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "EC",
+                                "range": {"start": 5.0e-10, "stop": 1.0e-8, "count": 50}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "secondary_oc_vs_ec",
+                            "type": "line",
+                            "description": "Secondary OC vs EC concentration at fixed total OC = 10 μg/m^3. Shows the transition from positive secondary OC to zero when primary OC exceeds total OC.",
+                            "x": {"variable": "EC",           "label": "EC (kg/m³)"},
+                            "y": {"variable": "OC_secondary", "label": "OC_secondary (kg/m³)"}
+                        },
+                        {
+                            "id": "primary_oc_vs_ec",
+                            "type": "line",
+                            "description": "Primary OC vs EC concentration — linear relationship OC_EC_ratio * EC + OC_NC.",
+                            "x": {"variable": "EC",          "label": "EC (kg/m³)"},
+                            "y": {"variable": "OC_primary",  "label": "OC_primary (kg/m³)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
