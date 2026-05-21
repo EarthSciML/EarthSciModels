@@ -1,0 +1,751 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "AerosolLayerRadiativeForcing",
+        "description": "Direct radiative forcing by an aerosol layer using the two-stream scattering-absorbing model — Seinfeld & Pandis (2006) Ch. 24 §24.1, Eqs. 24.1–24.10.",
+        "tags": [
+            "aerosol",
+            "radiative_forcing"
+        ]
+    },
+    "models": {
+        "AerosolLayerRadiativeForcing": {
+            "reference": {
+                "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 24, Section 24.1, Equations 24.1–24.10.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb:src/aerosol_radiative_forcing.jl:36\nDirect aerosol radiative forcing from the two-stream scattering-absorbing model. The aerosol layer reflects fraction r_aer upward and transmits fraction t_aer downward (Eq. 24.1). The combined reflectance of the aerosol-surface system R_as accounts for multiple reflections between the aerosol base and surface (Eq. 24.5). The change in planetary albedo ΔR_p is modulated by fractional cloudiness A_c and atmospheric transmittance T_a (Eq. 24.9), and the resulting radiative forcing ΔF = F_0·ΔR_p (Eq. 24.10) is negative (cooling) when the aerosol increases the planetary albedo. All five equations are algebraic and reduce to zero ODE states after MTK structural_simplify; the inline-test runner exercises each variable at its observed algebraic value.\n\nTolerance rationale (model-level rel=1e-8 / abs=1e-12): the chain involves exp, products, divisions, and a square — all well-conditioned for the physically reasonable parameter domain. 1e-8 captures float64 roundoff across the multi-step chain. abs=1e-12 floors the τ→0 limit where r_aer and ΔR_p vanish."
+            },
+            "variables": {
+                "F_0": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 1370.0,
+                    "description": "Incident solar flux"
+                },
+                "τ": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.1,
+                    "description": "Aerosol optical depth (dimensionless)"
+                },
+                "ω": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.95,
+                    "description": "Single-scattering albedo (dimensionless)"
+                },
+                "β": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.29,
+                    "description": "Upscatter fraction (dimensionless)"
+                },
+                "R_s": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.15,
+                    "description": "Surface albedo (dimensionless)"
+                },
+                "A_c": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.6,
+                    "description": "Cloud fraction (dimensionless)"
+                },
+                "T_a": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.76,
+                    "description": "Atmospheric transmittance (dimensionless)"
+                },
+                "r_aer": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Fraction of incident light reflected upward by the aerosol layer, r_aer = (1 − exp(−τ))·ω·β — Eq. 24.1 auxiliary.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [-1, "τ"]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    "ω"
+                                ]
+                            },
+                            "β"
+                        ]
+                    }
+                },
+                "t_aer": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Fraction of incident light transmitted downward through the aerosol layer, t_aer = exp(−τ) + ω·(1−β)·(1−exp(−τ)) — Eq. 24.1.",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [-1, "τ"]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "ω",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [-1, "β"]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {
+                                                        "op": "exp",
+                                                        "args": [
+                                                            {
+                                                                "op": "*",
+                                                                "args": [-1, "τ"]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "R_as": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Total reflectance of the aerosol-surface system accounting for multiple reflections, R_as = r_aer + t_aer²·R_s / (1 − R_s·r_aer) — Eq. 24.5.",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            "r_aer",
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": ["t_aer", 2]
+                                            },
+                                            "R_s"
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {
+                                                        "op": "*",
+                                                        "args": ["R_s", "r_aer"]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "ΔR_p": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Change in planetary albedo due to the aerosol layer, ΔR_p = (1−A_c)·T_a²·(R_as−R_s) — Eq. 24.9. Positive = cooling (aerosol increases albedo); negative = heating (absorbing aerosol reduces albedo).",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [-1, "A_c"]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": ["T_a", 2]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "R_as",
+                                    {
+                                        "op": "*",
+                                        "args": [-1, "R_s"]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "ΔF": {
+                    "type": "observed",
+                    "units": "W/m^2",
+                    "description": "Change in outgoing radiative flux due to the aerosol layer, ΔF = F_0·ΔR_p — Eq. 24.10. Negative = net cooling.",
+                    "expression": {
+                        "op": "*",
+                        "args": ["F_0", "ΔR_p"]
+                    }
+                }
+            },
+            "equations": [],
+            "tolerance": {
+                "rel": 1e-8,
+                "abs": 1e-12
+            },
+            "tests": [
+                {
+                    "id": "default_params_table_24_2",
+                    "description": "Default Table 24.2 parameter set (R_s=0.15, β=0.29, T_a=0.76, A_c=0.6, τ=0.1, ω=0.95, F_0=1370 W/m²) from Seinfeld & Pandis (2006) p. 1069. Pins all five observed variables at their analytic float64 values. Reproduces the upstream Aerosol.jl `AerosolLayerRadiativeForcing - Limiting Cases` default scenario (scattering aerosol with ω=0.95 > ω_crit ≈ 0.59, so ΔR_p > 0 and ΔF > 0: net cooling).",
+                    "parameter_overrides": {
+                        "F_0": 1370.0,
+                        "τ": 0.1,
+                        "ω": 0.95,
+                        "β": 0.29,
+                        "R_s": 0.15,
+                        "A_c": 0.6,
+                        "T_a": 0.76
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.02621729133109315
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.9690245795707049
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.16762468452648646
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 0.0040720071129994335
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 5.578649744809224
+                        },
+                        {
+                            "variable": "r_aer",
+                            "time": 1.0,
+                            "expected": 0.02621729133109315
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 1.0,
+                            "expected": 0.9690245795707049
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 1.0,
+                            "expected": 0.16762468452648646
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 1.0,
+                            "expected": 0.0040720071129994335
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 1.0,
+                            "expected": 5.578649744809224
+                        }
+                    ]
+                },
+                {
+                    "id": "limiting_zero_tau",
+                    "description": "Limiting case τ → 0 (no aerosol): r_aer → 0, t_aer → 1, R_as → R_s, ΔR_p → 0, ΔF → 0. Upstream Aerosol.jl asserts r_aer ≈ 0 (atol=1e-8), t_aer ≈ 1 (atol=1e-8), ΔR_p ≈ 0 (atol=1e-8). Pins exact float64 values for τ=1e-10.",
+                    "parameter_overrides": {
+                        "τ": 1e-10
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 2.755000227949722e-11
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.99999999996745
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.15000000001840486
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 4.252259078185717e-12
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 5.825594937114432e-09
+                        }
+                    ]
+                },
+                {
+                    "id": "nonabsorbing_energy_conservation",
+                    "description": "Nonabsorbing aerosol (ω=1): energy conservation requires r_aer + t_aer = 1 since all intercepted light is either reflected or transmitted with no absorption. Upstream Aerosol.jl asserts r_nonabs + t_nonabs ≈ 1 (rtol=0.01). Pins r_aer and t_aer individually; the sum 0.027597148769571738 + 0.9724028512304282 = 1.0 to float64 precision.",
+                    "parameter_overrides": {
+                        "ω": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.027597148769571738
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.9724028512304282
+                        },
+                        {
+                            "variable": "r_aer",
+                            "time": 1.0,
+                            "expected": 0.027597148769571738
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 1.0,
+                            "expected": 0.9724028512304282
+                        }
+                    ]
+                },
+                {
+                    "id": "small_tau_linear_approx",
+                    "description": "Small-τ linear approximation from Eq. 24.11 (p. 1060): for τ ≪ 1, r_aer ≈ τ·ω·β. At τ=0.01, the linear approximation gives 0.01·0.95·0.29 = 0.002755; the exact exponential formula gives r_aer = 0.002741..., within 0.5% of the linear approximation (well within the upstream rtol=0.05 assertion). Pins the exact value.",
+                    "parameter_overrides": {
+                        "τ": 0.01
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.002741270802104186
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.9967612208853542
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.15183251544260082
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 0.0004233843678584944
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 0.5800365839661373
+                        }
+                    ]
+                },
+                {
+                    "id": "high_tau_strong_cooling",
+                    "description": "High aerosol optical depth τ=1 (thick layer): strong scattering produces large r_aer ≈ 0.174 and significant planetary albedo increase ΔR_p ≈ 0.028, giving a forcing of ΔF ≈ 38.4 W/m² — well above the thin-layer (τ=0.1) result of ~5.6 W/m². Pins all five variables.",
+                    "parameter_overrides": {
+                        "τ": 1.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.17414921395726762
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.7942447581013045
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.2713110222028734
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 0.028027698569751874
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 38.39794704056007
+                        }
+                    ]
+                },
+                {
+                    "id": "absorbing_aerosol_heating",
+                    "description": "Absorbing aerosol ω=0.4: below the critical single-scattering albedo ω_crit ≈ 0.59 (CriticalSingleScatteringAlbedo at R_s=0.15, β=0.29). Absorption reduces the effective reflectance below R_s, so R_as < R_s, ΔR_p < 0, and ΔF < 0 (net heating). Upstream Aerosol.jl `Direct Forcing - Cooling vs Heating` testitem asserts ΔR_p_absorb < 0. Pins the exact float64 values.",
+                    "parameter_overrides": {
+                        "ω": 0.4
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.011038859507828696
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.931863591313747
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.14151036091632538
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": -0.0019614462138921834
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": -2.6871813130322915
+                        }
+                    ]
+                },
+                {
+                    "id": "dark_surface_enhanced_cooling",
+                    "description": "Dark surface R_s=0.01 (ocean/dark soil): the aerosol layer is more effective at cooling because the contrast between R_as and R_s is larger. ΔF ≈ 8.1 W/m² vs ~5.6 W/m² for the default R_s=0.15 land surface. Pins all five variables.",
+                    "parameter_overrides": {
+                        "R_s": 0.01
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.02621729133109315
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.9690245795707049
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.03560984016110515
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 0.005916897470821733
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 8.106149535025775
+                        }
+                    ]
+                },
+                {
+                    "id": "overcast_reduced_forcing",
+                    "description": "High cloud fraction A_c=0.9: cloud cover reduces the clear-sky aerosol forcing because aerosols under optically thick clouds have minimal effect on outgoing radiation. ΔF drops from ~5.6 W/m² (A_c=0.6) to ~1.4 W/m² (A_c=0.9). Pins all five variables.",
+                    "parameter_overrides": {
+                        "A_c": 0.9
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "r_aer",
+                            "time": 0.0,
+                            "expected": 0.02621729133109315
+                        },
+                        {
+                            "variable": "t_aer",
+                            "time": 0.0,
+                            "expected": 0.9690245795707049
+                        },
+                        {
+                            "variable": "R_as",
+                            "time": 0.0,
+                            "expected": 0.16762468452648646
+                        },
+                        {
+                            "variable": "ΔR_p",
+                            "time": 0.0,
+                            "expected": 0.0010180017782498582
+                        },
+                        {
+                            "variable": "ΔF",
+                            "time": 0.0,
+                            "expected": 1.3946624362023057
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "forcing_vs_optical_depth",
+                    "description": "Aerosol radiative forcing ΔF as a function of aerosol optical depth τ at fixed ω=0.95 (scattering aerosol), showing the transition from near-zero forcing at τ→0 to saturation at large τ. The reflected fraction r_aer also rises, illustrating the nonlinear (exponential) dependence on optical depth.",
+                    "parameters": {
+                        "ω": 0.95,
+                        "β": 0.29,
+                        "R_s": 0.15,
+                        "A_c": 0.6,
+                        "T_a": 0.76,
+                        "F_0": 1370.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "τ",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 2.0,
+                                    "count": 60,
+                                    "scale": "log"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ΔF_vs_τ",
+                            "type": "line",
+                            "description": "Aerosol radiative forcing ΔF (W/m²) as a function of aerosol optical depth τ (log axis). Scattering aerosol (ω=0.95) produces positive ΔF (cooling) that rises rapidly for small τ then saturates.",
+                            "x": {
+                                "variable": "τ",
+                                "label": "Aerosol optical depth τ"
+                            },
+                            "y": {
+                                "variable": "ΔF",
+                                "label": "Radiative forcing ΔF (W/m²)"
+                            }
+                        },
+                        {
+                            "id": "r_aer_vs_τ",
+                            "type": "line",
+                            "description": "Aerosol reflectance r_aer as a function of aerosol optical depth τ (log axis).",
+                            "x": {
+                                "variable": "τ",
+                                "label": "Aerosol optical depth τ"
+                            },
+                            "y": {
+                                "variable": "r_aer",
+                                "label": "Aerosol reflectance r_aer"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "cooling_heating_transition_vs_ssa",
+                    "description": "Aerosol radiative forcing ΔF as a function of single-scattering albedo ω at fixed τ=0.1, R_s=0.15, β=0.29, T_a=0.76, A_c=0.6. The forcing crosses zero at the critical single-scattering albedo ω_crit ≈ 0.59 (from CriticalSingleScatteringAlbedo) — scattering-dominated aerosols (ω > ω_crit) cool the surface while absorption-dominated aerosols (ω < ω_crit) heat it. Reproduces the cooling/heating boundary from Seinfeld & Pandis (2006) §24.2.",
+                    "parameters": {
+                        "τ": 0.1,
+                        "β": 0.29,
+                        "R_s": 0.15,
+                        "A_c": 0.6,
+                        "T_a": 0.76,
+                        "F_0": 1370.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "ω",
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 1.0,
+                                    "count": 60,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ΔF_vs_ω",
+                            "type": "line",
+                            "description": "Aerosol radiative forcing ΔF as a function of single-scattering albedo ω. The sign change at ω_crit ≈ 0.59 separates cooling (ω > ω_crit, ΔF > 0) from heating (ω < ω_crit, ΔF < 0).",
+                            "x": {
+                                "variable": "ω",
+                                "label": "Single-scattering albedo ω"
+                            },
+                            "y": {
+                                "variable": "ΔF",
+                                "label": "Radiative forcing ΔF (W/m²)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "forcing_landscape_tau_omega",
+                    "description": "Joint sensitivity of aerosol radiative forcing ΔF to optical depth τ and single-scattering albedo ω. The heatmap shows the forcing landscape: the zero-forcing contour traces the critical SSA (independent of τ for this formulation), while the magnitude grows with τ for scattering aerosols and decreases (becomes more negative) for absorbing aerosols.",
+                    "parameters": {
+                        "β": 0.29,
+                        "R_s": 0.15,
+                        "A_c": 0.6,
+                        "T_a": 0.76,
+                        "F_0": 1370.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "τ",
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 1.0,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
+                            },
+                            {
+                                "parameter": "ω",
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 1.0,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ΔF_heatmap",
+                            "type": "heatmap",
+                            "description": "Radiative forcing ΔF(τ, ω) heatmap. Red = cooling (scattering-dominated); blue = heating (absorption-dominated). The zero-crossing traces ω_crit(R_s=0.15, β=0.29) ≈ 0.59.",
+                            "x": {
+                                "variable": "τ",
+                                "label": "Aerosol optical depth τ"
+                            },
+                            "y": {
+                                "variable": "ω",
+                                "label": "Single-scattering albedo ω"
+                            },
+                            "value": {
+                                "variable": "ΔF",
+                                "reduce": "final"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
