@@ -1,0 +1,631 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "fuel_mce",
+    "description": "Anderson 13 fuel model lookup table: dead fuel moisture content of extinction Mx (dimensionless fraction) from the fuel model code. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:126 (`fuel_mce` @register_symbolic interface). Maps integer fuel model code (1-13) to Mx (dimensionless dry-weight-basis fraction), using the Anderson (1982) Mx values from the WRF-SFIRE table (Mandel et al. 2011 Table 1). Codes outside [1, 13] — including LANDFIRE non-burnable codes (91, 92, 93, 98, 99) — return the fuel model 1 default: 0.12. The gt-p3ep (@register_symbolic) gap is resolved by expressing the lookup as interp.linear over the 13 Anderson codes with an ifelse guard for out-of-range codes.",
+    "tags": [
+      "wildland_fire",
+      "registered_function",
+      "fuel_model",
+      "anderson_13",
+      "lookup_table",
+      "rothermel"
+    ],
+    "created": "2026-05-21T00:00:00Z",
+    "authors": [
+      "WildlandFire.jl contributors",
+      "EarthSciModels migration (esm-hr2x)"
+    ],
+    "references": [
+      {
+        "citation": "Anderson, H. E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service, Intermountain Forest and Range Experiment Station. Gen. Tech. Rep. INT-122. — Source for the 13-fuel-model moisture-of-extinction table."
+      },
+      {
+        "citation": "Mandel, J., Beezley, J. D., and Kochanski, A. K. (2011). Coupled atmosphere-wildland fire modeling with WRF 3.3 and SFIRE 2011. Geosci. Model Dev., 4, 591–610. — Table 1 lists the Anderson fuel parameters used by WRF-SFIRE, including the Mx (moisture content of extinction) column that this component encodes."
+      }
+    ]
+  },
+  "models": {
+    "fuel_mce": {
+      "reference": {
+        "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:126\n\nUpstream definition:\n  const _FUEL_MCE = Dict(k => v.mce for (k, v) in ANDERSON_FUEL_DATA)\n  fuel_mce(code) = _lookup_fuel(_FUEL_MCE, code, 0.12)\n  @register_symbolic fuel_mce(code)\n\nwhere ANDERSON_FUEL_DATA.mce values (dimensionless fraction, dry-weight basis) are:\n  code 1:         mce = 0.12   (short grass)\n  code 2:         mce = 0.15   (timber/grass/shrub mix)\n  code 3:         mce = 0.25   (tall grass)\n  code 4:         mce = 0.20   (chaparral)\n  code 5:         mce = 0.20   (brush)\n  code 6:         mce = 0.25   (dormant brush / hardwood slash)\n  code 7:         mce = 0.40   (southern rough)\n  code 8:         mce = 0.30   (closed timber litter)\n  code 9:         mce = 0.25   (hardwood litter)\n  code 10:        mce = 0.25   (timber litter with understory)\n  code 11:        mce = 0.15   (light logging slash)\n  code 12:        mce = 0.20   (medium logging slash)\n  code 13:        mce = 0.25   (heavy logging slash)\n\nThe @register_symbolic gap (gt-p3ep) is resolved by composing the closed\nfunction registry: an ifelse guard selects between the 13-entry interp.linear\ntable for in-range codes and the fuel-model-1 default for everything else.\nFor integer inputs 1–13, interp.linear evaluated at an exact grid knot returns\nthe exact table value (blend weight = 0 or 1 at both endpoints).\n\nNon-burnable codes (91, 92, 93, 98, 99) are intentionally out of the [1, 13]\nrange and therefore return the default 0.12. This matches the upstream\nbehavior: the dictionary has no entry for non-burnable codes so get() falls back\nto the default.\n\nTolerance rationale (rel=1e-12): ifelse + interp.linear on float64 hardware is\nexact for in-range integer codes (single table access at a grid knot) and exact\nfor the default branch (literal constant). 1e-12 covers the one-ULP float64\nrounding without admitting any physical imprecision."
+      },
+      "tolerance": {
+        "rel": 1e-12
+      },
+      "variables": {
+        "code": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "Anderson 13 fuel model code (dimensionless integer 1–13). Values outside this range return the fuel-model-1 default."
+        },
+        "fuel_mce": {
+          "type": "observed",
+          "units": "1",
+          "description": "Dead fuel moisture content of extinction Mx (dimensionless dry-weight-basis fraction). Encodes the Anderson (1982) Mx parameter for the given fuel model code. Used by FuelModelLookup to set the Mx input for the Rothermel fire spread equations.",
+          "expression": {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "code",
+                      1.0
+                    ]
+                  },
+                  {
+                    "op": "<=",
+                    "args": [
+                      "code",
+                      13.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "fn",
+                "name": "interp.linear",
+                "args": [
+                  {
+                    "op": "const",
+                    "value": [
+                      0.12,
+                      0.15,
+                      0.25,
+                      0.20,
+                      0.20,
+                      0.25,
+                      0.40,
+                      0.30,
+                      0.25,
+                      0.25,
+                      0.15,
+                      0.20,
+                      0.25
+                    ],
+                    "args": []
+                  },
+                  {
+                    "op": "const",
+                    "value": [
+                      1.0,
+                      2.0,
+                      3.0,
+                      4.0,
+                      5.0,
+                      6.0,
+                      7.0,
+                      8.0,
+                      9.0,
+                      10.0,
+                      11.0,
+                      12.0,
+                      13.0
+                    ],
+                    "args": []
+                  },
+                  "code"
+                ]
+              },
+              0.12
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "fm1_short_grass",
+          "description": "Fuel model 1 (short grass): Mx = 0.12. Matches upstream WildlandFire.fuel_mce(1.0) = 0.12.",
+          "parameter_overrides": {
+            "code": 1.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm2_timber_grass",
+          "description": "Fuel model 2 (timber/grass/shrub mix): Mx = 0.15.",
+          "parameter_overrides": {
+            "code": 2.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.15,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm3_tall_grass",
+          "description": "Fuel model 3 (tall grass): Mx = 0.25.",
+          "parameter_overrides": {
+            "code": 3.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.25,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm4_chaparral",
+          "description": "Fuel model 4 (chaparral): Mx = 0.20.",
+          "parameter_overrides": {
+            "code": 4.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.20,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm5_brush",
+          "description": "Fuel model 5 (brush): Mx = 0.20.",
+          "parameter_overrides": {
+            "code": 5.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.20,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm6_dormant_brush",
+          "description": "Fuel model 6 (dormant brush/hardwood slash): Mx = 0.25.",
+          "parameter_overrides": {
+            "code": 6.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.25,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm7_southern_rough",
+          "description": "Fuel model 7 (southern rough): Mx = 0.40. Highest MCE among Anderson 13 models.",
+          "parameter_overrides": {
+            "code": 7.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.40,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm8_closed_timber",
+          "description": "Fuel model 8 (closed timber litter): Mx = 0.30. Matches upstream WildlandFire.fuel_mce(8.0) = 0.30.",
+          "parameter_overrides": {
+            "code": 8.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.30,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm9_hardwood_litter",
+          "description": "Fuel model 9 (hardwood litter): Mx = 0.25.",
+          "parameter_overrides": {
+            "code": 9.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.25,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm10_timber_litter_understory",
+          "description": "Fuel model 10 (timber litter with understory): Mx = 0.25.",
+          "parameter_overrides": {
+            "code": 10.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.25,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm11_light_logging_slash",
+          "description": "Fuel model 11 (light logging slash): Mx = 0.15.",
+          "parameter_overrides": {
+            "code": 11.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.15,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm12_medium_logging_slash",
+          "description": "Fuel model 12 (medium logging slash): Mx = 0.20.",
+          "parameter_overrides": {
+            "code": 12.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.20,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "fm13_heavy_logging_slash",
+          "description": "Fuel model 13 (heavy logging slash): Mx = 0.25. Upper boundary of the valid range.",
+          "parameter_overrides": {
+            "code": 13.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.25,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "nonburnable_water_code98",
+          "description": "LANDFIRE non-burnable code 98 (water): outside [1, 13] range → returns FM1 default 0.12. Matches upstream WildlandFire.fuel_mce(98.0) = 0.12.",
+          "parameter_overrides": {
+            "code": 98.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "nonburnable_urban_code91",
+          "description": "LANDFIRE non-burnable code 91 (urban): outside [1, 13] range → returns FM1 default.",
+          "parameter_overrides": {
+            "code": 91.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "nonburnable_snow_code92",
+          "description": "LANDFIRE non-burnable code 92 (snow/ice): outside [1, 13] range → returns FM1 default.",
+          "parameter_overrides": {
+            "code": 92.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "nonburnable_agriculture_code93",
+          "description": "LANDFIRE non-burnable code 93 (agriculture): outside [1, 13] range → returns FM1 default.",
+          "parameter_overrides": {
+            "code": 93.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "nonburnable_barren_code99",
+          "description": "LANDFIRE non-burnable code 99 (barren): outside [1, 13] range → returns FM1 default.",
+          "parameter_overrides": {
+            "code": 99.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "unrecognized_code0",
+          "description": "Unrecognized code 0 (below lower bound): returns FM1 default.",
+          "parameter_overrides": {
+            "code": 0.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        },
+        {
+          "id": "unrecognized_code999",
+          "description": "Unrecognized code 999 (far above upper bound): returns FM1 default.",
+          "parameter_overrides": {
+            "code": 999.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "assertions": [
+            {
+              "variable": "fuel_mce",
+              "time": 0.0,
+              "expected": 0.12,
+              "tolerance": {
+                "rel": 1e-12
+              }
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "fuel_mce_by_code",
+          "description": "Moisture content of extinction Mx for each Anderson 13 fuel model code. Compare with Table 1 of Mandel et al. (2011).",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "code",
+                "values": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "mce_by_code",
+              "type": "scatter",
+              "x": {
+                "variable": "code",
+                "label": "Fuel model code (1-13)"
+              },
+              "y": {
+                "variable": "fuel_mce",
+                "label": "Mx (dimensionless)"
+              }
+            }
+          ]
+        },
+        {
+          "id": "default_for_nonburnable_codes",
+          "description": "Out-of-range inputs (including LANDFIRE non-burnable codes 91-99) return the FM1 default Mx = 0.12.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "code",
+                "values": [
+                  0.0,
+                  14.0,
+                  91.0,
+                  92.0,
+                  93.0,
+                  98.0,
+                  99.0,
+                  999.0
+                ]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "mce_nonburnable",
+              "type": "scatter",
+              "x": {
+                "variable": "code",
+                "label": "Code (out-of-range)"
+              },
+              "y": {
+                "variable": "fuel_mce",
+                "label": "Mx (dimensionless)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
