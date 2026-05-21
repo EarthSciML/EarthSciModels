@@ -81,7 +81,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | NH3Equilibria | `src/aqueous_equilibria.jl:345` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/aq_eq/nh3.esm` | — | **status: complete** (esm-nu8du sweep — already migrated; `components/aerosol/aq_eq/nh3.esm` committed on `main`, inline-test gate passes.)
 | HNO3Equilibria | `src/aqueous_equilibria.jl:438` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/aq_eq/hno3.esm` | — |
 | H2O2Equilibria | `src/aqueous_equilibria.jl:519` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/aq_eq/h2o2.esm` | — |
-| O3Equilibria | `src/aqueous_equilibria.jl:589` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/aq_eq/o3.esm` | — |
+| O3Equilibria | `src/aqueous_equilibria.jl:589` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/aq_eq/o3.esm` | — | **status: complete** (esm-85j — migrated; `components/aerosol/aq_eq/o3.esm` committed on `polecat/esm-85j/o3-equilibria`, inline-test gate passes: 16/16.)
 | AqueousEquilibria | `src/aqueous_equilibria.jl:642` | Model | variables, parameters, observed, coupling.couple | none | L | Y | Y | `components/aerosol/aq_eq/all.esm` | WaterEquilibrium, CO2/SO2/NH3/HNO3/H2O2/O3 Equilibria |
 
 ### 1.3 aqueous_transport.jl (3 components, all `none`)
