@@ -1,0 +1,182 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "BrownianDiffusion",
+        "description": "Brownian (Stokes-Einstein) diffusion coefficient for aerosol single-particle dynamics. Migrated from Aerosol.jl@c8c640bb src/single_particle_dynamics.jl:172 (`BrownianDiffusion` @component). Computes the Brownian diffusivity D of a particle via the Stokes-Einstein relation with Cunningham slip correction (Seinfeld & Pandis 2006, Chapter 9, Eq. 9.73).",
+        "tags": [
+            "aerosol",
+            "particle-dynamics",
+            "brownian-diffusion"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "Aerosol.jl contributors",
+            "EarthSciModels migration (esm-4rf)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 9, Eq. 9.73 (Brownian diffusivity / Stokes-Einstein relation)."
+            }
+        ]
+    },
+    "models": {
+        "BrownianDiffusion": {
+            "reference": {
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/single_particle_dynamics.jl:172\nUpstream `BrownianDiffusion` is an MTK `@component` with two constants (k_B, π_val), four `@parameters` (T, D_p, μ, C_c) and one variable (D). The single equation is:\n  • D ~ k_B * T * C_c / (3 * π_val * μ * D_p)  (Eq. 9.73 — Brownian / Stokes-Einstein diffusivity)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only — the single output D is given by one algebraic equation in which D appears only on the LHS. D migrates as `type: state` with an explicit `equations` entry, matching the sibling single_particle_dynamics.jl migrations mean_free_path.esm, slip.esm, mobility.esm, electrical_mobility.esm, stokes.esm and aerodynamic_diameter.esm. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nConstants k_B (Boltzmann constant, 1.38e-23 J/K) and π_val (3.141592653589793) migrate as `type: parameter` carrying their numeric defaults. k_B keeps its upstream name; it is one of the ESS schema's reserved physical-constant names and its units J/K satisfy the dimensional check. π_val is not in the reserved list and is preserved verbatim from the source, consistent with mean_free_path.esm, mobility.esm and electrical_mobility.esm.\n\nAll four `@parameters` and both constants appear in the equation, so `parameters(sys)` collects the full set — no unused-parameter pruning is needed.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the D equation is a single product/division of parameters. Expected values are computed in float64 with the same arithmetic; floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "k_B": {
+                    "type": "parameter",
+                    "units": "J/K",
+                    "default": 1.38e-23,
+                    "description": "Boltzmann constant"
+                },
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Pi (dimensionless)"
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 298.15,
+                    "description": "Temperature"
+                },
+                "D_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-6,
+                    "description": "Particle diameter"
+                },
+                "μ": {
+                    "type": "parameter",
+                    "units": "kg/(m*s)",
+                    "default": 1.8e-5,
+                    "description": "Dynamic viscosity of air"
+                },
+                "C_c": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Slip correction factor (dimensionless)"
+                },
+                "D": {
+                    "type": "state",
+                    "units": "m^2/s",
+                    "description": "Brownian diffusion coefficient"
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "D",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": ["k_B", "T", "C_c"]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    "π_val",
+                                    "μ",
+                                    "D_p"
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "default_conditions",
+                    "description": "Default conditions: T = 298.15 K, D_p = 1.0e-6 m (1 μm particle), μ = 1.8e-5 kg/(m·s), C_c = 1.0. The Brownian diffusivity D = k_B*T*C_c/(3π μ D_p) ≈ 2.4253e-11 m²/s — the Stokes-Einstein diffusivity of a 1 μm particle in air at 298 K.",
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 2.425326810012262e-11 }
+                    ]
+                },
+                {
+                    "id": "slip_corrected_micron",
+                    "description": "1 μm particle with the physically appropriate slip correction C_c = 1.164 (the Cunningham value for D_p = 1 μm at λ ≈ 6.5e-8 m) at default temperature and viscosity. D ∝ C_c, so D ≈ 2.8231e-11 m²/s — 16.4% larger than the uncorrected default.",
+                    "parameter_overrides": { "C_c": 1.164 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 2.823080406854272e-11 }
+                    ]
+                },
+                {
+                    "id": "small_particle",
+                    "description": "Small particle (D_p = 1.0e-7 m = 100 nm), with the larger slip correction C_c = 2.85 appropriate to that size. D ∝ C_c/D_p, so both a 10× smaller diameter and a larger slip correction raise the diffusivity strongly to ≈ 6.9122e-10 m²/s — about 28× the default value, confirming that smaller particles diffuse much more rapidly.",
+                    "parameter_overrides": { "D_p": 1.0e-7, "C_c": 2.85 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 6.912181408534947e-10 }
+                    ]
+                },
+                {
+                    "id": "large_particle",
+                    "description": "Large particle (D_p = 1.0e-5 m = 10 μm), with the lower slip correction C_c = 1.016 appropriate to that size. D ∝ 1/D_p, so a 10× larger diameter lowers the diffusivity roughly tenfold to ≈ 2.4641e-12 m²/s — large particles sediment rather than diffuse.",
+                    "parameter_overrides": { "D_p": 1.0e-5, "C_c": 1.016 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 2.464132038972458e-12 }
+                    ]
+                },
+                {
+                    "id": "elevated_temperature",
+                    "description": "Elevated temperature (T = 350 K) at default particle size and viscosity. D ∝ T, so a 17.4% increase in temperature raises the diffusivity by the same factor to ≈ 2.8471e-11 m²/s.",
+                    "parameter_overrides": { "T": 350.0 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 2.84710509308835e-11 }
+                    ]
+                },
+                {
+                    "id": "high_viscosity",
+                    "description": "Doubled dynamic viscosity (μ = 3.6e-5 kg/(m·s)) at default particle size and temperature. D ∝ 1/μ, so doubling the viscosity halves the diffusivity to ≈ 1.2127e-11 m²/s — exactly half the default-conditions value.",
+                    "parameter_overrides": { "μ": 3.6e-5 },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        { "variable": "D", "time": 0.0, "expected": 1.212663405006131e-11 }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "size_dependence",
+                    "description": "Sweep particle diameter D_p from 10 nm to 10 μm (log scale) at default temperature (T = 298.15 K), viscosity (μ = 1.8e-5 kg/(m·s)) and slip correction held at unity (C_c = 1.0) to isolate the geometric dependence. The Brownian diffusivity D = k_B*T*C_c/(3π μ D_p) ∝ 1/D_p falls by three decades across the range — smaller particles diffuse far more rapidly, which is why ultrafine aerosol particles have negligible settling but significant diffusional loss to surfaces.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {}
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p",
+                                "range": { "start": 1.0e-8, "stop": 1.0e-5, "count": 50, "scale": "log" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "diffusivity_vs_diameter",
+                            "type": "line",
+                            "description": "Brownian diffusivity D vs particle diameter (log x-axis) — D ∝ 1/D_p, so the curve rises three decades from ≈ 5.9e-13 m²/s at 10 μm to ≈ 5.9e-10 m²/s at 10 nm at fixed slip correction.",
+                            "x": { "variable": "D_p", "label": "D_p (m)" },
+                            "y": { "variable": "D", "label": "D (m^2/s)" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
