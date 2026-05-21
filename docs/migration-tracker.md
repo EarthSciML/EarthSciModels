@@ -30,7 +30,7 @@ schema-gap blockers. This manifest drives per-component Phase-2 migration beads.
 
 | Bucket | Components | Notes |
 |---|---:|---|
-| **Migrated to date** (`status: complete`) | **133** | 133 component `.esm` files committed on `main` — 132 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
+| **Migrated to date** (`status: complete`) | **134** | 134 component `.esm` files committed on `main` — 133 from the `none` "migrate today" set + 1 (`FastJX_interpolation_troposphere`, a `gt-p3ep` row). Each row carries a `status: complete` annotation; the migration-bead generator emits no fresh bead for them. Reconciled file-by-file against disk + the inline-test gate by the esm-nu8du sweep (2026-05-17). |
 | **Migrate today** (`none`) | **215** | Clean ODE/algebraic `@component` models. No schema gaps. Migration is well underway — see the *Migrated to date* row above. |
 | Blocked on `gt-p3ep` (lookup / @register_symbolic) | 26 | AtmDep lookup tables, GasChem Fast-JX, EarthSciData interpolators, WildlandFire fuel tables, Aerosol ISORROPIA-II helpers. `FastJX_interpolation_troposphere` is migrated (`fastjx.esm`) — its lookup gap was resolved by recovering registered functions as AST compositions of the v0.3 `interp.*` named primitives. |
 | Blocked on `gt-kuxo` (brownian / SDE) | 2 | StagePrognosis (Vegetation), BoundaryLayerMixingKC (EnvTransport) |
@@ -177,7 +177,7 @@ All sub-components compile to equation fragments; the TOP-LEVEL `Isorropia` syst
 | KnudsenNumber | `src/mass_transfer.jl:87` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/knudsen.esm` | — |
 | FuchsSutugin | `src/mass_transfer.jl:117` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/fuchs_sutugin.esm` | — |
 | Dahneke | `src/mass_transfer.jl:145` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/dahneke.esm` | — |
-| MaxwellianFlux | `src/mass_transfer.jl:173` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/maxwellian_flux.esm` | — |
+| MaxwellianFlux | `src/mass_transfer.jl:173` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/maxwellian_flux.esm` | — | **status: complete** (esm-esr — `components/aerosol/mass_transfer/maxwellian_flux.esm` committed on `main`, inline-test gate passes: 6P/0F/0E.)
 | ParticleGrowthRate | `src/mass_transfer.jl:200` | Model | variables, parameters, equations | none | S | Y | Y | `components/aerosol/mass_transfer/particle_growth.esm` | — |
 | MassTransferCoefficient | `src/mass_transfer.jl:231` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/mass_transfer_coeff.esm` | — | **status: complete** (esm-f9f — `components/aerosol/mass_transfer/mass_transfer_coeff.esm` committed on `main`, inline-test gate passes: 15P/0F/0E.)
 | UptakeCoefficient | `src/mass_transfer.jl:272` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/mass_transfer/uptake_coeff.esm` | — | **status: complete** (esm-jyo — `components/aerosol/mass_transfer/uptake_coeff.esm` committed on `main`, inline-test gate passes: 13P/0F/0E.)
