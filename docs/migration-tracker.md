@@ -129,7 +129,7 @@ Repo purpose: aerosol microphysics, inorganic/organic aqueous chemistry, ISORROP
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
 | ElementalCarbon | `src/elemental_carbon.jl:13` | Model | variables, parameters, equations (with `DataInterpolations.LinearInterpolation`) | none (data is constants in-place) | S | Y | Y | `components/aerosol/elemental_carbon.esm` | — |
-| HenrysLaw | `src/henrys_law.jl:101` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/henrys_law.esm` | — |
+| HenrysLaw | `src/henrys_law.jl:101` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/henrys_law.esm` | — | **status: complete** (esm-3ro — `components/aerosol/henrys_law/henrys_law.esm` committed on `main`, inline-test gate passes: 4P/0F/0E.)
 | HenrysLawTemperature | `src/henrys_law.jl:155` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/henrys_law_temperature.esm` | — |
 | EffectiveHenrysLaw | `src/henrys_law.jl:240` | Model | variables, parameters, observed | none | S | Y | Y | `components/aerosol/henrys_law/effective_henrys_law.esm` | — | **status: complete** (esm-kon — `components/aerosol/henrys_law/effective_henrys_law.esm` committed on `main`, inline-test gate passes: 4P/0F/0E.)
 
