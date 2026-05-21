@@ -87,7 +87,7 @@ from typing import Dict, List, Optional, Tuple
 # Configuration
 # ---------------------------------------------------------------------------
 
-DEFAULT_ROOTS = ["components", "lib"]
+DEFAULT_ROOTS = ["components", "lib", "registered_functions"]
 DEFAULT_REL_TOL = 1e-6
 
 # Per-subprocess hard memory ceiling. 6 GiB leaves headroom on the 16 GiB
@@ -618,9 +618,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument(
         "--root", action="append", default=None,
         help="Root directory to search for .esm files. May be passed "
-             "multiple times. Defaults to ./components and ./lib "
+             "multiple times. Defaults to ./components, ./lib, and "
+             "./registered_functions "
              "(mdl-14s: lib/ included so structural-validation drift in "
-             "lib/*.esm is caught at PR time). Mutually exclusive with --files.",
+             "lib/*.esm is caught at PR time; esm-1rhq: registered_functions/ "
+             "added for standalone registered-function lookup tables). "
+             "Mutually exclusive with --files.",
     )
     ap.add_argument(
         "--files", nargs="+", default=None,
