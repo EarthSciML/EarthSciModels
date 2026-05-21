@@ -772,17 +772,24 @@ def _render_time_series_line_plot(
 def _initial_state_values(example: Example) -> dict[str, float] | None:
     """Extract per-variable initial values from `example.initial_state`.
 
-    Only the `per_variable` form is supported here — other forms (constant,
-    function, data) would require additional schema plumbing or external
-    sources and are out of scope for the renderer's purpose (illustrative
-    plots derived purely from the .esm file).
+    Only the `per_variable` form with scalar values is supported here —
+    other forms (constant, function, data) and expression-typed values
+    (used by PDE field ICs) would require additional schema plumbing or
+    external sources and are out of scope for the renderer's purpose
+    (illustrative plots derived purely from the .esm file). Non-scalar
+    values are silently skipped so PDE examples render with their state
+    defaults instead of crashing the renderer.
     """
     ic = example.initial_state
     if ic is None:
         return None
-    if getattr(ic, "values", None):
-        return {name: float(v) for name, v in ic.values.items()}
-    return None
+    if not getattr(ic, "values", None):
+        return None
+    scalar: dict[str, float] = {}
+    for name, v in ic.values.items():
+        if isinstance(v, (int, float)):
+            scalar[name] = float(v)
+    return scalar or None
 
 
 def _state_defaults(model: Any) -> dict[str, float]:
