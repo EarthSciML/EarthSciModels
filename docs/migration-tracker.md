@@ -512,7 +512,7 @@ Repo purpose: gas-phase chemistry (SuperFast, GEOS-Chem full-chem, Pollu, Fast-J
 | cos_solar_zenith_angle | `src/Fast-JX.jl:1049` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/cos_solar_zenith_angle` | — |
 | calc_direct_flux | `src/Fast-JX.jl:1065` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/calc_direct_flux` | — |
 | calc_direct_fluxes | `src/Fast-JX.jl:1082` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/calc_direct_fluxes` | — |
-| flux_interp_1..18 | `src/interpolations_FastJX.jl:36-53` | Interface | @register_symbolic (one per reaction channel) | gt-p3ep(lookup) | S each | Y | Y | `registered_functions/flux_interp_{1..18}` | — |
+| flux_interp_1..18 | `src/interpolations_FastJX.jl:36-53` | Interface | @register_symbolic (one per reaction channel) | gt-p3ep(lookup) | S each | Y | Y | `registered_functions/flux_interp_{1..18}` | — | **status: complete** (esm-9vcj — migrated as `registered_functions/flux_interp_{1..18}.esm` (18 files); gt-p3ep resolved by interp.bilinear over the precomputed Z_all[i] table (23 P × 61 cosSZA); 3 tests × 18 files = 54 assertions pass.) |
 
 ### 9.3 Fast-JX couplings
 
