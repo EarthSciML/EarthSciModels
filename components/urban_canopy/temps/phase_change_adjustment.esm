@@ -1,0 +1,713 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PhaseChangeAdjustment",
+        "description": "Per-layer phase-change adjustment for ice/liquid water redistribution and temperature correction in the urban canopy thermal column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:686 (`PhaseChangeAdjustment` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.60–4.65: given the excess/deficit energy H_i (W/m²) available for phase change in layer i (from `PhaseChangeEnergy`), recompute ice mass w_ice^{n+1}, liquid water mass w_liq^{n+1}, and layer temperature T^{n+1}. Melting occurs when H_i > 0 (surplus energy melts ice up to available mass); freezing occurs when H_i < 0 (deficit energy freezes liquid water). Residual energy H_res = H_i - L_f*(w_ice^n - w_ice^{n+1})/Δt that cannot drive further phase change adjusts the layer temperature. The upstream MTK component is parameterized at construction time by `layer_type ∈ {:interior, :top}`. The two variants share equations 1–4 (Eqs. 4.60–4.64) and differ only in Eq. 4.65 (temperature correction): the :top variant divides by (1 - (Δt/(c_i*Δz_i))*dh_dT) to account for the linearized surface-heat-flux feedback; the :interior variant uses the denominator = 1 (no surface feedback). Both variants are unified here via a dimensionless switch parameter `is_top` (0.0 = interior, 1.0 = top), identical to the unification strategy used by the sibling `PhaseChangeEnergy` component. NOTE: the migration-tracker entry for this component listed `blocking_gap: other:discretization-plan` citing line :1227, but that line belongs to `RoadHeatConduction` (a separate non-exported helper function). `PhaseChangeAdjustment` itself is a pure algebraic MTK `@component` with no PDESystem or MOLFiniteDifference — this migration is unblocked.",
+        "tags": [
+            "urban_canopy",
+            "temperatures",
+            "phase_change",
+            "snow",
+            "soil",
+            "ice",
+            "observed-only",
+            "clmu"
+        ],
+        "created": "2026-05-21T00:00:00Z",
+        "authors": [
+            "UrbanCanopy.jl contributors",
+            "EarthSciModels migration (esm-eya8)"
+        ],
+        "references": [
+            {
+                "citation": "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 4, Section 4.5 (Urban temperature solution — phase-change adjustments), Eqs. 4.60–4.65, pp. 103–106."
+            }
+        ]
+    },
+    "models": {
+        "PhaseChangeAdjustment": {
+            "reference": {
+                "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:686\n\nUpstream `PhaseChangeAdjustment` is an MTK `@component` keyword-parameterized by `layer_type ∈ {:interior, :top}` (default `:interior`). It declares three `@constants` (T_f = 273.15 K, L_f = 3.337e5 J/kg, zero_kgm2 = 0.0 kg/m²), six shared `@parameters` (H_i, w_ice_n, w_liq_n, Δt, c_i, Δz_i), and five `@variables` (H_m, w_ice_np1, w_liq_np1, H_residual, T_np1). The `:top` variant adds one `@parameter` (dh_dT). All five equations are shared across variants except Eq. 4.65: the `:top` variant divides the temperature correction by (1 - coeff*dh_dT) and the `:interior` variant uses denominator = 1.\n\nVariant unification: following the sibling `PhaseChangeEnergy` component, both variants are merged into a single model gated by a dimensionless switch parameter `is_top` (default 0.0 = interior layer). The merged Eq. 4.65 is:\n\n  T_np1 = T_f + (Δt/(c_i*Δz_i)) * H_residual / (1 - is_top * (Δt/(c_i*Δz_i)) * dh_dT)\n\nWhen is_top = 0.0: denominator = 1 (interior, Eq. 4.65b); when is_top = 1.0: denominator = 1 - coeff*dh_dT (top, Eq. 4.65a). IEEE-754 exact: 0.0 * x = 0.0 for finite x; 1.0 * x = x. The dead parameter `dh_dT` is declared but multiplied by is_top — when is_top=0 it contributes nothing to the result.\n\nEquations 1–4 (shared):\n  Eq. 4.60: H_m = H_i * Δt / L_f   (mass change potential, kg/m²)\n  Eq. 4.61/4.62: w_ice^{n+1} = ifelse(H_m > 0, max(w_ice^n - H_m, 0), min(w_liq^n + w_ice^n, w_ice^n - H_m))\n    → melting: max ensures ice cannot go negative; freezing: min ensures ice cannot exceed total water\n  Eq. 4.63: w_liq^{n+1} = max(w_liq^n + w_ice^n - w_ice^{n+1}, 0)\n    → total water conservation: w_liq + w_ice = const (held by construction)\n  Eq. 4.64: H_residual = H_i - L_f * (w_ice^n - w_ice^{n+1}) / Δt\n    → residual energy not consumed by phase change; = 0 when exact melt/freeze occurs\n\nObservability classification: observed-only — all five variables are algebraic functions of parameters with no time derivatives. Test scenarios use `time_span: [0, 1]` and sample at t=0, following the convention of sibling observed-only ESM files in this rig.\n\nGreek parameter names Δt and Δz_i are preserved verbatim from upstream (matches sibling `layer_phase_change_energy.esm` which uses Δt, `phase_change_energy.esm` which uses Δz_i and Δt, `snow_melt_no_layers.esm` which uses Δt and Δz_snow_0). The upstream `@constants` T_f, L_f, zero_kgm2 are encoded as fixed-default parameters per the rig convention (matches `snow_melt_no_layers.esm`, `layer_phase_change_energy.esm`, `freezing_point_depression.esm`).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system; the equations involve multiplication, division, max/min/ifelse, and IEEE-754 ULP precision ~1e-16. rel=1e-9 follows the convention of sibling observed-only files. The abs=1e-12 gating on exact-zero outputs prevents silent stuck-at-zero regressions. Per-assertion rel=1e-10 is applied to the upstream-canonical test cases (matching upstream `rtol = 1.0e-10` at roof_wall_road_snow_temperatures_test.jl).\n\nTracker note: the bead tracker entry for this component listed `blocking_gap: other:discretization-plan` with a reference to line :1227 in the source file. That line is inside `RoadHeatConduction` (a private helper function at line 1181), not `PhaseChangeAdjustment`. The `PhaseChangeAdjustment` MTK `@component` contains no PDESystem, no MOLFiniteDifference call, and no spatial discretization — it is purely algebraic and requires no discretization plan for migration."
+            },
+            "tolerance": {
+                "rel": 1.0e-9
+            },
+            "variables": {
+                "T_f": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Freezing temperature of water (Oleson Table 1.4) — upstream `@constants` T_f = 273.15 K; threshold the phase-change adjustment corrects the layer temperature toward"
+                },
+                "L_f": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 333700.0,
+                    "description": "Latent heat of fusion of water (Oleson Table 1.4) — upstream `@constants` L_f = 3.337e5 J/kg; converts phase-change energy to mass"
+                },
+                "zero_kgm2": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 0.0,
+                    "description": "Zero mass reference — upstream `@constants` zero_kgm2 = 0.0 kg/m²; lower bound for ice and liquid water in max/min clamps"
+                },
+                "H_i": {
+                    "type": "parameter",
+                    "units": "W/m^2",
+                    "default": 50.0,
+                    "description": "Excess or deficit energy available for phase change in layer i (Oleson Eq. 4.59, output of `PhaseChangeEnergy`). H_i > 0: energy surplus for melting; H_i < 0: energy deficit for freezing."
+                },
+                "w_ice_n": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 10.0,
+                    "description": "Ice mass at time n (kg/m²) — input from the temperature column state at the start of the timestep"
+                },
+                "w_liq_n": {
+                    "type": "parameter",
+                    "units": "kg/m^2",
+                    "default": 5.0,
+                    "description": "Liquid water mass at time n (kg/m²) — input from the temperature column state at the start of the timestep"
+                },
+                "Δt": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 3600.0,
+                    "description": "Integration timestep (Oleson Eq. 4.60) — used to convert H_i (W/m²) to H_m (kg/m²) and to compute H_residual from mass change"
+                },
+                "c_i": {
+                    "type": "parameter",
+                    "units": "J/(m^3*K)",
+                    "default": 2000000.0,
+                    "description": "Volumetric heat capacity of layer i (Oleson Eq. 4.65) — used to compute the thermal inertia coefficient Δt/(c_i*Δz_i) in the temperature correction"
+                },
+                "Δz_i": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Thickness of layer i (Oleson Eq. 4.65) — layer depth entering the thermal inertia coefficient Δt/(c_i*Δz_i)"
+                },
+                "dh_dT": {
+                    "type": "parameter",
+                    "units": "W/(m^2*K)",
+                    "default": 0.0,
+                    "description": "Linearization slope of the surface heat flux with respect to layer-1 temperature (Oleson Eq. 4.65 top-layer denominator term). Active only when is_top = 1.0; multiplied by zero when is_top = 0.0 (interior variant)."
+                },
+                "is_top": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Dimensionless switch: 0.0 selects the interior-layer variant of Eq. 4.65 (denominator = 1), 1.0 selects the top-layer variant (denominator = 1 - coeff*dh_dT). Matches the upstream `layer_type ∈ {:interior, :top}` parameter."
+                },
+                "H_m": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Mass-change potential (Oleson Eq. 4.60): H_m = H_i * Δt / L_f. Positive: mass available for melting; negative: mass available for freezing."
+                },
+                "w_ice_np1": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Ice mass at time n+1 (Oleson Eqs. 4.61–4.62): melting branch max(w_ice^n - H_m, 0); freezing branch min(w_liq^n + w_ice^n, w_ice^n - H_m). Always non-negative; conserves total water mass with w_liq^{n+1}."
+                },
+                "w_liq_np1": {
+                    "type": "state",
+                    "units": "kg/m^2",
+                    "description": "Liquid water mass at time n+1 (Oleson Eq. 4.63): max(w_liq^n + w_ice^n - w_ice^{n+1}, 0). Always non-negative; total water w_ice^{n+1} + w_liq^{n+1} = w_ice^n + w_liq^n by construction."
+                },
+                "H_residual": {
+                    "type": "state",
+                    "units": "W/m^2",
+                    "description": "Residual energy after phase change (Oleson Eq. 4.64): H_i - L_f*(w_ice^n - w_ice^{n+1})/Δt. Zero when exact phase change absorbs all H_i; nonzero when the ice/liquid reservoir is exhausted before all energy is consumed."
+                },
+                "T_np1": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Layer temperature at time n+1 (Oleson Eq. 4.65): T_f + (Δt/(c_i*Δz_i)) * H_residual / (1 - is_top*(Δt/(c_i*Δz_i))*dh_dT). Equals T_f when H_residual = 0 (all energy consumed by phase change). Rises above T_f (melting) or falls below T_f (freezing) when H_residual ≠ 0."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "H_m",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            { "op": "*", "args": ["H_i", "Δt"] },
+                            "L_f"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_ice_np1",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            { "op": ">", "args": ["H_m", "zero_kgm2"] },
+                            {
+                                "op": "max",
+                                "args": [
+                                    { "op": "-", "args": ["w_ice_n", "H_m"] },
+                                    "zero_kgm2"
+                                ]
+                            },
+                            {
+                                "op": "min",
+                                "args": [
+                                    { "op": "+", "args": ["w_liq_n", "w_ice_n"] },
+                                    { "op": "-", "args": ["w_ice_n", "H_m"] }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "w_liq_np1",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            {
+                                "op": "-",
+                                "args": [
+                                    { "op": "+", "args": ["w_liq_n", "w_ice_n"] },
+                                    "w_ice_np1"
+                                ]
+                            },
+                            "zero_kgm2"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "H_residual",
+                    "rhs": {
+                        "op": "-",
+                        "args": [
+                            "H_i",
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "L_f",
+                                            { "op": "-", "args": ["w_ice_n", "w_ice_np1"] }
+                                        ]
+                                    },
+                                    "Δt"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "T_np1",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "T_f",
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "Δt",
+                                                    { "op": "*", "args": ["c_i", "Δz_i"] }
+                                                ]
+                                            },
+                                            "H_residual"
+                                        ]
+                                    },
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "is_top",
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "Δt",
+                                                                    { "op": "*", "args": ["c_i", "Δz_i"] }
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    "dh_dT"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "upstream_interior_H_m",
+                    "description": "Reproduces the H_m assertion from upstream `PhaseChangeAdjustment Interior - Melting` test (UrbanCanopy.jl test/roof_wall_road_snow_temperatures_test.jl:682). Interior variant. H_i = 50 W/m², Δt = 3600 s, L_f = 333700.0 J/kg → H_m = 50*3600/333700.0 = 0.5394066526820498 kg/m². rtol=1e-10 matches upstream `rtol = 1.0e-10`.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 50.0,
+                        "w_ice_n": 10.0,
+                        "w_liq_n": 5.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "H_m",
+                            "time": 0.0,
+                            "expected": 0.5394066526820498,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_interior_melting_mass_conservation",
+                    "description": "Reproduces the mass-conservation assertion from upstream `PhaseChangeAdjustment Interior - Melting` test (:682): w_ice^{n+1} + w_liq^{n+1} = w_ice^n + w_liq^n = 15.0 kg/m². Interior melting: H_i=50, w_ice_n=10, w_liq_n=5, partial melt consumes 0.5394 kg/m² ice. H_residual = 0 (exact melt), T_np1 = T_f = 273.15 K.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 50.0,
+                        "w_ice_n": 10.0,
+                        "w_liq_n": 5.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 9.46059334731795,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 5.53940665268205,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-8 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 273.15,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_interior_freezing_mass_conservation",
+                    "description": "Reproduces the mass-conservation assertion from upstream `PhaseChangeAdjustment Interior - Freezing` test (:722): w_ice^{n+1} + w_liq^{n+1} = 15.0 kg/m². Interior freezing: H_i=-50, w_ice_n=5, w_liq_n=10; partial freeze converts 0.5394 kg/m² of liquid to ice. H_residual = 0, T_np1 = T_f = 273.15 K.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": -50.0,
+                        "w_ice_n": 5.0,
+                        "w_liq_n": 10.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 5.53940665268205,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 9.46059334731795,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-8 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 273.15,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "upstream_top_temperature_correction",
+                    "description": "Reproduces upstream `PhaseChangeAdjustment Top - Temperature Correction` test (:754). Top variant: H_i=10, w_ice_n=20, w_liq_n=5, Δt=3600, c_i=2e6, Δz_i=0.1, dh_dT=-10. H_m = 0.1079 < w_ice_n = 20 → partial melt, H_residual = 0, T_np1 = T_f = 273.15 K. Upstream test checks T_np1 = T_f + coeff*H_res / (1 - coeff*dh_dT) = 273.15 + 0 = 273.15 K.",
+                    "parameter_overrides": {
+                        "is_top": 1.0,
+                        "H_i": 10.0,
+                        "w_ice_n": 20.0,
+                        "w_liq_n": 5.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1,
+                        "dh_dT": -10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 273.15,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-8 }
+                        }
+                    ]
+                },
+                {
+                    "id": "interior_no_phase_change",
+                    "description": "H_i = 0: H_m = 0, freezing branch taken (> is strict), w_ice_np1 = min(w_liq+w_ice, w_ice-0) = min(5,3) = 3 (unchanged), w_liq_np1 = max(2+3-3, 0) = 2 (unchanged), H_residual = 0, T_np1 = T_f. Confirms the strict > ensures no spurious phase change at H_i = 0.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 0.0,
+                        "w_ice_n": 3.0,
+                        "w_liq_n": 2.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 3.0,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 2.0,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-12 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 273.15,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "interior_complete_melt_with_residual",
+                    "description": "Complete melting: H_i = 1000 W/m², w_ice_n = 0.5 kg/m², w_liq_n = 0. H_m = 10.789 >> w_ice_n; ice fully melts (w_ice_np1 = 0, w_liq_np1 = 0.5). H_residual = 1000 - L_f*0.5/Δt = 1000 - 46.347 = 953.653 W/m². Interior T_np1 = T_f + coeff*H_res = 273.15 + 0.018*953.653 = 290.316 K (layer warms above T_f after ice is exhausted).",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 1000.0,
+                        "w_ice_n": 0.5,
+                        "w_liq_n": 0.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-12 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 953.6527777777778,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 290.3157500000000,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "interior_complete_freeze_with_deficit",
+                    "description": "Complete freezing: H_i = -1000 W/m², w_ice_n = 0.0, w_liq_n = 0.5 kg/m². H_m = -10.789; freezing branch: w_ice_np1 = min(0+0.5, 0+10.789) = 0.5 (all liquid frozen). H_residual = -1000 + L_f*0.5/Δt = -953.653 W/m². T_np1 = T_f - 17.166 = 255.984 K (layer cools below T_f after liquid is exhausted).",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": -1000.0,
+                        "w_ice_n": 0.0,
+                        "w_liq_n": 0.5,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-12 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": -953.6527777777778,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 255.98425000000002,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "top_complete_melt_dh_dT_dampening",
+                    "description": "Top variant with complete melt and dh_dT = -10: same H_residual as `interior_complete_melt_with_residual` (953.653 W/m²), but the denominator 1 - coeff*dh_dT = 1 - 0.018*(-10) = 1.18 reduces the temperature correction. T_np1 = 273.15 + 17.1658/1.18 = 273.15 + 14.547 = 287.697 K (less warming than interior despite same H_residual — negative dh_dT indicates the surface flux decreases as T rises, providing negative feedback that damps the temperature overshoot).",
+                    "parameter_overrides": {
+                        "is_top": 1.0,
+                        "H_i": 1000.0,
+                        "w_ice_n": 0.5,
+                        "w_liq_n": 0.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1,
+                        "dh_dT": -10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 953.6527777777778,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 287.69724576271186,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "dry_layer_no_ice_no_liquid",
+                    "description": "Dry layer: w_ice_n = 0, w_liq_n = 0. Melting branch (H_i > 0): w_ice_np1 = max(0 - H_m, 0) = 0; w_liq_np1 = max(0 + 0 - 0, 0) = 0. H_residual = H_i (entire energy goes to temperature, no phase change). T_np1 = T_f + coeff * H_i. Confirms the equations handle the zero-water edge case without division by zero or mass creation.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 100.0,
+                        "w_ice_n": 0.0,
+                        "w_liq_n": 0.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "w_ice_np1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-12 }
+                        },
+                        {
+                            "variable": "w_liq_np1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": { "abs": 1.0e-12 }
+                        },
+                        {
+                            "variable": "H_residual",
+                            "time": 0.0,
+                            "expected": 100.0,
+                            "tolerance": { "rel": 1.0e-10 }
+                        },
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 274.95,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                },
+                {
+                    "id": "top_is_top_dead_dh_dT_ignored",
+                    "description": "is_top = 0.0: the dh_dT multiplier is 0, so even a huge dh_dT = 1e6 must not affect T_np1. With H_i = 100 W/m², w_ice_n = w_liq_n = 0 (dry layer): H_residual = 100, T_np1 = 273.15 + 0.018*100 / (1 - 0*0.018*1e6) = 273.15 + 1.8 = 274.95 K. Confirms the is_top=0 masking is exact.",
+                    "parameter_overrides": {
+                        "is_top": 0.0,
+                        "H_i": 100.0,
+                        "w_ice_n": 0.0,
+                        "w_liq_n": 0.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1,
+                        "dh_dT": 1000000.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "assertions": [
+                        {
+                            "variable": "T_np1",
+                            "time": 0.0,
+                            "expected": 274.95,
+                            "tolerance": { "rel": 1.0e-10 }
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "phase_change_sweep_H_i",
+                    "description": "Sweep H_i over [-500, 500] W/m² (interior, w_ice_n=5, w_liq_n=5) to surface the piecewise-linear phase-change response. For |H_i| small: partial melt or freeze (H_residual ≈ 0, T_np1 ≈ T_f, ice/liquid mass change proportionally). For large H_i: ice exhausted (w_ice_np1 = 0, H_residual > 0, T_np1 > T_f). For large negative H_i: liquid exhausted (w_liq_np1 = 0, H_residual < 0, T_np1 < T_f). Exercises all three regimes of Eqs. 4.60–4.65.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {
+                        "is_top": 0.0,
+                        "w_ice_n": 5.0,
+                        "w_liq_n": 5.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_i",
+                                "range": { "start": -500.0, "stop": 500.0, "count": 101, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "ice_mass_vs_H_i",
+                            "type": "line",
+                            "description": "w_ice_np1 vs H_i: constant w_ice_n for H_i < 0 (freezing branch, ice grows), linear decrease for H_i > 0 (melting), clamped to 0 once all ice melts.",
+                            "x": { "variable": "H_i", "label": "H_i (W/m²)" },
+                            "y": { "variable": "w_ice_np1", "label": "w_ice^{n+1} (kg/m²)" }
+                        },
+                        {
+                            "id": "T_np1_vs_H_i",
+                            "type": "line",
+                            "description": "T_np1 vs H_i (interior): flat at T_f while phase change consumes all H_i; departs below T_f (complete freeze) or above T_f (complete melt) with slope Δt/(c_i*Δz_i) = 0.018 K/(W/m²).",
+                            "x": { "variable": "H_i", "label": "H_i (W/m²)" },
+                            "y": { "variable": "T_np1", "label": "T_np1 (K)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "top_vs_interior_temperature_correction",
+                    "description": "Compare top variant (is_top=1, dh_dT=-10) vs interior variant (is_top=0) temperature correction as a function of H_i for a dry layer (w_ice_n=0, w_liq_n=0) where H_residual = H_i. The top variant denominator 1.18 damps the temperature response by ≈15% relative to the interior variant. Surfaces the physical role of the dh_dT linearization in reducing the temperature overshoot.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {
+                        "w_ice_n": 0.0,
+                        "w_liq_n": 0.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1,
+                        "dh_dT": -10.0
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_i",
+                                "range": { "start": -1000.0, "stop": 1000.0, "count": 81, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "is_top",
+                                "values": [0.0, 1.0]
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "T_np1_interior_vs_top",
+                            "type": "line",
+                            "description": "T_np1 vs H_i for interior (is_top=0) and top (is_top=1, dh_dT=-10) variants on a dry layer. Both are linear; top variant has shallower slope by factor 1/1.18.",
+                            "x": { "variable": "H_i", "label": "H_i (W/m²)" },
+                            "y": { "variable": "T_np1", "label": "T_np1 (K)" }
+                        }
+                    ]
+                },
+                {
+                    "id": "two_d_sweep_H_i_w_ice",
+                    "description": "2-D sweep over (H_i ∈ [-500, 500] W/m², w_ice_n ∈ [0, 20] kg/m²) at fixed w_liq_n = 5 kg/m² (interior). Shows the phase-change saturation ridge: for large positive H_i, T_np1 departs from T_f more steeply when w_ice_n is small (ice exhausted quickly); for large negative H_i, T_np1 departs when w_liq_n is exhausted.",
+                    "initial_state": { "type": "per_variable", "values": {} },
+                    "parameters": {
+                        "is_top": 0.0,
+                        "w_liq_n": 5.0,
+                        "Δt": 3600.0,
+                        "c_i": 2000000.0,
+                        "Δz_i": 0.1
+                    },
+                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "H_i",
+                                "range": { "start": -500.0, "stop": 500.0, "count": 41, "scale": "linear" }
+                            },
+                            {
+                                "parameter": "w_ice_n",
+                                "range": { "start": 0.0, "stop": 20.0, "count": 21, "scale": "linear" }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "T_np1_heatmap_H_i_w_ice",
+                            "type": "heatmap",
+                            "description": "T_np1 in (H_i, w_ice_n) space: T_f plateau (273.15 K) where phase change absorbs all H_i; above-T_f region (top-right, large H_i / small w_ice) where ice is exhausted; near-T_f region (bottom-left, negative H_i / large w_ice) where ample ice capacity prevents temperature drop.",
+                            "x": { "variable": "H_i", "label": "H_i (W/m²)" },
+                            "y": { "variable": "w_ice_n", "label": "w_ice^n (kg/m²)" },
+                            "value": { "variable": "T_np1", "reduce": "final" }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
