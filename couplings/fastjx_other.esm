@@ -1,0 +1,78 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "FastJXTroposphericChemistryCoupling",
+        "description": "Coupling interface routing FastJX photolysis rates to the TroposphericChemistrySystem via param_to_var. Two mappings: (1) FastJX j_O31D → TroposphericChemistrySystem.oh.j_O3 supplies the O(¹D) production rate driving OH generation (OHProduction subsystem, Seinfeld & Pandis §5.2); (2) FastJX j_NO2 → TroposphericChemistrySystem.nox.j_NO2 supplies the NO₂ photolysis rate driving the Leighton photostationary-state cycle (NOxPhotochemistry subsystem, S&P §6.2).\n\nBlocking gap gt-p3ep (inherits): FastJX gt-p3ep was resolved by esm-lnl6 via inline Spencer-Fourier solar zenith angle + bilinear actinic-flux interpolation over the precomputed Z_all[i] table (replacing the calc_direct_flux / flux_interp registered-symbolic chain). No additional gap for this coupling interface.\n\nSource: GasChem.jl@8c12c048 src/fastjx_couplings.jl:113.",
+        "tags": [
+            "gaschem",
+            "fastjx",
+            "photolysis",
+            "coupling",
+            "tropospheric_chemistry",
+            "param_to_var",
+            "oh_production",
+            "nox_photochemistry"
+        ],
+        "created": "2026-05-22T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-2kv8)"
+        ],
+        "references": [
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.). Wiley. Ch. 5 §5.2 (OH production via O(¹D)+H₂O) and Ch. 6 §6.2 (Leighton NO-NO₂-O₃ photostationary state). — physics context for the two J-rate mappings."
+            },
+            {
+                "citation": "Wild, O., Zhu, X., & Prather, M. J. (2000). Fast-J: Accurate simulation of in- and below-cloud photolysis in tropospheric chemical models. Journal of Atmospheric Chemistry, 37(3), 245–282. — FastJX photolysis rate computation basis."
+            },
+            {
+                "citation": "Prather, M. J. (2015). Photolysis rates in correlated overlapping cloud fields: Cloud-J 7.3c. Geoscientific Model Development, 8(8), 2587–2595. — Fast-JX heritage and J-rate variable naming."
+            }
+        ]
+    },
+    "models": {
+        "FastJX": {
+            "reference": {
+                "notes": "Coupling-interface stub: declares the two J-rate observed variables used in this coupling file. Full model definition with all 13 J-rates, 18 actinic-flux channels, σ/ϕ interpolation tables, and solar zenith angle computation lives in components/gaschem/fastjx/fastjx.esm (migrated by esm-lnl6). gt-p3ep resolved there via inline Spencer-Fourier + bilinear flux-lookup; no additional gap here.\n\nUpstream: GasChem.jl@8c12c048 src/Fast-JX.jl:1276."
+            },
+            "variables": {
+                "j_O31D": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 5.8e-6,
+                    "description": "O₃→O(¹D) photolysis rate (s⁻¹). j_O31D = Σᵢ Fᵢ·σ_O3,ᵢ·ϕ_O31D,ᵢ(T) where ϕ_O31D,ᵢ(T) is the temperature-dependent O(¹D) quantum yield (JPL-10 Eq. 4-55, linearly interpolated between 200 K and 320 K for each of the 18 Fast-JX wavelength bins). Default 5.8e-6 s⁻¹ is the typical-noon equatorial surface value from S&P Fig. 4.15. Full computed value from FastJX replaces this default at runtime. Routed by this coupling to TroposphericChemistrySystem.oh.j_O3."
+                },
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 8.0e-3,
+                    "description": "NO₂ photolysis rate (s⁻¹). j_NO2 = Σᵢ Fᵢ·σ_NO2,ᵢ·ϕ_NO2 at the 18 Fast-JX wavelength bins (JPL-10 cross-section and unit quantum yield ϕ_NO2=1). Default 8.0e-3 s⁻¹ is the typical-midday surface value (matches NOxPhotochemistry.j_NO2 default). Full computed value from FastJX replaces this default at runtime. Routed by this coupling to TroposphericChemistrySystem.nox.j_NO2."
+                }
+            },
+            "equations": []
+        },
+        "TroposphericChemistrySystem": {
+            "reference": {
+                "notes": "Coupling-interface stub: target system for the J-rate mappings. Full model definition (NOxPhotochemistry + OHProduction + COOxidation subsystems, 14 coupling equations, 9 diagnostics) lives in components/gaschem/combined/tropospheric_chemistry.esm (migrated by esm-nu8du sweep). The coupling targets subsystem parameters TroposphericChemistrySystem.oh.j_O3 (OHProduction.j_O3) and TroposphericChemistrySystem.nox.j_NO2 (NOxPhotochemistry.j_NO2).\n\nUpstream: GasChem.jl@8c12c048 src/combined_system.jl:54."
+            },
+            "variables": {},
+            "equations": []
+        }
+    },
+    "coupling": [
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_O31D",
+            "to": "TroposphericChemistrySystem.oh.j_O3",
+            "transform": "param_to_var",
+            "description": "Route FastJX O₃→O(¹D) photolysis rate to OHProduction.j_O3 inside TroposphericChemistrySystem. FastJX j_O31D = Σᵢ Fᵢ·σ_O3,ᵢ·ϕ_O31D,ᵢ(T) where ϕ_O31D,ᵢ(T) is the temperature-dependent O(¹D) quantum yield (JPL-10 Eq. 4-55, linearly interpolated between 200 K and 320 K for each of the 18 wavelength bins). OHProduction uses j_O3 (= j_O31D in S&P notation) to compute OH ~ 2·k4·(RO1DplH2O/RO1D)·j_O3·O3/k3 (S&P Eq. 5.9). Units: s⁻¹ (both sides)."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_NO2",
+            "to": "TroposphericChemistrySystem.nox.j_NO2",
+            "transform": "param_to_var",
+            "description": "Route FastJX NO₂ photolysis rate to NOxPhotochemistry.j_NO2 inside TroposphericChemistrySystem. FastJX j_NO2 = Σᵢ Fᵢ·σ_NO2,ᵢ·ϕ_NO2 (s⁻¹) at the 18 Fast-JX wavelength bins. NOxPhotochemistry uses j_NO2 to compute O ~ j_NO2·NO2/(k_O_O2_M·O2·M) (S&P Eq. 6.5), O3_pss ~ j_NO2·NO2/(k_NO_O3·NO) (Eq. 6.6), Φ ~ j_NO2·NO2/(k_NO_O3·NO·O3) (Eq. 6.7), and P_O3 ~ j_NO2·NO2 − k_NO_O3·NO·O3 (Eq. 6.8). Units: s⁻¹ (both sides)."
+        }
+    ]
+}
