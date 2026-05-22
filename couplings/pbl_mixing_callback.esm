@@ -1,0 +1,79 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "PBLMixingCallback",
+        "description": "Planetary boundary layer (PBL) vertical full-mixing callback for coupled 3-D atmospheric transport models. Applied periodically (default every 3600 s = 1 hour) or at every ODE integration step; reads the PBL height and horizontal grid-cell area diagnostics from the coupled system and performs mass-weighted vertical mixing of all tracer species across the atmospheric boundary layer column.\n\nBlocking gap: other:P2-C — the callback operates by direct in-place mutation of the ODE integrator state array (integrator.u), which requires a registered EarthSciMLBase operator implementing the pbl_full_mix! algorithm at runtime. The ESM schema FunctionalAffect mechanism supports this dispatch pattern, but the pbl_mixing.full_mix handler has not yet been registered in EarthSciMLBase. This file declares the operator interface and periodic-coupling contract so that the EarthSciMLBase registration can reference this handler_id when the gap is closed. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0 src/PBL_mixing.jl:183.",
+        "tags": [
+            "environmental_transport",
+            "boundary_layer",
+            "pbl",
+            "mixing",
+            "callback",
+            "coupling"
+        ],
+        "created": "2026-05-22T00:00:00Z",
+        "authors": [
+            "EnvironmentalTransport.jl contributors",
+            "EarthSciModels migration (esm-d8do)"
+        ],
+        "references": [
+            {
+                "citation": "GEOS-Chem vertical grids. Harvard GEOS-Chem Wiki. https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids — 73-level GEOS-FP Ap/Bp hybrid-sigma pressure coordinate (pedges_73) used to locate the PBL top pressure."
+            },
+            {
+                "citation": "Lin, S.-J., & Rood, R. B. (1996). Multidimensional flux-form semi-Lagrangian transport schemes. Monthly Weather Review, 124(9), 2046–2070. — GEOS-FP hybrid vertical coordinate motivation and Ap/Bp table structure."
+            },
+            {
+                "citation": "Stull, R. B. (1988). An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers. — PBL height as the mixing-layer depth; mass-weighted vertical averaging as the full-mixing approximation."
+            }
+        ]
+    },
+    "models": {
+        "PBLMixingCallback": {
+            "reference": {
+                "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/PBL_mixing.jl:183\n\nUpstream PBLMixingCallback is a mutable struct with two fields:\n  interval::Float64  (default 3600.0 s)\n  every_step::Bool   (default false)\n\nIt extends EarthSciMLBase.init_callback, which is called once at solve() time to build and return either:\n  PeriodicCallback(apply_pbl_mixing!, cb.interval)  when every_step==false\n  DiscreteCallback((u,t,integrator)->true, apply_pbl_mixing!)  when every_step==true\n\nThe apply_pbl_mixing! closure captures, at init_callback time:\n  (a) grid — the spatial grid from domain (grd[1]=x, grd[2]=y, grd[3]=z level indices)\n  (b) pblh_data_f, delta_x_delta_lon_data_f, delta_y_delta_lat_data_f — observed-variable functions\n      built via pbl_obs_function(sys_mtk, coord_args, vars[i], T) for i=1..3;\n      vars = EarthSciMLBase.get_needed_vars(cb, csys, sys_mtk, domain) yields the\n      three system variables that supply pblh (m), delta_x_delta_lon (m/rad), delta_y_delta_lat (m/rad).\n  (c) pedge_domain — GEOS-FP pressure edges (hPa) for the domain vertical levels,\n      extracted from the 73-level Ap/Bp table via extract_domain_pressure_edges.\n  (d) dx, dy — grid spacing (radians) from domain.grid_spacing.\n\nAt each callback firing, apply_pbl_mixing! iterates over every horizontal column (i,j):\n  1. Evaluate pblh_val = pblh_data_f(p, t, x1, x2, x3) at (x1,x2)=grd[1][i],grd[2][j], x3=grd[3][1].\n  2. Evaluate area = dx * dy * delta_x_delta_lon_val * delta_y_delta_lat_val.\n  3. imix, fpbl = compute_imix_fpbl(pedge_domain, pblh_val):\n     bltop = pedge_domain[1] * exp(-pblh_val / 8000.0); scan levels to find the\n     lowest l where bltop > pedge_domain[l+1]; fpbl = fraction of level imix within PBL.\n  4. ad = air_mass_from_pressure(pedge_domain, area):\n     ad[l] = (pedge_domain[l] - pedge_domain[l+1]) * 100.0 * area / 9.80665  (kg).\n  5. pbl_full_mix!(col, ad, imix, fpbl): for each species n, compute the\n     mass-weighted mean concentration cc_aa over levels 1..imix (with fractional\n     weight fpbl at imix) and assign cc_aa to levels 1..imix-1, blending at imix.\n     Mass is conserved: sum_l(ad[l]*tc_before[l,n]) = sum_l(ad[l]*tc_after[l,n]).\n  6. Write the mixed column back to integrator.u.\n\nBlocking gap (other:P2-C): the pbl_full_mix! algorithm accesses and writes the\nentire integrator.u array across all species and all vertical levels of a column.\nThis cannot be expressed as a closed-form symbolic equation over named ESM variables —\nit requires access to the full state array at runtime. The ESM FunctionalAffect mechanism\n(handler_id + read_vars) is the correct dispatch point, but the pbl_mixing.full_mix\nhandler must be registered in EarthSciMLBase (Julia side) before this coupling can\nexecute. The interval parameter drives the PeriodicCallback period; every_step drives\nchoice of PeriodicCallback vs DiscreteCallback. Both are captured in the coupling entry\nbelow.\n\nVariable naming (Unicode -> ASCII, rig convention):\n  δxδlon -> delta_x_delta_lon  (∂x/∂lon, the x-direction coordinate Jacobian, m/rad)\n  δyδlat -> delta_y_delta_lat  (∂y/∂lat, the y-direction coordinate Jacobian, m/rad)"
+            },
+            "variables": {
+                "interval": {
+                    "type": "parameter",
+                    "units": "s",
+                    "default": 3600.0,
+                    "description": "Mixing-callback firing interval (s). The PBL full-mixing is applied once every `interval` seconds during the ODE integration (PeriodicCallback period). Default 3600 s = 1 hour. Ignored when every_step != 0."
+                },
+                "every_step": {
+                    "type": "parameter",
+                    "default": 0.0,
+                    "description": "Apply-at-every-step flag (0.0 = false, nonzero = true). When nonzero, PBL mixing is applied at every ODE integration step (DiscreteCallback with trivial condition) instead of on the periodic schedule. Default 0.0 (periodic mode). Stored as float for ESM parameter compatibility; runtime coerces to Bool."
+                }
+            },
+            "equations": []
+        }
+    },
+    "coupling": [
+        {
+            "type": "event",
+            "event_type": "discrete",
+            "trigger": {
+                "type": "periodic",
+                "interval": 3600.0
+            },
+            "functional_affect": {
+                "handler_id": "pbl_mixing.full_mix",
+                "read_vars": [
+                    "pblh",
+                    "delta_x_delta_lon",
+                    "delta_y_delta_lat"
+                ],
+                "read_params": [
+                    "PBLMixingCallback.interval",
+                    "PBLMixingCallback.every_step"
+                ],
+                "config": {
+                    "scale_height_m": 8000.0,
+                    "g0_m_s2": 9.80665
+                }
+            },
+            "description": "Apply the pbl_mixing.full_mix operator as a periodic callback during ODE integration. When PBLMixingCallback.every_step == 0 (default), fires every PBLMixingCallback.interval seconds (default 3600 s); when every_step != 0, fires at every integration step. The handler reads pblh (m), delta_x_delta_lon (m/rad), and delta_y_delta_lat (m/rad) from the coupled system to determine PBL top pressure and grid-cell area, then mass-weight-averages all tracer concentrations across levels 1..imix within the PBL for every horizontal column. Mass is conserved by construction. Blocking gap other:P2-C: pbl_mixing.full_mix is not yet registered in EarthSciMLBase; this entry declares the interface for the future registration."
+        }
+    ]
+}
