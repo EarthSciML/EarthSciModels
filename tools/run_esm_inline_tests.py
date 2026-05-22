@@ -126,6 +126,11 @@ CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
     # urban_canopy_model.esm (esm-vmik): inlines HeatMomentumFluxes with 78
     # algebraic states; inherits same substitution-loop cliff as above.
     "urban_canopy_model.esm",
+    # boundary_layer_mixing_kc.esm (esm-gw1f): 23 algebraic states with
+    # nested Piecewise (ifelse/max/min) conditions; cse=False triggers
+    # SymPy simplify_logic NaN via Max(nan,1) when all free vars→0.
+    # cse=True correctness verified after removing sign/abs from L_eff.
+    "boundary_layer_mixing_kc.esm",
 })
 
 
