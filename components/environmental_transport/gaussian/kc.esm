@@ -1,0 +1,494 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "GaussianKC",
+        "description": "Lagrangian Gaussian puff horizontal dispersion model based on turbulent velocity fluctuation standard deviations (σu). Integrates the growth of horizontal dispersion standard deviations sigma_x and sigma_y from the Kolmogorov-type closure d(sigma)/dt = sqrt(2)*sigma_u, and computes the ground-level centerline concentration per unit mass assuming a top-hat vertical distribution within the lowest grid layer (height dz). Migrated from EnvironmentalTransport.jl@a48559c4 src/GaussianDispersion.jl:378 (GaussianKC @component). When coupled, sigma_u_x and sigma_u_y are provided by BoundaryLayerMixingKC and z_agl is provided by Puff; in standalone mode all three are treated as constant parameters.",
+        "tags": [
+            "environmental_transport",
+            "gaussian_dispersion",
+            "lagrangian_puff",
+            "turbulent_diffusion"
+        ],
+        "created": "2026-05-22T00:00:00Z",
+        "authors": [
+            "EnvironmentalTransport.jl contributors",
+            "EarthSciModels migration (esm-iyy6)"
+        ],
+        "references": [
+            {
+                "citation": "Kolmogorov, A. N. (1941). The local structure of turbulence in incompressible viscous fluid for very large Reynolds numbers. Doklady Akademii Nauk SSSR, 30, 301–305. — Turbulence closure underlying d(sigma)/dt = sqrt(2)*sigma_u."
+            },
+            {
+                "citation": "Stull, R. B. (1988). An Introduction to Boundary Layer Meteorology. Kluwer Academic Publishers. — Section 9.3 Lagrangian dispersion from a continuous point source: Taylor's hypothesis of stationary turbulence."
+            }
+        ]
+    },
+    "models": {
+        "GaussianKC": {
+            "reference": {
+                "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/GaussianDispersion.jl:378\n\nUpstream GaussianKC is an MTK @component with two ODE states (sigma_x, sigma_y), three input variables (sigma_u_x, sigma_u_y, z_agl) marked `input=true`, two parameters (Δz, C_zero), and one algebraic observed output (C_gl). It is designed to couple with Puff (which supplies z_agl, the height above ground level) and BoundaryLayerMixingKC (which supplies sigma_u_x and sigma_u_y — the standard deviations of the turbulent horizontal velocity fluctuations in x and y). In the full coupled SDE system, sigma_u_x and sigma_u_y are the std devs of the Brownian noise provided by the BoundaryLayerMixingKC @brownians declaration.\n\nMigration approach (standalone): since Puff and BoundaryLayerMixingKC are not yet available as ESM components (blocking gaps gt-kuxo and other:P2-C-terminate-in-FunctionalAffect respectively), GaussianKC is migrated as a standalone ODE component. The three input variables (sigma_u_x, sigma_u_y, z_agl) are declared as `parameter` type with physically representative defaults; when the dependency components are migrated, a coupling entry will promote them to shared variables via connector equations.\n\nUnicode → ASCII name mapping (following rig convention):\n  σu_x → sigma_u_x\n  σu_y → sigma_u_y\n  Δz   → dz\n\nEquations (verbatim from source):\n  d(sigma_x)/dt = sqrt(2) * sigma_u_x\n  d(sigma_y)/dt = sqrt(2) * sigma_u_y\n  C_gl = ifelse(z_agl <= dz, 1/(2*pi*sigma_x*sigma_y*dz), C_zero)\n\nPhysical interpretation: the growth ODEs implement Taylor's hypothesis that, in stationary turbulence with velocity std dev sigma_u, the puff spread grows as sigma(t) = sigma(0) + sqrt(2)*sigma_u*t (diffusion in the Lagrangian frame). The ground-level concentration formula assumes a top-hat vertical distribution over the mixing height dz: C = 1/(2*pi*sigma_x*sigma_y*dz) when the puff is within the surface layer (z_agl <= dz), zero otherwise.\n\nTolerance rationale (model-level rel=1e-8, abs=1e-12): both sigma_x and sigma_y satisfy linear ODEs with constant coefficients (d(sigma)/dt = const). The analytical solution sigma(t) = sigma_0 + sqrt(2)*sigma_u*t is exact, so the numerical integrator error is at the integrator tolerance, well within rel=1e-8 for scipy BDF/LSODA. The C_gl expression is a product/quotient of bounded quantities; accumulated roundoff is ~3-4 ULP (~4e-16 relative), comfortably within rel=1e-8."
+            },
+            "tolerance": {
+                "rel": 1e-08,
+                "abs": 1e-12
+            },
+            "variables": {
+                "sigma_u_x": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "Standard deviation of the turbulent horizontal velocity fluctuation in x (eastward). Supplied by BoundaryLayerMixingKC when coupled; held constant as a parameter in standalone mode."
+                },
+                "sigma_u_y": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "Standard deviation of the turbulent horizontal velocity fluctuation in y (northward). Supplied by BoundaryLayerMixingKC when coupled; held constant as a parameter in standalone mode."
+                },
+                "z_agl": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 25.0,
+                    "description": "Puff height above ground level (m). Supplied by Puff when coupled; held constant as a parameter in standalone mode. When z_agl > dz the puff is above the surface layer and C_gl is set to zero."
+                },
+                "dz": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 50.0,
+                    "description": "Grid-cell height (m); used as the effective mixing layer depth for the top-hat vertical concentration profile. C_gl is non-zero only when z_agl <= dz."
+                },
+                "C_zero": {
+                    "type": "parameter",
+                    "units": "m^-3",
+                    "default": 0.0,
+                    "description": "Zero-concentration sentinel (m^-3). Ground-level concentration is set to this value when the puff is above the surface layer (z_agl > dz). Preserved from upstream @parameter C_zero for MTK unit-balancing."
+                },
+                "sigma_x": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Horizontal dispersion standard deviation in the x (eastward) direction (m). Grows monotonically via d(sigma_x)/dt = sqrt(2)*sigma_u_x."
+                },
+                "sigma_y": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Horizontal dispersion standard deviation in the y (northward) direction (m). Grows monotonically via d(sigma_y)/dt = sqrt(2)*sigma_u_y."
+                },
+                "C_gl": {
+                    "type": "observed",
+                    "units": "m^-3",
+                    "expression": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<=",
+                                "args": [
+                                    "z_agl",
+                                    "dz"
+                                ]
+                            },
+                            {
+                                "op": "/",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            6.283185307179586,
+                                            "sigma_x",
+                                            "sigma_y",
+                                            "dz"
+                                        ]
+                                    }
+                                ]
+                            },
+                            "C_zero"
+                        ]
+                    },
+                    "description": "Ground-level centerline concentration per unit puff mass (m^-3). Equals 1/(2*pi*sigma_x*sigma_y*dz) when the puff is in the surface layer (z_agl <= dz); zero otherwise."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "sigma_x"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    2.0
+                                ]
+                            },
+                            "sigma_u_x"
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "sigma_y"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {
+                                "op": "sqrt",
+                                "args": [
+                                    2.0
+                                ]
+                            },
+                            "sigma_u_y"
+                        ]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "linear_dispersion_growth",
+                    "description": "Constant turbulence sigma_u_x = sigma_u_y = 1.0 m/s with puff in the surface layer (z_agl=0 <= dz=1000 m). sigma_x and sigma_y grow linearly: sigma(t) = 1.0 + sqrt(2)*1.0*t. At t=50 s: sigma = 1+50*sqrt(2) = 71.71067811865476 m; at t=100 s: sigma = 1+100*sqrt(2) = 142.4213562373095 m. C_gl = 1/(2*pi*sigma_x*sigma_y*dz). Analytical solution is exact (linear ODE); verifies both the ODE integration and the algebraic C_gl expression.",
+                    "parameter_overrides": {
+                        "sigma_u_x": 1.0,
+                        "sigma_u_y": 1.0,
+                        "z_agl": 0.0,
+                        "dz": 1000.0,
+                        "C_zero": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "sigma_x",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "abs": 1e-14
+                            }
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "abs": 1e-14
+                            }
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 0.0,
+                            "expected": 0.00015915494309189535
+                        },
+                        {
+                            "variable": "sigma_x",
+                            "time": 50.0,
+                            "expected": 71.71067811865476
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 50.0,
+                            "expected": 71.71067811865476
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 50.0,
+                            "expected": 3.0949417028780464e-08
+                        },
+                        {
+                            "variable": "sigma_x",
+                            "time": 100.0,
+                            "expected": 142.4213562373095
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 100.0,
+                            "expected": 142.4213562373095
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 100.0,
+                            "expected": 7.846390121829065e-09
+                        }
+                    ],
+                    "initial_conditions": {
+                        "sigma_x": 1.0,
+                        "sigma_y": 1.0
+                    }
+                },
+                {
+                    "id": "above_mixing_layer_zero_concentration",
+                    "description": "Puff above the surface layer: z_agl=200 m exceeds dz=100 m, so the ifelse condition (z_agl <= dz) is FALSE and C_gl = C_zero = 0. sigma_x and sigma_y still grow (sigma_u_x = sigma_u_y = 1.0 m/s), but the concentration output is identically zero throughout the run. Verifies the ifelse branch that prevents reporting a surface concentration when the puff is aloft.",
+                    "parameter_overrides": {
+                        "sigma_u_x": 1.0,
+                        "sigma_u_y": 1.0,
+                        "z_agl": 200.0,
+                        "dz": 100.0,
+                        "C_zero": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 100.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "C_gl",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-30
+                            }
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 50.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-30
+                            }
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 100.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-30
+                            }
+                        },
+                        {
+                            "variable": "sigma_x",
+                            "time": 100.0,
+                            "expected": 142.4213562373095
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 100.0,
+                            "expected": 142.4213562373095
+                        }
+                    ],
+                    "initial_conditions": {
+                        "sigma_x": 1.0,
+                        "sigma_y": 1.0
+                    }
+                },
+                {
+                    "id": "no_turbulence_steady_concentration",
+                    "description": "Zero turbulence (sigma_u_x = sigma_u_y = 0) with puff at the surface (z_agl=0 < dz=100 m). sigma_x and sigma_y are constant at 10 m (d/dt = 0). C_gl = 1/(2*pi*10*10*100) = 1.5915494309189535e-5 m^-3 at all times. Verifies the steady-state limit and the algebraic C_gl expression in isolation from the ODE growth.",
+                    "parameter_overrides": {
+                        "sigma_u_x": 0.0,
+                        "sigma_u_y": 0.0,
+                        "z_agl": 0.0,
+                        "dz": 100.0,
+                        "C_zero": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "sigma_x",
+                            "time": 0.0,
+                            "expected": 10.0,
+                            "tolerance": {
+                                "abs": 1e-14
+                            }
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 0.0,
+                            "expected": 10.0,
+                            "tolerance": {
+                                "abs": 1e-14
+                            }
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 0.0,
+                            "expected": 1.5915494309189534e-05
+                        },
+                        {
+                            "variable": "sigma_x",
+                            "time": 1800.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 1800.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 1800.0,
+                            "expected": 1.5915494309189534e-05
+                        },
+                        {
+                            "variable": "sigma_x",
+                            "time": 3600.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 3600.0,
+                            "expected": 10.0
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 3600.0,
+                            "expected": 1.5915494309189534e-05
+                        }
+                    ],
+                    "initial_conditions": {
+                        "sigma_x": 10.0,
+                        "sigma_y": 10.0
+                    }
+                },
+                {
+                    "id": "asymmetric_turbulence",
+                    "description": "Asymmetric turbulence: sigma_u_x = 2.0 m/s (faster x-spread) and sigma_u_y = 0.5 m/s (slower y-spread). Initial sigma_x = sigma_y = 5.0 m. At t=10 s: sigma_x = 5 + sqrt(2)*2*10 = 33.28427124746190 m, sigma_y = 5 + sqrt(2)*0.5*10 = 12.07106781186548 m. C_gl = 1/(2*pi*sigma_x*sigma_y*dz). dz=1000 m, z_agl=0. Verifies independent growth in x and y directions.",
+                    "parameter_overrides": {
+                        "sigma_u_x": 2.0,
+                        "sigma_u_y": 0.5,
+                        "z_agl": 0.0,
+                        "dz": 1000.0,
+                        "C_zero": 0.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 10.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "sigma_x",
+                            "time": 10.0,
+                            "expected": 33.2842712474619
+                        },
+                        {
+                            "variable": "sigma_y",
+                            "time": 10.0,
+                            "expected": 12.071067811865476
+                        },
+                        {
+                            "variable": "C_gl",
+                            "time": 10.0,
+                            "expected": 3.9612786145893607e-07
+                        }
+                    ],
+                    "initial_conditions": {
+                        "sigma_x": 5.0,
+                        "sigma_y": 5.0
+                    }
+                }
+            ],
+            "examples": [
+                {
+                    "id": "sigma_growth_over_time",
+                    "description": "Time evolution of horizontal dispersion sigma_x and ground-level concentration C_gl for constant turbulence (sigma_u_x = sigma_u_y = 1.0 m/s) with the puff at the surface (z_agl=0, dz=1000 m). sigma_x grows as 1 + sqrt(2)*t m; C_gl decays as the puff spreads.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "sigma_x": 1.0,
+                            "sigma_y": 1.0
+                        }
+                    },
+                    "parameters": {
+                        "sigma_u_x": 1.0,
+                        "sigma_u_y": 1.0,
+                        "z_agl": 0.0,
+                        "dz": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "plots": [
+                        {
+                            "id": "sigma_vs_time",
+                            "type": "line",
+                            "description": "Horizontal dispersion sigma_x growing over time from initial 1 m with sigma_u_x=1 m/s.",
+                            "x": {
+                                "variable": "t",
+                                "label": "t (s)"
+                            },
+                            "y": {
+                                "variable": "sigma_x",
+                                "label": "sigma_x (m)"
+                            }
+                        },
+                        {
+                            "id": "C_gl_vs_time",
+                            "type": "line",
+                            "description": "Ground-level centerline concentration C_gl (per unit puff mass) decaying as the puff spreads horizontally.",
+                            "x": {
+                                "variable": "t",
+                                "label": "t (s)"
+                            },
+                            "y": {
+                                "variable": "C_gl",
+                                "label": "C_gl (m^-3)"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "id": "concentration_vs_turbulence",
+                    "description": "Final ground-level concentration C_gl at t=3600 s as a function of turbulence intensity sigma_u_x (sigma_u_y held at its default 1.0 m/s). Stronger x-direction turbulence spreads the puff faster in x, reducing C_gl. Initial sigma_x=sigma_y=1 m, z_agl=0, dz=1000 m.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "sigma_x": 1.0,
+                            "sigma_y": 1.0
+                        }
+                    },
+                    "parameters": {
+                        "z_agl": 0.0,
+                        "dz": 1000.0
+                    },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 3600.0
+                    },
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "sigma_u_x",
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 3.0,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "C_gl_final_vs_sigma_u",
+                            "type": "line",
+                            "description": "Final C_gl (at t=3600 s) as a function of turbulent velocity std dev sigma_u_x. Illustrates how stronger turbulence dilutes the puff concentration at the surface.",
+                            "x": {
+                                "variable": "sigma_u_x",
+                                "label": "sigma_u_x (m/s)"
+                            },
+                            "y": {
+                                "variable": "C_gl",
+                                "label": "C_gl at t=3600 s (m^-3)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
