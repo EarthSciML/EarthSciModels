@@ -1,0 +1,245 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "calc_direct_flux",
+    "description": "Direct actinic flux for a single wavelength bin at the given cosine of the solar zenith angle. Migrated from GasChem.jl src/Fast-JX.jl:1065 (`calc_flux(csa, max_actinic_flux)`, @register_symbolic in the dev version). Computes F = max(0, max_actinic_flux * csa): the top-of-atmosphere actinic flux for a specific wavelength bin scaled by cos(SZA), clipped to zero for nighttime conditions (csa ≤ 0). The gt-p3ep (@register_symbolic) gap is resolved by expressing the function as a closed-form AST composition of the `max` and `*` ops.",
+    "tags": [
+      "gaschem",
+      "fast-jx",
+      "photolysis",
+      "registered_function",
+      "actinic_flux",
+      "solar_zenith_angle"
+    ],
+    "created": "2026-05-22T00:00:00Z",
+    "authors": [
+      "GasChem.jl contributors",
+      "EarthSciModels migration (esm-hlrp)"
+    ],
+    "references": [
+      {
+        "citation": "Neu, J.L., Prather, M.J., and Penner, J.E. (2007), Global atmospheric chemistry: Integrating over fractional cloud cover, J. Geophys. Res., 112, D11306, doi:10.1029/2006JD008007. — Source for the Fast-JX scheme."
+      },
+      {
+        "citation": "Source: GasChem.jl/src/Fast-JX.jl (commit 8c12c048482b515fb8eb2110bf8ab4b4f4e71309). calc_flux(csa, max_actinic_flux) = max(zero(max_actinic_flux), max_actinic_flux * csa) — scales top-of-atmosphere actinic flux by cos(SZA) and clips to zero at night."
+      }
+    ]
+  },
+  "models": {
+    "calc_direct_flux": {
+      "reference": {
+        "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/Fast-JX.jl:1065\n\nUpstream definition (current GasChem.jl nomenclature):\n  function calc_flux(csa, max_actinic_flux)\n      max(zero(max_actinic_flux), max_actinic_flux * csa)\n  end\n  @register_symbolic calc_flux(csa, max_actinic_flux)  # registered in dev version\n\nIn the older dev code (commit 8c12c048) this was named calc_direct_flux.\nThe function computes the top-of-atmosphere direct (beam) actinic flux for a\nsingle wavelength bin, scaled by the cosine of the solar zenith angle and\nclipped to zero for nighttime (csa ≤ 0).\n\nThe @register_symbolic gap (gt-p3ep) is resolved by expressing the function\nas a pure AST composition: max(0, max_actinic_flux * csa). No table lookup\nis required — the only inputs are the scalar csa and the per-bin\nmax_actinic_flux constant (typically supplied from GasChem's `actinic_flux`\narray at the call site).\n\nTypical usage in FastJX: for each of 18 wavelength bins i,\n  F_i ~ calc_direct_flux(actinic_flux[i], csa)\nwhere actinic_flux[i] is the top-of-atmosphere flux constant for bin i:\n  SA_F32[1.391e12, 1.627e12, 1.664e12, 9.278e11, 7.842e12, 4.680e12,\n         9.918e12, 1.219e13, 6.364e14, 4.049e14, 3.150e14, 5.889e14,\n         7.678e14, 5.045e14, 8.902e14, 3.853e15, 1.547e16, 2.131e17]\n\nTolerance (rel=1e-12): the expression is a single IEEE-754 multiply followed\nby a max — no rounding beyond one ULP. rel=1e-12 sits safely above that\nfloor while being strict enough to catch any expression rewrite errors."
+      },
+      "tolerance": {
+        "rel": 1e-12
+      },
+      "variables": {
+        "csa": {
+          "type": "parameter",
+          "units": "1",
+          "default": 0.7071067811865476,
+          "description": "Cosine of the solar zenith angle (dimensionless). Values ≤ 0 correspond to nighttime and produce zero flux. Default: cos(45°) ≈ 0.7071 (45-degree solar zenith)."
+        },
+        "max_actinic_flux": {
+          "type": "parameter",
+          "units": "1/s",
+          "default": 1.391e12,
+          "description": "Top-of-atmosphere actinic flux for a specific wavelength bin (s⁻¹). Represents the maximum flux at that wavelength when the sun is directly overhead (csa=1). Default: GasChem actinic_flux[1] = 1.391e12 s⁻¹ (187 nm bin)."
+        },
+        "calc_direct_flux": {
+          "type": "observed",
+          "units": "1/s",
+          "description": "Direct actinic flux for the given wavelength bin (s⁻¹). Equals max_actinic_flux * csa for daytime (csa > 0), and zero for nighttime (csa ≤ 0). Used by FastJX to compute per-bin photolysis-rate integrands.",
+          "expression": {
+            "op": "max",
+            "args": [
+              0.0,
+              {
+                "op": "*",
+                "args": [
+                  "max_actinic_flux",
+                  "csa"
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "daytime_noon_overhead",
+          "description": "csa=1.0 (sun directly overhead): flux = max_actinic_flux * 1.0 = max_actinic_flux. Tests the daytime branch and confirms no clipping.",
+          "parameter_overrides": {
+            "csa": 1.0,
+            "max_actinic_flux": 1.391e12
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 1.391e12
+            }
+          ]
+        },
+        {
+          "id": "daytime_45deg",
+          "description": "csa=0.7071 (45° solar zenith): flux = max_actinic_flux * csa. Tests the standard daytime case.",
+          "parameter_overrides": {
+            "csa": 0.7071067811865476,
+            "max_actinic_flux": 1.391e12
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 9.835855326304877e11
+            }
+          ]
+        },
+        {
+          "id": "nighttime_negative_csa",
+          "description": "csa=-0.3 (nighttime): flux = max(0, max_actinic_flux * (-0.3)) = 0. Tests the nighttime zero-clip behavior.",
+          "parameter_overrides": {
+            "csa": -0.3,
+            "max_actinic_flux": 1.391e12
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 1e-30
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 0.0
+            }
+          ]
+        },
+        {
+          "id": "twilight_csa_zero",
+          "description": "csa=0.0 (sun on horizon): flux = max(0, 0) = 0. Tests the exact horizon boundary.",
+          "parameter_overrides": {
+            "csa": 0.0,
+            "max_actinic_flux": 1.391e12
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12,
+            "abs": 1e-30
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 0.0
+            }
+          ]
+        },
+        {
+          "id": "high_flux_bin_18",
+          "description": "csa=0.9 (low solar zenith), max_flux from bin 18 (574 nm, highest flux): flux = 2.131e17 * 0.9 = 1.9179e17 s⁻¹.",
+          "parameter_overrides": {
+            "csa": 0.9,
+            "max_actinic_flux": 2.131e17
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 1.9179e17
+            }
+          ]
+        },
+        {
+          "id": "time_invariance",
+          "description": "flux is constant in time (no time derivatives): value at t=1 equals value at t=0.",
+          "parameter_overrides": {
+            "csa": 0.7071067811865476,
+            "max_actinic_flux": 1.391e12
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-12
+          },
+          "assertions": [
+            {
+              "variable": "calc_direct_flux",
+              "time": 0.0,
+              "expected": 9.835855326304877e11
+            },
+            {
+              "variable": "calc_direct_flux",
+              "time": 1.0,
+              "expected": 9.835855326304877e11
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "flux_vs_csa",
+          "description": "Direct actinic flux for the 187 nm bin (actinic_flux[1] = 1.391e12 s⁻¹) as a function of cos(SZA) over the daytime range [0, 1]. The flux is linear in csa and zero at night.",
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "csa",
+                "values": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "flux_vs_csa_plot",
+              "type": "line",
+              "x": {
+                "variable": "csa",
+                "label": "cos(SZA)"
+              },
+              "y": {
+                "variable": "calc_direct_flux",
+                "label": "Direct actinic flux (s⁻¹)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
