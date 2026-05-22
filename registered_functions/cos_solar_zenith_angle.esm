@@ -1,0 +1,468 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "cos_solar_zenith_angle",
+    "description": "Cosine of the solar zenith angle as a function of UTC time, latitude, and longitude. Migrated from GasChem.jl src/Fast-JX.jl:1049 (`cos_solar_zenith_angle(lat, lon, t_utc)`, @register_symbolic). Implements the NOAA Spencer-Fourier solar position algorithm: computes the fractional-year angle γ from the UTC day-of-year and hour, evaluates the Spencer Fourier series for solar declination δ and equation of time EoT, converts to true solar time and hour angle ω, and returns clamp(sin φ sin δ + cos φ cos δ cos ω, -1, 1) where φ is latitude in radians. The gt-p3ep (@register_symbolic) gap is resolved by expressing the function as a closed-form AST composition of the `datetime.*` registry functions and elementary trig ops, identical to the formula used by lib/solar.esm `Solar.cos_zenith`.",
+    "tags": [
+      "gaschem",
+      "fast-jx",
+      "solar",
+      "zenith-angle",
+      "registered_function",
+      "noaa",
+      "spencer-fourier"
+    ],
+    "created": "2026-05-22T00:00:00Z",
+    "authors": [
+      "GasChem.jl contributors",
+      "EarthSciModels migration (esm-lf16)"
+    ],
+    "references": [
+      {
+        "citation": "Spencer, J.W., 1971. Fourier series representation of the position of the sun. Search 2(5), 172. — Source for the Fourier series approximations for solar declination and equation of time used in this function."
+      },
+      {
+        "citation": "NOAA Global Monitoring Laboratory, Solar Position Calculator (https://gml.noaa.gov/grad/solcalc/calcdetails.html). — The NOAA formulation of the Spencer Fourier algorithm implemented here."
+      },
+      {
+        "citation": "Source: GasChem.jl/src/Fast-JX.jl (commit 8c12c048482b515fb8eb2110bf8ab4b4f4e71309). cos_solar_zenith_angle(lat, lon, t_utc) — computes the cosine of the solar zenith angle for use in FastJX photolysis-rate calculations. The FastJX ESM migration sources cos_sza from Solar.cos_zenith (lib/solar.esm) via §4.7 inclusion using the same formula."
+      }
+    ]
+  },
+  "models": {
+    "cos_solar_zenith_angle": {
+      "reference": {
+        "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/Fast-JX.jl:1049\n\nUpstream definition:\n  function cos_solar_zenith_angle(lat, lon, t_utc)\n      # Spencer-Fourier solar position algorithm\n      dt = unix2datetime(t_utc)\n      DOY = dayofyear(dt)\n      H = hour(dt); Mn = minute(dt); S = second(dt)\n      γ = 0.01721420632103996 * ((DOY - 1) + (H - 12)/24.0)\n      δ = 0.006918 - 0.399912*cos(γ) + 0.070257*sin(γ) - 0.006758*cos(2γ)\n            + 0.000907*sin(2γ) - 0.002697*cos(3γ) + 0.00148*sin(3γ)\n      EoT = 229.18 * (0.000075 + 0.001868*cos(γ) - 0.032077*sin(γ)\n                      - 0.014615*cos(2γ) - 0.040849*sin(2γ))\n      TST = H*60.0 + Mn + S/60.0 + EoT + 4.0*lon\n      ω = 0.017453292519943295 * (TST/4.0 - 180.0)\n      φ = 0.017453292519943295 * lat\n      return clamp(sin(φ)*sin(δ) + cos(φ)*cos(δ)*cos(ω), -1.0, 1.0)\n  end\n  @register_symbolic cos_solar_zenith_angle(lat, lon, t_utc)\n\nThe @register_symbolic gap (gt-p3ep) is resolved by expressing the function\nas a pure AST composition using the closed function registry `datetime.*`\nops (day_of_year, hour, minute, second) and elementary trig/arithmetic ops.\nThe formula is bit-identical to the one in lib/solar.esm `Solar.cos_zenith`\n(the FastJX ESM model sources cos_sza via that library rather than calling\nthis registered function directly).\n\nIntermediate observed variables follow the same decomposition as solar.esm:\n  γ (gamma): NOAA fractional-year angle, 0 at Jan 1 noon, 2π at Dec 31 noon\n  δ (solar_declination): Spencer (1971) 6-term Fourier series, accurate ~0.0006 rad\n  EoT (equation_of_time): apparent minus mean solar time in minutes\n  TST (true_solar_time): minutes since UTC midnight at the local meridian\n  ω (hour_angle): radians, zero at local solar noon, positive in afternoon\n  φ (lat_rad): latitude in radians\n\nTolerance (rel=1e-10): the computation chains ~15 trig evaluations through\nthe Spencer series and the zenith-angle dot product. Cross-binding differences\nbetween Python/Julia libm trig implementations accumulate to ≤ 10 ULP on the\ntranscendental composition (consistent with lib/solar.esm's tolerance claim);\nrel=1e-10 sits safely above the ~5e-15 empirical floor while being strict\nenough to catch any expression rewrite errors."
+      },
+      "tolerance": {
+        "rel": 1e-10
+      },
+      "variables": {
+        "t_utc": {
+          "type": "parameter",
+          "units": "s",
+          "default": 1782043200.0,
+          "description": "UTC time as seconds since the Unix epoch (1970-01-01 00:00:00 UTC). Default: 2026-06-21 12:00:00 UTC (noon at summer solstice)."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "deg",
+          "default": 0.0,
+          "description": "Latitude in degrees north of the equator. Range [-90, 90]. Default: 0 (equator)."
+        },
+        "lon": {
+          "type": "parameter",
+          "units": "deg",
+          "default": 0.0,
+          "description": "Longitude in degrees east of the prime meridian. Range [-180, 180]. Default: 0 (prime meridian)."
+        },
+        "day_of_year": {
+          "type": "observed",
+          "units": "1",
+          "description": "Day of year of t_utc, 1..366 (integer-valued). Extracted from the UTC calendar date.",
+          "expression": {
+            "op": "fn",
+            "name": "datetime.day_of_year",
+            "args": ["t_utc"]
+          }
+        },
+        "hour": {
+          "type": "observed",
+          "units": "1",
+          "description": "UTC hour of t_utc, 0..23 (integer-valued).",
+          "expression": {
+            "op": "fn",
+            "name": "datetime.hour",
+            "args": ["t_utc"]
+          }
+        },
+        "minute": {
+          "type": "observed",
+          "units": "1",
+          "description": "UTC minute of t_utc, 0..59 (integer-valued).",
+          "expression": {
+            "op": "fn",
+            "name": "datetime.minute",
+            "args": ["t_utc"]
+          }
+        },
+        "second": {
+          "type": "observed",
+          "units": "1",
+          "description": "UTC second of t_utc, 0..59 (integer-valued).",
+          "expression": {
+            "op": "fn",
+            "name": "datetime.second",
+            "args": ["t_utc"]
+          }
+        },
+        "gamma": {
+          "type": "observed",
+          "units": "rad",
+          "description": "NOAA fractional-year angle γ = (2π/365) · ((day_of_year - 1) + (hour - 12)/24). Always uses 365.0 (NOAA convention). Ranges from 0 at Jan 1 noon to ≈2π at Dec 31 noon.",
+          "expression": {
+            "op": "*",
+            "args": [
+              0.01721420632103996,
+              {
+                "op": "+",
+                "args": [
+                  { "op": "-", "args": ["day_of_year", 1.0] },
+                  { "op": "/", "args": [ { "op": "-", "args": ["hour", 12.0] }, 24.0 ] }
+                ]
+              }
+            ]
+          }
+        },
+        "solar_declination": {
+          "type": "observed",
+          "units": "rad",
+          "description": "Solar declination δ (radians) — Spencer (1971) 6-term Fourier series in γ: δ = 0.006918 - 0.399912 cos γ + 0.070257 sin γ - 0.006758 cos 2γ + 0.000907 sin 2γ - 0.002697 cos 3γ + 0.00148 sin 3γ. Accurate to ~0.0006 rad (~2 arcmin).",
+          "expression": {
+            "op": "+",
+            "args": [
+              0.006918,
+              { "op": "*", "args": [-0.399912, { "op": "cos", "args": ["gamma"] }] },
+              { "op": "*", "args": [ 0.070257, { "op": "sin", "args": ["gamma"] }] },
+              { "op": "*", "args": [-0.006758, { "op": "cos", "args": [ { "op": "*", "args": [2.0, "gamma"] } ] }] },
+              { "op": "*", "args": [ 0.000907, { "op": "sin", "args": [ { "op": "*", "args": [2.0, "gamma"] } ] }] },
+              { "op": "*", "args": [-0.002697, { "op": "cos", "args": [ { "op": "*", "args": [3.0, "gamma"] } ] }] },
+              { "op": "*", "args": [ 0.00148,  { "op": "sin", "args": [ { "op": "*", "args": [3.0, "gamma"] } ] }] }
+            ]
+          }
+        },
+        "equation_of_time": {
+          "type": "observed",
+          "units": "1",
+          "description": "Equation of time (apparent minus mean solar time), in minutes (NOAA convention, treated as dimensionless for use in true_solar_time). Spencer form: EoT = 229.18 · (0.000075 + 0.001868 cos γ - 0.032077 sin γ - 0.014615 cos 2γ - 0.040849 sin 2γ). Accurate to ~0.5 min.",
+          "expression": {
+            "op": "*",
+            "args": [
+              229.18,
+              {
+                "op": "+",
+                "args": [
+                  0.000075,
+                  { "op": "*", "args": [ 0.001868, { "op": "cos", "args": ["gamma"] }] },
+                  { "op": "*", "args": [-0.032077, { "op": "sin", "args": ["gamma"] }] },
+                  { "op": "*", "args": [-0.014615, { "op": "cos", "args": [ { "op": "*", "args": [2.0, "gamma"] } ] }] },
+                  { "op": "*", "args": [-0.040849, { "op": "sin", "args": [ { "op": "*", "args": [2.0, "gamma"] } ] }] }
+                ]
+              }
+            ]
+          }
+        },
+        "true_solar_time": {
+          "type": "observed",
+          "units": "1",
+          "description": "True solar time at longitude lon, in minutes since UTC midnight (dimensionless, per NOAA convention): TST = hour·60 + minute + second/60 + EoT + 4·lon. The 4 min/degree term is the Earth rotation rate (1440 min / 360°).",
+          "expression": {
+            "op": "+",
+            "args": [
+              { "op": "*", "args": ["hour", 60.0] },
+              "minute",
+              { "op": "/", "args": ["second", 60.0] },
+              "equation_of_time",
+              { "op": "*", "args": [4.0, "lon"] }
+            ]
+          }
+        },
+        "hour_angle": {
+          "type": "observed",
+          "units": "rad",
+          "description": "Solar hour angle ω (radians): ω = (TST/4 − 180)·π/180. Zero at local solar noon; positive in the afternoon, negative in the morning.",
+          "expression": {
+            "op": "*",
+            "args": [
+              0.017453292519943295,
+              {
+                "op": "-",
+                "args": [
+                  { "op": "/", "args": ["true_solar_time", 4.0] },
+                  180.0
+                ]
+              }
+            ]
+          }
+        },
+        "lat_rad": {
+          "type": "observed",
+          "units": "rad",
+          "description": "Latitude in radians: φ = lat · π/180.",
+          "expression": {
+            "op": "*",
+            "args": [0.017453292519943295, "lat"]
+          }
+        },
+        "cos_solar_zenith_angle": {
+          "type": "observed",
+          "units": "1",
+          "description": "Cosine of the solar zenith angle (dimensionless, clamped to [-1, 1]): csa = clamp(sin φ · sin δ + cos φ · cos δ · cos ω, -1, 1). Positive values indicate daytime (sun above horizon); negative values indicate nighttime. Used by FastJX as the CSZA input to calc_direct_flux and calc_direct_fluxes.",
+          "expression": {
+            "op": "min",
+            "args": [
+              1.0,
+              {
+                "op": "max",
+                "args": [
+                  -1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          { "op": "sin", "args": ["lat_rad"] },
+                          { "op": "sin", "args": ["solar_declination"] }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          { "op": "cos", "args": ["lat_rad"] },
+                          { "op": "cos", "args": ["solar_declination"] },
+                          { "op": "cos", "args": ["hour_angle"] }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "noon_summer_solstice_equator",
+          "description": "Noon UTC on the summer solstice (2026-06-21 12:00:00 UTC) at the equator and prime meridian. Sun is nearly overhead (declination ≈ +23.4°, lat=0°, local solar time ≈ noon). Expected csa ≈ 0.9174 (cos 23.4°).",
+          "parameter_overrides": {
+            "t_utc": 1782043200.0,
+            "lat": 0.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": 0.9173780810128263
+            }
+          ]
+        },
+        {
+          "id": "noon_march_equinox_equator",
+          "description": "Noon UTC on the March equinox (2026-03-20 12:00:00 UTC) at the equator. Solar declination is near zero; the sun is nearly directly overhead. Expected csa ≈ 0.9993 (small EoT offset from geometric noon).",
+          "parameter_overrides": {
+            "t_utc": 1774008000.0,
+            "lat": 0.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": 0.9993332301246177
+            }
+          ]
+        },
+        {
+          "id": "midnight_summer_solstice_equator",
+          "description": "Midnight UTC on the summer solstice (2026-06-21 00:00:00 UTC) at the equator. Sun is below the horizon (hour angle ≈ ±π). Expected csa ≈ -0.917 (nighttime, antipodal to the noon value).",
+          "parameter_overrides": {
+            "t_utc": 1782000000.0,
+            "lat": 0.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "tolerance": { "rel": 1e-10, "abs": 1e-30 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": -0.9174107558877910
+            }
+          ]
+        },
+        {
+          "id": "noon_summer_midlat_lat40",
+          "description": "Noon UTC on the summer solstice (2026-06-21 12:00:00 UTC) at lat=40°N, lon=0°. Sun is well above horizon in northern summer. Expected csa ≈ 0.959.",
+          "parameter_overrides": {
+            "t_utc": 1782043200.0,
+            "lat": 40.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": 0.9585698890931749
+            }
+          ]
+        },
+        {
+          "id": "north_pole_at_equinox",
+          "description": "Noon UTC at the March equinox (2026-03-20 12:00:00 UTC) at the North Pole (lat=90°). Solar declination is near zero so the sun is near the horizon. Expected csa ≈ 0 (slightly negative due to EoT and non-zero declination).",
+          "parameter_overrides": {
+            "t_utc": 1774008000.0,
+            "lat": 90.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "tolerance": { "rel": 1e-10, "abs": 1e-6 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": -0.0080464586030936
+            }
+          ]
+        },
+        {
+          "id": "south_pole_in_june",
+          "description": "Noon UTC on the summer solstice (2026-06-21 12:00:00 UTC) at the South Pole (lat=-90°). Southern hemisphere winter: sun is well below the polar horizon. Expected csa ≈ -0.398 (nighttime).",
+          "parameter_overrides": {
+            "t_utc": 1782043200.0,
+            "lat": -90.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "tolerance": { "rel": 1e-10, "abs": 1e-30 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": -0.3979813923589773
+            }
+          ]
+        },
+        {
+          "id": "time_invariance",
+          "description": "cos_solar_zenith_angle is purely algebraic (no time derivatives): value at integration time t=1 equals value at t=0 for fixed parameter t_utc.",
+          "parameter_overrides": {
+            "t_utc": 1782043200.0,
+            "lat": 0.0,
+            "lon": 0.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": 0.9173780810128263
+            },
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 1.0,
+              "expected": 0.9173780810128263
+            }
+          ]
+        },
+        {
+          "id": "longitude_shifts_solar_noon",
+          "description": "Moving the observer west by 90° (lon=-90°) shifts local solar time by -6 h. At 12 UTC the local solar time is ~5:58 AM (EoT ≈ -1.3 min), placing the sun right at the horizon (hour angle ≈ -90°). Expected csa ≈ -0.0053 (just below the horizon due to EoT and non-zero declination).",
+          "parameter_overrides": {
+            "t_utc": 1782043200.0,
+            "lat": 0.0,
+            "lon": -90.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "tolerance": { "rel": 1e-10, "abs": 1e-6 },
+          "assertions": [
+            {
+              "variable": "cos_solar_zenith_angle",
+              "time": 0.0,
+              "expected": -0.0053167483703949
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "csa_vs_hour_at_equator",
+          "description": "Cosine of the solar zenith angle at the equator (lat=0, lon=0) over the course of a day on the summer solstice (2026-06-21). CSA peaks near 0.917 at local solar noon (≈12 UTC at lon=0) and is negative at night.",
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "t_utc",
+                "values": [
+                  1782000000.0,
+                  1782003600.0,
+                  1782007200.0,
+                  1782010800.0,
+                  1782014400.0,
+                  1782018000.0,
+                  1782021600.0,
+                  1782025200.0,
+                  1782028800.0,
+                  1782032400.0,
+                  1782036000.0,
+                  1782039600.0,
+                  1782043200.0,
+                  1782046800.0,
+                  1782050400.0,
+                  1782054000.0,
+                  1782057600.0,
+                  1782061200.0,
+                  1782064800.0,
+                  1782068400.0,
+                  1782072000.0,
+                  1782075600.0,
+                  1782079200.0,
+                  1782082800.0
+                ]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "csa_vs_hour",
+              "type": "line",
+              "x": {
+                "variable": "t_utc",
+                "label": "UTC time (s since epoch)"
+              },
+              "y": {
+                "variable": "cos_solar_zenith_angle",
+                "label": "cos(SZA)"
+              }
+            }
+          ]
+        },
+        {
+          "id": "csa_vs_latitude_at_noon",
+          "description": "Cosine of the solar zenith angle at solar noon UTC (2026-06-21 12:00:00 UTC, lon=0) as a function of latitude. Shows the summer solstice sun-angle profile from pole to pole.",
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "lat",
+                "values": [-90.0, -75.0, -60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0, 75.0, 90.0]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "csa_vs_lat",
+              "type": "line",
+              "x": {
+                "variable": "lat",
+                "label": "Latitude (°N)"
+              },
+              "y": {
+                "variable": "cos_solar_zenith_angle",
+                "label": "cos(SZA)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
