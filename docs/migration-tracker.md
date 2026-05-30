@@ -35,12 +35,12 @@ schema-gap blockers. This manifest drives per-component Phase-2 migration beads.
 | Blocked on `gt-p3ep` (lookup / @register_symbolic) | 26 | AtmDep lookup tables, GasChem Fast-JX, EarthSciData interpolators, WildlandFire fuel tables, Aerosol ISORROPIA-II helpers. `FastJX_interpolation_troposphere` is migrated (`fastjx/fastjx_interp_troposphere.esm`) — its lookup gap was resolved by recovering registered functions as AST compositions of the v0.3 `interp.*` named primitives. |
 | Blocked on `gt-kuxo` (brownian / SDE) | 2 | StagePrognosis (Vegetation), BoundaryLayerMixingKC (EnvTransport) |
 | Blocked on `gt-ebuq` (init_eqs / system_kind for nonlinear/algebraic) | 3 | Sofiev2012PlumeRise (EnvTransport), Isorropia + sub-components (Aerosol), IsorropiaEquilibrium |
-| Blocked on `gt-vzwk` (PDE-tests) | 7 | LevelSetFireSpread (WildlandFire), SurfaceRunoff (EnvTransport), plus in-component discretized PDE helpers in UrbanCanopy (roof/wall/hydrology) |
+| Blocked on `gt-vzwk` (PDE-tests) | 7 | LevelSetFireSpread (WildlandFire), SurfaceRunoff (EnvTransport), plus in-component discretized PDE helpers in UrbanCanopy (roof/wall/hydrology). PDE-test enablement (grid/discretization selection in test/example blocks, MMS convergence tests) tracked by **esm-y4m9r**. |
 | Blocked on `gt-6ohw` (DataInterpolations.derivative) | 2 | ERA5, GEOSFP register get_unit for DataInterpolations.derivative |
 | `other:P3-A-metric-tensor-coord-transforms` | 3 | WildlandFire level-set uses `partialderivative_transforms`; EarthSciDiscretizations metric tensors |
 | `other:P3-B-BC-symbolic-offset` | 1 | Puff lateral stop references `grid_spacing * buffer_cells` in BC |
 | `other:P2-C-terminate-in-FunctionalAffect` | 1 | Puff uses `terminate!(integrator)` in a closure |
-| `other:discretization-plan` | ~1 per PDE | MOLFiniteDifference discretization plan not in ESM Domain; tracked by `gt-dq0f` (v2.1). The §8 `AdvectionOperator` row was reclassified into this bucket by the esm-nu8du sweep — its `none (Operator schema supported)` was stale (ESS v0.4.0 has no `operators` top-level block). |
+| `other:discretization-plan` | ~1 per PDE | ~~MOLFiniteDifference discretization plan not in ESM Domain~~ — **stale framing**: the ESM schema has `grids`, `staggering_rules`, `discretizations`, per-domain discretization, and `system_kind: pde`. The residual PDE-migration blocker is narrower: test/example blocks cannot select grid/discretization, so migrated PDE components cannot carry MMS convergence tests — tracked by **esm-y4m9r** (relocated from ea-fz09l7 2026-05-18). The §8 `AdvectionOperator` row was reclassified into this bucket by the esm-nu8du sweep — its `none (Operator schema supported)` was stale (ESS v0.4.0 has no `operators` top-level block). |
 | `other:framework-only` | — | EarthSciMLBase.jl, EarthSciDiscretizations.jl — framework primitives, not migratable as .esm files. The §5/§6 rows now carry `status: complete` (framework-only) annotations so the bead generator emits no fresh work item for them. |
 | `other:empty-no-mtk` | — | Emissions.jl (data-processing, non-MTK), OceanDynamics.jl (no `src/`) |
 
@@ -424,7 +424,7 @@ Repo purpose: data-backed MTK systems (reanalysis/emissions/topography). Every s
 
 Repo purpose: finite-volume PDE discretization library (cubed sphere, metric tensors, divergence/gradient/laplacian operators).
 
-**Classification:** Framework only. These are the discretization operators that MOLFiniteDifference-free PDE migration will need. They do not become `.esm` files themselves but they define the operator semantics that `Domain.coordinate_transforms` and array-op `ExpressionNode`s need to represent.
+**Classification:** Framework only. These are the discretization operators that PDE migration uses. They do not become `.esm` files themselves but they define the operator semantics that `Domain.coordinate_transforms` and array-op `ExpressionNode`s need to represent. **Note (2026-05-17):** the `discretize(PDESystem, ESD curvilinear grid)` pipeline is now validated end-to-end — ess-d1e, merged 2026-05-17, MMS O(h²) on a real ESD `LatLonGrid`. The residual PDE-migration blocker is not the discretization schema but the inability for test/example blocks to select grid/discretization (esm-y4m9r).
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
@@ -589,7 +589,7 @@ Repo purpose: ocean dynamics (placeholder — no `src/` on the pinned commit).
 
 Repo purpose: CLMU-style urban canopy (roof/wall/road thermal conduction, snow, hydrology, radiation fluxes, waste heat).
 
-**Notes:** Several components (`BuildingTemperature`, `PhaseChangeAdjustment`, `SoilWaterFlux`) internally call `PDESystem` + `MOLFiniteDifference` + `discretize` at MTK-build time and return an ODE-ified system. ESM `Domain` schema doesn't encode the MOL discretization plan — classified as `other:discretization-plan` (gt-dq0f). The pdesys lines are at `src/roof_wall_road_snow_temperatures.jl:1152,1227` and `src/hydrology.jl:674`.
+**Notes:** Several components (`BuildingTemperature`, `PhaseChangeAdjustment`, `SoilWaterFlux`) internally call `PDESystem` + `MOLFiniteDifference` + `discretize` at MTK-build time and return an ODE-ified system. ~~ESM `Domain` schema doesn't encode the MOL discretization plan~~ — **stale**: the schema has `grids`, `staggering_rules`, `discretizations`, and `system_kind: pde`. These components remain classified as `other:discretization-plan` because the test/example blocks cannot carry grid/discretization selection or MMS convergence tests; the enablement is tracked by **esm-y4m9r**. The pdesys lines are at `src/roof_wall_road_snow_temperatures.jl:1152,1227` and `src/hydrology.jl:674`.
 
 ### 12.1 urban_canopy_model.jl / clmu_introduction.jl / offline_mode.jl / heat_momentum_fluxes.jl / albedos_radiative_fluxes.jl (5)
 
@@ -758,13 +758,13 @@ Repo purpose: fire spread (Rothermel, Clark 1996 coupling, elliptical), NFDRS fu
 
 3. **Queue `gt-kuxo` + `gt-ebuq`** (7 components total) before attempting Vegetation StagePrognosis, EnvTransport BoundaryLayerMixingKC/Sofiev2012PlumeRise, Geodynamics, and top-level Isorropia.
 
-4. **Defer PDE models to Phase 3** (`gt-vzwk`): LevelSetFireSpread, SurfaceRunoff Saint-Venant, and UrbanCanopy in-function PDE discretizations. These also need `other:discretization-plan` (MOLFiniteDifference spec) resolved.
+4. **Defer PDE models to Phase 3** (`gt-vzwk`): LevelSetFireSpread, SurfaceRunoff Saint-Venant, and UrbanCanopy in-function PDE discretizations. The `discretize(PDESystem, ESD grid)` pipeline is validated end-to-end (ess-d1e, 2026-05-17, MMS O(h²) on ESD `LatLonGrid`); the remaining blocker is test/example block grid/discretization selection and MMS convergence assertions (tracked by **esm-y4m9r**).
 
 5. **Spawn follow-up beads (not yet filed)**:
    - `other:P3-A-metric-tensor-coord-transforms` — CoordinateTransform needs optional `forward_expression`/`inverse_expression`/`metric` AST fields.
    - `other:P3-B-BC-symbolic-offset` — `BoundaryCondition.value` should accept Expression, not just number (Puff lateral BC).
    - `other:P2-C-terminate-in-FunctionalAffect` — reserve built-in `handler_id` set (`terminate`, `save`, `reset`) in the spec.
-   - `other:discretization-plan` — MOLFiniteDifference / discretization stanza on `Domain` (related to `gt-dq0f`).
+   - `other:discretization-plan` — test/example block grid/discretization selection + MMS convergence assertions; tracked by **esm-y4m9r** (the "schema doesn't encode discretization" framing was stale — the schema has `grids`/`staggering_rules`/`discretizations`; see esm-y4m9r for the actual spec extension needed).
 
 6. **Framework bootstrap (not a Phase-2 model migration)**: EarthSciMLBase and EarthSciDiscretizations are not migrated as `.esm` files. They must remain code-form, but their `Operator`/`CoupledSystem`/`DomainInfo`/`MOLFiniteDifference` semantics are the schema's evaluation contract. Any `.esm` file that references an `Operator` by `handler_id` relies on an EarthSciMLBase-registered implementation.
 
