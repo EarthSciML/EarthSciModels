@@ -1,0 +1,334 @@
+{
+  "esm": "0.4.0",
+  "metadata": {
+    "name": "get_lev_depth",
+    "description": "Atmospheric level depth lookup table: physical depth (m) of each vertical model level in the GEOS-Chem / EarthSciML 72-level pressure grid. Migrated from AtmosphericDeposition.jl src/wet_deposition.jl:90 (`get_lev_depth(lev)`, @register_symbolic). Returns the depth (m) of atmospheric level `lev` from the precomputed 72-entry `lev_depth` array. The gt-p3ep (@register_symbolic) gap is resolved by expressing the lookup as a 1D interp.linear over integer axis [1..72], which is exact at integer grid knots and clamps for out-of-range inputs.",
+    "tags": [
+      "atmospheric_deposition",
+      "wet_deposition",
+      "registered_function",
+      "level_depth",
+      "lookup_table",
+      "vertical_grid",
+      "geos-chem"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "AtmosphericDeposition.jl contributors",
+      "EarthSciModels migration (esm-e9k6)"
+    ],
+    "references": [
+      {
+        "citation": "Source: AtmosphericDeposition.jl/src/wet_deposition.jl (commit e4468c79c8dd4aae88646cd16d6bcf290874742c). `get_lev_depth(lev)` — returns the physical depth (m) of vertical level `lev` from the precomputed `lev_depth` array used in wet deposition scavenging calculations."
+      }
+    ]
+  },
+  "models": {
+    "get_lev_depth": {
+      "reference": {
+        "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/wet_deposition.jl:90\n\nUpstream definition:\n  const lev_depth = [\n      123.66503647136699, 126.1276322862293, 127.81793001768432,\n      129.5320284164788, 131.3096296124803, 133.16517799136489,\n      135.08768602272573, 137.10796269057562, 139.21228482592755,\n      141.44376989951024, 143.7574669454459, 146.11933204200864,\n      198.54224783503264, 254.42969509717796, 261.67340274464914,\n      269.231033059717, 277.3039413513152, 285.9069077030176,\n      446.4439568700527, 469.32492993415644, 494.6124439883338,\n      522.6842502004765, 554.6091144685597, 591.0927240282208,\n      633.2768512023067, 682.3924743496791, 741.7294428383548,\n      1090.491426716162, 1091.224127316289, 1063.1347680566032,\n      1038.8233086979671, 1024.2528747829, 1011.555297383451,\n      1001.2550381718829, 993.8747259925203, 988.6668674973989,\n      1000.6772919922369, 1018.1853036083521, 1038.4077259678052,\n      1060.279636055635, 1080.0011699235038, 1105.2749220476362,\n      1128.8308686418932, 1150.9605352645412, 1174.281709164923,\n      1196.5658056986103, 1220.477376106457, 1248.055139801716,\n      1289.3240338666546, 1330.1699211514533, 1371.1351955508508,\n      1418.9073193940494, 1469.6721949144776, 1524.1720211194188,\n      1589.3067557895556, 1669.0982349095284, 1748.6026372218985,\n      1819.7984799666592, 1873.109532132221, 1911.520986089934,\n      1927.4499053974941, 1929.2166042272438, 1929.6506325142327,\n      1932.4995109991505, 1946.1510743334002, 1971.4849133077078,\n      1995.6526762815556, 2040.0593226684432, 2158.2645757768187,\n      2421.761343639795, 3116.2739840471622, 4343.478215407085\n  ]\n  function get_lev_depth(lev)\n      j = 0\n      for i in 1:length(lev_depth)\n          j += ifelse(i <= lev, 1, 0)\n      end\n      result = lev_depth[j]\n      return result\n  end\n  @register_symbolic get_lev_depth(lev)\n\nThe function counts how many indices i in 1..72 satisfy i <= lev, which\ngives j = min(lev, 72) for integer lev >= 1 and j = 0 (out of bounds) for\nlev < 1. For valid integer inputs lev in [1, 72], j = lev exactly, so the\nfunction is a simple 1-indexed array lookup: lev_depth[lev].\n\nThe @register_symbolic gap (gt-p3ep) is resolved by composing the closed\nfunction registry: interp.linear over the 72-entry lev_depth table with\ninteger axis [1.0 .. 72.0]. interp.linear is exact at integer grid knots\n(blend weight is 0 or 1 at the endpoint), and clamps out-of-range inputs:\n  lev < 1:  clamps to lev_depth[1]  = 123.665 m (better than upstream crash)\n  lev > 72: clamps to lev_depth[72] = 4343.478 m (matches upstream j=72)\n\nUsed by WetDeposition (src/wet_deposition.jl:147) to compute the physical\nthickness of the model level for wet scavenging rate calculations.\n\nTolerance (rel=1e-12): interp.linear at an exact integer grid knot is a\npoint evaluation with zero blend weight — a direct table read with one IEEE-754\noperation. rel=1e-12 sits safely above the one-ULP float64 floor."
+      },
+      "tolerance": {
+        "rel": 1e-12
+      },
+      "variables": {
+        "lev": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "Vertical model level index (dimensionless integer 1–72). Level 1 is the lowest (near-surface) level. Values outside [1, 72] are clamped to the boundary depth."
+        },
+        "get_lev_depth": {
+          "type": "observed",
+          "units": "m",
+          "description": "Physical depth (m) of the atmospheric model level at index `lev`. Taken from the 72-entry `lev_depth` table defined in AtmosphericDeposition.jl. Ranges from ~123.7 m at level 1 (near surface) to ~4343.5 m at level 72 (upper troposphere). Used as the layer thickness Δz in the WetDeposition wet-scavenging coefficient calculation.",
+          "expression": {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  123.66503647136699,
+                  126.1276322862293,
+                  127.81793001768432,
+                  129.5320284164788,
+                  131.3096296124803,
+                  133.16517799136489,
+                  135.08768602272573,
+                  137.10796269057562,
+                  139.21228482592755,
+                  141.44376989951024,
+                  143.7574669454459,
+                  146.11933204200864,
+                  198.54224783503264,
+                  254.42969509717796,
+                  261.67340274464914,
+                  269.231033059717,
+                  277.3039413513152,
+                  285.9069077030176,
+                  446.4439568700527,
+                  469.32492993415644,
+                  494.6124439883338,
+                  522.6842502004765,
+                  554.6091144685597,
+                  591.0927240282208,
+                  633.2768512023067,
+                  682.3924743496791,
+                  741.7294428383548,
+                  1090.491426716162,
+                  1091.224127316289,
+                  1063.1347680566032,
+                  1038.8233086979671,
+                  1024.2528747829,
+                  1011.555297383451,
+                  1001.2550381718829,
+                  993.8747259925203,
+                  988.6668674973989,
+                  1000.6772919922369,
+                  1018.1853036083521,
+                  1038.4077259678052,
+                  1060.279636055635,
+                  1080.0011699235038,
+                  1105.2749220476362,
+                  1128.8308686418932,
+                  1150.9605352645412,
+                  1174.281709164923,
+                  1196.5658056986103,
+                  1220.477376106457,
+                  1248.055139801716,
+                  1289.3240338666546,
+                  1330.1699211514533,
+                  1371.1351955508508,
+                  1418.9073193940494,
+                  1469.6721949144776,
+                  1524.1720211194188,
+                  1589.3067557895556,
+                  1669.0982349095284,
+                  1748.6026372218985,
+                  1819.7984799666592,
+                  1873.109532132221,
+                  1911.520986089934,
+                  1927.4499053974941,
+                  1929.2166042272438,
+                  1929.6506325142327,
+                  1932.4995109991505,
+                  1946.1510743334002,
+                  1971.4849133077078,
+                  1995.6526762815556,
+                  2040.0593226684432,
+                  2158.2645757768187,
+                  2421.761343639795,
+                  3116.2739840471622,
+                  4343.478215407085
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                  11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0,
+                  21.0, 22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0, 29.0, 30.0,
+                  31.0, 32.0, 33.0, 34.0, 35.0, 36.0, 37.0, 38.0, 39.0, 40.0,
+                  41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0, 49.0, 50.0,
+                  51.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0,
+                  61.0, 62.0, 63.0, 64.0, 65.0, 66.0, 67.0, 68.0, 69.0, 70.0,
+                  71.0, 72.0
+                ],
+                "args": []
+              },
+              "lev"
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": [
+        {
+          "id": "level_1_surface",
+          "description": "Level 1 (lowest, near-surface): depth = 123.66503647136699 m. Matches upstream AtmosphericDeposition.get_lev_depth(1) = lev_depth[1].",
+          "parameter_overrides": {
+            "lev": 1.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 123.66503647136699,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_10",
+          "description": "Level 10: depth = 141.44376989951024 m. Matches upstream get_lev_depth(10) = lev_depth[10].",
+          "parameter_overrides": {
+            "lev": 10.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 141.44376989951024,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_13_jump",
+          "description": "Level 13: depth = 198.54224783503264 m. This is where the lev_depth array has a step increase (from ~146 m at level 12 to ~199 m at level 13).",
+          "parameter_overrides": {
+            "lev": 13.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 198.54224783503264,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_28_maximum_zone",
+          "description": "Level 28: depth = 1090.491426716162 m. Near the top of the lower-troposphere levels where depths exceed 1 km.",
+          "parameter_overrides": {
+            "lev": 28.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 1090.491426716162,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_35_local_minimum",
+          "description": "Level 35: depth = 993.8747259925203 m. This is a local minimum in the depth profile (surrounding levels are deeper).",
+          "parameter_overrides": {
+            "lev": 35.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 993.8747259925203,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_71",
+          "description": "Level 71: depth = 3116.2739840471622 m. Second-highest level; below the deepest entry.",
+          "parameter_overrides": {
+            "lev": 71.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 3116.2739840471622,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_72_top",
+          "description": "Level 72 (highest): depth = 4343.478215407085 m. The deepest level in the 72-entry array. Matches upstream get_lev_depth(72) = lev_depth[72].",
+          "parameter_overrides": {
+            "lev": 72.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 4343.478215407085,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "level_clamp_above_72",
+          "description": "lev=80 (above range): interp.linear clamps to lev_depth[72] = 4343.478215407085 m. Matches upstream behavior where j = min(80, 72) = 72.",
+          "parameter_overrides": {
+            "lev": 80.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 4343.478215407085,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        },
+        {
+          "id": "time_invariance",
+          "description": "get_lev_depth is purely algebraic (no time derivatives): value at t=1 equals value at t=0.",
+          "parameter_overrides": {
+            "lev": 28.0
+          },
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "assertions": [
+            {
+              "variable": "get_lev_depth",
+              "time": 0.0,
+              "expected": 1090.491426716162,
+              "tolerance": { "rel": 1e-12 }
+            },
+            {
+              "variable": "get_lev_depth",
+              "time": 1.0,
+              "expected": 1090.491426716162,
+              "tolerance": { "rel": 1e-12 }
+            }
+          ]
+        }
+      ],
+      "examples": [
+        {
+          "id": "depth_profile",
+          "description": "Physical depth (m) of each vertical level 1–72. Near-surface levels (1–12) are shallow (~123–146 m); level 13 jumps to ~199 m; mid-troposphere levels (28–72) range from ~988 m to ~4344 m.",
+          "time_span": { "start": 0.0, "end": 1.0 },
+          "parameter_sweep": {
+            "type": "cartesian",
+            "dimensions": [
+              {
+                "parameter": "lev",
+                "values": [
+                  1.0, 5.0, 10.0, 13.0, 15.0, 19.0, 24.0, 28.0, 35.0,
+                  40.0, 45.0, 50.0, 55.0, 60.0, 65.0, 70.0, 71.0, 72.0
+                ]
+              }
+            ]
+          },
+          "plots": [
+            {
+              "id": "depth_by_level",
+              "type": "line",
+              "x": {
+                "variable": "lev",
+                "label": "Vertical level index (1 = surface)"
+              },
+              "y": {
+                "variable": "get_lev_depth",
+                "label": "Level depth (m)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
