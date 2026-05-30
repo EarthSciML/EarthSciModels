@@ -276,7 +276,7 @@ Repo purpose: dry and wet deposition velocity/resistance schemes (Wesley 1989, S
 |---|---|---|---|---|---|---|---|---|---|
 | DryDepositionGas (Wesley) | `src/dry_deposition.jl:323` | Model | variables, parameters, equations, registered_function calls (A_table/α_table/γ_table) | gt-p3ep(lookup) | L | Y | Y | `components/atmospheric_deposition/wesley_dry_gas.esm` | — |
 | DryDepositionAerosol | `src/dry_deposition.jl:1040` | Model | variables, parameters, equations | none | M | Y | Y | `components/atmospheric_deposition/dry_aerosol.esm` | — |
-| A_table | `src/dry_deposition.jl:180` | Interface | @register_symbolic (season × land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_A_table` | — |
+| A_table | `src/dry_deposition.jl:180` | Interface | @register_symbolic (season × land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_A_table` | — | **status: complete** (esm-0xch — S&P Table 19.2, 5×5 season×land-use collector radius; gt-p3ep resolved via interp.linear over 25-entry column-major flattening; desert=1e25 Inf sentinel; 11 inline assertions all pass.)
 | α_table | `src/dry_deposition.jl:185` | Interface | @register_symbolic (land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_alpha_table` | — |
 | γ_table | `src/dry_deposition.jl:190` | Interface | @register_symbolic (land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_gamma_table` | — |
 
