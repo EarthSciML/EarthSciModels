@@ -1,0 +1,368 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "ERA5",
+    "description": "ERA5 ECMWF Reanalysis 5th Generation DataLoader. Provides hourly pressure-level atmospheric variables (wind, temperature, humidity, geopotential, cloud, ozone, and derived fields) on 37 pressure levels at 0.25°×0.25° global resolution, 1940–present.\n\nData is sourced from monthly NetCDF files containing all 16 pressure-level variables plus pressure_level coordinate. The data loader ERA5_pl handles file download, temporal interpolation (hourly), and spatial regridding to the simulation domain at runtime.\n\nPressure coordinate P is derived from the ERA5 pressure levels via a 37-entry linear lookup table (era5_pressure_levels_pa). The δPδlev quantity (derivative of pressure with respect to level index, needed for advection in level-index coordinates) requires DataInterpolations.derivative of the level→pressure mapping and is omitted pending resolution of gap gt-6ohw.\n\nCoordinate transform metrics δxδlon and δyδlat are emitted for lat/lon domains.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download, temporal interpolation, and spatial regridding; model equations reference ERA5_pl loader variables directly.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5 constructor, esm-te2e).",
+    "tags": [
+      "earthsci_data",
+      "meteorology",
+      "reanalysis",
+      "era5",
+      "ecmwf",
+      "pressure_levels",
+      "global",
+      "data_loader"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "ECMWF",
+      "EarthSciModels migration (esm-te2e)"
+    ],
+    "references": [
+      {
+        "citation": "Hersbach, H., Bell, B., Berrisford, P., Hirahara, S., Horanyi, A., Munoz-Sabater, J., Nicolas, J., Peubey, C., Radu, R., Schepers, D., Simmons, A., Soci, C., Abdalla, S., Abellan, X., Balsamo, G., Bechtold, P., Biavati, G., Bidlot, J., Bonavita, M., De Chiara, G., Dahlgren, P., Dee, D., Diamantakis, M., Dragani, R., Flemming, J., Forbes, R., Fuentes, M., Geer, A., Haimberger, L., Healy, S., Hogan, R. J., Holm, E., Janiskova, M., Keeley, S., Laloyaux, P., Lopez, P., Lupu, C., Radnoti, G., de Rosnay, P., Rozum, I., Vamborg, F., Villaume, S., and Thepaut, J.-N. (2020). The ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society, 146(730), 1999–2049.",
+        "url": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5",
+        "doi": "10.1002/qj.3803"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5 constructor). ERA5FileSet, create_interp_equation with 'pl' prefix, ERA5_PRESSURE_LEVELS_HPA, era5_P_itp."
+      }
+    ]
+  },
+  "function_tables": {
+    "era5_pressure_levels_pa": {
+      "axes": [
+        {
+          "name": "lev",
+          "values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+        }
+      ],
+      "data": [100000.0, 97500.0, 95000.0, 92500.0, 90000.0, 87500.0, 85000.0, 82500.0, 80000.0, 77500.0, 75000.0, 70000.0, 65000.0, 60000.0, 55000.0, 50000.0, 45000.0, 40000.0, 35000.0, 30000.0, 25000.0, 22500.0, 20000.0, 17500.0, 15000.0, 12500.0, 10000.0, 7000.0, 5000.0, 3000.0, 2000.0, 1000.0, 700.0, 500.0, 300.0, 200.0, 100.0],
+      "interpolation": "linear",
+      "out_of_bounds": "clamp",
+      "description": "ERA5 pressure levels in Pa (= hPa * 100). Index 1 = 1000 hPa (near-surface), index 37 = 1 hPa (top of atmosphere). ERA5_PRESSURE_LEVELS_HPA = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100, 70, 50, 30, 20, 10, 7, 5, 3, 2, 1] converted to Pa. Used by era5_P_itp (LinearInterpolation of levels 1:37 → hPa values) in the upstream source, reproduced here as a table_lookup with lev input."
+    }
+  },
+  "models": {
+    "ERA5": {
+      "coupletype": "ERA5Coupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385\n\nUpstream constructor ERA5(domaininfo; name=:ERA5, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad), lev (dimensionless, 1–37 integer index), t_ref (s)\n  - Sub-system 'pl' containing one observed equation per NetCDF variable via create_interp_equation(\"pl\" prefix):\n      pl₊t(t) ~ interp_unsafe(data_t, fit, fi_lon, fi_lat, fi_lev, extrap)\n      pl₊u(t) ~ interp_unsafe(data_u, ...)\n      ... (16 variables total)\n  - Top-level observed variables:\n      P(t) ~ hPa2Pa * era5_P_itp(lev)   where hPa2Pa=100.0\n      δxδlon(t) ~ lon2m * cos(lat)        [lat/lon domains only]\n      δyδlat(t) ~ lat2meters              [lat/lon domains only]\n  - era5_P_itp = LinearInterpolation(ERA5_PRESSURE_LEVELS_HPA, 1:37): maps lev ∈ [1,37] → pressure in hPa; multiplied by hPa2Pa=100 to give Pa.\n  - discrete_events: build_interp_event fires hourly to reload ERA5 file buffers.\n  - metadata: Dict(CoupleType => ERA5Coupler, SysDomainInfo => domaininfo)\n  - couple2 with MeanWindCoupler: MeanWind.v_lon ~ ERA5.pl.u, MeanWind.v_lat ~ ERA5.pl.v, MeanWind.v_lev ~ ERA5.pl.w\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern for all 16 per-variable equations is replaced by the data_loaders §8 mechanism (ERA5_pl.{varname} references). The subsystem 'pl' is expressed as a named subsystem containing the 16 loader variable references. P, δxδlon, and δyδlat are expressed as simple algebraic combinations in the top-level ERA5 model.\n\ngt-6ohw gap — δPδlev omitted:\n  Upstream source (era5.jl:454,516) computes:\n    δPδlev(t) ~ hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev)\n  This requires calling the derivative of a LinearInterpolation object with respect to its argument (lev). The ESM expression language does not support calling derivatives of DataInterpolations interpolation objects; this is tracked as gap gt-6ohw (DataInterpolations.derivative get_unit). δPδlev is therefore omitted from this migration. When gt-6ohw is resolved, add:\n    variables.δPδlev = {\n      type: observed, units: Pa,\n      description: \"Derivative of pressure with respect to level index (Pa per index unit). δPδlev = hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev). Used in level-index coordinate advection to convert vertical velocity from Pa/s to lev/s.\",\n      expression: { op: *, args: [100.0, { op: fn, name: function_tables.derivative, args: [era5_pressure_levels_pa, lev] }] }\n    }\n\nCoordinate conventions:\n  - lev: 1-based integer index into ERA5_PRESSURE_LEVELS_HPA, increasing upward (1 = 1000 hPa near-surface, 37 = 1 hPa top-of-atmosphere). Fractional values interpolate between levels.\n  - lon: radians; runtime regridder converts to degrees for spatial interpolation against the 0.25°×0.25° ERA5 grid.\n  - lat: radians; same convention.\n  - t_ref: seconds since the Julian date epoch, set from DomainInfo.get_tref(domaininfo) at construction time.\n  - δxδlon and δyδlat: emitted only for lat/lon coordinate domains. Not emitted for projected (x/y) domains.\n\nNetCDF dimension names in ERA5 monthly pressure-level files:\n  longitude, latitude, pressure_level (37 levels, in hPa), valid_time (hourly).\n\nMeanWind coupling (from EarthSciData.jl@830435a coupling.jl):\n  MeanWind.v_lon ~ ERA5.pl.u\n  MeanWind.v_lat ~ ERA5.pl.v\n  MeanWind.v_lev ~ ERA5.pl.w\n\nFile naming convention: era5_pl_{YYYY}_{MM:02d}.nc (monthly files, one per calendar month, covering all 16 variables with pressure_level dimension)."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid."
+        },
+        "lev": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "ERA5 pressure level index (dimensionless, 1-based). Index 1 corresponds to the near-surface level (1000 hPa); index 37 corresponds to the top-of-atmosphere level (1 hPa). Fractional values interpolate linearly between adjacent pressure levels. Corresponds to the 'pressure_level' NetCDF dimension, re-indexed from 1. Coupled from the simulation domain's lev coordinate."
+        },
+        "t_ref": {
+          "type": "parameter",
+          "units": "s",
+          "default": 0.0,
+          "description": "Reference epoch (seconds since the Julian date epoch) from which the ERA5 file time axis (valid_time) is offset. Set from DomainInfo.get_tref(domaininfo) at construction time."
+        },
+        "P": {
+          "type": "observed",
+          "units": "Pa",
+          "description": "Atmospheric pressure at the current level index (Pa). P = hPa2Pa * era5_P_itp(lev) = 100.0 * LinearInterpolation(ERA5_PRESSURE_LEVELS_HPA, 1:37)(lev). Computed from the era5_pressure_levels_pa function table (37 entries, Pa). For integer lev this returns exact ERA5 standard pressure levels; for fractional lev it linearly interpolates between adjacent levels. ERA5_PRESSURE_LEVELS_HPA = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100, 70, 50, 30, 20, 10, 7, 5, 3, 2, 1] hPa.",
+          "expression": {
+            "op": "table_lookup",
+            "table": "era5_pressure_levels_pa",
+            "axes": {
+              "lev": "lev"
+            },
+            "args": []
+          }
+        },
+        "δxδlon": {
+          "type": "observed",
+          "units": "m/rad",
+          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars.",
+          "expression": {
+            "op": "*",
+            "args": [
+              6378134.3,
+              {
+                "op": "cos",
+                "args": [
+                  "lat"
+                ]
+              }
+            ]
+          }
+        },
+        "δyδlat": {
+          "type": "observed",
+          "units": "m/rad",
+          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³·(180/π) ≈ 6378166.0 m rad⁻¹. Constant (does not depend on position). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars.",
+          "expression": 6378166.0
+        }
+      },
+      "subsystems": {
+        "pl": {
+          "variables": {
+            "t": {
+              "type": "observed",
+              "units": "K",
+              "description": "Temperature (K) at the current ERA5 pressure level. Sourced from ERA5_pl.t (NetCDF variable 't' in era5_pl_{YYYY}_{MM:02d}.nc). MTK name: ERA5.pl₊t.",
+              "expression": "ERA5_pl.t"
+            },
+            "u": {
+              "type": "observed",
+              "units": "m/s",
+              "description": "U component of wind — zonal (west–east) wind (m/s) at the current ERA5 pressure level. Sourced from ERA5_pl.u. MTK name: ERA5.pl₊u. Coupled to MeanWind.v_lon via ERA5Coupler.",
+              "expression": "ERA5_pl.u"
+            },
+            "v": {
+              "type": "observed",
+              "units": "m/s",
+              "description": "V component of wind — meridional (south–north) wind (m/s) at the current ERA5 pressure level. Sourced from ERA5_pl.v. MTK name: ERA5.pl₊v. Coupled to MeanWind.v_lat via ERA5Coupler.",
+              "expression": "ERA5_pl.v"
+            },
+            "w": {
+              "type": "observed",
+              "units": "Pa/s",
+              "description": "Vertical velocity in pressure coordinates — Lagrangian tendency of pressure (omega, Pa/s) at the current ERA5 pressure level. Positive downward (increasing pressure). Sourced from ERA5_pl.w. MTK name: ERA5.pl₊w. Coupled to MeanWind.v_lev via ERA5Coupler.",
+              "expression": "ERA5_pl.w"
+            },
+            "q": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Specific humidity (kg water per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.q.",
+              "expression": "ERA5_pl.q"
+            },
+            "r": {
+              "type": "observed",
+              "units": "%",
+              "description": "Relative humidity (%) at the current ERA5 pressure level. Sourced from ERA5_pl.r.",
+              "expression": "ERA5_pl.r"
+            },
+            "z": {
+              "type": "observed",
+              "units": "m^2/s^2",
+              "description": "Geopotential (m² s⁻²) at the current ERA5 pressure level. Divide by g ≈ 9.80665 m s⁻² to obtain geopotential height in metres. Sourced from ERA5_pl.z.",
+              "expression": "ERA5_pl.z"
+            },
+            "d": {
+              "type": "observed",
+              "units": "1/s",
+              "description": "Divergence (s⁻¹) of the horizontal wind field at the current ERA5 pressure level. Sourced from ERA5_pl.d.",
+              "expression": "ERA5_pl.d"
+            },
+            "vo": {
+              "type": "observed",
+              "units": "1/s",
+              "description": "Relative vorticity (s⁻¹) of the horizontal wind field at the current ERA5 pressure level. Sourced from ERA5_pl.vo.",
+              "expression": "ERA5_pl.vo"
+            },
+            "o3": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Ozone mass mixing ratio (kg ozone per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.o3.",
+              "expression": "ERA5_pl.o3"
+            },
+            "cc": {
+              "type": "observed",
+              "units": "1",
+              "description": "Fraction of cloud cover (dimensionless, 0–1) at the current ERA5 pressure level. ERA5 stores this as a fraction (0 = clear, 1 = overcast). Sourced from ERA5_pl.cc.",
+              "expression": "ERA5_pl.cc"
+            },
+            "ciwc": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Specific cloud ice water content (kg ice per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.ciwc.",
+              "expression": "ERA5_pl.ciwc"
+            },
+            "clwc": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Specific cloud liquid water content (kg liquid water per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.clwc.",
+              "expression": "ERA5_pl.clwc"
+            },
+            "crwc": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Specific rain water content (kg rain water per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.crwc.",
+              "expression": "ERA5_pl.crwc"
+            },
+            "cswc": {
+              "type": "observed",
+              "units": "kg/kg",
+              "description": "Specific snow water content (kg snow water per kg moist air) at the current ERA5 pressure level. Sourced from ERA5_pl.cswc.",
+              "expression": "ERA5_pl.cswc"
+            },
+            "pv": {
+              "type": "observed",
+              "units": "K*m^2/(kg*s)",
+              "description": "Potential vorticity (K m² kg⁻¹ s⁻¹) at the current ERA5 pressure level. Sourced from ERA5_pl.pv.",
+              "expression": "ERA5_pl.pv"
+            }
+          },
+          "equations": []
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "ERA5_pl": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://data.earthsci.dev/era5/era5_pl_{date:%Y}_{date:%m}.nc"
+      },
+      "temporal": {
+        "start": "1940-01-01T00:00:00Z",
+        "end": "2025-12-31T23:59:59Z",
+        "file_period": "P1M",
+        "frequency": "PT1H",
+        "records_per_file": 744,
+        "time_variable": "valid_time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "longitude": "center",
+          "latitude": "center",
+          "pressure_level": "center"
+        },
+        "resolution": {
+          "longitude": 0.25,
+          "latitude": 0.25
+        },
+        "extent": {
+          "longitude": [-180.0, 180.0],
+          "latitude": [-90.0, 90.0],
+          "pressure_level": [1.0, 1000.0]
+        }
+      },
+      "variables": {
+        "t": {
+          "file_variable": "t",
+          "units": "K",
+          "description": "Temperature (K). ERA5 NetCDF short name 't'. Clamp extrapolation at domain boundaries."
+        },
+        "u": {
+          "file_variable": "u",
+          "units": "m/s",
+          "description": "U component of wind — zonal wind (m/s). ERA5 NetCDF short name 'u'. Clamp extrapolation."
+        },
+        "v": {
+          "file_variable": "v",
+          "units": "m/s",
+          "description": "V component of wind — meridional wind (m/s). ERA5 NetCDF short name 'v'. Clamp extrapolation."
+        },
+        "w": {
+          "file_variable": "w",
+          "units": "Pa/s",
+          "description": "Vertical velocity (omega, Pa/s). ERA5 NetCDF short name 'w'. Lagrangian tendency of pressure; positive downward. Clamp extrapolation."
+        },
+        "q": {
+          "file_variable": "q",
+          "units": "kg/kg",
+          "description": "Specific humidity (kg water per kg moist air). ERA5 NetCDF short name 'q'. Clamp extrapolation."
+        },
+        "r": {
+          "file_variable": "r",
+          "units": "%",
+          "description": "Relative humidity (%). ERA5 NetCDF short name 'r'. Clamp extrapolation."
+        },
+        "z": {
+          "file_variable": "z",
+          "units": "m^2/s^2",
+          "description": "Geopotential (m² s⁻²). ERA5 NetCDF short name 'z'. Divide by g to obtain geopotential height in metres. Clamp extrapolation."
+        },
+        "d": {
+          "file_variable": "d",
+          "units": "1/s",
+          "description": "Divergence (s⁻¹). ERA5 NetCDF short name 'd'. Clamp extrapolation."
+        },
+        "vo": {
+          "file_variable": "vo",
+          "units": "1/s",
+          "description": "Vorticity — relative vorticity (s⁻¹). ERA5 NetCDF short name 'vo'. Clamp extrapolation."
+        },
+        "o3": {
+          "file_variable": "o3",
+          "units": "kg/kg",
+          "description": "Ozone mass mixing ratio (kg ozone per kg moist air). ERA5 NetCDF short name 'o3'. Clamp extrapolation."
+        },
+        "cc": {
+          "file_variable": "cc",
+          "units": "1",
+          "description": "Fraction of cloud cover (dimensionless, 0–1). ERA5 NetCDF short name 'cc'. Stored as 0–1 fraction in ERA5 files. Clamp extrapolation."
+        },
+        "ciwc": {
+          "file_variable": "ciwc",
+          "units": "kg/kg",
+          "description": "Specific cloud ice water content (kg ice per kg moist air). ERA5 NetCDF short name 'ciwc'. Clamp extrapolation."
+        },
+        "clwc": {
+          "file_variable": "clwc",
+          "units": "kg/kg",
+          "description": "Specific cloud liquid water content (kg liquid water per kg moist air). ERA5 NetCDF short name 'clwc'. Clamp extrapolation."
+        },
+        "crwc": {
+          "file_variable": "crwc",
+          "units": "kg/kg",
+          "description": "Specific rain water content (kg rain water per kg moist air). ERA5 NetCDF short name 'crwc'. Clamp extrapolation."
+        },
+        "cswc": {
+          "file_variable": "cswc",
+          "units": "kg/kg",
+          "description": "Specific snow water content (kg snow water per kg moist air). ERA5 NetCDF short name 'cswc'. Clamp extrapolation."
+        },
+        "pv": {
+          "file_variable": "pv",
+          "units": "K*m^2/(kg*s)",
+          "description": "Potential vorticity (K m² kg⁻¹ s⁻¹). ERA5 NetCDF short name 'pv'. Clamp extrapolation."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hersbach, H. et al. (2020). The ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society, 146(730), 1999–2049.",
+        "url": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5",
+        "doi": "10.1002/qj.3803"
+      },
+      "metadata": {
+        "tags": [
+          "era5",
+          "ecmwf",
+          "meteorology",
+          "reanalysis",
+          "global",
+          "pressure-level",
+          "hourly",
+          "0.25deg"
+        ],
+        "earthscidata_source": "src/era5.jl::ERA5FileSet (pressure-level variables)",
+        "pressure_levels_hpa": [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100, 70, 50, 30, 20, 10, 7, 5, 3, 2, 1],
+        "netcdf_dimensions": ["longitude", "latitude", "pressure_level", "valid_time"],
+        "file_naming": "era5_pl_{YYYY}_{MM:02d}.nc (monthly, one file per calendar month, all 16 pressure-level variables plus pressure_level dimension)",
+        "level_indexing_note": "The data_loaders pressure_level coordinate uses hPa values (1–1000 hPa) matching the NetCDF 'pressure_level' dimension. The model lev parameter uses 1-based integer indexing (1=1000 hPa, 37=1 hPa) matching the upstream ERA5FileSet convention. The runtime must convert lev → hPa using ERA5_PRESSURE_LEVELS_HPA[lev] before querying ERA5_pl.",
+        "access_note": "ERA5 data is available from the Copernicus Climate Data Store (CDS) at https://cds.climate.copernicus.eu/. The url_template above uses a placeholder earthsci.dev mirror; in production, set EARTHSCIDATADIR to a local cache directory populated via the CDS API or the EarthSciData.jl ERA5FileSet download utilities.",
+        "temporal_note": "ERA5 monthly files are released with a ~2-month lag. The temporal.end above is approximate; update as new months are released. ERA5 Back Extension covers 1940–1978 with slightly reduced quality; the main ERA5 record begins January 1979."
+      }
+    }
+  }
+}
