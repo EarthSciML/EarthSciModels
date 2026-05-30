@@ -416,7 +416,7 @@ Repo purpose: data-backed MTK systems (reanalysis/emissions/topography). Every s
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| EarthSciData ↔ CoupledSystem couplings (ERA5/GEOSFP/CEDS/EDGAR/NEI adjoint couples via `param_to_var`) | `src/coupling.jl:24,31,...` | Coupling | coupling.param_to_var (`lat`, `lon`, `lev`) | none | S | Y | Y | `couplings/earthscidata_spatial_params.esm` | ERA5, GEOSFP, CEDS, EDGARv81MonthlyEmis, NEI2016MonthlyEmis |
+| EarthSciData ↔ CoupledSystem couplings (ERA5/GEOSFP/CEDS/EDGAR/NEI adjoint couples via `param_to_var`) | `src/coupling.jl:24,31,...` | Coupling | coupling.param_to_var (`lat`, `lon`, `lev`) | none | S | Y | Y | `couplings/earthscidata_spatial_params.esm` | ERA5, GEOSFP, CEDS, EDGARv81MonthlyEmis, NEI2016MonthlyEmis | **status: complete** (esm-wzih)
 
 ---
 
