@@ -278,7 +278,7 @@ Repo purpose: dry and wet deposition velocity/resistance schemes (Wesley 1989, S
 | DryDepositionAerosol | `src/dry_deposition.jl:1040` | Model | variables, parameters, equations | none | M | Y | Y | `components/atmospheric_deposition/dry_aerosol.esm` | — |
 | A_table | `src/dry_deposition.jl:180` | Interface | @register_symbolic (season × land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_A_table` | — | **status: complete** (esm-0xch — S&P Table 19.2, 5×5 season×land-use collector radius; gt-p3ep resolved via interp.linear over 25-entry column-major flattening; desert=1e25 Inf sentinel; 11 inline assertions all pass.)
 | α_table | `src/dry_deposition.jl:185` | Interface | @register_symbolic (land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_alpha_table` | — |
-| γ_table | `src/dry_deposition.jl:190` | Interface | @register_symbolic (land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_gamma_table` | — |
+| γ_table | `src/dry_deposition.jl:190` | Interface | @register_symbolic (land use) | gt-p3ep(lookup) | S | Y | Y | `registered_functions/wesley_gamma_table` | — | **status: complete** (esm-ixad — 5-entry 1D Brownian-diffusion exponent lookup (S&P Table 19.2); gt-p3ep resolved via interp.linear over integer axis [1..5]; Float32-promoted values (0.56f0→0.5600000023841858, 0.54f0→0.5400000214576721); exact at integer knots, clamps outside [1,5]; 8 inline assertions all pass.)
 
 ### 2.2 wet_deposition.jl — 1 builder, 1 lookup
 
