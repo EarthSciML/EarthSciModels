@@ -284,7 +284,7 @@ Repo purpose: dry and wet deposition velocity/resistance schemes (Wesley 1989, S
 
 | component_name | source_path | kind | features | blocking_gap | complexity | tests | docs | target_path | depends_on |
 |---|---|---|---|---|---|---|---|---|---|
-| WetDeposition | `src/wet_deposition.jl:147` | Model | variables, parameters, equations, registered_function calls (get_lev_depth) | gt-p3ep(lookup) | M | Y | Y | `components/atmospheric_deposition/wet_deposition.esm` | — |
+| WetDeposition | `src/wet_deposition.jl:147` | Model | variables, parameters, equations, registered_function calls (get_lev_depth) | gt-p3ep(lookup) | M | Y | Y | `components/atmospheric_deposition/wet_deposition.esm` | — | <!-- status: complete (esm-h955) -->
 | get_lev_depth | `src/wet_deposition.jl:90` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/get_lev_depth` | — | **status: complete** (esm-e9k6 — 72-entry 1D level-depth lookup table; gt-p3ep resolved via interp.linear over integer axis [1..72]; exact at integer grid knots, clamps outside [1,72]; 10 inline assertions all pass.)
 
 ### 2.3 seinfeld_pandis_ch19.jl (7, `none`)
