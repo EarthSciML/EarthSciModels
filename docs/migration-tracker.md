@@ -410,7 +410,7 @@ Repo purpose: data-backed MTK systems (reanalysis/emissions/topography). Every s
 | dayofweek_itp_CO | `src/nei2016monthly.jl:129` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/nei_dayofweek_itp_co` | — |
 | dayofweek_itp_NOx | `src/nei2016monthly.jl:130` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/nei_dayofweek_itp_nox` | — |
 | delp_dry_surface_itp | `src/nei2016monthly.jl:131` | Interface | @register_symbolic | gt-p3ep(lookup) | S | Y | Y | `registered_functions/nei_delp_dry_surface_itp` | — |
-| DataInterpolations.derivative (get_unit) | `src/era5.jl:454,516`, `src/geosfp.jl:279` | Interface | registered `get_unit` hook | gt-6ohw | S | Y | N | `registered_functions/data_interpolations_derivative` | — |
+| DataInterpolations.derivative (get_unit) | `src/era5.jl:454,516`, `src/geosfp.jl:279` | Interface | registered `get_unit` hook | gt-6ohw | S | Y | N | `registered_functions/data_interpolations_derivative` | — | **blocked: esm-j8jv** — Source: `EarthSciData.jl@830435a geosfp.jl:279`: `ModelingToolkit.get_unit(::typeof(DataInterpolations.derivative), args) = 1.0` (dimensionless hack; ERA5 applies `hPa2Pa` at call sites to recover physical units). Gap: .esm v0.4.0 has no `unit_hooks` block for runtime dispatch hooks on interpolation objects. Gap bead: esm-glvs.
 
 ### 4.3 Couplings (`src/coupling.jl`)
 
