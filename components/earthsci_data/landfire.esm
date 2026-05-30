@@ -1,0 +1,117 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "LANDFIRE",
+    "description": "LANDFIRE (Landscape Fire and Resource Management Planning Tools) fuel model data loader. Provides Anderson 13 (FBFM13) or Scott & Burgan 40 (FBFM40) fire behavior fuel model classifications at ~30m resolution over the contiguous United States (CONUS).\n\nData is downloaded from the LANDFIRE ImageServer REST API (USGS ArcGIS REST service) as a GeoTIFF, cropped to the model domain bounding box. This is a static (time-invariant) dataset: one image per simulation domain covering the entire simulation period.\n\nValid FBFM13 pixel values:\n  0 = no fuel\n  1–13 = Anderson 13 burnable fuel models\n  91 = urban/developed\n  92 = snow/ice\n  93 = agriculture\n  98 = water\n  99 = barren\n\nFBFM40 adds codes 101–204 (Scott & Burgan 40 fuel models).\n\nNearest-neighbour interpolation is used (appropriate for categorical/integer data) to map the 30m grid values to model coordinates.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime downloads the GeoTIFF from the LANDFIRE ImageServer, reprojects/regrids to the model domain using nearest-neighbour interpolation, and exposes the fuel model code as LANDFIRE.fuel_model. No registered functions remain in the migrated component. The discrete_event (build_interp_event) fires once at simulation start since the dataset is static.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b src/landfire.jl:246 (LANDFIRE constructor, esm-19u5).",
+    "tags": [
+      "earthsci_data",
+      "wildland_fire",
+      "fuel_model",
+      "landfire",
+      "static",
+      "data_loader",
+      "conus"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-19u5)"
+    ],
+    "references": [
+      {
+        "citation": "LANDFIRE (2022). LANDFIRE 2022 Fire Behavior Fuel Model (FBFM13/FBFM40). U.S. Department of Agriculture, Forest Service; U.S. Department of Interior. Available: https://landfire.gov/",
+        "url": "https://landfire.gov/"
+      },
+      {
+        "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service, Intermountain Forest and Range Experiment Station. Gen. Tech. Rep. INT-122. — Source for Anderson 13 fuel model codes 1–13."
+      },
+      {
+        "citation": "Scott, J.H. and Burgan, R.E. (2005). Standard fire behavior fuel models: a comprehensive set for use with Rothermel's surface fire spread model. USDA Forest Service Gen. Tech. Rep. RMRS-GTR-153. — Source for Scott & Burgan 40 fuel model codes (FBFM40 product)."
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/landfire.jl (LANDFIREFileSet, LANDFIRE constructor). Test: test/landfire_test.jl. Docs: docs/src/landfire.md."
+      }
+    ]
+  },
+  "models": {
+    "LANDFIRE": {
+      "coupletype": "LANDFIRECoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/landfire.jl:246\n\nUpstream constructor LANDFIRE(domaininfo; name=:LANDFIRE, product=\"FBFM13\", version=\"LF2022\", resolution=1.0, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad) from domaininfo pvars (via pvdict)\n  - One observed equation via create_interp_equation(itp, \"\", t, t_ref, [lon, lat]; spatial_interp)\n    where itp = DataSetInterpolator{dt}(FileSetWithRegridder(fs, regrid_f), \"fuel_model\", ...)\n    and fs = LANDFIREFileSet(domaininfo; product, version, resolution)\n    and regrid_f uses _nearest_interpolate_from! (BSpline(Constant())) for categorical data\n  - discrete_events: build_interp_event fires at simulation start (static dataset)\n  - metadata: Dict(CoupleType => LANDFIRECoupler, SysDomainInfo => domaininfo)\n\nLANDFIREFileSet downloads from LANDFIRE ImageServer REST API:\n  URL: https://lfps.usgs.gov/arcgis/rest/services/Landfire_{version}/{version}_{product}_CONUS/ImageServer/exportImage\n  Query params: bbox={west},{south},{east},{north} (degrees), bboxSR=4326, imageSR=4326,\n                size={width},{height}, format=tiff, pixelType=S16,\n                interpolation=+RSP_NearestNeighbor, f=image\n  where bbox and dimensions are computed from the model domain via _domain_bbox_wgs84\n  (handles both longlat and projected domains via Proj.jl transformation)\n\nFile format: GeoTIFF, S16 pixel type. loadslice! converts S16 (TiffImages reads as\nQ0f15 fixed-point) to Float64 fuel model codes via × 32768.\n\nStaticness: DataFrequencyInfo is set up with a single interval spanning\n[starttime, endtime + 1 day]. The build_interp_event fires once at starttime;\nthe GeoTIFF buffer is never reloaded during the simulation.\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the\ndata_loaders §8 (kind: 'static') mechanism. LANDFIRE.fuel_model is the loader variable\nthat the runtime downloads from the LANDFIRE ImageServer API at the domain bounding box,\nconverts from S16 to integer fuel model codes, and regrids to model coordinates using\nnearest-neighbour interpolation (BSpline(Constant())). The model equation is a direct\npass-through: fuel_model(t) ~ LANDFIRE.fuel_model. No registered functions remain.\n\nNote on spatial_interp: upstream :linear (default) and :nearest modes both apply nearest-\nneighbour regridding to the fuel model grid before DataSetInterpolator time interpolation\n(which is trivial for a static dataset). The distinction between :linear and :nearest in\nthe upstream code applies to the DataSetInterpolator time axis, which has only one slice\nfor a static dataset.\n\nNote on projections: _domain_bbox_wgs84 handles both longlat and projected (e.g. LCC)\ndomains. For projected domains it transforms all edge points to WGS84 to compute the\nbounding envelope. The runtime must implement equivalent domain bbox computation."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "fuel_model": {
+          "type": "observed",
+          "units": "1",
+          "description": "LANDFIRE fire behavior fuel model code at the model grid point. Nearest-neighbour interpolated from the 30m-resolution GeoTIFF to the model coordinates. Valid FBFM13 values: 0 (no fuel), 1–13 (Anderson 13 burnable models), 91=urban/developed, 92=snow/ice, 93=agriculture, 98=water, 99=barren. FBFM40 adds codes 101–204. Non-integer values may appear due to floating-point conversion but are rounded to integer codes by downstream consumers (e.g. FuelModelLookup uses ifelse+interp.linear at integer-valued inputs). Static (time-invariant): the same value is returned for all simulation times.",
+          "expression": "LANDFIRE.fuel_model"
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "LANDFIRE": {
+      "kind": "static",
+      "source": {
+        "url_template": "https://lfps.usgs.gov/arcgis/rest/services/Landfire_{version}/{version}_{product}_CONUS/ImageServer/exportImage?bbox={bbox_west_deg},{bbox_south_deg},{bbox_east_deg},{bbox_north_deg}&bboxSR=4326&imageSR=4326&size={image_width},{image_height}&format=tiff&pixelType=S16&interpolation=+RSP_NearestNeighbor&f=image"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.00027778,
+          "lat": 0.00027778
+        }
+      },
+      "variables": {
+        "fuel_model": {
+          "file_variable": "Band1",
+          "units": "1",
+          "description": "Fire behavior fuel model code. Raw GeoTIFF pixel type S16; TiffImages reads as Q0f15 fixed-point — multiply by 32768 to recover integer fuel model codes. For FBFM13 (Anderson 13): codes 0 (no fuel), 1–13 (burnable), 91=urban, 92=snow/ice, 93=agriculture, 98=water, 99=barren. For FBFM40 (Scott & Burgan 40): codes 101–204 additional. Coverage: contiguous United States (CONUS) only."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "USGS LANDFIRE (2022). LF2022 Fire Behavior Fuel Model 13 (FBFM13) / Fuel Model 40 (FBFM40). U.S. Department of Agriculture, Forest Service; U.S. Department of Interior.",
+        "url": "https://landfire.gov/"
+      },
+      "metadata": {
+        "tags": ["wildland_fire", "fuel_model", "landfire", "static", "conus", "categorical"],
+        "earthscidata_source": "src/landfire.jl::LANDFIREFileSet",
+        "api_type": "ArcGIS ImageServer REST (exportImage endpoint)",
+        "file_format": "GeoTIFF, S16 signed 16-bit integer pixels (Q0f15 fixed-point in TiffImages; multiply by 32768 to get integer fuel model codes)",
+        "interpolation_note": "Nearest-neighbour regridding (BSpline(Constant())) is required for this categorical dataset. Do NOT use bilinear or higher-order interpolation — interpolated values between integer codes are physically meaningless.",
+        "bbox_computation": "The URL template substitutions {bbox_west_deg}, {bbox_south_deg}, {bbox_east_deg}, {bbox_north_deg}, {image_width}, {image_height} are domain-derived at runtime: the bounding box is the WGS84 envelope of the model domain (with a one-resolution-cell buffer), and the image dimensions are computed from the bbox extent divided by the requested resolution (default 1.0 arc-second ≈ 30m, clamped to 4000×4000 pixels per LANDFIRE ImageServer limit).",
+        "url_substitutions": "{version}=LF2022 (default), {product}=FBFM13 (default, use FBFM40 for Scott & Burgan 40 models), {bbox_*_deg}=domain WGS84 bounding box in degrees, {image_width}/{image_height}=computed pixel dimensions",
+        "coverage": "Contiguous United States (CONUS) only. Requests outside CONUS may return fill values or errors.",
+        "valid_products": ["FBFM13", "FBFM40"],
+        "valid_versions": ["LF2020", "LF2022"],
+        "cache_path_pattern": "landfire/{product}_{bbox_west}_{bbox_south}_{bbox_east}_{bbox_north}_{width}x{height}.tif"
+      }
+    }
+  }
+}
