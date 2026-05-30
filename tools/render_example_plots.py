@@ -73,6 +73,7 @@ from earthsci_toolkit import (  # noqa: E402
 from earthsci_toolkit.esm_types import (  # noqa: E402
     Equation,
     Example,
+    InitialConditionType,
     Metadata,
     ModelVariable,
     ParameterSweep,
@@ -769,27 +770,44 @@ def _render_time_series_line_plot(
     plt.close(fig)
 
 
-def _initial_state_values(example: Example) -> dict[str, float] | None:
-    """Extract per-variable initial values from `example.initial_state`.
+def _initial_state_values(
+    example: Example,
+) -> tuple[dict[str, float] | None, list[str]]:
+    """Extract IC values from ``example.initial_state``.
 
-    Only the `per_variable` form with scalar values is supported here —
-    other forms (constant, function, data) and expression-typed values
-    (used by PDE field ICs) would require additional schema plumbing or
-    external sources and are out of scope for the renderer's purpose
-    (illustrative plots derived purely from the .esm file). Non-scalar
-    values are silently skipped so PDE examples render with their state
-    defaults instead of crashing the renderer.
+    Returns ``(scalar_values, expression_vars)`` where:
+
+    - ``scalar_values``: ``{name: float}`` dict for ``per_variable`` ICs, or
+      None when no scalar IC is available.
+    - ``expression_vars``: names of variables whose ICs are expression-typed
+      (PDE spatial fields the renderer cannot collapse to a scalar).
+
+    Per the esm-spec §11.4 discriminated-union contract, ``type:
+    "per_variable"`` carries only scalars; ``type: "expression"`` carries only
+    AST-valued fields. The Python binding maps the unknown "expression" type
+    string to ``CONSTANT`` as a fallback, so we also inspect each ``values``
+    entry for non-scalar shapes rather than relying solely on the enum.
     """
     ic = example.initial_state
     if ic is None:
-        return None
-    if not getattr(ic, "values", None):
-        return None
-    scalar: dict[str, float] = {}
-    for name, v in ic.values.items():
-        if isinstance(v, (int, float)):
-            scalar[name] = float(v)
-    return scalar or None
+        return None, []
+    if ic.type == InitialConditionType.PER_VARIABLE:
+        scalar: dict[str, float] = {}
+        for name, v in (ic.values or {}).items():
+            if isinstance(v, (int, float)):
+                scalar[name] = float(v)
+        return scalar or None, []
+    # For non-per_variable types check whether values carries expression ASTs.
+    # The binding maps type:"expression" → CONSTANT (fallback), so we inspect
+    # the values dict instead of relying on the enum alone.
+    if ic.values:
+        expr_vars = [
+            name for name, v in ic.values.items()
+            if not isinstance(v, (int, float))
+        ]
+        if expr_vars:
+            return None, expr_vars
+    return None, []
 
 
 def _state_defaults(model: Any) -> dict[str, float]:
@@ -804,6 +822,54 @@ def _state_defaults(model: Any) -> dict[str, float]:
         if mv.type == "state" and mv.default is not None:
             out[name] = float(mv.default)
     return out
+
+
+def _render_expression_ic_placeholder(
+    esm_path: Path,
+    component_name: str,
+    model: Any,
+    example: Example,
+    expression_vars: list[str],
+    plots_dir: Path,
+    stats: _RenderStats,
+) -> None:
+    """Emit a placeholder PNG for each plot in an example with expression-typed ICs.
+
+    Per esm-spec §11.4, a renderer that cannot evaluate spatial-field ICs MUST
+    NOT crash and MUST visibly distinguish the output from a scalar-IC plot.
+    Each placeholder PNG contains a text annotation naming the expression-typed
+    variables instead of integration output that would require a PDE solver.
+    """
+    stats.examples_seen += 1
+    example_id = example.id or "example"
+    var_label = ", ".join(expression_vars)
+    for plot in (example.plots or []):
+        plot_id = plot.id or "plot"
+        out_path = plots_dir / f"{example_id}-{plot_id}.png"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        fig, ax = plt.subplots(figsize=(6.0, 4.0))
+        ax.set_axis_off()
+        ax.text(
+            0.5, 0.5,
+            f"⟨expression IC: {var_label}⟩\n"
+            "(rendered with state defaults)",
+            transform=ax.transAxes,
+            ha="center", va="center",
+            fontsize=11, color="#555555",
+        )
+        title = plot.description or plot.id or ""
+        if title:
+            ax.set_title(title, fontsize=10)
+        fig.tight_layout()
+        fig.savefig(out_path, dpi=120)
+        plt.close(fig)
+        stats.plots_rendered += 1
+        rel = (
+            out_path.relative_to(esm_path.parent.parent.parent.parent)
+            if str(out_path).startswith(str(esm_path.parent.parent.parent.parent))
+            else out_path
+        )
+        print(f"[ok]   {rel} (expression IC: {var_label})")
 
 
 def _render_final_state_vs_sweep_plot(
@@ -1080,7 +1146,18 @@ def _render_one_example(
         return
 
     has_dynamics = _component_has_dynamics(model)
-    explicit_ic = _initial_state_values(example)
+    explicit_ic, expression_vars = _initial_state_values(example)
+
+    # Expression-typed ICs (PDE spatial fields) cannot be reduced to scalars
+    # for ODE integration. Emit a placeholder plot per esm-spec §11.4 instead
+    # of silently falling through to state defaults.
+    if has_dynamics and expression_vars:
+        _render_expression_ic_placeholder(
+            esm_path, component_name, model, example, expression_vars,
+            plots_dir, stats,
+        )
+        return
+
     initial_values = None
     if has_dynamics:
         # Reaction-system species typically declare reservoir defaults that

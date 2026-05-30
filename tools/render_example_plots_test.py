@@ -905,5 +905,83 @@ class IntegrationTest(unittest.TestCase):
             self.assertFalse((root / "components" / "ode" / "ode.plots").exists())
 
 
+    def test_expression_ic_renders_placeholder(self):
+        # Regression for esm-8m7w9: a component whose initial_state is
+        # type:"expression" (PDE spatial field) must render a placeholder PNG
+        # rather than crashing or silently using state defaults. The placeholder
+        # must be visibly distinct from a scalar-IC plot (different file bytes).
+        body = {
+            "esm": "0.5.0",
+            "metadata": {"name": "PdeTest"},
+            "models": {
+                "PdeTest": {
+                    "variables": {
+                        "psi": {"type": "state"},
+                        "k": {"type": "parameter", "default": 0.1},
+                    },
+                    "equations": [
+                        {
+                            "lhs": {"op": "D", "wrt": "t", "args": ["psi"]},
+                            "rhs": {"op": "*", "args": ["k", "psi"]},
+                        }
+                    ],
+                    "examples": [
+                        {
+                            "id": "pde_ic",
+                            "time_span": {"start": 0.0, "end": 1.0},
+                            "initial_state": {
+                                "type": "expression",
+                                "values": {
+                                    "psi": {"op": "-", "args": ["x", 0.5]},
+                                },
+                            },
+                            "plots": [
+                                {
+                                    "id": "psi_t",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "psi"},
+                                    "description": "psi vs t",
+                                }
+                            ],
+                        },
+                        {
+                            "id": "scalar_ic",
+                            "time_span": {"start": 0.0, "end": 1.0},
+                            "initial_state": {
+                                "type": "per_variable",
+                                "values": {"psi": 1.0},
+                            },
+                            "plots": [
+                                {
+                                    "id": "psi_scalar",
+                                    "type": "line",
+                                    "x": {"variable": "t"},
+                                    "y": {"variable": "psi"},
+                                }
+                            ],
+                        },
+                    ],
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_esm(root, body, "pde")
+            rc = mod.run(root / "components")
+            self.assertEqual(rc, 0)
+            plots_dir = root / "components" / "pde" / "pde.plots"
+            # Expression IC: placeholder PNG must exist and be a valid PNG
+            placeholder = plots_dir / "pde_ic-psi_t.png"
+            self.assertTrue(placeholder.is_file(), f"expected placeholder at {placeholder}")
+            self.assertEqual(placeholder.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+            # Scalar IC: normal rendered PNG must exist
+            scalar_png = plots_dir / "scalar_ic-psi_scalar.png"
+            self.assertTrue(scalar_png.is_file(), f"expected rendered PNG at {scalar_png}")
+            self.assertEqual(scalar_png.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+            # Placeholder and scalar PNG must be visibly different (different bytes)
+            self.assertNotEqual(placeholder.read_bytes(), scalar_png.read_bytes())
+
+
 if __name__ == "__main__":
     unittest.main()
