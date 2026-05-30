@@ -1,0 +1,705 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "CEDS",
+    "description": "CEDS (Community Emissions Data System) global gridded anthropogenic emissions data loader. Provides monthly surface emission fluxes (kg m⁻² s⁻¹) at 0.5° × 0.5° global resolution for 10 species: BC, CH4, CO, CO2, N2O, NH3, NMVOC, NOx, OC, SO2.\n\nData source: CEDS-CMIP release v20250421 (CEDS-CMIP-2025-04-18), available from the ORNL ESGF THREDDS server. Files are NetCDF with dimensions (time, sector, lat, lon) and variable name {species}_em_anthro. The sector dimension has 8 entries (Agriculture, Energy, Industrial, Transportation, Residential/Commercial/Other, Solvents, Waste, International Shipping); the data_loaders emit sector-summed total anthropogenic flux.\n\nTemporal coverage: 1750–2023, monthly. Data is organized in 50-year file chunks: 1750-1799, 1800-1849, 1850-1899, 1900-1949, 1950-1999, and 2000-2023. This ESM documents the modern-era chunk (2000-2023) as the primary temporal range. For simulations outside 2000-2023, different chunk file URLs are required (see reference.notes).\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download, sector-summing, temporal interpolation, and spatial regridding from the native 0.5°×0.5° lat/lon grid to the model domain. Each species equation is a direct pass-through: {species}_em_anthro(t) ~ CEDS_{species}.{species}_em_anthro. No registered functions remain in the migrated component.\n\nLongitude convention: the raw CEDS NC files use [0, 360) longitude. The upstream loadslice! reorders to [−180, 180) via a permutation vector computed at FileSet construction time. This ESM documents the reordered [−180, 180) coordinate as the effective spatial extent.\n\nCoupling: lon and lat parameters are coupled to the simulation domain via param_to_var when composed into a CoupledSystem. Unlike EDGAR, CEDS has no lev parameter (surface-only flux).\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b src/ceds.jl:313 (CEDS constructor, esm-4ega).",
+    "tags": [
+      "earthsci_data",
+      "emissions",
+      "anthropogenic",
+      "ceds",
+      "monthly",
+      "data_loader",
+      "surface_flux",
+      "global",
+      "multi_species"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-4ega)"
+    ],
+    "references": [
+      {
+        "citation": "Hoesly, R. M., Smith, S. J., Feng, L., Klimont, Z., Janssens-Maenhout, G., Pitkanen, T., Seibert, J. J., Vu, L., Andres, R. J., Bolt, R. M., Bond, T. C., Dawidowski, L., Kholod, N., Kurokawa, J., Li, M., Liu, L., Lu, Z., Moura, M. C. P., O'Rourke, P. R., and Zhang, Q. (2018). Historical (1750–2014) anthropogenic emissions of reactive gases and aerosols from the Community Emissions Data System (CEDS). Geoscientific Model Development, 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      {
+        "citation": "CEDS-CMIP 2025 release (v20250421, CEDS-CMIP-2025-04-18). Available from ORNL ESGF THREDDS: https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/ceds.jl:1-378 (CEDSFileSet, CEDS constructor). Test: test/ceds_test.jl. Docs: docs/src/ceds.md."
+      }
+    ]
+  },
+  "models": {
+    "CEDS": {
+      "coupletype": "CEDSCoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/ceds.jl:313\n\nUpstream constructor CEDS(domaininfo; species=CEDS_SPECIES, sectors=nothing, mirror=..., version=..., data_version=..., name=:CEDS, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad) from domaininfo pvars (x→lon or y→lat)\n  - @parameters: t_ref (s) — reference epoch, implicitly set from get_tref(domaininfo)\n  - For each species in the species list:\n      fs = CEDSFileSet(sp, starttime, endtime; mirror, version, data_version, sectors)\n      varname = \"$(sp)_em_anthro\"\n      itp = DataSetInterpolator{dt}(fs, varname, starttime, endtime, domaininfo; stream)\n      eq, discretes, constants, info = create_interp_equation(itp, \"\", t, t_ref, [x, y]; spatial_interp)\n      → one observed equation per species: {sp}_em_anthro(t) ~ interp_unsafe(...)\n  - discrete_events: build_interp_event fires monthly to reload NC data buffers\n  - metadata: Dict(CoupleType => CEDSCoupler, SysDomainInfo => domaininfo)\n  - No lev parameter (CEDS is surface-only)\n\nCEDSFileSet internals:\n  - Opens all 50-year chunk files as aggregated NCDataset (NCDatasets.jl aggdim=\"time\")\n  - NC variable: {species}_em_anthro, dimensions (time, sector, lat, lon) in that order\n  - Fill value from _FillValue attribute (default 1e20f0); fill values replaced with 0.0 in loadslice!\n  - Longitude reordering: raw NC lons in [0, 360); lon_perm computed at construction time to sort to [-180, 180)\n  - loadslice! sums across sector dimension (or selects specified sectors) then applies lon_perm permutation\n  - DataFrequencyInfo: monthly frequency, tick times from CF-time decoded 'time' variable\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8 mechanism. CEDS_{species}.{species}_em_anthro is the loader variable that the runtime downloads, sector-sums, and interpolates spatiotemporally to (lon, lat, t). The runtime implicitly handles the build_interp_event discrete callbacks based on data_loaders.temporal.frequency = P1M.\n\nChunk file structure (historical era):\n  Chunk boundaries: 1750-1799, 1800-1849, 1850-1899, 1900-1949, 1950-1999, 2000-2023.\n  For year Y, the chunk file is:\n    {species}-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_{y1}01-{y2}12.nc\n  where (y1, y2) = the chunk bounds containing Y.\n  For the 1950-1999 era, y1=1950, y2=1999. URL path subdirectory pattern is the same.\n  This ESM data_loaders document the 2000-2023 chunk (static URL, no date substitution needed).\n\nQuantitative reference values from test/ceds_test.jl (EarthSciData.jl@830435a, simulation date 2016-05-01):\n  SO2 at Beijing area (lon=116°E, lat=39°N): 1e-12 < value < 1e-6 kg/m²/s\n  SO2 at Sahara (lon=10°E, lat=25°N): < 1% of Beijing value\n  CO at Beijing: positive and different from SO2\n\nSector indices (0-based in upstream, 0 to 7):\n  0: Agriculture\n  1: Energy\n  2: Industrial\n  3: Transportation\n  4: Residential, Commercial, Other\n  5: Solvents production and application\n  6: Waste\n  7: International Shipping\n\nCoupling with GEOS-FP (from test/ceds_test.jl):\n  couple(CEDS(...), GEOSFP(...)) couples CEDS.lat ↔ GEOSFP.lat and CEDS.lon ↔ GEOSFP.lon.\n  No lev coupling (CEDS has no lev parameter).\n\nNote on spatial_interp: :linear (default) uses full bilinear interpolation; :nearest uses nearest-grid + time-only linear interpolation (~8x speedup when queries are always at grid-point centres). The data_loaders regridding section uses bilinear (default) matching the upstream :linear default."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. Used as the x-axis coordinate for CEDS data interpolation."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. Used as the y-axis coordinate for CEDS data interpolation."
+        },
+        "BC_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Black carbon (BC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear interpolation in space from the 0.5°×0.5° CEDS grid; linear interpolation in time between monthly midpoints. Zero-filled where no emissions data are present.",
+          "expression": "CEDS_BC.BC_em_anthro"
+        },
+        "CH4_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Methane (CH4) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_CH4.CH4_em_anthro"
+        },
+        "CO_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Carbon monoxide (CO) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_CO.CO_em_anthro"
+        },
+        "CO2_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Carbon dioxide (CO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_CO2.CO2_em_anthro"
+        },
+        "N2O_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Nitrous oxide (N2O) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_N2O.N2O_em_anthro"
+        },
+        "NH3_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Ammonia (NH3) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_NH3.NH3_em_anthro"
+        },
+        "NMVOC_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_NMVOC.NMVOC_em_anthro"
+        },
+        "NOx_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Nitrogen oxides (NOx) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_NOx.NOx_em_anthro"
+        },
+        "OC_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Organic carbon (OC) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_OC.OC_em_anthro"
+        },
+        "SO2_em_anthro": {
+          "type": "observed",
+          "units": "kg/m^2/s",
+          "description": "Sulfur dioxide (SO2) anthropogenic emission flux (kg m⁻² s⁻¹) at the model grid point and current time, summed over all 8 CEDS sectors. Bilinear spatial interpolation from the 0.5°×0.5° CEDS grid; linear temporal interpolation between monthly midpoints.",
+          "expression": "CEDS_SO2.SO2_em_anthro"
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "CEDS_BC": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/BC_em_anthro/gn/v20250421/BC-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "BC_em_anthro": {
+          "file_variable": "BC_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Black carbon (BC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable BC_em_anthro has dimensions (time, sector, lat, lon); the sector dimension (8 entries) is summed to produce the total anthropogenic flux. Longitude reordered from native [0, 360) to [-180, 180) by the upstream loadslice! permutation."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408. https://doi.org/10.5194/gmd-11-369-2018",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "black_carbon"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "BC",
+        "nc_varname": "BC_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "lon_reordering": "native [0, 360) reordered to [-180, 180) via lon_perm permutation in CEDSFileSet.loadslice!",
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_CH4": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/CH4_em_anthro/gn/v20250421/CH4-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "CH4_em_anthro": {
+          "file_variable": "CH4_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Methane (CH4) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CH4_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "methane"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "CH4",
+        "nc_varname": "CH4_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_CO": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/CO_em_anthro/gn/v20250421/CO-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "CO_em_anthro": {
+          "file_variable": "CO_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Carbon monoxide (CO) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CO_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "carbon_monoxide"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "CO",
+        "nc_varname": "CO_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_CO2": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/CO2_em_anthro/gn/v20250421/CO2-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "CO2_em_anthro": {
+          "file_variable": "CO2_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Carbon dioxide (CO2) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable CO2_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "carbon_dioxide"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "CO2",
+        "nc_varname": "CO2_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_N2O": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/N2O_em_anthro/gn/v20250421/N2O-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "N2O_em_anthro": {
+          "file_variable": "N2O_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Nitrous oxide (N2O) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable N2O_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "nitrous_oxide"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "N2O",
+        "nc_varname": "N2O_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_NH3": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/NH3_em_anthro/gn/v20250421/NH3-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "NH3_em_anthro": {
+          "file_variable": "NH3_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Ammonia (NH3) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NH3_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "ammonia"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "NH3",
+        "nc_varname": "NH3_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_NMVOC": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/NMVOC_em_anthro/gn/v20250421/NMVOC-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "NMVOC_em_anthro": {
+          "file_variable": "NMVOC_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NMVOC_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "nmvoc", "voc"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "NMVOC",
+        "nc_varname": "NMVOC_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_NOx": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/NOx_em_anthro/gn/v20250421/NOx-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "NOx_em_anthro": {
+          "file_variable": "NOx_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Nitrogen oxides (NOx) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NOx_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "nitrogen_oxides"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "NOx",
+        "nc_varname": "NOx_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_OC": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/OC_em_anthro/gn/v20250421/OC-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "OC_em_anthro": {
+          "file_variable": "OC_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Organic carbon (OC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable OC_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "organic_carbon"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "OC",
+        "nc_varname": "OC_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    },
+    "CEDS_SO2": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/SO2_em_anthro/gn/v20250421/SO2-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "SO2_em_anthro": {
+          "file_variable": "SO2_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Sulfur dioxide (SO2) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable SO2_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180). Reference quantitative values from test/ceds_test.jl: SO2 at Beijing area (116°E, 39°N) is in range (1e-12, 1e-6) kg/m²/s; at Sahara (10°E, 25°N) less than 1% of Beijing value."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "ceds", "monthly", "gridded", "sulfur_dioxide"],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "SO2",
+        "nc_varname": "SO2_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421"
+      }
+    }
+  }
+}
