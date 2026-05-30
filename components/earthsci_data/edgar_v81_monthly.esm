@@ -1,0 +1,154 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "EDGARv81MonthlyEmis",
+    "description": "EDGAR v8.1 monthly global air pollutant emissions data loader. Provides surface-layer volumetric emission rate (kg m⁻³ s⁻¹) for lev < 2 (first vertical layer), and zero above. Configured per substance (species) and emission sector at instantiation time via {species} and {sector} URL template substitutions.\n\nSupported substances: BC, CO, NH3, NMVOC, NOx, OC, PM10, PM2.5, SO2.\nData spans 2000–2022 at 0.1°×0.1° global resolution, with monthly temporal resolution.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download, temporal interpolation, and spatial regridding to the model domain; the model equation references the loader variable directly via EDGAR_v81.flx. No registered functions remain in the migrated component.\n\nEquation: emission = ifelse(lev < 2, EDGAR_v81.flx / Δz * scale, 0)\nwhere EDGAR_v81.flx is the emission flux (kg m⁻² s⁻¹) regridded by the runtime from the 0.1°×0.1° EDGAR grid to the model domain, and Δz (default 60 m) is the first-layer height that converts the surface flux to a volumetric rate.\n\nMigrated from EarthSciData.jl@830435a src/edgar_v81_monthly.jl:277 (EDGARv81MonthlyEmis, esm-yp9q).",
+    "tags": [
+      "earthsci_data",
+      "emissions",
+      "anthropogenic",
+      "edgar",
+      "monthly",
+      "data_loader",
+      "surface_flux"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-yp9q)"
+    ],
+    "references": [
+      {
+        "citation": "Crippa, M., Guizzardi, D., Butler, T., Keating, T., Wu, R., Rosenveld, M., Jonescu, M., Muntean, M., Schaaf, E., Oreggioni, G., Gonzalez Ortiz, A., Textor, R., Sarigiannis, D., Muntean, M. (2023). EDGAR v8.1 Global Air Pollutant Emissions (1970–2022). European Commission, Joint Research Centre (JRC). Available: https://edgar.jrc.ec.europa.eu/dataset_ap81",
+        "url": "https://edgar.jrc.ec.europa.eu/dataset_ap81"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/edgar_v81_monthly.jl:91-338 (EDGARv81MonthlyEmisFileSet, EDGARv81MonthlyEmis constructor). Test: test/edgar_v81_monthly_test.jl."
+      }
+    ]
+  },
+  "models": {
+    "EDGARv81MonthlyEmis": {
+      "coupletype": "EDGARv81MonthlyEmisCoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/edgar_v81_monthly.jl:277\n\nUpstream constructor EDGARv81MonthlyEmis(substance, sector, domaininfo; scale=1.0, ...) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad), lev (1), Δz=60.0 (m), t_ref=get_tref(domaininfo) (s)\n  - One DataSetInterpolator per varnames(fileset): builds interp_unsafe equation for each NC variable\n  - Equation template (from create_interp_equation with wrapper_f):\n      var(t) ~ ifelse(lev < 2, interp_unsafe(data, fit, fi_lon, fi_lat, extrap) * unit_scale / Δz * scale, zero_var)\n    where fit = 1 + (t_ref + t - tstart) / tstep\n          fi_lon = 1 + (lon - s1start) / s1step\n          fi_lat = 1 + (lat - s2start) / s2step\n  - discrete_events: build_interp_event fires at monthly tstops to reload data buffers\n  - metadata: Dict(CoupleType => EDGARv81MonthlyEmisCoupler, SysDomainInfo => domaininfo)\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8\nmechanism. EDGAR_v81.flx is the loader variable that the runtime regridds from the 0.1°×0.1° EDGAR\ngrid to the model domain and interpolates in time to t. The runtime implicitly handles the\nbuild_interp_event discrete callbacks based on data_loaders.temporal.frequency = P1M.\n\nParameter rename: upstream `t` (simulation time relative to t_ref) is implicit; the ESM model\nhas no independent variable in the variable map since it only contains observed equations.\n\nThe variable `emission` corresponds to the observed variable created by the for-loop over\nvarnames(fileset). For the typical single-variable EDGAR NC file (one flux variable per\nsubstance/sector), there is one observed equation. The variable name in the NC file is 'flx'\n(from the _flx_nc.zip filename convention; confirmed by ESS test fixture at\nEarthSciSerialization/packages/earthsci_toolkit/tests/fixtures/data_loaders/edgar_v81_monthly.esm)."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "lev": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "Vertical level index (dimensionless, 1-based). Emissions are applied only at lev < 2 (surface layer). Coupled to the simulation domain's lev coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "Δz": {
+          "type": "parameter",
+          "units": "m",
+          "default": 60.0,
+          "description": "Height of the first vertical grid layer (m). Used to convert surface emission flux (kg m⁻² s⁻¹) to volumetric emission rate (kg m⁻³ s⁻¹) via division."
+        },
+        "scale": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "Multiplicative scaling factor applied to the emission flux. Default 1.0 (no scaling). May be used to adjust emissions for sensitivity experiments or unit-system conversions."
+        },
+        "emission": {
+          "type": "observed",
+          "units": "kg/m^3/s",
+          "description": "Volumetric emission rate (kg m⁻³ s⁻¹) at the current grid point and time. Non-zero only in the surface layer (lev < 2): emission = EDGAR_v81.flx / Δz * scale. Zero for lev ≥ 2. Corresponds to the upstream observed variable created per varnames(fileset) by create_interp_equation with wrapper_f = eq -> ifelse(lev < 2, eq / Δz * scale, zero_emis).",
+          "expression": {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<",
+                "args": ["lev", 2.0]
+              },
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": ["EDGAR_v81.flx", "Δz"]
+                  },
+                  "scale"
+                ]
+              },
+              0.0
+            ]
+          }
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "EDGAR_v81": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/EDGAR/datasets/v81_FT2022_AP_new/monthly/{species}/bkl_{sector}/bkl_{sector}_flx_nc.zip"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2022-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 0.1,
+          "lat": 0.1
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "flx": {
+          "file_variable": "flx",
+          "units": "kg/m^2/s",
+          "description": "Surface emission flux for the configured species and sector. Variable name 'flx' is derived from the _flx_nc.zip archive naming convention for EDGAR v8.1 AP datasets."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Crippa, M. et al. (2023). EDGAR v8.1 Global Air Pollutant Emissions (1970–2022). European Commission, Joint Research Centre (JRC). Available: https://edgar.jrc.ec.europa.eu/dataset_ap81",
+        "url": "https://edgar.jrc.ec.europa.eu/dataset_ap81"
+      },
+      "metadata": {
+        "tags": ["emissions", "anthropogenic", "edgar", "monthly", "gridded"],
+        "earthscidata_source": "src/edgar_v81_monthly.jl::EDGARv81MonthlyEmisFileSet",
+        "valid_species": ["BC", "CO", "NH3", "NMVOC", "NOx", "OC", "PM10", "PM2.5", "SO2"],
+        "packaging": "zip-of-netcdf",
+        "unit_note": "Raw NC file may declare units 'kg m-2 s-1'; the loadmetadata function reads var.attrib['units'] and applies to_unit() conversion — default assumed if attribute absent."
+      }
+    }
+  }
+}
