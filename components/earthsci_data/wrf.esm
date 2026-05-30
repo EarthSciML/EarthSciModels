@@ -1,0 +1,301 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "WRF",
+    "description": "WRF regional weather data loader providing hourly atmospheric fields from the UCAR Research Data Archive dataset d340000 (WRF-Chem v3.9.1, CONUS domain, 12 km grid). Supplies meteorological 3-D fields (wind components, potential temperature, pressure, geopotential, water vapor) plus derived diagnostic quantities (total pressure, geopotential height, coordinate metric terms) required for advection and chemistry coupling in EarthSciML systems.\n\nData source: UCAR RDA d340000 — daily 48-h WRF-Chem v3.9.1 forecasts over the contiguous United States (CONUS) at 12 km horizontal resolution, covering May 2019 – May 2026 (daily cycles). Files are named wrfout_hourly_d01_YYYY-MM-DD_HH:00:00.nc, one per hour, stored under YYYYMM/ directories. The grid uses a Lambert Conformal Conic (LCC) projection on an Arakawa C-grid (scalars at cell centres; U staggered in x, V in y, W/PH/PHB in z).\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download, hourly temporal interpolation, and spatial regridding from the LCC grid to the simulation domain. Model equations reference loader variables directly (e.g. WRF_hourly_d01.U). Derived quantities P_total = P + PB, z = (PH + PHB)/g, δxδlon = lon2m·cos(lat), and δyδlat are expressed as algebraic combinations of loader variables. The δzδlev quantity (vertical-level thickness, requiring evaluation of PH/PHB at lev+1 via indexed offset interpolation) is a remaining gt-p3ep(lookup) gap and is omitted from the model variables; it is documented in reference.notes.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/wrf.jl:169 (WRF constructor and WRFFileSet, esm-4l84).",
+    "tags": [
+      "earthsci_data",
+      "meteorology",
+      "atmospheric_dynamics",
+      "data_loader",
+      "regional_climate",
+      "wrf",
+      "conus",
+      "lambert_conformal"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-4l84)"
+    ],
+    "references": [
+      {
+        "citation": "Skamarock, W. C., Klemp, J. B., Dudhia, J., Gill, D. O., Liu, Z., Berner, J., Wang, W., Powers, J. G., Duda, M. G., Barker, D. M., and Huang, X.-Y. (2021). A Description of the Advanced Research WRF Model Version 4.3. NCAR Tech. Note NCAR/TN-556+STR, doi:10.5065/1dfh-6p97.",
+        "url": "https://www2.mmm.ucar.edu/wrf/users/"
+      },
+      {
+        "citation": "UCAR Research Data Archive, dataset d340000. WRF-Chem v3.9.1 CONUS 12 km hourly output, May 2019 – May 2026. https://rda.ucar.edu/datasets/d340000/",
+        "url": "https://rda.ucar.edu/datasets/d340000/"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/wrf.jl:169 (WRFFileSet struct, WRF constructor). Test: test/wrf_test.jl. Docs: not present in pinned commit."
+      }
+    ]
+  },
+  "models": {
+    "WRF": {
+      "coupletype": "WRFCoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/wrf.jl:169\n\nUpstream WRF(domaininfo; name=:WRF, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon/lat (rad) when pvars include :lat/:lon, or x/y (m) when pvars include :x/:y; lev (1); t_ref (s)\n  - For every varname in WRFFileSet.varnames(fs), one DataSetInterpolator and one observed equation via create_interp_equation (uses interp_unsafe)\n  - Coordinate mapping: bottom_top/bottom_top_stag/emissions_zdim → :lev; west_east/west_east_stag → :x or :lon; south_north/south_north_stag → :y or :lat\n  - Staggered grids de-staggered before setting coordinates: PH/PHB/W on bottom_top_stag (N+1 z-points), U on west_east_stag (N+1 x-points), V on south_north_stag (N+1 y-points); half-point averages applied during loadmetadata\n  - Extrapolation: W uses extrapolate_type=0.0 (zero below ground); all others use Flat() (clamp at boundary)\n  - Derived observed variables:\n      P_total(t) ~ P(t) + PB(t)\n      z(t) ~ (PH(t) + PHB(t)) / g  where g=9.80665 m/s²\n      δzδlev(t) ~ (build_interp_expr(ph_info, t+t_ref, [x/lon, y/lat, lev+1])\n                   + build_interp_expr(phb_info, t+t_ref, [x/lon, y/lat, lev+1])\n                   - build_interp_expr(ph_info,  t+t_ref, [x/lon, y/lat, lev])\n                   - build_interp_expr(phb_info, t+t_ref, [x/lon, y/lat, lev])) / g\n      δxδlon(t) ~ lon2m * cos(lat)   [only when :lat in pvdict]\n      δyδlat(t) ~ lat2meters          [only when :lat in pvdict]\n      where lon2m = 40075.0e3/(2π) ≈ 6378134.3 m/rad\n            lat2meters = 111.32e3*180/π ≈ 6378166.0 m/rad\n  - discrete_events: build_interp_event fires hourly to reload WRF file buffers\n  - metadata: Dict(CoupleType => WRFCoupler, SysDomainInfo => domaininfo)\n  - couple2 with MeanWindCoupler: maps WRF.U/V/W → MeanWind v_lon/v_lat/v_lev via _couple_meanwind\n\ngt-p3ep gap: the @register_symbolic interp_unsafe pattern for all per-variable equations is replaced by the data_loaders §8 mechanism (WRF_hourly_d01.{varname} references). P_total, z, δxδlon, and δyδlat are expressed as simple algebraic combinations.\n\nδzδlev gap: evaluating PH and PHB at lev+1 requires the indexed-offset form of data_loader evaluation (a gt-p3ep(lookup) expression) that is not yet representable in the ESM expression language. δzδlev is omitted from the model variables in this migration. When gt-p3ep(lookup) is resolved, add:\n  variables.δzδlev = { type: observed, units: m, expression:\n    { op: /, args: [\n      { op: +, args: [\n        { op: fn, name: data_loaders.eval_at, args: [WRF_hourly_d01.PH,  [lon, lat, {op: +, args: [lev, 1]}]] },\n        { op: fn, name: data_loaders.eval_at, args: [WRF_hourly_d01.PHB, [lon, lat, {op: +, args: [lev, 1]}]] },\n        { op: -, args: [WRF_hourly_d01.PH] },\n        { op: -, args: [WRF_hourly_d01.PHB] } ] },\n      9.80665 ] } }\n\nCoordinate system: this ESM targets the lat/lon coordinate form (pvars contain :lat and :lon). For LCC-projected (x/y) domains the loader uses pvars :x and :y; the δxδlon and δyδlat coordinate metrics are not emitted in that case, and the loader maps bottom_top_stag → :lev, west_east_stag → :x, south_north_stag → :y.\n\nLive tests: the upstream wrf_test.jl test suite downloads real WRF files from data.rda.ucar.edu/d340000/ (requires UCAR RDA account). Expected values from the test suite (as of EarthSciData.jl@830435a) are preserved here for reference:\n  P_total at (lon=-118.2707°, lat=34.0059°, lev=[1,1.5,2,21.5,30,31.5]):\n    [100331.86, 100235.72, 100139.58, 67846.08, 30679.47, 28729.87] Pa\n  δzδlev at same location/levels: [10.605, 16.965, 23.335, 655.557, 352.244, 279.699] m\n  W at same location, lev=[0.5,1,1.5,2,21.5,30,31.5]:\n    [0.0, 5.205e-3, 1.041e-2, 1.164e-2, -1.698e-2, 2.697e-2, 2.244e-2] m/s"
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. Used as the x-axis coordinate for WRF data interpolation in lat/lon domains."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. Used as the y-axis coordinate for WRF data interpolation in lat/lon domains."
+        },
+        "lev": {
+          "type": "parameter",
+          "units": "1",
+          "default": 1.0,
+          "description": "Vertical level index (dimensionless, 1-based integer corresponding to the WRF bottom_top layer). Fractional values interpolate between layers. Coupled from the simulation domain's lev coordinate."
+        },
+        "t_ref": {
+          "type": "parameter",
+          "units": "s",
+          "default": 0.0,
+          "description": "Reference epoch (seconds since the Julian date epoch) from which the WRF file time axis is offset. Set from DomainInfo.get_tref(domaininfo) at construction time."
+        },
+        "U": {
+          "type": "observed",
+          "units": "m/s",
+          "description": "Zonal (west–east) wind component (m/s). Interpolated from WRF output variable U on the west_east_stag grid (staggered by half a cell in x); de-staggered to cell centres in loadmetadata. Sourced from WRF_hourly_d01.U. Coupled to MeanWind.v_lon via WRFCoupler/couple2.",
+          "expression": "WRF_hourly_d01.U"
+        },
+        "V": {
+          "type": "observed",
+          "units": "m/s",
+          "description": "Meridional (south–north) wind component (m/s). Interpolated from WRF output variable V on the south_north_stag grid (staggered by half a cell in y); de-staggered to cell centres in loadmetadata. Sourced from WRF_hourly_d01.V. Coupled to MeanWind.v_lat via WRFCoupler/couple2.",
+          "expression": "WRF_hourly_d01.V"
+        },
+        "W": {
+          "type": "observed",
+          "units": "m/s",
+          "description": "Vertical wind component (m/s). Interpolated from WRF output variable W on the bottom_top_stag grid (staggered by half a cell in z); de-staggered to cell centres in loadmetadata. Zero-extrapolated below the surface (lev < 0.5) per the upstream loader (extrapolate_type=0.0 for W only). Sourced from WRF_hourly_d01.W. Coupled to MeanWind.v_lev via WRFCoupler/couple2.",
+          "expression": "WRF_hourly_d01.W"
+        },
+        "T": {
+          "type": "observed",
+          "units": "K",
+          "description": "Perturbation potential temperature (K). Full potential temperature θ = T + 300 K. On the mass (bottom_top) grid, cell-centred. Sourced from WRF_hourly_d01.T.",
+          "expression": "WRF_hourly_d01.T"
+        },
+        "PH": {
+          "type": "observed",
+          "units": "m^2/s^2",
+          "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid, staggered by half a cell in z; de-staggered during loadmetadata. PH + PHB gives total geopotential. Sourced from WRF_hourly_d01.PH.",
+          "expression": "WRF_hourly_d01.PH"
+        },
+        "PHB": {
+          "type": "observed",
+          "units": "m^2/s^2",
+          "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid, staggered by half a cell in z; de-staggered during loadmetadata. PH + PHB gives total geopotential. Sourced from WRF_hourly_d01.PHB.",
+          "expression": "WRF_hourly_d01.PHB"
+        },
+        "P": {
+          "type": "observed",
+          "units": "Pa",
+          "description": "Perturbation pressure (Pa). On the mass (bottom_top) grid, cell-centred. P + PB gives total atmospheric pressure. Sourced from WRF_hourly_d01.P.",
+          "expression": "WRF_hourly_d01.P"
+        },
+        "PB": {
+          "type": "observed",
+          "units": "Pa",
+          "description": "Base-state pressure (Pa). On the mass (bottom_top) grid, cell-centred. P + PB gives total atmospheric pressure. Sourced from WRF_hourly_d01.PB.",
+          "expression": "WRF_hourly_d01.PB"
+        },
+        "QVAPOR": {
+          "type": "observed",
+          "units": "kg/kg",
+          "description": "Water vapor mixing ratio (kg water per kg dry air). On the mass (bottom_top) grid, cell-centred. Sourced from WRF_hourly_d01.QVAPOR.",
+          "expression": "WRF_hourly_d01.QVAPOR"
+        },
+        "P_total": {
+          "type": "observed",
+          "units": "Pa",
+          "description": "Total atmospheric pressure (Pa): P_total = P + PB. Sum of perturbation and base-state pressure components, both on the mass grid. Computed from WRF_hourly_d01.P and WRF_hourly_d01.PB.",
+          "expression": {
+            "op": "+",
+            "args": [
+              "WRF_hourly_d01.P",
+              "WRF_hourly_d01.PB"
+            ]
+          }
+        },
+        "z": {
+          "type": "observed",
+          "units": "m",
+          "description": "Geopotential height (m): z = (PH + PHB) / g, where g = 9.80665 m s⁻². Computed from the de-staggered w-level geopotential components. Corresponds to the upstream z ~ (PH_itp + PHB_itp) / g_const equation.",
+          "expression": {
+            "op": "/",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  "WRF_hourly_d01.PH",
+                  "WRF_hourly_d01.PHB"
+                ]
+              },
+              9.80665
+            ]
+          }
+        },
+        "δxδlon": {
+          "type": "observed",
+          "units": "m/rad",
+          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134 m rad⁻¹ (equatorial circumference metric). Non-zero only in lat/lon coordinate domains; the upstream constructor emits this equation only when :lat is in DomainInfo.pvars.",
+          "expression": {
+            "op": "*",
+            "args": [
+              6378134.3,
+              {
+                "op": "cos",
+                "args": [
+                  "lat"
+                ]
+              }
+            ]
+          }
+        },
+        "δyδlat": {
+          "type": "observed",
+          "units": "m/rad",
+          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³·(180/π) ≈ 6378166 m rad⁻¹. Constant (does not depend on position). Emitted only in lat/lon coordinate domains.",
+          "expression": 6378166.0
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "WRF_hourly_d01": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://data.rda.ucar.edu/d340000/{date:%Y%m}/wrfout_hourly_d01_{date:%Y-%m-%d}_{date:%H}:00:00.nc"
+      },
+      "temporal": {
+        "start": "2019-05-01T00:00:00Z",
+        "end": "2026-05-31T23:59:59Z",
+        "file_period": "PT1H",
+        "frequency": "PT1H",
+        "records_per_file": 1,
+        "time_variable": "Times"
+      },
+      "spatial": {
+        "crs": "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
+        "grid_type": "lambert_conformal",
+        "staggering": {
+          "west_east": "center",
+          "south_north": "center",
+          "bottom_top": "center"
+        },
+        "resolution": {
+          "west_east": 12000.0,
+          "south_north": 12000.0
+        },
+        "extent": {
+          "west_east": [
+            -2334000.0,
+            2334000.0
+          ],
+          "south_north": [
+            -1374000.0,
+            1374000.0
+          ]
+        }
+      },
+      "variables": {
+        "U": {
+          "file_variable": "U",
+          "units": "m/s",
+          "description": "Zonal (west–east) wind component. WRF output variable U on the west_east_stag grid; runtime de-staggers to cell centres by averaging adjacent x-edge values. Clamp extrapolation at domain boundaries."
+        },
+        "V": {
+          "file_variable": "V",
+          "units": "m/s",
+          "description": "Meridional (south–north) wind component. WRF output variable V on the south_north_stag grid; runtime de-staggers to cell centres by averaging adjacent y-edge values. Clamp extrapolation at domain boundaries."
+        },
+        "W": {
+          "file_variable": "W",
+          "units": "m/s",
+          "description": "Vertical wind component. WRF output variable W on the bottom_top_stag grid; runtime de-staggers to cell centres by averaging adjacent z-edge values. Zero extrapolation below the surface (extrapolate_type=0.0 in upstream loader, overriding the default Flat() clamp for this variable only)."
+        },
+        "T": {
+          "file_variable": "T",
+          "units": "K",
+          "description": "Perturbation potential temperature (K). On the mass (bottom_top) grid, cell-centred. Full potential temperature θ = T + 300 K. Clamp extrapolation."
+        },
+        "PH": {
+          "file_variable": "PH",
+          "units": "m^2/s^2",
+          "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid; runtime de-staggers to mass-level centres. Together with PHB provides geopotential height z = (PH+PHB)/g. Also used for δzδlev (see model reference.notes). Clamp extrapolation."
+        },
+        "PHB": {
+          "file_variable": "PHB",
+          "units": "m^2/s^2",
+          "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid; runtime de-staggers to mass-level centres. Together with PH provides geopotential height z = (PH+PHB)/g. Clamp extrapolation."
+        },
+        "P": {
+          "file_variable": "P",
+          "units": "Pa",
+          "description": "Perturbation pressure (Pa). On the mass (bottom_top) grid, cell-centred. Together with PB provides total atmospheric pressure P_total = P + PB. Clamp extrapolation."
+        },
+        "PB": {
+          "file_variable": "PB",
+          "units": "Pa",
+          "description": "Base-state pressure (Pa). On the mass (bottom_top) grid, cell-centred. Together with P provides total atmospheric pressure P_total = P + PB. Clamp extrapolation."
+        },
+        "QVAPOR": {
+          "file_variable": "QVAPOR",
+          "units": "kg/kg",
+          "description": "Water vapor mixing ratio (kg water kg⁻¹ dry air). On the mass (bottom_top) grid, cell-centred. Clamp extrapolation."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "UCAR Research Data Archive, dataset d340000. WRF-Chem v3.9.1 CONUS 12 km hourly output.",
+        "url": "https://rda.ucar.edu/datasets/d340000/"
+      },
+      "metadata": {
+        "tags": [
+          "wrf",
+          "meteorology",
+          "regional_climate",
+          "conus",
+          "lambert_conformal",
+          "12km"
+        ],
+        "earthscidata_source": "src/wrf.jl::WRFFileSet",
+        "domain_id": "d01",
+        "projection": "lambert_conformal_conic",
+        "map_proj": 1,
+        "truelat1": 30.0,
+        "truelat2": 60.0,
+        "cen_lat": 38.999996,
+        "stand_lon": -97.0,
+        "dx_m": 12000.0,
+        "dy_m": 12000.0,
+        "grid_dimensions": [389, 229, 32],
+        "model_version": "WRF-Chem v3.9.1",
+        "wrf_variable_note": "The upstream WRF() constructor reads ALL variables in the WRF output file dynamically via WRFFileSet.varnames(). This ESM documents the nine core meteorological variables (U, V, W, T, PH, PHB, P, PB, QVAPOR) that are present in all CONUS d340000 files and that drive EarthSciML coupling. Additional WRF-Chem tracer and diagnostic variables (T2, U10, V10, PSFC, chemistry species, etc.) present in d340000 files can be added as additional data_loaders variables.",
+        "staggering_note": "WRF uses an Arakawa C-grid. In the upstream loader, staggered-grid variables (U on west_east_stag, V on south_north_stag, W/PH/PHB on bottom_top_stag) are de-staggered to cell centres in loadmetadata by averaging adjacent half-point values. The data_loaders staggering fields above record the effective (post-de-stagger) staggering for downstream regridding.",
+        "access_note": "UCAR RDA data access requires a free registration at https://rda.ucar.edu/. The upstream EarthSciData.jl WRFFileSet uses standard HTTP downloads (no special authentication beyond the login cookie). Ensure $EARTHSCIDATADIR is set for local caching.",
+        "w_extrapolation_note": "Vertical wind W uses zero-boundary extrapolation (extrapolate_type=0.0) in the upstream loader to prevent spurious mass transport through the ground surface. All other variables use Flat() (clamp) extrapolation. The global data_loaders regridding.extrapolation='clamp' approximates this for non-W variables; a per-variable extrapolation override for W is tracked in the ESM spec evolution."
+      }
+    }
+  }
+}
