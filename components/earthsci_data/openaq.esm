@@ -1,0 +1,188 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "OpenAQ",
+    "description": "OpenAQ air quality monitoring data loader. Provides hourly-averaged ambient air quality observations (PM2.5, PM10, O3, NO2, SO2, CO, BC, PM1, NO, NOx) from ground-based monitoring stations worldwide, mapped to model grid cells by averaging all stations within each cell.\n\nStation locations within the model domain are discovered at runtime via the OpenAQ REST API v3 (requires OPENAQ_API_KEY; results cached to disk). Measurement data is downloaded from the OpenAQ AWS S3 archive (no API key needed for S3 access). Daily gzip-compressed CSV files are cached locally under $EARTHSCIDATADIR/openaq_data/.\n\nPoint-to-grid aggregation: each station is assigned to the model grid cell that contains its coordinates (searchsortedlast on lon/lat edges). Multiple stations within the same cell are averaged; multiple readings from the same station within one hour are averaged. Grid cells with no stations receive the configured fill value (default NaN).\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles station discovery, S3 download, CSV parsing, point-to-grid aggregation, and hourly temporal interpolation. The model equation references the loader variable directly (e.g. OpenAQ_obs.pm25 for PM2.5). No registered functions remain in the migrated component.\n\nOne OpenAQ model instantiation covers one parameter (e.g. 'pm25'). The variable in the MTK System is named after the parameter; the ESM model documents 'pm25' as the representative case. Other parameters (pm10, o3, no2, so2, co, bc, pm1, no, nox) produce identically-structured models with the respective variable name.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b src/openaq.jl:595 (OpenAQ constructor, esm-mfi7).",
+    "tags": [
+      "earthsci_data",
+      "air_quality",
+      "observations",
+      "monitoring_stations",
+      "hourly",
+      "data_loader",
+      "point_observations"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-mfi7)"
+    ],
+    "references": [
+      {
+        "citation": "OpenAQ (2024). OpenAQ Data Archive. Open-source global air quality data aggregation platform. https://openaq.org/",
+        "url": "https://openaq.org/"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/openaq.jl:1-674 (OpenAQFileSet, OpenAQ constructor). Test: test/openaq_test.jl. Docs: docs/src/openaq.md."
+      }
+    ]
+  },
+  "models": {
+    "OpenAQ": {
+      "coupletype": "OpenAQCoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/openaq.jl:595\n\nUpstream constructor OpenAQ(parameter, domaininfo; api_key, station_filter, fill_value=0.0, name=:OpenAQ, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad) from domaininfo pvars\n  - One observed equation via create_interp_equation(itp, \"\", t, t_ref, [x, y]; spatial_interp)\n    where itp = DataSetInterpolator{dt}(FileSetWithRegridder(fs, copy_regridder), parameter, ...)\n    and fs = OpenAQFileSet(parameter, starttime, endtime, bbox; grid_lon_edges, grid_lat_edges, ...)\n  - discrete_events: build_interp_event fires hourly to reload S3 data buffers\n  - metadata: Dict(CoupleType => OpenAQCoupler, SysDomainInfo => domaininfo)\n\nThe variable name in the MTK System matches the parameter string (e.g. pm25(t)). Default system name is :OpenAQ.\n\nData flow (upstream implementation):\n  1. Station discovery: OpenAQ API v3 /locations query, bbox-filtered, parameter-filtered, paginated; cached to $EARTHSCIDATADIR/openaq_stations/{parameter}_{bbox}.json\n  2. S3 download: asyncmap over (station, date) pairs; per-station daily CSV.gz cached to $EARTHSCIDATADIR/openaq_data/locationid=N/year=YYYY/month=MM/location-N-YYYYMMDD.csv.gz\n  3. loadslice!: for each hourly time step, reads daily CSV caches, filters by parameter column, averages readings within the hour per station, averages across all stations in each grid cell, applies unit_scale (to_unit(unit_string))\n  4. DataSetInterpolator + create_interp_equation: wraps the gridded hourly slices in a DataSetInterpolator and produces the MTK observed equation\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8 mechanism. OpenAQ_obs.{parameter} is the loader variable that the runtime aggregates from station observations and provides as a gridded hourly field. The model equation is a direct pass-through: pm25(t) ~ OpenAQ_obs.pm25.\n\nNote on fill_value: the upstream default is 0.0 (not NaN/missing) because DataSetInterpolator's BSpline propagates NaN to the entire field. Grid cells with no stations receive fill_value. Upstream TODO comment: switch to NaN when BSpline handling is improved.\n\nNote on spatial_interp: :linear (default) uses full multilinear interpolation; :nearest uses nearest-grid + time-only linear interpolation (~8x speedup when queries are always at grid-point centres).\n\nSupported parameters and their OpenAQ API IDs: pm25(2), pm10(1), o3(3), no2(5), so2(4), co(6), bc(11), pm1(19), no(7), nox(8). All report in µg/m³."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "pm25": {
+          "type": "observed",
+          "units": "kg/m^3",
+          "description": "Hourly-averaged PM2.5 concentration at the model grid point (kg/m³), aggregated from monitoring stations within the grid cell and converted from µg/m³. Grid cells with no stations receive fill_value (default NaN). Variable name matches the constructor parameter ('pm25' shown here as representative; other instantiations use the respective parameter name: pm10, o3, no2, so2, co, bc, pm1, no, nox).",
+          "expression": "OpenAQ_obs.pm25"
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "OpenAQ_obs": {
+      "kind": "points",
+      "source": {
+        "url_template": "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid={location_id}/year={date:%Y}/month={date:%m}/location-{location_id}-{date:%Y%m%d}.csv.gz"
+      },
+      "temporal": {
+        "start": "2016-01-01T00:00:00Z",
+        "end": "2099-12-31T23:59:59Z",
+        "file_period": "P1D",
+        "frequency": "PT1H",
+        "records_per_file": "auto",
+        "time_variable": "datetime"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "unstructured",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        }
+      },
+      "variables": {
+        "pm25": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "PM2.5 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm25'); converted to kg/m³ (1 µg/m³ = 1×10⁻⁹ kg/m³). OpenAQ API parameter ID: 2."
+        },
+        "pm10": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "PM10 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm10'); converted to kg/m³. OpenAQ API parameter ID: 1."
+        },
+        "o3": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Ozone concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'o3'); converted to kg/m³. OpenAQ API parameter ID: 3."
+        },
+        "no2": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Nitrogen dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no2'); converted to kg/m³. OpenAQ API parameter ID: 5."
+        },
+        "so2": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Sulfur dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'so2'); converted to kg/m³. OpenAQ API parameter ID: 4."
+        },
+        "co": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Carbon monoxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'co'); converted to kg/m³. OpenAQ API parameter ID: 6."
+        },
+        "bc": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Black carbon concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'bc'); converted to kg/m³. OpenAQ API parameter ID: 11."
+        },
+        "pm1": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "PM1 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm1'); converted to kg/m³. OpenAQ API parameter ID: 19."
+        },
+        "no": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Nitric oxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no'); converted to kg/m³. OpenAQ API parameter ID: 7."
+        },
+        "nox": {
+          "file_variable": "value",
+          "units": "kg/m^3",
+          "unit_conversion": 1e-9,
+          "description": "Nitrogen oxides (NOx) concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'nox'); converted to kg/m³. OpenAQ API parameter ID: 8."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "OpenAQ. OpenAQ Data Archive. Open-source global air quality data aggregation platform. https://openaq.org/",
+        "url": "https://openaq.org/"
+      },
+      "metadata": {
+        "tags": [
+          "air_quality",
+          "observations",
+          "monitoring_stations",
+          "hourly",
+          "point_observations"
+        ],
+        "earthscidata_source": "src/openaq.jl::OpenAQFileSet",
+        "s3_mirror": "https://openaq-data-archive.s3.amazonaws.com",
+        "api_endpoint": "https://api.openaq.org/v3",
+        "station_discovery": "runtime (OpenAQ API v3 /locations endpoint — requires OPENAQ_API_KEY env var or api_key constructor argument; results cached to $EARTHSCIDATADIR/openaq_stations/{parameter}_{bbox}.json; no API key needed for S3 data download)",
+        "file_format": "gzip-compressed CSV (.csv.gz)",
+        "csv_columns": "location_id,sensor_id,location,datetime,lat,lon,parameter,unit,value",
+        "datetime_format": "ISO8601 with timezone offset (e.g. 2024-01-15T12:00:00+00:00); runtime converts all timestamps to UTC before aggregation",
+        "valid_parameters": [
+          "pm25",
+          "pm10",
+          "o3",
+          "no2",
+          "so2",
+          "co",
+          "bc",
+          "pm1",
+          "no",
+          "nox"
+        ],
+        "aggregation_method": "Average all non-negative readings within the hour from all stations whose coordinates fall within the model grid cell. Fill cells with no stations with fill_value (default NaN in constructor; 0.0 in data_loaders.regridding.fill_value here because BSpline interpolation propagates NaN to the entire field — upstream TODO to fix).",
+        "location_id_note": "The {location_id} URL substitution is a custom (non-standard) template variable resolved at runtime from the station list returned by station discovery. Each station in the discovered list produces one URL per day in the simulation time span.",
+        "data_availability": "Coverage varies by region and time period. Data starting ~2016 in many regions. Missing S3 files (HTTP 404) are treated as no-data (no error); the corresponding station-day contributes zero readings to its grid cell."
+      }
+    }
+  }
+}
