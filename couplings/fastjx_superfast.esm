@@ -1,0 +1,119 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "FastJXSuperFastCoupling",
+        "description": "FastJX photolysis model coupling to the SuperFast tropospheric chemistry system. Maps 6 photolysis rates computed by FastJX (j_H2O2, j_H2COa, j_H2COb, j_CH3OOH, j_NO2, j_o32OH) to the corresponding constant j-rate parameters in SuperFast (jH2O2, jH2COa, jH2COb, jCH3OOH, jNO2, jO32OH). Implements the param_to_var coupling that replaces SuperFast's fixed photolysis parameters with time-varying values computed by FastJX during simulation, enabling diurnally- and seasonally-resolved photolysis rates in place of the SuperFast climatological defaults. The j_o32OH mapping is the effective rate for O3 + hv → 2 OH (including the O(¹D) + H2O step), computed in FastJX as j_o32OH = j_O31D · j_O31D_adj, where j_O31D_adj is the fraction of O(¹D) that reacts with H2O to produce 2 OH (inlined from GasChem.jl adjust_j_o31D). Migrated from GasChem.jl@8c12c048 src/fastjx_couplings.jl:86-109 (esm-75da). Blocking gap gt-p3ep (solar zenith angle and actinic flux resolution) inherits resolution from FastJX migration (esm-lnl6).",
+        "tags": [
+            "photolysis",
+            "coupling",
+            "gaschem",
+            "fastjx",
+            "superfast",
+            "param_to_var"
+        ],
+        "created": "2026-05-30T00:00:00Z",
+        "authors": [
+            "GasChem.jl contributors",
+            "EarthSciModels migration (esm-75da)"
+        ],
+        "references": [
+            {
+                "citation": "Wild, O., Zhu, X., & Prather, M. J. (2000). Fast-J: Accurate simulation of in- and below-cloud photolysis in tropospheric chemical models. Journal of Atmospheric Chemistry, 37(3), 245–282. — Fast-J photolysis algorithm providing the spectral flux and cross-section lookup tables used to compute the j-rates mapped by this coupling."
+            },
+            {
+                "citation": "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (3rd ed.). Wiley. — Reference for tropospheric photolysis reactions, quantum yields, and the photochemical rate expressions for H2O2, CH2O, CH3OOH, NO2, and O3 covered by this coupling."
+            }
+        ]
+    },
+    "models": {
+        "FastJX": {
+            "coupletype": "FastJXCoupler",
+            "reference": {
+                "notes": "source_ref: GasChem.jl@8c12c048:src/Fast-JX.jl\n\nInterface stub declaring the 6 photolysis-rate outputs that the FastJX model provides for coupling to SuperFast. The full FastJX implementation with computed j-rates is at components/gaschem/fastjx/fastjx.esm (esm-lnl6).\n\nBlocking gap gt-p3ep (solar zenith angle computation and actinic flux spectral interpolation) is resolved by the inline Spencer-Fourier solar declination and bilinear flux lookup implemented in esm-lnl6. Variable naming convention: j-rates are declared as `type: parameter` here (interface contract) even though FastJX computes them as `type: observed` internally. The `param_to_var` transform in the coupling entries declares that each SuperFast j-rate parameter is replaced by the time-varying value from FastJX."
+            },
+            "variables": {
+                "j_H2O2": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 9.153504300134295e-05,
+                    "description": "H2O2 → 2 OH photolysis rate [s⁻¹]. Computed by FastJX as j_H2O2 = (Σ_i F_i·σ_H2O2_i)·ϕ_H2O2 summed over 18 wavelength bins. Default is tropical noon (lat=0°, summer solstice noon) from esm-lnl6 test suite."
+                },
+                "j_H2COa": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 7.927569431680207e-05,
+                    "description": "CH2O → CO + HO2 + H photolysis rate (radical channel) [s⁻¹]. Computed by FastJX as j_H2COa = (Σ_i F_i·σ_H2COa_i)·ϕ_H2COa. Default: tropical noon, esm-lnl6 test suite."
+                },
+                "j_H2COb": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 6.581696733212547e-05,
+                    "description": "CH2O → CO + H2 photolysis rate (molecular channel) [s⁻¹]. Computed by FastJX as j_H2COb = (Σ_i F_i·σ_H2COb_i)·ϕ_H2COb. Default: tropical noon, esm-lnl6 test suite."
+                },
+                "j_NO2": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 0.003903262349324107,
+                    "description": "NO2 → NO + O(³P) photolysis rate [s⁻¹]. Computed by FastJX as j_NO2 = (Σ_i F_i·σ_NO2_i)·ϕ_NO2. Default: tropical noon, esm-lnl6 test suite."
+                },
+                "j_CH3OOH": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 4.960027768503218e-05,
+                    "description": "CH3OOH (methyl hydroperoxide) → HO2 + OH + CH2O photolysis rate [s⁻¹]. Computed by FastJX as j_CH3OOH = (Σ_i F_i·σ_CH3OOH_i)·ϕ_CH3OOH. Default: tropical noon, esm-lnl6 test suite."
+                },
+                "j_o32OH": {
+                    "type": "parameter",
+                    "units": "1/s",
+                    "default": 1.9051399824626528e-08,
+                    "description": "Effective rate for O3 + hv → 2 OH [s⁻¹]. Computed as j_o32OH = j_O31D · j_O31D_adj, where j_O31D is the O3 → O(¹D) photolysis rate and j_O31D_adj is the temperature-, pressure-, and humidity-dependent fraction of O(¹D) that reacts with H2O to produce 2 OH (inlined from GasChem.jl adjust_j_o31D). Default: tropical noon, esm-lnl6 test suite."
+                }
+            },
+            "equations": []
+        }
+    },
+    "coupling": [
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_H2O2",
+            "to": "SuperFast.jH2O2",
+            "transform": "param_to_var",
+            "description": "H2O2 → 2 OH photolysis: FastJX.j_H2O2 → SuperFast.jH2O2. Replaces the SuperFast default constant jH2O2=1.0097e-05 s⁻¹ with the FastJX time-varying rate that accounts for diurnal solar angle variation and spectral actinic flux. FastJX value at tropical noon (~9.15e-05 s⁻¹) is approximately 9× larger than the SuperFast daytime-average default."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_H2COa",
+            "to": "SuperFast.jH2COa",
+            "transform": "param_to_var",
+            "description": "CH2O → CO + HO2 + H photolysis (radical channel): FastJX.j_H2COa → SuperFast.jH2COa. Replaces the SuperFast default constant jH2COa=1.4e-04 s⁻¹ with the FastJX time-varying radical-channel formaldehyde photolysis rate computed via σ_H2COa cross sections and ϕ_H2COa quantum yields over 18 wavelength bins."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_H2COb",
+            "to": "SuperFast.jH2COb",
+            "transform": "param_to_var",
+            "description": "CH2O → CO + H2 photolysis (molecular channel): FastJX.j_H2COb → SuperFast.jH2COb. Replaces the SuperFast default constant jH2COb=1.4e-04 s⁻¹ with the FastJX time-varying molecular-channel formaldehyde photolysis rate computed via σ_H2COb cross sections and ϕ_H2COb quantum yields over 18 wavelength bins."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_CH3OOH",
+            "to": "SuperFast.jCH3OOH",
+            "transform": "param_to_var",
+            "description": "CH3OOH → HO2 + OH + CH2O photolysis: FastJX.j_CH3OOH → SuperFast.jCH3OOH. Replaces the SuperFast default constant jCH3OOH=8.9573e-06 s⁻¹ with the FastJX time-varying methyl hydroperoxide photolysis rate computed via σ_CH3OOH cross sections and ϕ_CH3OOH quantum yields."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_NO2",
+            "to": "SuperFast.jNO2",
+            "transform": "param_to_var",
+            "description": "NO2 → NO + O(³P) photolysis: FastJX.j_NO2 → SuperFast.jNO2. Replaces the SuperFast default constant jNO2=1.49e-02 s⁻¹ with the FastJX time-varying NO2 photolysis rate computed via σ_NO2 cross sections and ϕ_NO2 quantum yields. This is the most photochemically important rate in the NOx cycle and drives the diurnal ozone formation cycle."
+        },
+        {
+            "type": "variable_map",
+            "from": "FastJX.j_o32OH",
+            "to": "SuperFast.jO32OH",
+            "transform": "param_to_var",
+            "description": "O3 + hv → 2 OH (effective two-step rate): FastJX.j_o32OH → SuperFast.jO32OH. Replaces the SuperFast default constant jO32OH=2.27e-04 s⁻¹ with the FastJX time-varying effective rate j_o32OH = j_O31D · j_O31D_adj, where j_O31D is the O3 → O(¹D) photolysis rate and j_O31D_adj is the fraction of O(¹D) that reacts with H2O to yield 2 OH (temperature-, pressure-, and humidity-dependent, inlined from GasChem.jl adjust_j_o31D). This is the primary OH source in the troposphere and its diurnal and seasonal variation is critical for oxidant budget accuracy."
+        }
+    ]
+}
