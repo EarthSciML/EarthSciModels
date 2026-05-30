@@ -41,9 +41,10 @@ equivalence cse=True ↔ cse=False at IEEE-754 ULP scale was verified
 in esm-wqy1 across a sample of stratospheric / radical-pool .esm
 files (mismatches confined to numerically-zero values below the
 ``atol=1e-12`` integrator floor; non-zero values match within the
-spec §6.6.4 default ``rel=1e-6`` tolerance). esm-kpo6 (upstream ESS
-sympy_bridge perf fix) is the long-term path that would let the
-override allowlist stay empty.
+spec §6.6.4 default ``rel=1e-6`` tolerance). ess-as2 (upstream ESS
+sympy_bridge sequential-algebraic-evaluation perf fix, tracked via
+esm-kpo6) is the long-term path that would let the override allowlist
+stay empty.
 
 OOM guardrails (per bead mdl-w1j scope):
   * Each .esm is processed in its own subprocess via
@@ -113,8 +114,8 @@ DENOM_SEED_PPB: Dict[str, float] = {
 # the whole budget), AND cse=True correctness has been verified
 # against either a parallel forward evaluator or the file's existing
 # reference data within the spec §6.6.4 declared tolerances. See the
-# module docstring for the audit decision and esm-kpo6 for the
-# long-term substitution-loop perf fix.
+# module docstring for the audit decision and ess-as2 (esm-kpo6) for
+# the long-term substitution-loop perf fix.
 CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
     # heat_momentum_fluxes.esm (esm-0ro4): 78 algebraic states with
     # cross-referenced ψ_m/ψ_h piecewise calls feeding through
