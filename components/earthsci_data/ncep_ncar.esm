@@ -1,0 +1,217 @@
+{
+  "esm": "0.5.0",
+  "metadata": {
+    "name": "NCEPNCARReanalysis",
+    "description": "NCEP/NCAR Reanalysis 1 DataLoader. Provides 6-hourly pressure-level atmospheric variables (temperature, geopotential height, vertical velocity, horizontal winds) and static surface geopotential, regridded to the model domain at runtime.\n\nData covers 1948–present at 2.5°×2.5° global resolution with 17 standard pressure levels (10–1000 hPa). Two data loaders are used: NCEPNCAR_Pressure for time-varying fields and NCEPNCAR_Surface for the static surface geopotential height.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles file download from NOAA PSL, temporal interpolation, and spatial regridding to the model domain; model equations reference loader variables directly. No registered functions remain in the migrated component.\n\nMigrated from EarthSciData.jl src/NCEP-NCAR_Reanalysis.jl:224 (NCEPNCARReanalysis, esm-k3bb).",
+    "tags": [
+      "earthsci_data",
+      "meteorology",
+      "reanalysis",
+      "ncep",
+      "ncar",
+      "pressure_levels",
+      "data_loader"
+    ],
+    "created": "2026-05-30T00:00:00Z",
+    "authors": [
+      "NOAA National Centers for Environmental Prediction",
+      "National Center for Atmospheric Research",
+      "EarthSciModels migration (esm-k3bb)"
+    ],
+    "references": [
+      {
+        "citation": "Kalnay, E., Kanamitsu, M., Kistler, R., Collins, W., Deaven, D., Gandin, L., Iredell, M., Saha, S., White, G., Woollen, J., Zhu, Y., Leetmaa, A., Reynolds, R., Chelliah, M., Ebisuzaki, W., Higgins, W., Janowiak, J., Mo, K. C., Ropelewski, C., Wang, J., Jenne, R., Joseph, D. (1996). The NCEP/NCAR 40-year reanalysis project. Bulletin of the American Meteorological Society, 77(3), 437–471.",
+        "url": "https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html",
+        "doi": "10.1175/1520-0477(1996)077<0437:TNYRP>2.0.CO;2"
+      },
+      {
+        "citation": "Source: EarthSciData.jl src/NCEP-NCAR_Reanalysis.jl:4-66 (NCEPNCARReanalysisFileSet), :72-79 (relpath), :224 (NCEPNCARReanalysis constructor). Test: test/NCEP-NCAR_Reanalysis_test.jl."
+      }
+    ]
+  },
+  "models": {
+    "NCEPNCARReanalysis": {
+      "coupletype": "NCEPNCARReanalysisCoupler",
+      "reference": {
+        "notes": "source_ref: EarthSciData.jl src/NCEP-NCAR_Reanalysis.jl:224\n\nUpstream constructor NCEPNCARReanalysis(domaininfo; kwargs...) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad), lev (hPa)\n  - One DataSetInterpolator per varnames(fileset): builds interp_unsafe equation for each NC variable\n  - Equation template (from create_interp_equation, pressure-level variables):\n      var(t) ~ interp_unsafe(data, fit, fi_lon, fi_lat, fi_lev, extrap)\n    where fit  = 1 + (t_ref + t - tstart) / tstep\n          fi_lon = 1 + (lon - lonstart) / lonstep\n          fi_lat = 1 + (lat - latstart) / latstep\n          fi_lev = 1 + (lev - levstart) / levstep\n  - Surface variable (hgt.sfc.nc, static): fi_time argument omitted, read once\n  - discrete_events: build_interp_event fires at 6-hourly tstops to reload pressure-level data buffers\n  - metadata: Dict(CoupleType => NCEPNCARReanalysisCoupler, SysDomainInfo => domaininfo)\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8\nmechanism. NCEPNCAR_Pressure.* variables are loader outputs regridded from the 2.5°×2.5°/17-level grid\nto the model domain (lon, lat, lev) at each 6-hourly timestep. NCEPNCAR_Surface.hgt_sfc is the\nstatic surface geopotential height, read once. The runtime handles the build_interp_event discrete\ncallbacks implicitly via data_loaders.temporal.frequency = PT6H.\n\nParameter units: lon and lat are in radians (matching EarthSciML convention for MTK integration;\nthe NCEP NC files store longitude in degrees, conversion handled by the runtime regridder).\nlev is in hPa (matching the NCEP NC 'level' coordinate in millibars = hPa)."
+      },
+      "tolerance": {
+        "rel": 1e-6
+      },
+      "variables": {
+        "lon": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Longitude of the grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the NCEP 2.5°×2.5° grid."
+        },
+        "lat": {
+          "type": "parameter",
+          "units": "rad",
+          "default": 0.0,
+          "description": "Latitude of the grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation."
+        },
+        "lev": {
+          "type": "parameter",
+          "units": "hPa",
+          "default": 500.0,
+          "description": "Pressure level (hPa). Corresponds to the 'level' coordinate in NCEP NC files. Standard levels: 1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10 hPa. Coupled to the simulation domain's pressure coordinate via param_to_var when composed into a CoupledSystem."
+        },
+        "T": {
+          "type": "observed",
+          "units": "K",
+          "description": "Air temperature at the current grid point and pressure level (K). Interpolated in time (6-hourly), space (2.5°×2.5° → model domain), and pressure level from the NCEP/NCAR Reanalysis 1 'air' variable.",
+          "expression": "NCEPNCAR_Pressure.air"
+        },
+        "Z": {
+          "type": "observed",
+          "units": "m",
+          "description": "Geopotential height at the current grid point and pressure level (m). Interpolated in time (6-hourly), space, and pressure level from the NCEP/NCAR Reanalysis 1 'hgt' variable.",
+          "expression": "NCEPNCAR_Pressure.hgt"
+        },
+        "omega": {
+          "type": "observed",
+          "units": "Pa/s",
+          "description": "Lagrangian tendency of pressure (vertical velocity in pressure coordinates) at the current grid point and pressure level (Pa/s). Interpolated from the NCEP/NCAR Reanalysis 1 'omega' variable.",
+          "expression": "NCEPNCAR_Pressure.omega"
+        },
+        "u": {
+          "type": "observed",
+          "units": "m/s",
+          "description": "Zonal (west–east) wind component at the current grid point and pressure level (m/s). Interpolated from the NCEP/NCAR Reanalysis 1 'uwnd' variable.",
+          "expression": "NCEPNCAR_Pressure.uwnd"
+        },
+        "v": {
+          "type": "observed",
+          "units": "m/s",
+          "description": "Meridional (south–north) wind component at the current grid point and pressure level (m/s). Interpolated from the NCEP/NCAR Reanalysis 1 'vwnd' variable.",
+          "expression": "NCEPNCAR_Pressure.vwnd"
+        },
+        "Z_sfc": {
+          "type": "observed",
+          "units": "m",
+          "description": "Surface geopotential height (m). Static field read once from the NCEP/NCAR Reanalysis 1 'hgt.sfc.nc' file. Spatially interpolated to the model domain; does not vary in time or pressure level.",
+          "expression": "NCEPNCAR_Surface.hgt_sfc"
+        }
+      },
+      "equations": [],
+      "tests": []
+    }
+  },
+  "data_loaders": {
+    "NCEPNCAR_Pressure": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis/pressure/{var}.{date:%Y}.nc"
+      },
+      "temporal": {
+        "start": "1948-01-01T00:00:00Z",
+        "file_period": "P1Y",
+        "frequency": "PT6H",
+        "records_per_file": 1460,
+        "time_variable": "time"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center",
+          "level": "center"
+        },
+        "resolution": {
+          "lon": 2.5,
+          "lat": 2.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0],
+          "level": [10.0, 1000.0]
+        }
+      },
+      "variables": {
+        "air": {
+          "file_variable": "air",
+          "units": "K",
+          "description": "Air temperature at pressure levels"
+        },
+        "hgt": {
+          "file_variable": "hgt",
+          "units": "m",
+          "description": "Geopotential height at pressure levels"
+        },
+        "omega": {
+          "file_variable": "omega",
+          "units": "Pa/s",
+          "description": "Lagrangian tendency of pressure (vertical velocity in pressure coordinates)"
+        },
+        "uwnd": {
+          "file_variable": "uwnd",
+          "units": "m/s",
+          "description": "Zonal wind component (positive eastward)"
+        },
+        "vwnd": {
+          "file_variable": "vwnd",
+          "units": "m/s",
+          "description": "Meridional wind component (positive northward)"
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Kalnay, E. et al. (1996). The NCEP/NCAR 40-year reanalysis project. Bull. Amer. Meteor. Soc. 77, 437–471.",
+        "url": "https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html",
+        "doi": "10.1175/1520-0477(1996)077<0437:TNYRP>2.0.CO;2"
+      },
+      "metadata": {
+        "tags": ["meteorology", "reanalysis", "pressure-level", "6-hourly", "ncep", "ncar"],
+        "earthscidata_source": "src/NCEP-NCAR_Reanalysis.jl::NCEPNCARReanalysisFileSet (pressure variables)",
+        "pressure_levels_hPa": [1000, 925, 850, 700, 600, 500, 400, 300, 250, 200, 150, 100, 70, 50, 30, 20, 10],
+        "unit_note": "NCEP NC files store air temperature with scale_factor/add_offset packed encoding; earthsci_toolkit applies CF conventions to decode to physical units (K). omega raw units in the file are Pa/s; no conversion needed."
+      }
+    },
+    "NCEPNCAR_Surface": {
+      "kind": "static",
+      "source": {
+        "url_template": "https://downloads.psl.noaa.gov/Datasets/ncep.reanalysis/surface/{var}.sfc.nc"
+      },
+      "spatial": {
+        "crs": "+proj=longlat +datum=WGS84 +no_defs",
+        "grid_type": "latlon",
+        "staggering": {
+          "lon": "center",
+          "lat": "center"
+        },
+        "resolution": {
+          "lon": 2.5,
+          "lat": 2.5
+        },
+        "extent": {
+          "lon": [-180.0, 180.0],
+          "lat": [-90.0, 90.0]
+        }
+      },
+      "variables": {
+        "hgt_sfc": {
+          "file_variable": "hgt",
+          "units": "m",
+          "description": "Surface geopotential height (static). Read from 'hgt.sfc.nc' on the NOAA PSL server. The variable name in the file is 'hgt'; the schema-level name 'hgt_sfc' distinguishes it from the pressure-level geopotential height in NCEPNCAR_Pressure."
+        }
+      },
+      "regridding": {
+        "fill_value": 0.0,
+        "extrapolation": "clamp"
+      },
+      "reference": {
+        "citation": "Kalnay, E. et al. (1996). The NCEP/NCAR 40-year reanalysis project. Bull. Amer. Meteor. Soc. 77, 437–471.",
+        "url": "https://psl.noaa.gov/data/gridded/data.ncep.reanalysis.html"
+      },
+      "metadata": {
+        "tags": ["meteorology", "static", "surface", "geopotential", "ncep", "ncar"],
+        "earthscidata_source": "src/NCEP-NCAR_Reanalysis.jl::NCEPNCARReanalysisFileSet (surface variables)"
+      }
+    }
+  }
+}
