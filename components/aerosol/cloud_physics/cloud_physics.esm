@@ -1,0 +1,867 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "CloudPhysics",
+        "description": "Composed cloud microphysics model (Seinfeld & Pandis 2006, Ch. 17). Flat composition of CloudDynamics (adiabatic thermodynamics, LCL height), IcePhysics (freezing point depression, ice nuclei), RainFormation (collision-coalescence, raindrop spectra), and AerosolScavenging (scavenging ratios and coefficient). Shared physical constants M_w and R unify CloudDynamics and IcePhysics. Ice particle diameter (D_p_ice) and collector drop diameter (D_p_rain) are kept as independent parameters. Migrated from Aerosol.jl src/cloud_physics.jl:735 (esm-c8z).",
+        "tags": [
+            "aerosol",
+            "cloud_physics",
+            "thermodynamics",
+            "ice_physics",
+            "rain_formation",
+            "aerosol_scavenging",
+            "seinfeld_pandis"
+        ]
+    },
+    "models": {
+        "CloudPhysics": {
+            "reference": {
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 17.",
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:735\n\nUpstream CloudPhysics is an MTK @component that calls EarthSciML coupling.couple() on four sub-components: CloudDynamics, IcePhysics, RainFormation, and AerosolScavenging. The couple() call unifies shared parameter names across components — specifically M_w (molecular weight of water) and R (universal gas constant), which appear in both CloudDynamics and IcePhysics with identical values.\n\nThis ESM flattens all four sub-models into a single model following the same pattern as aerosol_dynamics.esm:\n- CloudDynamics: pure-algebraic observed variables (Γ_d, p_sat, w_vs, T_d, h_LCL). Temperature T_0 (default 293.15 K) is the surface/parcel temperature for the LCL calculation.\n- IcePhysics: algebraic state equations (ΔT_f, T_e, kelvin_ice, IN). Temperature T (default 263.15 K) is the ice-phase temperature, kept separate from T_0 as in the upstream composition.\n- RainFormation: algebraic state equations (E_t, dm_dt, F_dist, n_MP). The upstream D_p parameter (collector drop diameter) is renamed D_p_rain to avoid collision with IcePhysics.\n- AerosolScavenging: algebraic state equations (F_mass, F_number, Λ). No parameter conflicts.\n\nName collision resolution: Both IcePhysics and RainFormation have a parameter named D_p (units m) but with distinct physical meanings and order-of-magnitude different defaults (1e-6 m for ice particles vs 1e-3 m for rain collector drops). In the upstream MTK system these are namespaced as ice.D_p and rain.D_p. In this flat ESM they are D_p_ice (ice particle diameter) and D_p_rain (collector drop diameter) respectively. All equation expression trees are updated accordingly.\n\nShared parameters M_w and R are listed once and referenced by both the CloudDynamics observed-variable expressions and the IcePhysics equations.\n\nThe coupling.couple feature in the upstream code produces no inter-model ODE coupling for this composition — the four sub-models are thermodynamically related (common M_w, R, and conceptually related T_0/T) but their outputs do not feed into each other's equations. The composition is primarily a convenience wrapper for downstream coupled atmospheric models.\n\nTolerance (rel=1e-8, abs=1e-12): all outputs are time-independent algebraic quantities. Inherits the strictest per-assertion tolerance needed across the four sub-models. CloudDynamics observed variables use pure closed-form expressions; 1e-8 easily covers float64 roundoff. The abs=1e-12 floor handles the molality=0 (ΔT_f=0) boundary."
+            },
+            "tolerance": {
+                "rel": 1.0e-8,
+                "abs": 1.0e-12
+            },
+            "variables": {
+                "M_w": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.018015,
+                    "description": "Molecular weight of water. Shared between CloudDynamics (w_vs, T_d) and IcePhysics (T_e, kelvin_ice)."
+                },
+                "R": {
+                    "type": "parameter",
+                    "units": "J/(mol*K)",
+                    "default": 8.314,
+                    "description": "Universal gas constant. Shared between CloudDynamics (T_d) and IcePhysics (T_e, kelvin_ice)."
+                },
+                "M_a": {
+                    "type": "parameter",
+                    "units": "kg/mol",
+                    "default": 0.02897,
+                    "description": "Molecular weight of dry air (CloudDynamics)."
+                },
+                "g": {
+                    "type": "parameter",
+                    "units": "m/s^2",
+                    "default": 9.81,
+                    "description": "Gravitational acceleration (CloudDynamics)."
+                },
+                "c_p_air": {
+                    "type": "parameter",
+                    "units": "J/(kg*K)",
+                    "default": 1005.0,
+                    "description": "Specific heat of air at constant pressure (CloudDynamics)."
+                },
+                "p_sat_ref": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 610.94,
+                    "description": "Magnus formula reference saturation pressure at 0°C (CloudDynamics)."
+                },
+                "magnus_a": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 17.625,
+                    "description": "Magnus formula coefficient a (CloudDynamics)."
+                },
+                "T_magnus_offset": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Magnus formula temperature offset 0°C in Kelvin (CloudDynamics)."
+                },
+                "magnus_b": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 243.04,
+                    "description": "Magnus formula coefficient b (CloudDynamics)."
+                },
+                "T_0": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 293.15,
+                    "description": "Surface/parcel temperature for adiabatic cloud-base thermodynamics (CloudDynamics). Distinct from the ice-phase temperature T."
+                },
+                "RH": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.8,
+                    "description": "Relative humidity (dimensionless, 0–1) for LCL calculation (CloudDynamics)."
+                },
+                "p_a": {
+                    "type": "parameter",
+                    "units": "Pa",
+                    "default": 101325.0,
+                    "description": "Atmospheric pressure (CloudDynamics)."
+                },
+                "ΔH_v": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 2500000.0,
+                    "description": "Latent heat of vaporization (CloudDynamics, S&P Table 17.1)."
+                },
+                "Γ_d": {
+                    "type": "observed",
+                    "units": "K/m",
+                    "description": "Dry adiabatic lapse rate Γ_d = g/c_p_air (CloudDynamics, Eq. 17.44). Constant ≈ 9.76 K/km.",
+                    "expression": {
+                        "op": "/",
+                        "args": ["g", "c_p_air"]
+                    }
+                },
+                "p_sat": {
+                    "type": "observed",
+                    "units": "Pa",
+                    "description": "Saturation vapor pressure at T_0 via Magnus formula (CloudDynamics). p_sat ≈ 2333 Pa at 20°C.",
+                    "expression": {
+                        "op": "*",
+                        "args": [
+                            "p_sat_ref",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "magnus_a",
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            "T_0",
+                                                            {"op": "*", "args": [-1, "T_magnus_offset"]}
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            "T_0",
+                                                            {"op": "*", "args": [-1, "T_magnus_offset"]}
+                                                        ]
+                                                    },
+                                                    "magnus_b"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "w_vs": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Saturation water vapor mixing ratio w_vs = M_w p_sat / (M_a p_a) (CloudDynamics, Eq. 17.46).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {"op": "*", "args": ["M_w", "p_sat"]},
+                            {"op": "*", "args": ["M_a", "p_a"]}
+                        ]
+                    }
+                },
+                "T_d": {
+                    "type": "observed",
+                    "units": "K",
+                    "description": "Dew-point temperature T_d = T_0 + (R T_0² / (ΔH_v M_w)) ln(RH) (CloudDynamics, Eq. 17.43).",
+                    "expression": {
+                        "op": "+",
+                        "args": [
+                            "T_0",
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": ["R", {"op": "^", "args": ["T_0", 2]}]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": ["ΔH_v", "M_w"]
+                                            }
+                                        ]
+                                    },
+                                    {"op": "log", "args": ["RH"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                "h_LCL": {
+                    "type": "observed",
+                    "units": "m",
+                    "description": "Lifting condensation level height h_LCL = (T_0 - T_d) / Γ_d (CloudDynamics, Eq. 17.49).",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "+",
+                                "args": ["T_0", {"op": "*", "args": [-1, "T_d"]}]
+                            },
+                            "Γ_d"
+                        ]
+                    }
+                },
+                "ρ_i": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 917.0,
+                    "description": "Density of ice (IcePhysics)."
+                },
+                "T_freeze": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 273.15,
+                    "description": "Freezing point of pure water (IcePhysics)."
+                },
+                "ΔH_m_mass": {
+                    "type": "parameter",
+                    "units": "J/kg",
+                    "default": 333500.0,
+                    "description": "Latent heat of fusion of water (IcePhysics)."
+                },
+                "K_f": {
+                    "type": "parameter",
+                    "units": "K*kg/mol",
+                    "default": 1.86,
+                    "description": "Cryoscopic constant of water (IcePhysics)."
+                },
+                "IN_ref": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 1000.0,
+                    "description": "Ice nuclei reference concentration at T_IN_ref (IcePhysics, Eq. 17.103)."
+                },
+                "IN_coeff": {
+                    "type": "parameter",
+                    "units": "1/K",
+                    "default": 0.6,
+                    "description": "Ice nuclei exponential temperature coefficient (IcePhysics, Eq. 17.103)."
+                },
+                "T_IN_ref": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 253.0,
+                    "description": "Reference temperature for ice nuclei parameterization (IcePhysics)."
+                },
+                "dim_eps": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0e-30,
+                    "description": "Small value added to water activity to prevent log(0) (IcePhysics)."
+                },
+                "T": {
+                    "type": "parameter",
+                    "units": "K",
+                    "default": 263.15,
+                    "description": "Ice-phase temperature (IcePhysics). Separate from T_0 (cloud-dynamics surface temperature)."
+                },
+                "σ_ia": {
+                    "type": "parameter",
+                    "units": "N/m",
+                    "default": 0.106,
+                    "description": "Ice-air surface tension (IcePhysics, Eq. 17.102)."
+                },
+                "D_p_ice": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-6,
+                    "description": "Ice particle diameter (IcePhysics, Eq. 17.102). Renamed from D_p to avoid collision with D_p_rain (collector drop diameter) in RainFormation."
+                },
+                "a_w": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Water activity (IcePhysics, Eq. 17.101)."
+                },
+                "molality": {
+                    "type": "parameter",
+                    "units": "mol/kg",
+                    "default": 0.0,
+                    "description": "Solute molality of the solution (IcePhysics, Eq. 17.100)."
+                },
+                "ΔT_f": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Freezing point depression ΔT_f = K_f * molality (IcePhysics, Eq. 17.100)."
+                },
+                "T_e": {
+                    "type": "state",
+                    "units": "K",
+                    "description": "Equilibrium freezing temperature from water activity (IcePhysics, Eq. 17.101)."
+                },
+                "kelvin_ice": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Kelvin curvature factor for ice particle vapor pressure (IcePhysics, Eq. 17.102). Always > 1."
+                },
+                "IN": {
+                    "type": "state",
+                    "units": "1/m^3",
+                    "description": "Ice nuclei concentration (IcePhysics, Eq. 17.103)."
+                },
+                "π_val": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 3.141592653589793,
+                    "description": "Pi (RainFormation)."
+                },
+                "F_diam_ref": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.3e-3,
+                    "description": "Best distribution diameter scale (RainFormation, Eq. 17.107: 1.3 mm)."
+                },
+                "F_exp": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 2.25,
+                    "description": "Best distribution exponent (RainFormation, Eq. 17.107)."
+                },
+                "one": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Unity constant for F_dist expression (RainFormation)."
+                },
+                "p0_unit": {
+                    "type": "parameter",
+                    "units": "mm/hr",
+                    "default": 1.0,
+                    "description": "Unit rainfall intensity for nondimensionalization (RainFormation)."
+                },
+                "D_p_rain": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-3,
+                    "description": "Collector drop diameter (RainFormation). Renamed from D_p to avoid collision with D_p_ice (ice particle diameter) in IcePhysics."
+                },
+                "d_p": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0e-5,
+                    "description": "Collected droplet diameter (RainFormation, Eq. 17.106)."
+                },
+                "E_coll": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Collision efficiency (RainFormation, Eq. 17.104)."
+                },
+                "E_coal": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Coalescence efficiency (RainFormation, Eq. 17.105)."
+                },
+                "w_L": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0e-3,
+                    "description": "Liquid water mass mixing ratio kg/kg (RainFormation, Eq. 17.106)."
+                },
+                "v_D": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 5.0,
+                    "description": "Fall velocity of collector drop (RainFormation, Eq. 17.106)."
+                },
+                "v_d": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.01,
+                    "description": "Fall velocity of collected droplet (RainFormation, Eq. 17.106)."
+                },
+                "ρ_a": {
+                    "type": "parameter",
+                    "units": "kg/m^3",
+                    "default": 1.225,
+                    "description": "Air density (RainFormation, Eq. 17.106)."
+                },
+                "p_0": {
+                    "type": "parameter",
+                    "units": "mm/hr",
+                    "default": 1.0,
+                    "description": "Rainfall intensity (RainFormation, Eq. 17.107)."
+                },
+                "n_0": {
+                    "type": "parameter",
+                    "units": "1/m^4",
+                    "default": 8.0e6,
+                    "description": "Marshall-Palmer intercept parameter (RainFormation, Eq. 17.108: 8000 m⁻³ mm⁻¹)."
+                },
+                "ψ": {
+                    "type": "parameter",
+                    "units": "1/m",
+                    "default": 4100.0,
+                    "description": "Marshall-Palmer slope parameter (RainFormation, Eq. 17.108)."
+                },
+                "E_t": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Collection efficiency E_t = E_coll * E_coal (RainFormation, Eq. 17.106)."
+                },
+                "dm_dt": {
+                    "type": "state",
+                    "units": "kg/s",
+                    "description": "Mass accretion rate by continuous collection (RainFormation, Eq. 17.106)."
+                },
+                "F_dist": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Best raindrop size CDF (RainFormation, Eq. 17.107)."
+                },
+                "n_MP": {
+                    "type": "state",
+                    "units": "1/m^4",
+                    "description": "Marshall-Palmer raindrop number density (RainFormation, Eq. 17.108)."
+                },
+                "C_0": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 1.0e9,
+                    "description": "Initial aerosol mass concentration (AerosolScavenging, Eq. 17.84)."
+                },
+                "C_int": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 5.0e8,
+                    "description": "Interstitial aerosol mass concentration (AerosolScavenging, Eq. 17.84)."
+                },
+                "N_0": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 1.0e9,
+                    "description": "Initial aerosol number concentration (AerosolScavenging, Eq. 17.85)."
+                },
+                "N_int": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 3.0e8,
+                    "description": "Interstitial aerosol number concentration (AerosolScavenging, Eq. 17.85)."
+                },
+                "K_coll": {
+                    "type": "parameter",
+                    "units": "m^3/s",
+                    "default": 1.0e-12,
+                    "description": "Collision coefficient (AerosolScavenging, Eq. 17.92)."
+                },
+                "N_d": {
+                    "type": "parameter",
+                    "units": "1/m^3",
+                    "default": 1.0e8,
+                    "description": "Cloud droplet number concentration (AerosolScavenging, Eq. 17.92)."
+                },
+                "F_mass": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Mass scavenging ratio F_mass = (C_0 - C_int)/C_0 (AerosolScavenging, Eq. 17.84)."
+                },
+                "F_number": {
+                    "type": "state",
+                    "units": "1",
+                    "description": "Number scavenging ratio F_number = (N_0 - N_int)/N_0 (AerosolScavenging, Eq. 17.85)."
+                },
+                "Λ": {
+                    "type": "state",
+                    "units": "1/s",
+                    "description": "Scavenging coefficient Λ = N_d * K_coll (AerosolScavenging, Eq. 17.92)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "ΔT_f",
+                    "rhs": {"op": "*", "args": ["K_f", "molality"]}
+                },
+                {
+                    "lhs": "T_e",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "T_freeze",
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {"op": "*", "args": ["R", {"op": "^", "args": ["T_freeze", 2]}]},
+                                            {"op": "*", "args": ["ΔH_m_mass", "M_w"]}
+                                        ]
+                                    },
+                                    {"op": "log", "args": [{"op": "+", "args": ["a_w", "dim_eps"]}]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "kelvin_ice",
+                    "rhs": {
+                        "op": "exp",
+                        "args": [
+                            {
+                                "op": "/",
+                                "args": [
+                                    {"op": "*", "args": [4, "M_w", "σ_ia"]},
+                                    {"op": "*", "args": ["R", "T", "ρ_i", "D_p_ice"]}
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "IN",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "IN_ref",
+                            {
+                                "op": "exp",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "IN_coeff",
+                                            {"op": "+", "args": ["T_IN_ref", {"op": "*", "args": [-1, "T"]}]}
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "E_t",
+                    "rhs": {"op": "*", "args": ["E_coll", "E_coal"]}
+                },
+                {
+                    "lhs": "dm_dt",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            {"op": "/", "args": ["π_val", 4]},
+                            "E_t",
+                            {"op": "^", "args": [{"op": "+", "args": ["D_p_rain", "d_p"]}, 2]},
+                            "w_L",
+                            "ρ_a",
+                            {"op": "abs", "args": [{"op": "+", "args": ["v_D", {"op": "*", "args": [-1, "v_d"]}]}]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_dist",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            "one",
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    {
+                                        "op": "exp",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "D_p_rain",
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "F_diam_ref",
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    {"op": "/", "args": ["p_0", "p0_unit"]},
+                                                                                    0.232
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "F_exp"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "n_MP",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "n_0",
+                            {"op": "exp", "args": [{"op": "*", "args": [-1, "ψ", "D_p_rain"]}]}
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_mass",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "+", "args": ["C_0", {"op": "*", "args": [-1, "C_int"]}]},
+                            "C_0"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "F_number",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {"op": "+", "args": [{"op": "*", "args": [-1, "N_int"]}, "N_0"]},
+                            "N_0"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Λ",
+                    "rhs": {"op": "*", "args": ["N_d", "K_coll"]}
+                }
+            ],
+            "tests": [
+                {
+                    "id": "defaults_all_submodels",
+                    "description": "Reference run at upstream Aerosol.jl defaults for all four sub-models simultaneously. Verifies all 13 output variables at t=0 and t=3600 s. All outputs are time-independent algebraic quantities, so values must be identical at both times.\n\nExpected values sourced from cloud_dynamics.esm (Γ_d, p_sat, w_vs, T_d, h_LCL), ice_physics.esm (ΔT_f, T_e, kelvin_ice, IN), rain_formation.esm (E_t, dm_dt, F_dist, n_MP), and aerosol_scavenging.esm (F_mass, F_number, Λ) — each cross-validated against the upstream Aerosol.jl test suite.",
+                    "time_span": {"start": 0.0, "end": 3600.0},
+                    "assertions": [
+                        {"variable": "Γ_d",       "time": 0.0,    "expected": 0.009761194029850746},
+                        {"variable": "Γ_d",       "time": 3600.0, "expected": 0.009761194029850746},
+                        {"variable": "p_sat",      "time": 0.0,    "expected": 2333.4406230993577},
+                        {"variable": "p_sat",      "time": 3600.0, "expected": 2333.4406230993577},
+                        {"variable": "w_vs",       "time": 0.0,    "expected": 0.014320754941837679},
+                        {"variable": "w_vs",       "time": 3600.0, "expected": 0.014320754941837679},
+                        {"variable": "T_d",        "time": 0.0,    "expected": 289.6100275457325},
+                        {"variable": "T_d",        "time": 3600.0, "expected": 289.6100275457325},
+                        {"variable": "h_LCL",      "time": 0.0,    "expected": 362.65772849528986},
+                        {"variable": "h_LCL",      "time": 3600.0, "expected": 362.65772849528986},
+                        {"variable": "ΔT_f",       "time": 0.0,    "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "ΔT_f",       "time": 3600.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
+                        {"variable": "T_e",        "time": 0.0,    "expected": 273.15},
+                        {"variable": "T_e",        "time": 3600.0, "expected": 273.15},
+                        {"variable": "kelvin_ice", "time": 0.0,    "expected": 1.0038145595610195},
+                        {"variable": "kelvin_ice", "time": 3600.0, "expected": 1.0038145595610195},
+                        {"variable": "IN",         "time": 0.0,    "expected": 2.265408914814352},
+                        {"variable": "IN",         "time": 3600.0, "expected": 2.265408914814352},
+                        {"variable": "E_t",        "time": 0.0,    "expected": 0.5},
+                        {"variable": "E_t",        "time": 3600.0, "expected": 0.5},
+                        {"variable": "dm_dt",      "time": 0.0,    "expected": 2.4487207850181197e-9},
+                        {"variable": "dm_dt",      "time": 3600.0, "expected": 2.4487207850181197e-9},
+                        {"variable": "F_dist",     "time": 0.0,    "expected": 0.4254396577227785},
+                        {"variable": "F_dist",     "time": 3600.0, "expected": 0.4254396577227785},
+                        {"variable": "n_MP",       "time": 0.0,    "expected": 132581.40321409004},
+                        {"variable": "n_MP",       "time": 3600.0, "expected": 132581.40321409004},
+                        {"variable": "F_mass",     "time": 0.0,    "expected": 0.5},
+                        {"variable": "F_mass",     "time": 3600.0, "expected": 0.5},
+                        {"variable": "F_number",   "time": 0.0,    "expected": 0.7},
+                        {"variable": "F_number",   "time": 3600.0, "expected": 0.7},
+                        {"variable": "Λ",          "time": 0.0,    "expected": 1.0e-4},
+                        {"variable": "Λ",          "time": 3600.0, "expected": 1.0e-4}
+                    ]
+                },
+                {
+                    "id": "D_p_ice_independent_of_D_p_rain",
+                    "description": "D_p_ice=1e-7 m (100 nm ice particle, 10× smaller than default 1 μm). Verifies that kelvin_ice changes as expected (Kelvin factor scales as exp(1/D_p); smaller particle → larger correction) while n_MP and all RainFormation outputs remain at their default values, confirming that D_p_ice and D_p_rain are independent parameters.\n\nkelvin_ice expected from ice_physics.esm 'kelvin_effect_small_particle' test.",
+                    "parameter_overrides": {"D_p_ice": 1.0e-7},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "kelvin_ice", "time":   0.0, "expected": 1.0388070898029664},
+                        {"variable": "kelvin_ice", "time": 600.0, "expected": 1.0388070898029664},
+                        {"variable": "n_MP",       "time":   0.0, "expected": 132581.40321409004},
+                        {"variable": "n_MP",       "time": 600.0, "expected": 132581.40321409004},
+                        {"variable": "dm_dt",      "time":   0.0, "expected": 2.4487207850181197e-9},
+                        {"variable": "dm_dt",      "time": 600.0, "expected": 2.4487207850181197e-9}
+                    ]
+                },
+                {
+                    "id": "D_p_rain_independent_of_D_p_ice",
+                    "description": "D_p_rain=2e-3 m (2 mm collector drop, 2× default). Verifies n_MP drops per the Marshall-Palmer exponential while kelvin_ice and all IcePhysics outputs remain at default values, confirming D_p_rain and D_p_ice are independent parameters.\n\nn_MP expected from rain_formation.esm 'marshall_palmer_decreasing' test.",
+                    "parameter_overrides": {"D_p_rain": 2.0e-3},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "n_MP",       "time":   0.0, "expected": 2197.22855977714},
+                        {"variable": "n_MP",       "time": 600.0, "expected": 2197.22855977714},
+                        {"variable": "kelvin_ice", "time":   0.0, "expected": 1.0038145595610195},
+                        {"variable": "kelvin_ice", "time": 600.0, "expected": 1.0038145595610195},
+                        {"variable": "IN",         "time":   0.0, "expected": 2.265408914814352},
+                        {"variable": "IN",         "time": 600.0, "expected": 2.265408914814352}
+                    ]
+                },
+                {
+                    "id": "ice_temperature_independent_of_cloud_dynamics",
+                    "description": "T=243.15 K (cold surge, 10 K below T_IN_ref=253 K). Ice nuclei concentration IN spikes per the exponential parameterization (Eq. 17.103). CloudDynamics outputs (Γ_d, p_sat, etc.) must remain unchanged because they depend on T_0 not T, confirming the two temperature parameters are independent.\n\nIN expected from ice_physics.esm 'ice_nuclei_cold_surge' test.",
+                    "parameter_overrides": {"T": 243.15},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "IN",    "time":   0.0, "expected": 368706.1554093557},
+                        {"variable": "IN",    "time": 600.0, "expected": 368706.1554093557},
+                        {"variable": "Γ_d",   "time":   0.0, "expected": 0.009761194029850746},
+                        {"variable": "p_sat", "time":   0.0, "expected": 2333.4406230993577},
+                        {"variable": "h_LCL", "time":   0.0, "expected": 362.65772849528986}
+                    ]
+                },
+                {
+                    "id": "cloud_dynamics_cold_independent_of_ice",
+                    "description": "T_0=263.15 K (cold parcel). CloudDynamics outputs change (lower p_sat, lower h_LCL). IcePhysics outputs must remain unchanged because they depend on T not T_0. Also confirms Γ_d = g/c_p_air is constant (does not depend on temperature).\n\np_sat and h_LCL expected from cloud_dynamics.esm 'cold_temperature_T0_263' test.",
+                    "parameter_overrides": {"T_0": 263.15},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "p_sat",      "time":   0.0, "expected": 286.77296061847886},
+                        {"variable": "p_sat",      "time": 600.0, "expected": 286.77296061847886},
+                        {"variable": "h_LCL",      "time":   0.0, "expected": 292.22938809413193},
+                        {"variable": "h_LCL",      "time": 600.0, "expected": 292.22938809413193},
+                        {"variable": "Γ_d",        "time":   0.0, "expected": 0.009761194029850746},
+                        {"variable": "IN",         "time":   0.0, "expected": 2.265408914814352},
+                        {"variable": "kelvin_ice", "time":   0.0, "expected": 1.0038145595610195}
+                    ]
+                },
+                {
+                    "id": "scavenging_defaults",
+                    "description": "Spot-check AerosolScavenging at default parameters and at a complete-scavenging boundary (C_int=0, N_int=0). Confirms F_mass=F_number=1 at the upper bound and verifies Λ=N_d*K_coll=1e-4 s^-1 at defaults. Sourced from aerosol_scavenging.esm tests.",
+                    "parameter_overrides": {},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "F_mass",   "time": 600.0, "expected": 0.5},
+                        {"variable": "F_number", "time": 600.0, "expected": 0.7},
+                        {"variable": "Λ",        "time": 600.0, "expected": 1.0e-4}
+                    ]
+                },
+                {
+                    "id": "rain_saturation_rh",
+                    "description": "CloudDynamics at RH=1.0 (100% humidity): dew point equals air temperature so h_LCL=0 (parcel already at saturation). RainFormation outputs unchanged. Sourced from cloud_dynamics.esm 'saturation_rh_100' test.",
+                    "parameter_overrides": {"RH": 1.0},
+                    "time_span": {"start": 0.0, "end": 600.0},
+                    "assertions": [
+                        {"variable": "T_d",   "time":   0.0, "expected": 293.15},
+                        {"variable": "h_LCL", "time":   0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-10}},
+                        {"variable": "E_t",   "time": 600.0, "expected": 0.5},
+                        {"variable": "n_MP",  "time": 600.0, "expected": 132581.40321409004}
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "lcl_height_vs_relative_humidity",
+                    "description": "LCL height h_LCL as a function of relative humidity RH at T_0=293.15 K. As RH decreases the dew-point depression increases and cloud base rises (S&P Eq. 17.49). Reproduces CloudDynamics example.",
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "RH",
+                                "range": {"start": 0.2, "stop": 1.0, "count": 50, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "h_LCL_vs_RH",
+                            "type": "line",
+                            "description": "LCL height h_LCL vs relative humidity (S&P Eq. 17.49).",
+                            "x": {"variable": "RH",   "label": "Relative humidity RH"},
+                            "y": {"variable": "h_LCL", "label": "h_LCL (m)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "ice_nuclei_temperature_sweep",
+                    "description": "Ice nuclei concentration IN vs temperature T (233–273 K) at fixed IN_ref=1000 m^-3 and IN_coeff=0.6 K^-1. Spans ~7 orders of magnitude over 40 K (S&P Eq. 17.103). Reproduces IcePhysics example.",
+                    "time_span": {"start": 0.0, "end": 60.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "T",
+                                "range": {"start": 233.15, "stop": 273.15, "count": 21, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "IN_vs_T",
+                            "type": "line",
+                            "description": "Ice nuclei concentration vs ice-phase temperature.",
+                            "x": {"variable": "T",  "label": "Temperature T (K)"},
+                            "y": {"variable": "IN", "label": "IN (m^-3)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "marshall_palmer_raindrop_spectrum",
+                    "description": "Marshall-Palmer number density n_MP vs collector drop diameter D_p_rain (0.5–5 mm). Exponential decay n = n_0 * exp(-ψ D) (S&P Eq. 17.108). Reproduces RainFormation example.",
+                    "time_span": {"start": 0.0, "end": 60.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "D_p_rain",
+                                "range": {"start": 5.0e-4, "stop": 5.0e-3, "count": 19, "scale": "linear"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "n_MP_vs_D_p_rain",
+                            "type": "line",
+                            "description": "Marshall-Palmer number density vs collector drop diameter.",
+                            "x": {"variable": "D_p_rain", "label": "D_p_rain (m)"},
+                            "y": {"variable": "n_MP",     "label": "n_MP (m^-4)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "scavenging_coefficient_vs_droplet_density",
+                    "description": "Scavenging coefficient Λ = N_d K_coll vs cloud-droplet number density N_d across four orders of magnitude (1e6–1e10 m^-3). Covers timescales from ~1 second (heavy cumulus) to ~12 days (thin cirrus) (S&P Eq. 17.92). Reproduces AerosolScavenging example.",
+                    "time_span": {"start": 0.0, "end": 60.0},
+                    "parameter_sweep": {
+                        "type": "cartesian",
+                        "dimensions": [
+                            {
+                                "parameter": "N_d",
+                                "range": {"start": 1.0e6, "stop": 1.0e10, "count": 21, "scale": "log"}
+                            }
+                        ]
+                    },
+                    "plots": [
+                        {
+                            "id": "lambda_vs_Nd",
+                            "type": "line",
+                            "description": "Scavenging coefficient Λ vs cloud-droplet number density.",
+                            "x": {"variable": "N_d", "label": "N_d (m^-3)"},
+                            "y": {"variable": "Λ",   "label": "Λ (1/s)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
