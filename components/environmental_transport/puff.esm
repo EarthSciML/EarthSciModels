@@ -1,0 +1,576 @@
+{
+    "esm": "0.4.0",
+    "metadata": {
+        "name": "Puff",
+        "description": "Lagrangian puff transport model that advects a parcel of matter within a 3-D fluid velocity field defined by a DomainInfo coordinate system. The puff position in three coordinates (lev, x, y) evolves under prescribed velocity components (v_lev, v_x, v_y) scaled by coordinate transforms. Vertical boundaries (glo, ghi) are enforced via ifelse clamping of the vertical velocity with a small offset buffer: upward motion is blocked when lev > ghi−offset and downward motion when lev < glo+offset. Lateral domain boundaries trigger simulation termination (FunctionalAffect gap other:P2-C); the effective lateral boundary distance is set via grid_spacing×buffer_cells offsets from the domain edge (parameter gap other:P3-B). Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0 src/puff.jl:24.",
+        "tags": [
+            "environmental_transport",
+            "lagrangian",
+            "puff",
+            "advection",
+            "boundary"
+        ],
+        "created": "2026-05-30T00:00:00Z",
+        "authors": [
+            "EnvironmentalTransport.jl contributors",
+            "EarthSciModels migration (esm-evcg)"
+        ],
+        "references": [
+            {
+                "citation": "Draxler, R.R. and Rolph, G.D. (2003). HYSPLIT (Hybrid Single-Particle Lagrangian Integrated Trajectory) Model. NOAA Air Resources Laboratory, Silver Spring, MD. ARL Technical Memorandum ARL-224. — Lagrangian puff advection framework."
+            }
+        ]
+    },
+    "models": {
+        "Puff": {
+            "coupletype": "PuffCoupler",
+            "reference": {
+                "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/puff.jl:24\n\nUpstream Puff is an MTK @component (function returning a System) that advects a Lagrangian 'puff' in three coordinates supplied by a DomainInfo argument. The component is constructed at runtime from the DomainInfo object, which sets the coordinate variables (lon/x, lat/y, lev/z), their units, the domain endpoints, and the grid spacing. This runtime construction pattern creates two blocking gaps in the ESM migration.\n\nBlocking gap other:P2-C-terminate-in-FunctionalAffect: The lateral_boundary continuous event uses a FunctionalAffect with `terminate!(integrator)` to stop the simulation when the puff reaches a lateral domain boundary. In MTK/DifferentialEquations.jl this is a standard SciML FunctionalAffect. In ESM, the FunctionalAffect mechanism references a registered handler_id. The handler 'simulation.terminate' is not yet registered in EarthSciMLBase's ESM handler registry. This ESM file declares the interface contract (the four lateral conditions and the terminate handler_id) so the registration can reference this file when the gap is closed. Until then the lateral_boundary event is structurally valid ESM but cannot execute in the ESS runner.\n\nBlocking gap other:P3-B-BC-symbolic-offset: The lateral boundary conditions in the upstream MTK component use `di.grid_spacing[lon_idx] * buffer_cells` and `di.grid_spacing[lat_idx] * buffer_cells` as symbolic offsets from the domain endpoints. The grid spacing comes from DomainInfo at model construction time — it is a compile-time constant in MTK, not a symbolic parameter. In ESM, the coupling machinery has no mechanism to inject DomainInfo fields directly into model parameters. This ESM exposes `lon_grid_spacing`, `lat_grid_spacing`, and `buffer_cells` as explicit model parameters (defaults from the upstream test: 0.1 m and 1 respectively) so the offset expression `lon_max - lon_grid_spacing * buffer_cells` can be represented symbolically in the lateral_boundary conditions. Downstream coupling must set these parameters to the correct DomainInfo grid spacing; there is no automatic injection mechanism yet.\n\nTODO_GAP [other:P2-C-terminate-in-FunctionalAffect]: lateral_boundary functional_affect references handler_id 'simulation.terminate' which is not yet registered in EarthSciMLBase. Simulation will raise an 'unknown handler' error if the lateral event fires.\n\nTODO_GAP [other:P3-B-BC-symbolic-offset]: lon_grid_spacing, lat_grid_spacing, and buffer_cells must be set by coupling machinery from the DomainInfo object. ESM has no automatic DomainInfo-to-parameter injection mechanism; these parameters must be set manually.\n\nVariable treatment. The upstream MTK component uses three coordinate variables whose names depend on DomainInfo (lev/z for vertical, lon/x for east-west, lat/y for north-south). In the ESM these are fixed as 'lev', 'x', and 'y' to match the test case coordinate names. Transform parameters x_trans, y_trans, lev_trans (MTK @parameters, unit = coord_unit/m or coord_unit/Pa) are included to support coordinate systems where the puff velocity is specified in SI units (m/s or Pa/s) rather than coordinate units per second. In the standalone test case with all coordinates in m, all transforms default to 1.\n\nThe 'offset', 'glo', 'ghi', 'v_zero' parameters are MTK @constants in the upstream source (baked into the compiled model at construction time). In ESM these are exposed as overridable parameters; coupling machinery that reconstructs a Puff from a DomainInfo should set glo and ghi from the DomainInfo level-coordinate endpoints and leave offset=0.05 (the upstream hardcoded value).\n\nVertical boundary implementation. The upstream uses a combined strategy: the ifelse clamping (offset buffer) is in the equation, and the continuous_events entry for vertical_boundary is for numerical accuracy (root-finding at the exact boundary with no symbolic affect). In this ESM the continuous_events block is OMITTED entirely (see next paragraph). The vertical boundary clamping is fully exercised through the v_lev_clamped observed variable in D(lev); the upstream ContinuousCallback is for numerical step-size refinement only, not for physics, so omitting it is lossless for the standalone simulation.\n\nBlocking gap — continuous_events omitted (runner limitation + P2-C + P3-B): The ESM continuous_events block is absent for two reasons. (1) ESS runner event functions (as of the current earthsci_toolkit build) map all free symbols in a condition expression to y[i] by enumeration index, assigning zero to any symbol past the end of the state vector y. Parameters that appear in conditions (glo, ghi, offset for vertical_boundary; lon_min, lon_max, lon_grid_spacing, lat_min, lat_max, lat_grid_spacing, buffer_cells for lateral_boundary) are not in the state vector y, so they receive 0 instead of their declared values. With ghi=0, the condition lev-ghi crosses zero at t=0 (initial state), which sets terminal=True on the event function and immediately stops scipy's solve_ivp before any integration occurs. The dense output then extrapolates from the initial slope, producing wrong trajectories. (2) The lateral_boundary event requires FunctionalAffect terminate! (other:P2-C) and DomainInfo-injected boundary offsets (other:P3-B), neither of which is expressible in the current schema. Both gaps prevent the events from being useful in the ESS runner, so the entire continuous_events block is omitted. The vertical boundary physics is fully captured by v_lev_clamped (the ifelse observed expression); the lateral boundary terminate! remains a TODO_GAP for when the runner's event-function parameter-binding is fixed and the two schema gaps are closed.\n\nCoordinate system for standalone tests. All coordinates (lev, x, y) and velocity parameters (v_lev, v_x, v_y) use metres and metres/second. Transform parameters are dimensionless (= 1). Domain: lev ∈ [-1, 1] m, x ∈ [-1.1, 1.1] m, y ∈ [-1.1, 1.1] m, grid_spacing = 0.1 m, buffer_cells = 1. This matches the upstream puff_test.jl test setup where @parameters x, y, z all have unit u\"m\".\n\nTolerance rationale. The vertical boundary tests (bounded_upward, bounded_downward) exercise the ifelse discontinuity at lev = ghi−offset = 0.95 (or glo+offset = −0.95). The ODE is piecewise: D(lev) = 10 until lev=0.95, then D(lev)=0. The solver sees a step-discontinuity in the derivative at lev=0.95. The expected value at t=1.0 is lev=0.95 (exact analytically), but numerical integration of the discontinuous RHS may produce slight overshoot/undershoot at the kink. Per-assertion abs tolerance of 0.002 m accommodates typical adaptive-step solver behavior at this kind of ifelse boundary without masking gross errors. The linear-motion tests (x_linear_motion, y_linear_motion) have exact analytical solutions (constant-coefficient linear ODE) and use model-default rel=1e-10."
+            },
+            "tolerance": {
+                "rel": 1e-10,
+                "abs": 1e-12
+            },
+            "variables": {
+                "lev": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "Vertical coordinate of the puff (m in standalone mode; Pa in atmospheric applications with lev_trans converting pressure to coordinate). Bounded below by glo and above by ghi via ifelse clamping in D(lev). Initial value = domain midpoint; in standalone tests = 0.0 m. Corresponds to MTK variable lev(t) / z(t) in the upstream DomainInfo coordinate mapping."
+                },
+                "x": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "East-west (longitude) coordinate of the puff (m). Evolves as D(x) = v_x * x_trans. Lateral bounds enforced by the lateral_boundary continuous event (FunctionalAffect terminate, gap other:P2-C). Initial value = domain midpoint; in standalone tests = 0.0 m. Corresponds to MTK variable lon(t) / x(t)."
+                },
+                "y": {
+                    "type": "state",
+                    "units": "m",
+                    "default": 0.0,
+                    "description": "North-south (latitude) coordinate of the puff (m). Evolves as D(y) = v_y * y_trans. Lateral bounds enforced by the lateral_boundary continuous event (FunctionalAffect terminate, gap other:P2-C). Initial value = domain midpoint; in standalone tests = 0.0 m. Corresponds to MTK variable lat(t) / y(t)."
+                },
+                "v_vertical": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "expression": {
+                        "op": "*",
+                        "args": ["v_lev", "lev_trans"]
+                    },
+                    "description": "Raw vertical velocity after coordinate transform (m/s). Equal to v_lev * lev_trans. This is the unclamped velocity; the boundary-clamped velocity used in D(lev) is v_lev_clamped. Upstream MTK @variables v_vertical(t)."
+                },
+                "v_lev_clamped": {
+                    "type": "observed",
+                    "units": "m/s",
+                    "expression": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    {"op": "-", "args": ["lev", "offset"]},
+                                    "glo"
+                                ]
+                            },
+                            {
+                                "op": "max",
+                                "args": ["v_zero", {"op": "*", "args": ["v_lev", "lev_trans"]}]
+                            },
+                            {
+                                "op": "ifelse",
+                                "args": [
+                                    {
+                                        "op": ">",
+                                        "args": [
+                                            {"op": "+", "args": ["lev", "offset"]},
+                                            "ghi"
+                                        ]
+                                    },
+                                    {
+                                        "op": "min",
+                                        "args": ["v_zero", {"op": "*", "args": ["v_lev", "lev_trans"]}]
+                                    },
+                                    {"op": "*", "args": ["v_lev", "lev_trans"]}
+                                ]
+                            }
+                        ]
+                    },
+                    "description": "Boundary-clamped vertical velocity (m/s) used as the RHS of D(lev). Implements the upstream MTK ifelse expression: when lev-offset < glo (near lower boundary) the puff can only move upward (max(v_zero, v_lev*lev_trans)); when lev+offset > ghi (near upper boundary) the puff can only move downward (min(v_zero, v_lev*lev_trans)); otherwise unrestricted (v_lev*lev_trans). ESM migration note: the ifelse clamping logic is expressed here as an observed variable (not inline in the D(lev) ODE equation) to match the ESS runner evaluation model — the runner substitutes observed variables during ODE integration, analogous to BoundaryLayerMixingKC's wprime_ref pattern."
+                },
+                "v_lev": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Velocity component in the lev (vertical) direction before the coordinate transform (m/s in standalone; Pa/s in atmospheric use where lev_trans converts Pa/s to m/s). Default 0 = stationary puff. Upstream MTK @parameters v_lev. Set by coupling to supply wind speed in the level coordinate."
+                },
+                "v_x": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Velocity component in the x (longitude) direction before the coordinate transform (m/s). Default 0 = stationary. Upstream MTK @parameters v_x. Set by coupling to the zonal wind speed in the x coordinate system."
+                },
+                "v_y": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Velocity component in the y (latitude) direction before the coordinate transform (m/s). Default 0 = stationary. Upstream MTK @parameters v_y. Set by coupling to the meridional wind speed in the y coordinate system."
+                },
+                "x_trans": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "x-coordinate to metres transform (dimensionless when x is already in m; otherwise coord_unit/m). Multiplies v_x to produce D(x) in coordinate units/s. Default 1.0 for standalone tests where x is in m. Upstream MTK @parameters x_trans [unit = coord_unit/m]."
+                },
+                "y_trans": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "y-coordinate to metres transform (dimensionless when y is already in m; otherwise coord_unit/m). Multiplies v_y to produce D(y) in coordinate units/s. Default 1.0 for standalone tests where y is in m. Upstream MTK @parameters y_trans [unit = coord_unit/m]."
+                },
+                "lev_trans": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "lev to pressure transform (dimensionless in standalone mode; m/Pa in atmospheric use where lev is in Pa). Multiplies v_lev to produce v_vertical = v_lev * lev_trans. Default 1.0 for standalone tests where lev is in m. Upstream MTK @parameters lev_trans [unit = lev_unit/Pa]."
+                },
+                "offset": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.05,
+                    "description": "Boundary offset for vertical clamping (m). When lev > ghi−offset the puff cannot move upward (D(lev) = min(0, v_vertical)); when lev < glo+offset it cannot move downward (D(lev) = max(0, v_vertical)). Default 0.05 m — a hardcoded MTK @constants in the upstream source; not expected to be changed in normal use. Upstream: @constants offset = 0.05."
+                },
+                "glo": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -1.0,
+                    "description": "Lower bound of the lev domain (m). Taken from DomainInfo.endpoints[lev_idx][1] at model construction time in the upstream source; exposed here as an explicit parameter. Default -1.0 m matching the upstream puff_test.jl levrange lower bound. Upstream: @constants glo = endpts[lev_idx][begin]."
+                },
+                "ghi": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Upper bound of the lev domain (m). Taken from DomainInfo.endpoints[lev_idx][end] at model construction time. Default 1.0 m matching the upstream puff_test.jl levrange upper bound. Upstream: @constants ghi = endpts[lev_idx][end]."
+                },
+                "v_zero": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Zero-velocity sentinel (m/s). Used as the bound argument in max(v_zero, v_vertical) and min(v_zero, v_vertical) in the vertical boundary clamping ifelse. Always 0.0; preserved from upstream MTK @constants for unit-balancing in the ifelse expression. Upstream: @constants v_zero = 0."
+                },
+                "lon_min": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -1.1,
+                    "description": "Lower bound of the x (longitude) domain (m). Corresponds to endpts[lon_idx][1] from DomainInfo in the upstream source. Default -1.1 m matching the upstream puff_test.jl xrange lower bound. Used in the lateral_boundary condition: x = lon_min + lon_grid_spacing * buffer_cells. See gap other:P3-B-BC-symbolic-offset."
+                },
+                "lon_max": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.1,
+                    "description": "Upper bound of the x (longitude) domain (m). Corresponds to endpts[lon_idx][end] from DomainInfo. Default 1.1 m matching the upstream puff_test.jl xrange upper bound. Used in the lateral_boundary condition: x = lon_max - lon_grid_spacing * buffer_cells. See gap other:P3-B-BC-symbolic-offset."
+                },
+                "lat_min": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": -1.1,
+                    "description": "Lower bound of the y (latitude) domain (m). Corresponds to endpts[lat_idx][1] from DomainInfo. Default -1.1 m matching the upstream puff_test.jl yrange lower bound. See gap other:P3-B-BC-symbolic-offset."
+                },
+                "lat_max": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.1,
+                    "description": "Upper bound of the y (latitude) domain (m). Corresponds to endpts[lat_idx][end] from DomainInfo. Default 1.1 m matching the upstream puff_test.jl yrange upper bound. See gap other:P3-B-BC-symbolic-offset."
+                },
+                "lon_grid_spacing": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Grid spacing in the x (longitude) direction (m). Taken from di.grid_spacing[lon_idx] in the upstream source at model construction time. Default 0.1 m matching the upstream puff_test.jl xrange step. Used to compute the effective lateral boundary: x_eff = lon_min + lon_grid_spacing * buffer_cells (west) and lon_max - lon_grid_spacing * buffer_cells (east). See gap other:P3-B-BC-symbolic-offset."
+                },
+                "lat_grid_spacing": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0.1,
+                    "description": "Grid spacing in the y (latitude) direction (m). Taken from di.grid_spacing[lat_idx] at model construction time. Default 0.1 m matching the upstream puff_test.jl yrange step. See gap other:P3-B-BC-symbolic-offset."
+                },
+                "buffer_cells": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Number of buffer grid cells inset from the lateral domain boundary to use as the termination trigger. In the upstream source, the buffer_cells=1 keyword argument defaults to 1. The effective lateral boundary is domain_edge ∓ grid_spacing * buffer_cells. Default 1.0 (stored as float for ESM compatibility). See gap other:P3-B-BC-symbolic-offset."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": ["lev"]
+                    },
+                    "rhs": "v_lev_clamped"
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": ["x"]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": ["v_x", "x_trans"]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": ["y"]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": ["v_y", "y_trans"]
+                    }
+                }
+            ],
+            "tests": [
+                {
+                    "id": "steady_state",
+                    "description": "Zero velocity in all directions: the puff stays at its initial position (lev=x=y=0) for the entire simulation. Verifies that the default v_lev=v_x=v_y=0 gives a stationary solution and that the ifelse boundary expression evaluates correctly at lev=0 (well inside the vertical domain bounds glo=-1/ghi=1): lev-offset = -0.05 > glo=-1 (first condition false) and lev+offset = 0.05 < ghi=1 (second condition false), so D(lev)=v_vertical=0.",
+                    "parameter_overrides": {
+                        "v_lev": 0.0,
+                        "v_x": 0.0,
+                        "v_y": 0.0,
+                        "glo": -1.0,
+                        "ghi": 1.0,
+                        "offset": 0.05
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "initial_conditions": {
+                        "lev": 0.0,
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "lev",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-14}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-14}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-14}
+                        },
+                        {
+                            "variable": "v_vertical",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-14}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 0.5,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 0.5,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 0.5,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        }
+                    ]
+                },
+                {
+                    "id": "vertical_bounded_upward",
+                    "description": "Upward-moving puff (v_lev=10 m/s) with ghi=1.0 m, offset=0.05 m, glo=-1.0 m. Analytical solution: D(lev)=v_vertical=10 while lev < ghi-offset=0.95; at lev=0.95 the upper ifelse branch activates and D(lev)=min(0,10)=0, so lev saturates at 0.95. The saturation time is t_sat = 0.95/10 = 0.095 s; for all t≥0.095 s: lev=0.95. Assertions at t=0.05 (before saturation, lev=0.5) and t=1.0 (long after saturation, lev=0.95). The ifelse step-discontinuity at lev=0.95 may cause minor numerical overshoot; abs tolerance 0.002 m accommodates adaptive-step solver behavior at the kink without masking gross errors. x and y remain 0 throughout (v_x=v_y=0).",
+                    "parameter_overrides": {
+                        "v_lev": 10.0,
+                        "v_x": 0.0,
+                        "v_y": 0.0,
+                        "glo": -1.0,
+                        "ghi": 1.0,
+                        "offset": 0.05,
+                        "lev_trans": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "initial_conditions": {
+                        "lev": 0.0,
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "v_vertical",
+                            "time": 0.0,
+                            "expected": 10.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 0.05,
+                            "expected": 0.5,
+                            "tolerance": {"abs": 0.002}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 1.0,
+                            "expected": 0.95,
+                            "tolerance": {"abs": 0.002}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        }
+                    ]
+                },
+                {
+                    "id": "vertical_bounded_downward",
+                    "description": "Downward-moving puff (v_lev=-10 m/s) with glo=-1.0 m, offset=0.05 m, ghi=1.0 m. Analytical solution: D(lev)=v_vertical=-10 while lev > glo+offset=-0.95; at lev=-0.95 the lower ifelse branch activates and D(lev)=max(0,-10)=0, so lev saturates at -0.95. Saturation time t_sat = 0.95/10 = 0.095 s. At t=0.05: lev = -0.5 (before saturation). At t=1.0: lev = -0.95 (saturated). x and y remain 0.",
+                    "parameter_overrides": {
+                        "v_lev": -10.0,
+                        "v_x": 0.0,
+                        "v_y": 0.0,
+                        "glo": -1.0,
+                        "ghi": 1.0,
+                        "offset": 0.05,
+                        "lev_trans": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "initial_conditions": {
+                        "lev": 0.0,
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "v_vertical",
+                            "time": 0.0,
+                            "expected": -10.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 0.05,
+                            "expected": -0.5,
+                            "tolerance": {"abs": 0.002}
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 1.0,
+                            "expected": -0.95,
+                            "tolerance": {"abs": 0.002}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        }
+                    ]
+                },
+                {
+                    "id": "x_linear_motion",
+                    "description": "Constant eastward motion (v_x=0.5 m/s) with x_trans=1.0 (dimensionless). D(x) = 0.5 * 1.0 = 0.5 m/s. Exact analytical solution: x(t) = 0.5*t. At t=0.5: x=0.25 m; at t=1.0: x=0.5 m. Both are well within the lateral domain bounds (lon_min=-1.1 to lon_max=1.1 with buffer_cells=1, effective bound at ±1.0 m), so no termination occurs. lev and y remain 0 (v_lev=v_y=0). Verifies the D(x) = v_x * x_trans equation independently of the vertical boundary logic.",
+                    "parameter_overrides": {
+                        "v_x": 0.5,
+                        "v_lev": 0.0,
+                        "v_y": 0.0,
+                        "x_trans": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "initial_conditions": {
+                        "lev": 0.0,
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "x",
+                            "time": 0.5,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "x",
+                            "time": 1.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "y",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        }
+                    ]
+                },
+                {
+                    "id": "y_linear_motion",
+                    "description": "Constant northward motion (v_y=0.5 m/s) with y_trans=1.0. D(y) = 0.5 * 1.0 = 0.5 m/s. Exact analytical solution: y(t) = 0.5*t. At t=0.5: y=0.25 m; at t=1.0: y=0.5 m. Both within lateral bounds. lev and x remain 0. Verifies the D(y) = v_y * y_trans equation.",
+                    "parameter_overrides": {
+                        "v_y": 0.5,
+                        "v_lev": 0.0,
+                        "v_x": 0.0,
+                        "y_trans": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 1.0},
+                    "initial_conditions": {
+                        "lev": 0.0,
+                        "x": 0.0,
+                        "y": 0.0
+                    },
+                    "assertions": [
+                        {
+                            "variable": "y",
+                            "time": 0.5,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "y",
+                            "time": 1.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "lev",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        },
+                        {
+                            "variable": "x",
+                            "time": 1.0,
+                            "expected": 0.0,
+                            "tolerance": {"abs": 1e-12}
+                        }
+                    ]
+                }
+            ],
+            "examples": [
+                {
+                    "id": "vertical_clamping",
+                    "description": "Vertical clamping behavior: puff rising at 10 m/s from lev=0, clamped by the ifelse boundary at lev=ghi-offset=0.95 m. Illustrates the asymmetric boundary condition that allows the puff to approach the top of the domain (lev=1 m) but be stopped at ghi-offset=0.95 m.",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "lev": 0.0,
+                            "x": 0.0,
+                            "y": 0.0
+                        }
+                    },
+                    "parameters": {
+                        "v_lev": 10.0,
+                        "v_x": 0.0,
+                        "v_y": 0.0,
+                        "glo": -1.0,
+                        "ghi": 1.0,
+                        "offset": 0.05
+                    },
+                    "time_span": {"start": 0.0, "end": 0.5},
+                    "plots": [
+                        {
+                            "id": "lev_vs_time",
+                            "type": "line",
+                            "description": "Vertical coordinate lev (m) vs time. Rises at 10 m/s until reaching the clamping boundary at ghi-offset=0.95 m (t≈0.095 s), then stays flat.",
+                            "x": {"variable": "t", "label": "t (s)"},
+                            "y": {"variable": "lev", "label": "lev (m)"}
+                        },
+                        {
+                            "id": "v_vertical_vs_time",
+                            "type": "line",
+                            "description": "Effective vertical velocity v_vertical = v_lev * lev_trans (m/s) vs time. Constant 10 m/s everywhere (the clamping is implemented via the ifelse in D(lev) which produces D=0, but v_vertical itself remains 10).",
+                            "x": {"variable": "t", "label": "t (s)"},
+                            "y": {"variable": "v_vertical", "label": "v_vertical (m/s)"}
+                        }
+                    ]
+                },
+                {
+                    "id": "horizontal_drift",
+                    "description": "Horizontal drift: puff moving eastward at 0.3 m/s and northward at 0.2 m/s, staying well within the lateral bounds. Illustrates combined x and y motion with stationary lev (v_lev=0).",
+                    "initial_state": {
+                        "type": "per_variable",
+                        "values": {
+                            "lev": 0.0,
+                            "x": 0.0,
+                            "y": 0.0
+                        }
+                    },
+                    "parameters": {
+                        "v_x": 0.3,
+                        "v_y": 0.2,
+                        "v_lev": 0.0,
+                        "x_trans": 1.0,
+                        "y_trans": 1.0
+                    },
+                    "time_span": {"start": 0.0, "end": 2.0},
+                    "plots": [
+                        {
+                            "id": "x_vs_time",
+                            "type": "line",
+                            "description": "x coordinate (m) vs time. Linear growth at v_x=0.3 m/s. Stays within bounds lon_min+buffer=-1.0 to lon_max-buffer=1.0.",
+                            "x": {"variable": "t", "label": "t (s)"},
+                            "y": {"variable": "x", "label": "x (m)"}
+                        },
+                        {
+                            "id": "y_vs_time",
+                            "type": "line",
+                            "description": "y coordinate (m) vs time. Linear growth at v_y=0.2 m/s. Stays within bounds lat_min+buffer=-1.0 to lat_max-buffer=1.0.",
+                            "x": {"variable": "t", "label": "t (s)"},
+                            "y": {"variable": "y", "label": "y (m)"}
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}
