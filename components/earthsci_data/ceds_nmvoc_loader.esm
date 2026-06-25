@@ -1,0 +1,123 @@
+{
+  "esm": "0.6.0",
+  "metadata": {
+    "name": "CEDS_NMVOC_loader",
+    "description": "Pure-I/O data loader for CEDS (Community Emissions Data System) monthly anthropogenic NMVOC emissions. Supplies the sector-summed surface emission flux NMVOC_em_anthro (kg m⁻² s⁻¹) on the native 0.5°×0.5° global longitude/latitude grid, monthly, 2000–2023 chunk (CEDS-CMIP-2025-04-18, v20250421).\n\nThis is one of the ten loader halves of the ceds loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.3) — CEDS sources each species from a separate NetCDF FileSet, so each becomes its own single-component loader file (a {\"ref\"} target must contain exactly one component, RFC §4.7). It is PURE I/O: it declares its source (url_template), the file variable it reads (NMVOC_em_anthro, sector-summed at load time, with units), its temporal cadence, and its NATIVE grid expressed as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/ceds.esm), which references this file as the subsystem `CEDS_NMVOC` via {\"ref\": \"./ceds_nmvoc_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (proj4 crs string / grid_type / staggering / resolution / extent) is replaced by the GDD `grid` (family + crs + dimensions + extents); the old per-loader `regridding` block (fill_value / extrapolation) is gone — regridding is declared per-variable on the model (ceds.esm `regrid`). Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5).\n\nMigrated from EarthSciData.jl@830435a src/ceds.jl:1-378 (CEDSFileSet). Split out of the pre-migration components/earthsci_data/ceds.esm (esm-4ega).",
+    "tags": [
+      "earthsci_data",
+      "emissions",
+      "anthropogenic",
+      "ceds",
+      "monthly",
+      "data_loader",
+      "surface_flux",
+      "global",
+      "pure-io",
+      "longlat",
+      "nmvoc"
+    ],
+    "created": "2026-06-25T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-3nc.3)"
+    ],
+    "references": [
+      {
+        "citation": "Hoesly, R. M., Smith, S. J., Feng, L., Klimont, Z., Janssens-Maenhout, G., Pitkanen, T., Seibert, J. J., Vu, L., Andres, R. J., Bolt, R. M., Bond, T. C., Dawidowski, L., Kholod, N., Kurokawa, J., Li, M., Liu, L., Lu, Z., Moura, M. C. P., O'Rourke, P. R., and Zhang, Q. (2018). Historical (1750–2014) anthropogenic emissions of reactive gases and aerosols from the Community Emissions Data System (CEDS). Geoscientific Model Development, 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      {
+        "citation": "CEDS-CMIP 2025 release (v20250421, CEDS-CMIP-2025-04-18). Available from ORNL ESGF THREDDS: https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/ceds.jl:1-378 (CEDSFileSet, CEDS constructor). Test: test/ceds_test.jl. Docs: docs/src/ceds.md."
+      }
+    ]
+  },
+  "data_loaders": {
+    "CEDS_NMVOC": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://esgf-node.ornl.gov/thredds/fileServer/user_pub_work/input4MIPs/CMIP7/CMIP/PNNL-JGCRI/CEDS-CMIP-2025-04-18/atmos/mon/NMVOC_em_anthro/gn/v20250421/NMVOC-em-anthro_input4MIPs_emissions_CMIP_CEDS-CMIP-2025-04-18_gn_200001-202312.nc"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2023-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "grid": {
+        "family": "cartesian",
+        "crs": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "description": "Native CEDS grid: regular global 0.5°×0.5° longitude/latitude lattice (720×360), cell-centered. Geographic (unprojected) crs — the regridding model applies the longlat identity reprojection (ESD reprojection/longlat.esm, esd-47z.1). Migrated from the loader's former DataLoaderSpatial block (proj4 +proj=longlat +datum=WGS84). Longitude is reordered from the raw NC [0, 360) to [-180°, 180°] by the upstream CEDSFileSet.loadslice! permutation; the loader describes this reordered grid but performs no reprojection or regridding. Documented native geometry: lon ∈ [-180°, 180°] (720 cells), lat ∈ [-90°, 90°] (360 cells).",
+        "dimensions": [
+          "lon",
+          "lat"
+        ],
+        "extents": {
+          "lon": {
+            "n": 720,
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": 360,
+            "spacing": "uniform"
+          }
+        }
+      },
+      "variables": {
+        "NMVOC_em_anthro": {
+          "file_variable": "NMVOC_em_anthro",
+          "units": "kg/m^2/s",
+          "description": "Non-methane volatile organic compounds (NMVOC) anthropogenic emission flux (kg m⁻² s⁻¹). NC variable NMVOC_em_anthro has dimensions (time, sector, lat, lon); sector dimension summed to total. Longitude reordered from [0, 360) to [-180, 180)."
+        }
+      },
+      "reference": {
+        "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
+        "url": "https://doi.org/10.5194/gmd-11-369-2018"
+      },
+      "metadata": {
+        "tags": [
+          "emissions",
+          "anthropogenic",
+          "ceds",
+          "monthly",
+          "gridded",
+          "nmvoc",
+          "voc"
+        ],
+        "earthscidata_source": "src/ceds.jl::CEDSFileSet",
+        "species": "NMVOC",
+        "nc_varname": "NMVOC_em_anthro",
+        "chunk": "2000-2023",
+        "sector_aggregation": "sum",
+        "sector_dim": "sector",
+        "sector_count": 8,
+        "grid_size": "720 lon × 360 lat",
+        "version": "CEDS-CMIP-2025-04-18",
+        "data_version": "v20250421",
+        "native_resolution_deg": {
+          "lon": 0.5,
+          "lat": 0.5
+        },
+        "native_extent": {
+          "lon": [
+            -180.0,
+            180.0
+          ],
+          "lat": [
+            -90.0,
+            90.0
+          ]
+        },
+        "proj4_string": "+proj=longlat +datum=WGS84 +no_defs",
+        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (ceds.esm `regrid`)."
+      }
+    }
+  }
+}
