@@ -25,7 +25,7 @@
         "AqueousDiffusionReaction": {
             "reference": {
                 "citation": "Seinfeld, J. H., & Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd ed., Wiley. Ch. 12, Eqs. 12.105 and 12.110. Migrated from Aerosol.jl:src/aqueous_transport.jl:14 (esm-x0e).",
-                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:14\n\nUpstream `AqueousDiffusionReaction` is an MTK `@component` with three `@parameters` (R_p, k_rxn, D_aq) and two `@variables` (q, Q), both algebraic (no `D()` time-derivative). The `eqs` array uses `~` (algebraic constraint) for both:\n  q ~ R_p * sqrt(k_rxn / D_aq)         [Eq. 12.105 — Hatta number]\n  Q ~ 3 * ((exp(q)+exp(-q))/(exp(q)-exp(-q))/q - 1/q^2)  [Eq. 12.110 — correction factor]\n\nPhysical interpretation: the Hatta number q = R_p√(k_rxn/D_aq) compares the reacto-diffusive length scale l_d = √(D_aq/k_rxn) to the droplet radius R_p. When q << 1 (slow reaction or small droplet), species diffuses freely throughout the interior before reacting and Q → 1 (no correction). When q >> 1 (fast reaction or large droplet), the reaction is confined near the droplet surface because the interior is depleted, and Q → 3/q → 0. The factor Q multiplies the bulk aqueous-phase reaction rate to give the effective rate; it appears as the `Q` parameter in the sibling `DropletMassBalance` component (src/aqueous_transport.jl:112).\n\nBoth variables become observed quantities after MTK `structural_simplify`: `q` is an explicit function of parameters only; `Q` is an explicit function of `q` (and hence also of parameters only). The ESM serializes both as `type: observed` following the established convention for purely-algebraic MTK components (cf. sibling `MassTransportLimitation.esm` and `AqueousEquilibrationTimescale.esm`). The `equations` array is empty.\n\nDependency ordering: `Q` references `q` in its expression. The ESM runtime topologically sorts observed variables, so `q` is evaluated first, then `Q`.\n\ncoth encoding: Julia has no built-in `coth` function in MTK symbolic form; the upstream code uses the ratio `(exp(q)+exp(-q))/(exp(q)-exp(-q))` directly. The ESM expression mirrors this exactly. For the default parameterization (q ≈ 0.316) both exponentials are well-conditioned. For large q (fast reaction), the formula evaluates to 3*(1/q − 1/q²) ≈ 3/q → 0, and exp(-q) is negligible — no underflow issues in the atmospheric range.\n\nTolerance rationale (model-level rel=1e-9): the model is a composition of sqrt and exp over parameters, plus simple arithmetic. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom, matching sibling observed-only ESMs (mass_transport_limitation, aqueous_diffusion_timescale)."
+                "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/aqueous_transport.jl:14\n\nUpstream `AqueousDiffusionReaction` is an MTK `@component` with three `@parameters` (R_p, k_rxn, D_aq) and two `@variables` (q, Q), both algebraic (no `D()` time-derivative). The `eqs` array uses `~` (algebraic constraint) for both:\n  q ~ R_p * sqrt(k_rxn / D_aq)         [Eq. 12.105 — Hatta number]\n  Q ~ 3 * ((exp(q)+exp(-q))/(exp(q)-exp(-q))/q - 1/q^2)  [Eq. 12.110 — correction factor]\n\nPhysical interpretation: the Hatta number q = R_p√(k_rxn/D_aq) compares the reacto-diffusive length scale l_d = √(D_aq/k_rxn) to the droplet radius R_p. When q << 1 (slow reaction or small droplet), species diffuses freely throughout the interior before reacting and Q → 1 (no correction). When q >> 1 (fast reaction or large droplet), the reaction is confined near the droplet surface because the interior is depleted, and Q → 3/q → 0. The factor Q multiplies the bulk aqueous-phase reaction rate to give the effective rate; it appears as the `Q` parameter in the sibling `DropletMassBalance` component (src/aqueous_transport.jl:112).\n\nBoth variables become observed quantities after MTK `structural_simplify`: `q` is an explicit function of parameters only; `Q` is an explicit function of `q` (and hence also of parameters only). The ESM serializes both as `type: observed` following the established convention for purely-algebraic MTK components (cf. sibling `MassTransportLimitation.esm` and `AqueousEquilibrationTimescale.esm`). The `equations` array is empty.\n\nDependency ordering: `Q` references `q` in its expression. The ESM runtime topologically sorts observed variables, so `q` is evaluated first, then `Q`.\n\ncoth encoding: there is no native `coth` op in the ESS operator set, so coth q is expressed as the ratio of native hyperbolic ops cosh(q)/sinh(q). This equals the algebraic identity (exp(q)+exp(-q))/(exp(q)-exp(-q)) — the factor of ½ in each of cosh/sinh cancels in the ratio. The upstream Aerosol.jl code and the original ESM migration both wrote the exp-expansion directly; bead esm-ji2 substituted the native cosh/sinh ops (added to the ESS static operator set at origin/main ≥ 8b8d3056, bead ess-v9a.1). Besides removing the hand-rolled expansion, the native ops are better-conditioned at small q: the exp difference exp(q)-exp(-q) suffers catastrophic cancellation as q→0, whereas sinh(q) is accurate to machine precision (see the kinetically_controlled_slow_reaction test, where accuracy improves ~180×). For large q (fast reaction), the formula evaluates to 3*(1/q − 1/q²) ≈ 3/q → 0; cosh and sinh remain finite well past the atmospheric q range.\n\nTolerance rationale (model-level rel=1e-9): the model is a composition of sqrt and the native hyperbolic ops (cosh, sinh) over parameters, plus simple arithmetic. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of headroom, matching sibling observed-only ESMs (mass_transport_limitation, aqueous_diffusion_timescale)."
             },
             "tolerance": {
                 "rel": 1e-9
@@ -72,7 +72,7 @@
                 "Q": {
                     "type": "observed",
                     "units": "1",
-                    "description": "Aqueous diffusion correction factor (Eq. 12.110): Q = 3(q·coth q − 1)/q² = 3((exp(q)+exp(−q))/((exp(q)−exp(−q))·q) − 1/q²). Ranges from 1 (q→0, kinetically controlled, no correction) to 0 (q→∞, strongly diffusion-limited). Applied as a multiplier on the aqueous-phase reaction rate in the sibling DropletMassBalance component.",
+                    "description": "Aqueous diffusion correction factor (Eq. 12.110): Q = 3(q·coth q − 1)/q² = 3(cosh(q)/(sinh(q)·q) − 1/q²), with coth q evaluated via the native cosh/sinh ops. Ranges from 1 (q→0, kinetically controlled, no correction) to 0 (q→∞, strongly diffusion-limited). Applied as a multiplier on the aqueous-phase reaction rate in the sibling DropletMassBalance component.",
                     "expression": {
                         "op": "*",
                         "args": [
@@ -83,23 +83,11 @@
                                     {
                                         "op": "/",
                                         "args": [
-                                            {
-                                                "op": "+",
-                                                "args": [
-                                                    {"op": "exp", "args": ["q"]},
-                                                    {"op": "exp", "args": [{"op": "-", "args": ["q"]}]}
-                                                ]
-                                            },
+                                            {"op": "cosh", "args": ["q"]},
                                             {
                                                 "op": "*",
                                                 "args": [
-                                                    {
-                                                        "op": "-",
-                                                        "args": [
-                                                            {"op": "exp", "args": ["q"]},
-                                                            {"op": "exp", "args": [{"op": "-", "args": ["q"]}]}
-                                                        ]
-                                                    },
+                                                    {"op": "sinh", "args": ["q"]},
                                                     "q"
                                                 ]
                                             }
@@ -138,12 +126,12 @@
                 },
                 {
                     "id": "kinetically_controlled_slow_reaction",
-                    "description": "Slow reaction k_rxn=1e-4 s⁻¹ (k_rxn reduced 1e4-fold). Hatta number q = 0.003162 << 1: the reacto-diffusive length l_d >> R_p so the species fully equilibrates across the droplet interior before reacting. Q ≈ 1 − q²/15 ≈ 0.999999 — diffusion correction is negligible, well-mixed limit applies.",
+                    "description": "Slow reaction k_rxn=1e-4 s⁻¹ (k_rxn reduced 1e4-fold). Hatta number q = 0.003162 << 1: the reacto-diffusive length l_d >> R_p so the species fully equilibrates across the droplet interior before reacting. Q ≈ 1 − q²/15 ≈ 0.999999 — diffusion correction is negligible, well-mixed limit applies. ACCURACY NOTE (esm-ji2): this small-q point is the one place where swapping the hand-rolled (exp(q)±exp(−q)) coth standin for native cosh(q)/sinh(q) changes the value. The standin lost ~2.8e-9 relative precision to catastrophic cancellation in exp(q)−exp(−q), so the prior stored expected 0.9999993361125229 inherited that error. Native sinh/cosh are well-conditioned at small argument: the updated expected 0.9999993333185557 lies within 1.5e-11 of the analytic value 0.9999993333339683 (mpmath, 50 dps) — about 180× more accurate, and comfortably inside the model rel=1e-9 tolerance.",
                     "time_span": {"start": 0.0, "end": 1.0},
                     "parameter_overrides": {"k_rxn": 1.0e-4},
                     "assertions": [
                         {"variable": "q", "time": 0.0, "expected": 0.003162277660168379},
-                        {"variable": "Q", "time": 0.0, "expected": 0.9999993361125229}
+                        {"variable": "Q", "time": 0.0, "expected": 0.9999993333185557}
                     ]
                 },
                 {
