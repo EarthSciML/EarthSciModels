@@ -1,0 +1,115 @@
+{
+  "esm": "0.6.0",
+  "metadata": {
+    "name": "USGS3DEP_loader",
+    "description": "Pure-I/O data loader for USGS 3D Elevation Program (3DEP) terrain elevation at ~1/3 arc-second (~10 m) resolution. Provides static (time-invariant) terrain elevation and the two runtime-derived slope components (dzdx, dzdy) on a geographic (longlat/WGS84, EPSG:4326) lattice, sourced from the USGS National Map ImageServer REST API as a GeoTIFF cropped to the model domain.\n\nThis is the loader half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.4). It is PURE I/O: it declares its source (url_template), the file variables it reads/derives (with units), and its NATIVE grid expressed as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/usgs3dep.esm), which references this file as a subsystem via {\"ref\": \"./usgs3dep_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (EPSG:4326 crs string / grid_type / staggering / resolution / extent) is replaced by the GDD `grid` (family + crs + dimensions + extents); the old per-loader `regridding` block (extrapolation) is gone — regridding is declared per-variable on the model (usgs3dep.esm `regrid`). This is a STATIC (time-invariant) dataset: there is NO `temporal` block, so the loader seeds CONST cadence (ess-v9a.5) — the runtime fetches the GeoTIFF once per simulation domain and never refreshes it (kind: static). Cadence derives from the absence of `temporal`, orthogonal to the `kind` enum.\n\nSlope components (dzdx, dzdy) are derived from the elevation field at runtime by finite differences (all three variables share file_variable 'elevation'); the metric constants are documented in metadata.slope_derivation.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326 (USGS3DEPFileSet, USGS3DEPSlopeFileSet, USGS3DEP constructor). Split out of the pre-migration components/earthsci_data/usgs3dep.esm (esm-tibb).",
+    "tags": [
+      "earthsci_data",
+      "elevation",
+      "terrain",
+      "slope",
+      "static",
+      "data_loader",
+      "pure-io",
+      "usgs3dep",
+      "dem",
+      "longlat"
+    ],
+    "created": "2026-06-25T00:00:00Z",
+    "authors": [
+      "EarthSciData.jl contributors",
+      "EarthSciModels migration (esm-3nc.4)"
+    ],
+    "references": [
+      {
+        "citation": "U.S. Geological Survey. 3D Elevation Program (3DEP). National Map Elevation Imagery Service. https://elevation.nationalmap.gov/",
+        "url": "https://elevation.nationalmap.gov/"
+      },
+      {
+        "citation": "Source: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:1-410 (USGS3DEPFileSet, USGS3DEPSlopeFileSet, USGS3DEP constructor). Test: test/usgs3dep_test.jl."
+      }
+    ]
+  },
+  "data_loaders": {
+    "USGS3DEP_data": {
+      "kind": "static",
+      "source": {
+        "url_template": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox={bbox_west},{bbox_south},{bbox_east},{bbox_north}&size={width},{height}&format=tiff&bboxSR=4326&imageSR=4326&pixelType=F32&interpolation=+RSP_BilinearInterpolation&f=image"
+      },
+      "grid": {
+        "family": "cartesian",
+        "crs": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "description": "Native USGS 3DEP grid: regular geographic (longlat/WGS84, EPSG:4326) lattice at ~1/3 arc-second (~10 m, 0.00009259°) resolution. Geographic (unprojected) crs — the regridding model applies the longlat identity reprojection (ESD reprojection/longlat.esm, esd-47z.1). Migrated from the loader's former DataLoaderSpatial block (RFC pure-io-data-loaders §4.1); the loader describes this grid but performs no reprojection or regridding. The bounding box and cell counts are domain-derived at load time: the GeoTIFF is requested at the WGS84 envelope of the model domain, so lon/lat cell counts (n_lon, n_lat) are resolved from the source response at load time and capped at 1000×1000 pixels per request. The documented native cell size is 0.00009259° in both lon and lat; US coverage is lon ∈ [-180°, -60°], lat ∈ [17°, 72°] (CONUS + Alaska + Hawaii + US territories); cells outside US territory return NaN.",
+        "dimensions": [
+          "lon",
+          "lat"
+        ],
+        "extents": {
+          "lon": {
+            "n": "n_lon",
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": "n_lat",
+            "spacing": "uniform"
+          }
+        },
+        "parameters": {
+          "n_lon": {
+            "units": "1",
+            "description": "Longitude cell count, resolved from the source GeoTIFF at load time. Domain-derived: width = min(1000, round((bbox_east - bbox_west) / 0.00009259))."
+          },
+          "n_lat": {
+            "units": "1",
+            "description": "Latitude cell count, resolved from the source GeoTIFF at load time. Domain-derived: height = min(1000, round((bbox_north - bbox_south) / 0.00009259))."
+          }
+        }
+      },
+      "variables": {
+        "elevation": {
+          "file_variable": "elevation",
+          "units": "m",
+          "description": "Terrain elevation above WGS84 ellipsoid (m). Fetched directly from the USGS 3DEP ImageServer GeoTIFF response. No-data pixels outside US territory are NaN."
+        },
+        "dzdx": {
+          "file_variable": "elevation",
+          "units": "1",
+          "description": "East-west terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdx[i,j] = Δelev_x / (Δlon * _LON2M * cos(lat[j])) where _LON2M = 40075.0e3 / (2π) ≈ 6378137 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdx) in EarthSciData.jl. Shares file_variable='elevation' because it is computed from the same downloaded GeoTIFF."
+        },
+        "dzdy": {
+          "file_variable": "elevation",
+          "units": "1",
+          "description": "North-south terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdy[i,j] = Δelev_y / (Δlat * _LAT2M) where _LAT2M = 111.32e3 * (180/π) ≈ 6367449 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdy) in EarthSciData.jl. Shares file_variable='elevation' because it is computed from the same downloaded GeoTIFF."
+        }
+      },
+      "reference": {
+        "citation": "U.S. Geological Survey. 3D Elevation Program (3DEP). National Map Elevation Imagery Service. https://elevation.nationalmap.gov/",
+        "url": "https://elevation.nationalmap.gov/"
+      },
+      "metadata": {
+        "tags": ["elevation", "terrain", "slope", "static", "derived", "usgs3dep", "longlat"],
+        "earthscidata_source": "src/usgs3dep.jl::USGS3DEPFileSet, src/usgs3dep.jl::USGS3DEPSlopeFileSet",
+        "native_crs_epsg": "EPSG:4326 (geographic longlat / WGS84 — encoded as crs {projection: longlat, datum: WGS84})",
+        "native_resolution_deg": {
+          "lon": 0.00009259,
+          "lat": 0.00009259
+        },
+        "native_staggering": "Cell-centered (lon 'center', lat 'center') — 3DEP is a regular non-staggered raster. The regridding model regrids elevation/dzdx/dzdy conservatively (RFC §5.2; bead esm-3nc.4 cell-centered → conservative); see usgs3dep.esm regrid.",
+        "native_extent": {
+          "lon": [-180.0, -60.0],
+          "lat": [17.0, 72.0]
+        },
+        "resolution_arc_seconds": 0.333,
+        "coverage": "US only (CONUS + Alaska + Hawaii + US territories). Cells outside US territory return NaN.",
+        "url_substitutions": "bbox_{west,south,east,north} are domain bounding box in decimal degrees (WGS84); {width} and {height} are pixel dimensions capped at 1000 (= min(1000, round((E-W)/resolution)) and min(1000, round((N-S)/resolution)) respectively)",
+        "max_request_pixels": "1000x1000",
+        "file_format": "GeoTIFF (F32 pixel type)",
+        "slope_derivation": "runtime finite-difference on elevation grid; _LON2M = 40075.0e3 / (2*pi) m/rad; _LAT2M = 111.32e3 * (180/pi) m/rad; dzdx and dzdy use file_variable='elevation' because they are computed from the same downloaded GeoTIFF",
+        "static_note": "No temporal block: kind='static' and the absence of `temporal` seed CONST cadence (ess-v9a.5). The runtime fetches the GeoTIFF once per simulation domain. Upstream DataFrequencyInfo uses two bracketing time points solely to satisfy the interp_unsafe interface; no time interpolation occurs."
+      }
+    }
+  }
+}
