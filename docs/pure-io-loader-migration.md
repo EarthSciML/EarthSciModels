@@ -49,6 +49,16 @@ Both files stay in `components/earthsci_data/`:
 The model references the loader by **relative path**: `{"ref": "./<name>_loader.esm"}`.
 The ref resolves relative to the model file's directory.
 
+**Multi-loader components.** A component whose original co-located file held several
+`data_loaders` blocks (e.g. `geosfp` with six GEOS-FP collections, `ncep_ncar` with a
+pressure + a surface loader) splits into **one loader file per block** — §8's "one component
+per loader file" rule — named `<name>_<block>_loader.esm` (e.g. `geosfp_a3dyn_loader.esm`,
+`ncep_ncar_surface_loader.esm`). The single model file `<name>.esm` declares each as a
+subsystem keyed by the **original loader name** (`GEOSFP_A3dyn`, `NCEPNCAR_Surface`, …) so
+the pre-existing observed expressions `GEOSFP_A3dyn.U` / `NCEPNCAR_Surface.hgt_sfc` keep
+resolving unchanged. A `kind: "lookup"` block (removed in 0.6.0) is **not** a loader — re-home
+it as top-level `function_tables` (see `geosfp`'s `Ap`/`Bp` → `geosfp_Ap_pa`/`geosfp_Bp`).
+
 ---
 
 ## 3. The loader half (`<name>_loader.esm`)
@@ -229,8 +239,8 @@ rule in the model's `reference.notes` for the reader.
 |---|---|---|---|---|---|
 | `era5` | geographic | grid | identity | centered→conservative, wind→B-spline | **esm-3nc.1 ✓** |
 | `wrf` | LCC (30/60/39/-97/6370000) | grid | LCC↔lonlat | centered→conservative, C-grid wind→B-spline | **esm-3nc.1 ✓** |
-| `geosfp` | `longlat`/WGS84 (0.3125°×0.25°) | grid | identity | centered→conservative, staggered (A3dyn U/V/OMEGA)→B-spline | esm-3nc.2 |
-| `ncep_ncar` | geographic | grid | identity | centered→conservative, wind→B-spline | esm-3nc.2 |
+| `geosfp` | `longlat`/WGS84 (0.3125°×0.25°) | grid | identity | centered→conservative, staggered (A3dyn U/V/OMEGA)→B-spline | **esm-3nc.2 ✓** |
+| `ncep_ncar` | geographic | grid | identity | centered→conservative, wind→B-spline | **esm-3nc.2 ✓** |
 | `ceds` | geographic | grid | identity | emissions (centered)→conservative | esm-3nc.3 |
 | `edgar_v81_monthly` | geographic | grid | identity | emissions→conservative | esm-3nc.3 |
 | `nei2016_monthly` | **LCC** (33/45/40/-97/**R=6370997**) | grid | LCC↔lonlat | emissions (centered)→conservative | esm-3nc.3 |
