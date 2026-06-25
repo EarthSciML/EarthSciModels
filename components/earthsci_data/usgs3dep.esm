@@ -1,22 +1,23 @@
 {
-  "esm": "0.5.0",
+  "esm": "0.6.0",
   "metadata": {
     "name": "USGS3DEP",
-    "description": "USGS 3D Elevation Program (3DEP) terrain elevation data loader at ~1/3 arc-second resolution (~10 m). Provides static (time-invariant) terrain elevation and derived slope components (dzdx, dzdy) for the model domain.\n\nElevation is fetched directly from the USGS National Map ImageServer REST API as a GeoTIFF, using the model domain bounding box and pixel dimensions. Pixel dimensions are capped at 1000×1000 per request. Coverage is US-only (CONUS, Alaska, Hawaii, and US territories); grid cells outside US territory receive NaN.\n\nSlope components are derived from the elevation field at runtime using finite differences:\n  dzdx[i,j] = dz / (dlon * _LON2M * cos(lat[j]))  where _LON2M = 40075.0e3 / (2π) ≈ 6378137 m/rad\n  dzdy[i,j] = dz / (dlat * _LAT2M)                 where _LAT2M = 111.32e3 * (180/π) ≈ 6367449 m/rad\nCentral differences are used for interior points; forward/backward differences at boundaries.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism: the runtime handles GeoTIFF download, spatial regridding to the model domain, and slope derivation. The USGS3DEP model references loader variables directly (USGS3DEP_data.elevation, USGS3DEP_data.dzdx, USGS3DEP_data.dzdy).\n\nMigrated from EarthSciData.jl@830435a src/usgs3dep.jl:326 (USGS3DEP constructor, esm-tibb).",
+    "description": "USGS 3DEP regridding model — the coupler half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes USGS 3D Elevation Program terrain elevation and the derived slope components (dzdx, dzdy) on the simulation's target grid for terrain coupling in EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/usgs3dep_loader.esm) as the subsystem `raw` via {\"ref\": \"./usgs3dep_loader.esm\"}. Loader fields are referenced as raw.<var> (raw.elevation, raw.dzdx, raw.dzdy) and re-exposed as model-level observed variables USGS3DEP.elevation/.dzdx/.dzdy (Pattern B), preserving the public symbol paths for downstream consumers.\n  2. Reprojection: 3DEP's native grid is geographic (longlat/WGS84, EPSG:4326), so the coordinate transform is the identity reproject (ESD reprojection/longlat.esm, esd-47z.1) — selected by convention from the loader's grid.crs.projection = 'longlat'.\n  3. Regridding (per variable, RFC §5.2): the cell-centered scalars elevation, dzdx, dzdy → conservative (area-weighted, mass-conserving) regridding, per the esm-3nc.4 migration spec (cell-centered → conservative). Declared in the `regrid` block.\n\nThis is a STATIC (time-invariant) dataset: the loader carries no `temporal` block (CONST cadence). The elevation GeoTIFF is fetched once per simulation domain; slope components are derived from it at runtime by finite differences.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326 (USGS3DEP constructor, esm-tibb); split into pure loader + regridding model by esm-3nc.4.",
     "tags": [
       "earthsci_data",
       "elevation",
       "terrain",
       "slope",
+      "regridding_model",
       "static",
-      "data_loader",
       "usgs3dep",
-      "dem"
+      "dem",
+      "longlat"
     ],
-    "created": "2026-05-30T00:00:00Z",
+    "created": "2026-06-25T00:00:00Z",
     "authors": [
       "EarthSciData.jl contributors",
-      "EarthSciModels migration (esm-tibb)"
+      "EarthSciModels migration (esm-3nc.4)"
     ],
     "references": [
       {
@@ -32,7 +33,7 @@
     "USGS3DEP": {
       "coupletype": "USGS3DEPCoupler",
       "reference": {
-        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326\n\nUpstream constructor USGS3DEP(domaininfo) creates an MTK System with:\n  - @parameters: lon (rad), lat (rad) from pvars(domaininfo); t_ref (reference time, s)\n  - Three observed equations via interp_unsafe:\n      elevation(t) ~ interp_unsafe(...)  from USGS3DEPFileSet\n      dzdx(t)      ~ interp_unsafe(...)  from USGS3DEPSlopeFileSet(fs, :dzdx)\n      dzdy(t)      ~ interp_unsafe(...)  from USGS3DEPSlopeFileSet(fs, :dzdy)\n  - Static dataset: DataFrequencyInfo with two time points bracketing the simulation domain\n    (not a time-varying loader; the 'static' kind means the runtime fetches once and caches)\n  - metadata: Dict(CoupleType => USGS3DEPCoupler, SysDomainInfo => domaininfo)\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern is replaced by the data_loaders §8\nmechanism. USGS3DEP_data.elevation, USGS3DEP_data.dzdx, and USGS3DEP_data.dzdy are the loader\nvariables that the runtime fetches from the 3DEP ImageServer and (for dzdx/dzdy) derives via\nfinite-difference slope computation. The static kind means no temporal interpolation is needed;\nthe runtime fetches the GeoTIFF once per simulation.\n\nSlope computation detail (from src/usgs3dep.jl USGS3DEPSlopeFileSet):\n  _LON2M = 40075.0e3 / (2π)      # meters per radian of longitude at equator ≈ 6378137 m/rad\n  _LAT2M = 111.32e3 * (180 / π)  # meters per radian of latitude ≈ 6367449 m/rad\n  dzdx[i,j] = Δelev_x / (Δlon * _LON2M * cos(lat[j]))\n  dzdy[i,j] = Δelev_y / (Δlat * _LAT2M)\n  Interior points use central differences; boundary points use forward/backward differences.\n\nURL construction (from src/usgs3dep.jl url() method for USGS3DEPFileSet):\n  Pixel dimensions: width  = min(1000, round(Int, (E-W)/resolution))\n                    height = min(1000, round(Int, (N-S)/resolution))\n  where resolution = 1/3 arc-second ≈ 9.259e-5 degrees.\n  bbox query params: bbox=W,S,E,N (decimal degrees, WGS84)\n\nUS coverage extent: lon [-180, -60], lat [17, 72] (CONUS + Alaska + Hawaii + territories)."
+        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326\n\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.4). The pre-migration usgs3dep.esm carried both the coupler model AND a co-located data_loaders.USGS3DEP_data block (with the now-removed `spatial` and `regridding` sub-blocks). That loader is now the pure-I/O file components/earthsci_data/usgs3dep_loader.esm, referenced here as subsystem `raw`.\n\nUpstream constructor USGS3DEP(domaininfo) created an MTK System with:\n  - @parameters: lon (rad), lat (rad) from pvars(domaininfo); t_ref (reference time, s)\n  - Three observed equations via interp_unsafe:\n      elevation(t) ~ interp_unsafe(...)  from USGS3DEPFileSet\n      dzdx(t)      ~ interp_unsafe(...)  from USGS3DEPSlopeFileSet(fs, :dzdx)\n      dzdy(t)      ~ interp_unsafe(...)  from USGS3DEPSlopeFileSet(fs, :dzdy)\n  - Static dataset: DataFrequencyInfo with two time points bracketing the simulation domain (the 'static' kind means the runtime fetches once and caches)\n  - metadata: Dict(CoupleType => USGS3DEPCoupler, SysDomainInfo => domaininfo)\nThese loader fields are now provided by the loader subsystem `raw` (raw.elevation, raw.dzdx, raw.dzdy) and re-exposed as the model observed variables elevation/dzdx/dzdy. (The model declares lon/lat parameters as in the pre-migration ESM; t_ref is an upstream construction detail not needed for this static loader.)\n\nReprojection (RFC §6 step 2): 3DEP's native grid.crs.projection is 'longlat' (EPSG:4326), so the reprojection rule selected by convention is the identity ESD reprojection/longlat.esm (esd-47z.1). The model does not name the ESD file; it only requires the loader's crs to be correct.\n\nRegridding (RFC §6 step 3 / §5.2): declared per variable in the model `regrid` block. The cell-centered scalars elevation, dzdx, dzdy → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), per the esm-3nc.4 migration spec (cell-centered → conservative).\n\nSlope computation detail (from src/usgs3dep.jl USGS3DEPSlopeFileSet):\n  _LON2M = 40075.0e3 / (2π)      # meters per radian of longitude at equator ≈ 6378137 m/rad\n  _LAT2M = 111.32e3 * (180 / π)  # meters per radian of latitude ≈ 6367449 m/rad\n  dzdx[i,j] = Δelev_x / (Δlon * _LON2M * cos(lat[j]))\n  dzdy[i,j] = Δelev_y / (Δlat * _LAT2M)\n  Interior points use central differences; boundary points use forward/backward differences. dzdx/dzdy share the loader file_variable 'elevation' (computed from the same GeoTIFF); the slope derivation is a loader-side runtime computation, regridded conservatively here.\n\nStaticness: no `temporal` block on the loader → CONST cadence. The elevation GeoTIFF is fetched once per simulation domain. US coverage extent: lon [-180, -60], lat [17, 72] (CONUS + Alaska + Hawaii + territories); cells outside US territory receive NaN.\n\nURL construction (from src/usgs3dep.jl url() method for USGS3DEPFileSet): pixel dimensions width = min(1000, round((E-W)/resolution)), height = min(1000, round((N-S)/resolution)), where resolution = 1/3 arc-second ≈ 9.259e-5 degrees; bbox query params bbox=W,S,E,N (decimal degrees, WGS84)."
       },
       "tolerance": {
         "rel": 1e-6
@@ -53,83 +54,43 @@
         "elevation": {
           "type": "observed",
           "units": "m",
-          "description": "Terrain elevation above WGS84 ellipsoid at the model grid point (m). Fetched from the USGS 3DEP ImageServer as a GeoTIFF and regridded to the model domain. Grid cells outside US territory receive NaN. Corresponds to upstream interp_unsafe observed equation from USGS3DEPFileSet.",
-          "expression": "USGS3DEP_data.elevation"
+          "description": "Terrain elevation above WGS84 ellipsoid at the model grid point (m). Sourced from the loader field raw.elevation and conservatively regridded onto the target grid. Grid cells outside US territory receive NaN. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPFileSet.",
+          "expression": "raw.elevation"
         },
         "dzdx": {
           "type": "observed",
           "units": "1",
-          "description": "East-west terrain slope at the model grid point (dimensionless, dz/dx in m/m). Derived at runtime from the 3DEP elevation field using finite differences in the longitudinal direction with metric correction for latitude: dzdx = Δelev / (Δlon * _LON2M * cos(lat)), where _LON2M ≈ 6378137 m/rad. Corresponds to upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdx).",
-          "expression": "USGS3DEP_data.dzdx"
+          "description": "East-west terrain slope at the model grid point (dimensionless, dz/dx in m/m). Sourced from the loader field raw.dzdx (derived at runtime from the 3DEP elevation field by finite differences with metric correction for latitude: dzdx = Δelev / (Δlon * _LON2M * cos(lat)), _LON2M ≈ 6378137 m/rad) and conservatively regridded. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdx).",
+          "expression": "raw.dzdx"
         },
         "dzdy": {
           "type": "observed",
           "units": "1",
-          "description": "North-south terrain slope at the model grid point (dimensionless, dz/dy in m/m). Derived at runtime from the 3DEP elevation field using finite differences in the latitudinal direction: dzdy = Δelev / (Δlat * _LAT2M), where _LAT2M ≈ 6367449 m/rad. Corresponds to upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdy).",
-          "expression": "USGS3DEP_data.dzdy"
+          "description": "North-south terrain slope at the model grid point (dimensionless, dz/dy in m/m). Sourced from the loader field raw.dzdy (derived at runtime from the 3DEP elevation field by finite differences: dzdy = Δelev / (Δlat * _LAT2M), _LAT2M ≈ 6367449 m/rad) and conservatively regridded. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdy).",
+          "expression": "raw.dzdy"
+        }
+      },
+      "subsystems": {
+        "raw": {
+          "ref": "./usgs3dep_loader.esm"
+        }
+      },
+      "regrid": {
+        "elevation": {
+          "method": "conservative",
+          "description": "Terrain elevation (m). Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm), per the esm-3nc.4 migration spec (cell-centered → conservative)."
+        },
+        "dzdx": {
+          "method": "conservative",
+          "description": "East-west terrain slope (m/m). Cell-centered scalar (runtime-derived from elevation) → conservative regridder (esm-3nc.4 cell-centered → conservative)."
+        },
+        "dzdy": {
+          "method": "conservative",
+          "description": "North-south terrain slope (m/m). Cell-centered scalar (runtime-derived from elevation) → conservative regridder (esm-3nc.4 cell-centered → conservative)."
         }
       },
       "equations": [],
       "tests": []
-    }
-  },
-  "data_loaders": {
-    "USGS3DEP_data": {
-      "kind": "static",
-      "source": {
-        "url_template": "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage?bbox={bbox_west},{bbox_south},{bbox_east},{bbox_north}&size={width},{height}&format=tiff&bboxSR=4326&imageSR=4326&pixelType=F32&interpolation=+RSP_BilinearInterpolation&f=image"
-      },
-      "spatial": {
-        "crs": "EPSG:4326",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center"
-        },
-        "resolution": {
-          "lon": 0.00009259,
-          "lat": 0.00009259
-        },
-        "extent": {
-          "lon": [-180.0, -60.0],
-          "lat": [17.0, 72.0]
-        }
-      },
-      "variables": {
-        "elevation": {
-          "file_variable": "elevation",
-          "units": "m",
-          "description": "Terrain elevation above WGS84 ellipsoid (m). Fetched directly from the USGS 3DEP ImageServer GeoTIFF response. No-data pixels outside US territory are NaN."
-        },
-        "dzdx": {
-          "file_variable": "elevation",
-          "units": "1",
-          "description": "East-west terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdx[i,j] = Δelev_x / (Δlon * _LON2M * cos(lat[j])) where _LON2M = 40075.0e3 / (2π) ≈ 6378137 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdx) in EarthSciData.jl."
-        },
-        "dzdy": {
-          "file_variable": "elevation",
-          "units": "1",
-          "description": "North-south terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdy[i,j] = Δelev_y / (Δlat * _LAT2M) where _LAT2M = 111.32e3 * (180/π) ≈ 6367449 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdy) in EarthSciData.jl."
-        }
-      },
-      "regridding": {
-        "extrapolation": "nan"
-      },
-      "reference": {
-        "citation": "U.S. Geological Survey. 3D Elevation Program (3DEP). National Map Elevation Imagery Service. https://elevation.nationalmap.gov/",
-        "url": "https://elevation.nationalmap.gov/"
-      },
-      "metadata": {
-        "tags": ["elevation", "terrain", "slope", "static", "derived", "usgs3dep"],
-        "earthscidata_source": "src/usgs3dep.jl::USGS3DEPFileSet, src/usgs3dep.jl::USGS3DEPSlopeFileSet",
-        "resolution_arc_seconds": 0.333,
-        "coverage": "US only (CONUS + Alaska + Hawaii + US territories)",
-        "url_substitutions": "bbox_{west,south,east,north} are domain bounding box in decimal degrees (WGS84); {width} and {height} are pixel dimensions capped at 1000 (= min(1000, round(Int, (E-W)/resolution)) and min(1000, round(Int, (N-S)/resolution)) respectively)",
-        "max_request_pixels": "1000x1000",
-        "file_format": "GeoTIFF (F32 pixel type)",
-        "slope_derivation": "runtime finite-difference on elevation grid; _LON2M = 40075.0e3 / (2*pi) m/rad; _LAT2M = 111.32e3 * (180/pi) m/rad; dzdx and dzdy use file_variable='elevation' because they are computed from the same downloaded GeoTIFF",
-        "static_note": "No temporal block: kind='static' means the runtime fetches the GeoTIFF once per simulation domain. Upstream DataFrequencyInfo uses two bracketing time points solely to satisfy the interp_unsafe interface; no time interpolation occurs."
-      }
     }
   }
 }
