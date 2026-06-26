@@ -1,0 +1,115 @@
+{
+  "esm": "0.7.0",
+  "metadata": {
+    "name": "NIFC_perimeters_loader",
+    "description": "Pure-I/O data loader for NIFC / GeoMAC daily wildfire perimeters, RASTERIZED OFFLINE to a burned-fraction grid. Provides a daily burned_fraction(lon,lat) field in [0,1] — the per-cell fraction of area inside the cumulative (or daily) fire perimeter — read as an ordinary gridded time series (one NetCDF per day). This is the day-by-day fire PROGRESSION reference for fire-model validation (campfire-e2e Phase E1/E2).\n\n⭐ Key design constraint (campfire-e2e plan, 2026-06-26): the DataLoader `kind` enum is grid/points/static/mesh — there is NO vector/polygon kind. Fire perimeters are time-varying POLYGONS. Rather than add a new vector loader primitive (against the no-new-primitives principle), the daily perimeters are RASTERIZED OFFLINE by a documented preprocessing leaf (tools/leaves/nifc_perimeters_rasterize.py) to burned_fraction NetCDFs on a chosen analysis grid, and this loader is a plain `kind:grid` reader. This keeps every loader pure-IO and reuses the existing grid machinery; rasterization is a one-time preprocessing step, not an engine capability.\n\nThis is a pure-IO loader in the 0.7.0 split shape (RFC pure-io-data-loaders §4.1/§7): it declares its source (url_template), the file variable it reads (with units), its temporal cadence, and its NATIVE grid as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are model concerns. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5): daily files, one per day. The file layout mirrors the era5_loader period-file model (era5: monthly files × hourly records; here: daily files × one daily record), so a fire's burned_fraction(lon,lat,time) series is the stack of its daily files.\n\nObserved-fire loaders are VALIDATION refs — they do NOT feed the model RHS, so this loader has no companion forcing wrapper; the E2 validation harness aligns the burned-fraction grid to the comparison grid using the same ESD regridding rules.\n\nUSER-ACTION (campfire-e2e plan §User-action): choose the analysis/comparison grid + resolution for rasterization (default: the fire model's domain grid — for the 2018 Camp Fire, the model's Camp Fire domain). The rasterizer leaf and this loader share that grid choice; see metadata.access_note and the leaf docstring.",
+    "tags": [
+      "earthsci_data",
+      "wildfire",
+      "fire_perimeters",
+      "burned_fraction",
+      "progression",
+      "observations",
+      "validation",
+      "data_loader",
+      "pure-io",
+      "nifc",
+      "geomac",
+      "rasterized_vector",
+      "longlat"
+    ],
+    "created": "2026-06-26T00:00:00Z",
+    "authors": [
+      "National Interagency Fire Center (NIFC) / GeoMAC",
+      "EarthSciModels campfire-e2e (esm-1zj)"
+    ],
+    "references": [
+      {
+        "citation": "National Interagency Fire Center (NIFC) Open Data — Wildland Fire Perimeters (current + historical), incl. the GeoMAC daily fire-perimeter archive. Public, no key.",
+        "url": "https://data-nifc.opendata.arcgis.com/"
+      },
+      {
+        "citation": "Rasterization: daily perimeter polygons → per-cell burned_fraction on the analysis grid, by the documented preprocessing leaf tools/leaves/nifc_perimeters_rasterize.py (cell-coverage fraction, not a hard 0/1 mask, so the validation metric tolerates partial cells)."
+      }
+    ]
+  },
+  "data_loaders": {
+    "NIFC_burned_fraction": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://data.earthsci.dev/nifc_perimeters/{fire_id}/burned_fraction_{date:%Y%m%d}.nc"
+      },
+      "temporal": {
+        "start": "2018-11-08T00:00:00Z",
+        "end": "2018-11-25T00:00:00Z",
+        "file_period": "P1D",
+        "frequency": "P1D",
+        "records_per_file": 1,
+        "time_variable": "time"
+      },
+      "grid": {
+        "family": "cartesian",
+        "crs": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "description": "Analysis grid the daily perimeters are rasterized onto: a regular geographic (longlat/WGS84) lattice covering the fire domain. The default is the fire model's own domain grid + resolution (campfire-e2e plan §User-action) — for the 2018 Camp Fire, the model's Camp Fire domain (≈0.01° ~1 km cells over lon ∈ [-122.0, -121.2], lat ∈ [39.6, 40.1]). Cell counts (n_lon, n_lat) are resolved from the rasterized NetCDF at load time and are set by the rasterizer leaf to match the chosen grid; the loader describes the grid but performs no reprojection or regridding. burned_fraction is cell-centered (lon/lat 'center'); the E2 harness regrids it conservatively (area-weighted) onto the comparison grid.",
+        "dimensions": [
+          "lon",
+          "lat"
+        ],
+        "extents": {
+          "lon": {
+            "n": "n_lon",
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": "n_lat",
+            "spacing": "uniform"
+          }
+        },
+        "parameters": {
+          "n_lon": {
+            "units": "1",
+            "description": "Longitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
+          },
+          "n_lat": {
+            "units": "1",
+            "description": "Latitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
+          }
+        }
+      },
+      "variables": {
+        "burned_fraction": {
+          "file_variable": "burned_fraction",
+          "units": "1",
+          "description": "Per-cell burned fraction in [0,1]: the fraction of the grid cell's area covered by the day's fire perimeter (the union of NIFC/GeoMAC perimeter polygons valid on that day, rasterized by cell-coverage fraction). 0 = unburned, 1 = fully inside the perimeter. A continuous fraction (not a hard 0/1 mask) so the validation metric tolerates partial cells at the fire front. By convention the rasterizer emits the CUMULATIVE burned area through each day (monotonic non-decreasing), so the daily series is the modeled fire's growth curve; see the leaf docstring for the daily-vs-cumulative option."
+        }
+      },
+      "reference": {
+        "citation": "National Interagency Fire Center (NIFC) Open Data — Wildland Fire Perimeters / GeoMAC daily archive. https://data-nifc.opendata.arcgis.com/",
+        "url": "https://data-nifc.opendata.arcgis.com/"
+      },
+      "metadata": {
+        "tags": [
+          "nifc",
+          "geomac",
+          "fire_perimeters",
+          "burned_fraction",
+          "wildfire",
+          "progression",
+          "validation",
+          "rasterized_vector"
+        ],
+        "native_source_geometry": "vector polygons (one or more NIFC/GeoMAC perimeter features per day over the fire's lifetime); served as ArcGIS REST / GeoJSON from NIFC Open Data.",
+        "rasterization_leaf": "tools/leaves/nifc_perimeters_rasterize.py — fetches the daily perimeter polygons, unions them per day, and writes burned_fraction_{YYYYMMDD}.nc on the analysis grid (one file per day, dims lon/lat, plus a singleton time coord). Documented preprocessing leaf, NOT an engine capability.",
+        "no_new_loader_kind_note": "Fire perimeters are time-varying polygons with no DataLoader kind (grid/points/static/mesh only). The rasterize-offline choice means ZERO new loader kinds / engine primitives — the loader reads ordinary grid NetCDFs. This is the campfire-e2e plan's key design constraint.",
+        "cadence_note": "temporal present → DISCRETE cadence (ess-v9a.5); file_period P1D, frequency P1D, one daily record per file. The temporal.start/end above bracket the 2018 Camp Fire (default fixture); set them to the target fire's active window when rasterizing a different fire.",
+        "burned_fraction_convention": "cumulative-through-day by default (monotonic; the modeled growth curve). The leaf can also emit per-day (new area only) — see its --mode flag. units '1' (dimensionless fraction in [0,1]).",
+        "use": "Day-by-day fire PROGRESSION — the primary burned-area-vs-day validation signal, complementary to MTBS (final extent/severity) and VIIRS (sub-daily front timing).",
+        "access_note": "NIFC/GeoMAC perimeters are public/open (no key); cite NIFC per their terms. This loader reads the RASTERIZED product, not the raw polygons — run tools/leaves/nifc_perimeters_rasterize.py first to produce burned_fraction_{YYYYMMDD}.nc on your chosen analysis grid. The url_template uses a placeholder earthsci.dev mirror with a {fire_id} substitution; like the era5 loader, the toolkit does not yet resolve a local data cache (EARTHSCIDATADIR) at the URL layer (see the observed-fire framework-gaps report) — populate a local cache or use a file:// path until that C2 mechanism lands.",
+        "user_action": "Choose the analysis/comparison grid + resolution (campfire-e2e plan §User-action). Default: the fire model's domain grid (2018 Camp Fire domain)."
+      }
+    }
+  }
+}
