@@ -62,3 +62,50 @@ jobs:
           name: python-esm-inline-tests-junit
           path: python-esm-tests.xml
           if-no-files-found: ignore
+
+  # Consumer end-to-end gate (esm-3nc.6 fixture; wired into CI by esm-aha).
+  # Runs test/e2e_consumer_regrid_check.py, which validates the pure-IO
+  # data-loader migration (RFC pure-io-data-loaders §6/§7) from a *consumer's*
+  # vantage point: a downstream model that {"ref"}-includes the migrated
+  # single-component OpenAQ model resolves through the canonical ESS runner
+  # (a two-level pure-IO loader ref chain consumer → openaq.esm →
+  # openaq_loader.esm), carries a valid per-variable `regrid` block, and
+  # exposes fields whose interface + regrid-fill intent are identical (to
+  # tolerance) to the frozen pre-migration reference.
+  #
+  # Separate job from python-inline-tests on purpose: the e2e fixtures live
+  # under test/fixtures/** — deliberately outside components/** and lib/**, so
+  # neither the Python inline-test walk nor the Julia discovery auto-walks them
+  # (see test/fixtures/earthsci_data/README.md). The inline gate therefore
+  # never exercised this consumer pathway. Before esm-aha the script existed
+  # but was wired into no CI job, leaving the consumer ref-include chain
+  # unguarded; this job closes that gap. An independent job also keeps the
+  # consumer signal visible regardless of the inline gate's result.
+  #
+  # Scope note (numeric validation deferred): this check asserts the
+  # *interface + regrid intent* identity the model-content rig owns (exposed
+  # variable names/types/units and the regrid kernel + fill semantics, the
+  # last compared numerically to tolerance). Numeric regridded *field values*
+  # (station concentrations) require external OpenAQ data and are a downstream
+  # consumer-repo concern (AGENTS.md §2); they are not assertable in-repo
+  # against the frozen interface-only reference, so they are deferred
+  # downstream rather than checked here — see the script docstring and the
+  # fixtures README "Why structural (not numeric) field identity" section.
+  consumer-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      # Same canonical ESS Python runner the inline-test gate installs
+      # (earthsci_toolkit from EarthSciSerialization main; not yet on PyPI).
+      - name: Install earthsci_toolkit (from EarthSciSerialization main)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            "earthsci_toolkit @ git+https://github.com/EarthSciML/EarthSciSerialization.git@main#subdirectory=packages/earthsci_toolkit"
+      - name: Run consumer ref-include + regrid-intent e2e (esm-3nc.6)
+        run: |
+          python test/e2e_consumer_regrid_check.py

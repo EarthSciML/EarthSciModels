@@ -24,7 +24,9 @@ python test/e2e_consumer_regrid_check.py    # exit 0 = green
 These fixtures live outside `components/**` and `lib/**`, so the
 `run_esm_inline_tests.py` gate (Python) and `discover_esm_files`
 (`DEFAULT_ROOTS = ["components"]`, Julia) do **not** auto-walk them — the
-driver script is the explicit entry point.
+driver script is the explicit entry point. In CI it is run by the
+`consumer-e2e` job in `.github/workflows/test-esm.yml` (wired in by esm-aha;
+before that the script existed but was gated by no CI job).
 
 ## Why structural (not numeric) field identity
 
@@ -51,6 +53,16 @@ Validated against both the current CI ESS (`EarthSciSerialization@main`,
 | Consumer ref-include resolves + regrids + fields identical (to tol) | PASS | PASS |
 
 The hard-break is internally consistent: migrated files load under the
-bumped version gate (declared `esm 0.6.0` ≤ library `0.7.0`, no legacy
-`regridding`/`spatial` blocks), while legacy files are rejected with the
-named diagnostic.
+bumped version gate (declared `esm 0.7.0` == library `0.7.0` after the
+esm-aha stamp correction — they were originally stamped `esm 0.6.0`, which
+loaded only via the lenient-downward check; no legacy `regridding`/`spatial`
+blocks), while legacy files are rejected with the named diagnostic.
+
+> **Stamp correction (esm-aha, 2026-06-26).** The 35 migrated
+> `components/earthsci_data/*.esm` and the `consumer_openaq.esm` fixture
+> declared `esm 0.6.0` while already using the `0.7.0` pure-IO shape (a
+> latent mis-stamp: RFC §7 step-1 / `SCHEMA_CHANGE_PROCEDURE.md` require the
+> new shape to declare the new schema version). They are now stamped
+> `0.7.0`. Loads stay green (the matrix results above are unchanged); under
+> the bumped ESS the declared version is now an exact match rather than a
+> lenient-downward accept.
