@@ -477,3 +477,8 @@ substitute for §7.1. The checklist is a hard gate, not a suggestion.
   `mtk2esm`-scaffolded `.esm` files differ from hand-written ones.
 - **Spec**: `EarthSciSerialization/refinery/rig/esm-spec.md` and
   `esm-schema.json` for the canonical `.esm` shape.
+- **Pure-I/O data loaders**: [`pure-io-loader-migration.md`](pure-io-loader-migration.md)
+  — the loader + regridding-model split pattern for
+  `components/earthsci_data/*.esm` (RFC `pure-io-data-loaders`,
+  hard-break `esm` 0.6.0). Distinct from the `mtk2esm` flow above;
+  reference cases `era5` (geographic) and `wrf` (LCC) from `esm-3nc.1`.

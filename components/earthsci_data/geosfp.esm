@@ -1,8 +1,8 @@
 {
-  "esm": "0.5.0",
+  "esm": "0.6.0",
   "metadata": {
     "name": "GEOSFP",
-    "description": "GEOS-FP (Goddard Earth Observing System Forward Processing) atmospheric data loader as archived for use with GEOS-Chem classic. Provides 6 file-type collections covering 2D surface and 3D pressure-level meteorological fields at 0.25° × 0.3125° global resolution (the default domain; regional and coarser domains are also available — see domain_note in data_loaders metadata). Data are sourced from the AWS S3 mirror (geos-chem.s3-us-west-2.amazonaws.com) and are archived from approximately 2013-01-01 to near-real-time.\n\nSix file-type collections are provided:\n  A1  — 1-hourly time-averaged 2D surface fields (24 records/day; center times 00:30, 01:30, ..., 23:30 UTC)\n  A3cld — 3-hourly averaged 3D cloud properties (8 records/day; center times 01:30, ..., 22:30 UTC)\n  A3dyn — 3-hourly averaged 3D dynamical fields (8 records/day; U, V, OMEGA, RH, DTRAIN)\n  A3mstC — 3-hourly averaged 3D moist convective fields (8 records/day)\n  A3mstE — 3-hourly averaged 3D moist extra fields (8 records/day)\n  I3  — 3-hourly instantaneous 3D fields (8 records/day; times 00:00, 03:00, ..., 21:00 UTC)\n\nThe GEOS-FP vertical coordinate is a terrain-following hybrid sigma-pressure system with 72 model layers (73 interfaces). Pressure at level lev is P = Ap[lev] + Bp[lev] × PS, where Ap and Bp are the hybrid coordinate coefficients tabulated for lev=1 (bottom interface, P≈PS≈101325 Pa) to lev=73 (top of atmosphere, P≈1 Pa). The coefficients are embedded in GEOSFP_hybrid_coefs.\n\nThe gt-p3ep (@register_symbolic interp_unsafe) blocking gap is resolved by the data_loaders §8 mechanism for all six file-type collections. The gt-6ohw (DataInterpolations.derivative) blocking gap affects only δPδlev and δZδlev (which require the derivative of the Ap/Bp interpolation with respect to lev); those variables are omitted and documented in reference.notes.\n\nStaggering: A3dyn.U is x-edge-staggered (lon edges), A3dyn.V is y-edge-staggered (lat edges), A3dyn.OMEGA is z-edge-staggered (lev interfaces). All other variables are cell-centered.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410 (GEOSFP constructor, esm-1c6s).",
+    "description": "GEOS-FP regridding model — the coupler half of the geosfp loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.2, following the esm-3nc.1 era5/wrf pattern). Exposes NASA GMAO GEOS-FP assimilated meteorology (0.25°×0.3125° global, GEOS-Chem 72-level) on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC §6): it declares the six pure-I/O GEOS-FP grid loaders as subsystems under their original names (GEOSFP_A1/A3cld/A3dyn/A3mstC/A3mstE/I3 → ./geosfp_<coll>_loader.esm), so loader fields are referenced as GEOSFP.<coll>.<var> and re-exposed as model observeds (GEOSFP.T, GEOSFP.U, …). Native grids are geographic (longlat/WGS84) → longlat identity reprojection (esd-47z.1). Regridding is per-variable (`regrid`): A3dyn staggered winds U/V/OMEGA → B-spline (esd-47z.3); all other fields → conservative. The hybrid sigma-pressure Ap/Bp tables (former GEOSFP_hybrid_coefs kind:lookup, removed in the 0.6.0 hard break) are now the top-level function_tables geosfp_Ap_pa and geosfp_Bp, consumed by P = Ap(lev)+Bp(lev)·PS.\n\nDerived observeds on the target grid: pressure P, virtual temperature Tv and Tv_sfc, layer-mean virtual temperature Tv_bar, and the lat/lon coordinate metrics δxδlon, δyδlat. MeanWind coupling: GEOSFP.U/V/OMEGA → MeanWind v_lon/v_lat/v_lev.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410 (GEOSFP constructor, esm-1c6s); split into pure loaders + regridding model by esm-3nc.2.",
     "tags": [
       "earthsci_data",
       "meteorology",
@@ -12,12 +12,15 @@
       "global",
       "hybrid_pressure",
       "geos_chem",
-      "nasa"
+      "nasa",
+      "regridding_model",
+      "longlat",
+      "pure-io-split"
     ],
     "created": "2026-05-30T00:00:00Z",
     "authors": [
-      "EarthSciData.jl contributors",
-      "EarthSciModels migration (esm-1c6s)"
+      "NASA GMAO / GEOS-Chem",
+      "EarthSciModels migration (esm-3nc.2)"
     ],
     "references": [
       {
@@ -37,11 +40,335 @@
       }
     ]
   },
+  "function_tables": {
+    "geosfp_Ap_pa": {
+      "axes": [
+        {
+          "name": "lev",
+          "units": "1",
+          "values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73
+          ]
+        }
+      ],
+      "data": [
+        0.0,
+        4.804826,
+        659.3752,
+        1313.48,
+        1961.311,
+        2609.201,
+        3257.081,
+        3898.201,
+        4533.901,
+        5169.611,
+        5805.321,
+        6436.264,
+        7062.198,
+        7883.422,
+        8909.992,
+        9936.521,
+        10918.17,
+        11895.86,
+        12869.59,
+        14291.0,
+        15626.0,
+        16960.9,
+        18161.9,
+        19309.7,
+        20325.9,
+        21215.0,
+        21877.6,
+        22389.8,
+        22436.3,
+        21686.5,
+        20119.2,
+        17693.0,
+        15039.3,
+        12783.7,
+        10866.3,
+        9236.572,
+        7851.231,
+        6660.341,
+        5638.791,
+        4764.391,
+        4017.541,
+        3381.001,
+        2836.781,
+        2373.041,
+        1979.16,
+        1645.71,
+        1364.34,
+        1127.69,
+        929.2942,
+        761.9842,
+        621.6801,
+        504.6801,
+        407.6571,
+        327.6431,
+        262.0211,
+        208.497,
+        165.079,
+        130.051,
+        101.944,
+        79.51341,
+        61.67791,
+        47.58061,
+        36.50411,
+        27.85261,
+        21.1349,
+        15.9495,
+        11.9703,
+        8.934502,
+        6.600001,
+        4.758501,
+        3.27,
+        2.0,
+        1.0
+      ],
+      "interpolation": "linear",
+      "out_of_bounds": "clamp",
+      "description": "GEOS-FP hybrid sigma-pressure A coefficient (Pa) at hybrid level lev, 73 interface values on the GEOS-Chem 72-level standard grid (lev=1 surface … lev=73 top, unit spacing). Used by the observed P = Ap(lev) + Bp(lev)*PS. Migrated from the former GEOSFP_hybrid_coefs (kind:lookup) data loader (EarthSciData.jl src/geosfp.jl const Ap × 100 hPa→Pa); kind:lookup is no longer a valid DataLoader kind in esm 0.6.0, so the table is now a top-level function_table (mirrors era5_pressure_levels_pa, esm-3nc.1)."
+    },
+    "geosfp_Bp": {
+      "axes": [
+        {
+          "name": "lev",
+          "units": "1",
+          "values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73
+          ]
+        }
+      ],
+      "data": [
+        1.0,
+        0.984952,
+        0.963406,
+        0.941865,
+        0.920387,
+        0.898908,
+        0.877429,
+        0.856018,
+        0.8346609,
+        0.8133039,
+        0.7919469,
+        0.7706375,
+        0.7493782,
+        0.721166,
+        0.6858999,
+        0.6506349,
+        0.6158184,
+        0.5810415,
+        0.5463042,
+        0.4945902,
+        0.4437402,
+        0.3928911,
+        0.3433811,
+        0.2944031,
+        0.2467411,
+        0.2003501,
+        0.1562241,
+        0.1136021,
+        0.06372006,
+        0.02801004,
+        0.006960025,
+        8.175413e-09,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "interpolation": "linear",
+      "out_of_bounds": "clamp",
+      "description": "GEOS-FP hybrid sigma-pressure B coefficient (dimensionless) at hybrid level lev, 73 interface values on the GEOS-Chem 72-level standard grid (Bp[1]=1 surface, Bp[73]=0 top). Used by the observed P = Ap(lev) + Bp(lev)*PS. Migrated from the former GEOSFP_hybrid_coefs (kind:lookup) data loader (EarthSciData.jl src/geosfp.jl const Bp)."
+    }
+  },
   "models": {
     "GEOSFP": {
       "coupletype": "GEOSFPCoupler",
       "reference": {
-        "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410\n\nUpstream GEOSFP(domain, domaininfo; name=:GEOSFP, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon/lat (rad) and lev (1) from pvars(domaininfo); t_ref (s)\n  - For every varname in every GEOSFPFileSet collection (A1/A3cld/A3dyn/A3mstC/A3mstE/I3),\n    one DataSetInterpolator and one observed equation via create_interp_equation (uses interp_unsafe)\n  - Coordinate mapping: lon/lat in radians (loadmetadata converts from degrees); lev=1..72\n  - Staggering: geosfp_staggering() returns:\n      A3dyn/U   → (true, false, false)  # x-staggered (lon edges)\n      A3dyn/V   → (false, true, false)  # y-staggered (lat edges)\n      A3dyn/OMEGA → (false, false, true)  # z-staggered (lev interfaces)\n      all others → (false, false, false) # cell-centered\n  - Extrapolation: OMEGA uses zero extrapolation (extrapolate_type=0.0); all others use Flat() (clamp)\n  - Hybrid pressure: P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS\n    where Ap/Bp are DataInterpolations.LinearInterpolation tables indexed 1:73\n    (lev=1 → surface ≈ PS, lev=73 → 1 Pa). Encoded in GEOSFP_hybrid_coefs data_loader.\n  - Virtual temperature: Tv ~ T * (1 + 0.61 * QV); Tv_sfc ~ T2M * (1 + 0.61 * QV2M)\n  - Layer-mean virtual temp: Tv̄ ~ 0.5 * (Tv + Tv_sfc)\n  - Coordinate metrics (lat/lon domain only): δxδlon ~ lon2m * cos(lat); δyδlat ~ lat2meters\n  - discrete_events: build_interp_event fires at each file collection boundary to reload buffers\n  - metadata: Dict(CoupleType => GEOSFPCoupler, SysDomainInfo => domaininfo)\n  - couple2 with MeanWindCoupler: maps GEOSFP.A3dyn₊U/V/OMEGA → MeanWind v_lon/v_lat/v_lev\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern for all file-variable equations is replaced by the data_loaders §8 mechanism (GEOSFP_A1.*, GEOSFP_A3*.*, GEOSFP_I3.* references). The Ap/Bp hybrid coordinate tables are represented via GEOSFP_hybrid_coefs (kind: lookup) with embedded coefficient values, resolving the fixed-table lookup gap for P.\n\ngt-6ohw gap (DataInterpolations.derivative): δPδlev and δZδlev require the symbolic derivative of Ap(lev) and Bp(lev) with respect to lev (via DataInterpolations.derivative), which is not yet representable in the ESM expression language. These variables are omitted. When gt-6ohw is resolved:\n  δPδlev (Pa): d(P)/d(lev) = d(Ap(lev))/d(lev) + d(Bp(lev))/d(lev) * PS\n    For the linear interpolation with unit spacing: d(Ap)/d(lev) at integer lev n = Ap[n+1]-Ap[n]\n    The upstream code uses: expand_derivatives(Differential(lev)(P_unit * Ap(lev) + Bp(lev) * PS))\n  δZδlev (m): d(Z_agl)/d(lev) — requires Pmid = P_unit*Ap(lev+0.5)+Bp(lev+0.5)*PS (gt-p3ep(lookup)\n    with lev+0.5 offset) and derivatives of Ap/Bp at lev+0.5 (gt-6ohw). Both gaps must be resolved.\n\nZ_agl gap (gt-p3ep(lookup)): Z_agl = (Rd * Tv̄ / g) * log(PS / Pmid) where\n  Pmid = P_unit * Ap(lev+0.5) + Bp(lev+0.5) * PS\n  Evaluating Ap and Bp at the fractional level lev+0.5 is an offset-indexed lookup (gt-p3ep(lookup))\n  not yet representable in the ESM expression language. Z_agl is omitted; when gt-p3ep(lookup) is\n  resolved, add:\n    Pmid = GEOSFP_hybrid_coefs.Ap_at_lev_plus_half + GEOSFP_hybrid_coefs.Bp_at_lev_plus_half * I3₊PS\n    Z_agl = (287.05 * Tv̄ / 9.80665) * log(I3₊PS / Pmid)\n\nUpstream test values at (-155.7°, 39.1°) for domain '4x5' (EarthSciData.jl test/geosfp_test.jl):\n  P at lev=[1,2,3,71,72,73]: [102340.38, 101572.77, 100805.17, 2.0, 1.5, 1.0] Pa\n  OMEGA at lev=[0.5,1,1.5,2,35,70,72.5]: [0.0, -0.00385, -0.00770, -0.00652, 1.12e-5, 0.0, 0.0] Pa/s\n  Z_agl at various levels: 63.38 m (lev=1.5) to 80132.64 m (lev=72.5)\n\nDomain notes: the default domain '0.25x0.3125' is the native GEOS-FP global grid. Regional and coarser domains (e.g. '4x5', '0.25x0.3125_NA', '2x2.5') change the URL prefix GEOS_{domain}/GEOS_FP/ and the filename suffix. The transformed domain in the filename replaces dots with nothing and underscores with dots: '0.25x0.3125_NA' → '025x03125.NA'. This ESM documents the default 0.25x0.3125 global domain."
+        "notes": "This is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7; esm-3nc.1 era5/wrf pattern, bead esm-3nc.2). The pre-migration geosfp.esm carried both the GEOSFP coupler model AND seven co-located data_loaders blocks (six grid loaders GEOSFP_A1/A3cld/A3dyn/A3mstC/A3mstE/I3 plus a GEOSFP_hybrid_coefs kind:lookup table). The six grid loaders are now pure-I/O files referenced as subsystems under their ORIGINAL names (GEOSFP_A1 … GEOSFP_I3 → ./geosfp_<coll>_loader.esm), so every observed expression GEOSFP_<coll>.<var> keeps resolving unchanged. The GEOSFP_hybrid_coefs lookup became the top-level function_tables geosfp_Ap_pa and geosfp_Bp (kind:lookup is no longer a valid DataLoader kind in esm 0.6.0).\n\nReprojection (RFC §6 step 2): every loader's grid.crs.projection is 'longlat' (geographic WGS84), so the reprojection rule selected by convention is ESD reprojection/longlat.esm (esd-47z.1) — the IDENTITY transform (a no-op for an unprojected grid).\n\nRegridding (RFC §6 step 3 / §5.2): declared per variable in the model `regrid` block. The A3dyn C-grid wind components U (x-edge), V (y-edge), OMEGA (z-edge interface) are staggered → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3); every other consumed loader field (all A1/A3cld/A3mstC/A3mstE/I3 fields and A3dyn RH/DTRAIN) is cell-centered → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm). OMEGA's upstream zero-extrapolation (extrapolate_type=0.0) has no schema field and is documented in the A3dyn loader metadata.\n\nMeanWind coupling: the re-exposed top-level GEOSFP.U/V/OMEGA observeds preserve the couple2 contract (GEOSFP.U/V/OMEGA → MeanWind v_lon/v_lat/v_lev).\n\nsource_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410\n\nUpstream GEOSFP(domain, domaininfo; name=:GEOSFP, stream=true, spatial_interp=:linear) creates an MTK System with:\n  - @parameters: lon/lat (rad) and lev (1) from pvars(domaininfo); t_ref (s)\n  - For every varname in every GEOSFPFileSet collection (A1/A3cld/A3dyn/A3mstC/A3mstE/I3),\n    one DataSetInterpolator and one observed equation via create_interp_equation (uses interp_unsafe)\n  - Coordinate mapping: lon/lat in radians (loadmetadata converts from degrees); lev=1..72\n  - Staggering: geosfp_staggering() returns:\n      A3dyn/U   → (true, false, false)  # x-staggered (lon edges)\n      A3dyn/V   → (false, true, false)  # y-staggered (lat edges)\n      A3dyn/OMEGA → (false, false, true)  # z-staggered (lev interfaces)\n      all others → (false, false, false) # cell-centered\n  - Extrapolation: OMEGA uses zero extrapolation (extrapolate_type=0.0); all others use Flat() (clamp)\n  - Hybrid pressure: P ~ P_unit * Ap(lev) + Bp(lev) * I3₊PS\n    where Ap/Bp are DataInterpolations.LinearInterpolation tables indexed 1:73\n    (lev=1 → surface ≈ PS, lev=73 → 1 Pa). Encoded as the top-level function_tables geosfp_Ap_pa (Pa) and geosfp_Bp (dimensionless); P is observed = table_lookup(geosfp_Ap_pa, lev) + table_lookup(geosfp_Bp, lev) * GEOSFP_I3.PS.\n  - Virtual temperature: Tv ~ T * (1 + 0.61 * QV); Tv_sfc ~ T2M * (1 + 0.61 * QV2M)\n  - Layer-mean virtual temp: Tv̄ ~ 0.5 * (Tv + Tv_sfc)\n  - Coordinate metrics (lat/lon domain only): δxδlon ~ lon2m * cos(lat); δyδlat ~ lat2meters\n  - discrete_events: build_interp_event fires at each file collection boundary to reload buffers\n  - metadata: Dict(CoupleType => GEOSFPCoupler, SysDomainInfo => domaininfo)\n  - couple2 with MeanWindCoupler: maps GEOSFP.A3dyn₊U/V/OMEGA → MeanWind v_lon/v_lat/v_lev\n\ngt-p3ep resolution: the @register_symbolic interp_unsafe pattern for all file-variable equations is replaced by the data_loaders §8 mechanism (GEOSFP_A1.*, GEOSFP_A3*.*, GEOSFP_I3.* references). The Ap/Bp hybrid coordinate tables — formerly the GEOSFP_hybrid_coefs (kind: lookup) data loader, a kind removed in the 0.6.0 hard break — are now the top-level function_tables geosfp_Ap_pa and geosfp_Bp, resolving the fixed-table lookup gap for P.\n\ngt-6ohw gap (DataInterpolations.derivative): δPδlev and δZδlev require the symbolic derivative of Ap(lev) and Bp(lev) with respect to lev (via DataInterpolations.derivative), which is not yet representable in the ESM expression language. These variables are omitted. When gt-6ohw is resolved:\n  δPδlev (Pa): d(P)/d(lev) = d(Ap(lev))/d(lev) + d(Bp(lev))/d(lev) * PS\n    For the linear interpolation with unit spacing: d(Ap)/d(lev) at integer lev n = Ap[n+1]-Ap[n]\n    The upstream code uses: expand_derivatives(Differential(lev)(P_unit * Ap(lev) + Bp(lev) * PS))\n  δZδlev (m): d(Z_agl)/d(lev) — requires Pmid = P_unit*Ap(lev+0.5)+Bp(lev+0.5)*PS (gt-p3ep(lookup)\n    with lev+0.5 offset) and derivatives of Ap/Bp at lev+0.5 (gt-6ohw). Both gaps must be resolved.\n\nZ_agl gap (gt-p3ep(lookup)): Z_agl = (Rd * Tv̄ / g) * log(PS / Pmid) where\n  Pmid = P_unit * Ap(lev+0.5) + Bp(lev+0.5) * PS\n  Evaluating Ap and Bp at the fractional level lev+0.5 is an offset-indexed lookup (gt-p3ep(lookup))\n  not yet representable in the ESM expression language. Z_agl is omitted; when gt-p3ep(lookup) is\n  resolved, add:\n    Pmid = table_lookup(geosfp_Ap_pa, lev+0.5) + table_lookup(geosfp_Bp, lev+0.5) * GEOSFP_I3.PS\n    Z_agl = (287.05 * Tv̄ / 9.80665) * log(I3₊PS / Pmid)\n\nUpstream test values at (-155.7°, 39.1°) for domain '4x5' (EarthSciData.jl test/geosfp_test.jl):\n  P at lev=[1,2,3,71,72,73]: [102340.38, 101572.77, 100805.17, 2.0, 1.5, 1.0] Pa\n  OMEGA at lev=[0.5,1,1.5,2,35,70,72.5]: [0.0, -0.00385, -0.00770, -0.00652, 1.12e-5, 0.0, 0.0] Pa/s\n  Z_agl at various levels: 63.38 m (lev=1.5) to 80132.64 m (lev=72.5)\n\nDomain notes: the default domain '0.25x0.3125' is the native GEOS-FP global grid. Regional and coarser domains (e.g. '4x5', '0.25x0.3125_NA', '2x2.5') change the URL prefix GEOS_{domain}/GEOS_FP/ and the filename suffix. The transformed domain in the filename replaces dots with nothing and underscores with dots: '0.25x0.3125_NA' → '025x03125.NA'. This ESM documents the default 0.25x0.3125 global domain."
       },
       "tolerance": {
         "rel": 1e-06
@@ -314,15 +641,29 @@
         "P": {
           "type": "observed",
           "units": "Pa",
-          "description": "Total atmospheric pressure (Pa) on the GEOS-FP hybrid sigma-pressure vertical coordinate. P = Ap[lev] + Bp[lev] × PS, where Ap and Bp are the hybrid A/B interface coefficients for GEOS-Chem 72-level grid (lev=1: surface ≈ 101325 Pa; lev=73: top ≈ 1 Pa) and PS is the surface pressure. Coefficients sourced from GEOSFP_hybrid_coefs.",
+          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)·PS. Ap (Pa) and Bp (dimensionless) are the GEOS-FP 72-level hybrid sigma-pressure coefficients looked up from the top-level function_tables geosfp_Ap_pa and geosfp_Bp (linear interpolation in the 1-based hybrid level index; lev=1 → surface ≈ PS, lev=73 → 1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem. Reproduces the upstream P ~ P_unit·Ap(lev) + Bp(lev)·I3₊PS; the Ap/Bp DataInterpolations tables (former GEOSFP_hybrid_coefs kind:lookup loader, removed in the 0.6.0 hard break) are now function_tables.",
           "expression": {
             "op": "+",
             "args": [
-              "GEOSFP_hybrid_coefs.Ap",
+              {
+                "op": "table_lookup",
+                "table": "geosfp_Ap_pa",
+                "axes": {
+                  "lev": "lev"
+                },
+                "args": []
+              },
               {
                 "op": "*",
                 "args": [
-                  "GEOSFP_hybrid_coefs.Bp",
+                  {
+                    "op": "table_lookup",
+                    "table": "geosfp_Bp",
+                    "axes": {
+                      "lev": "lev"
+                    },
+                    "args": []
+                  },
                   "GEOSFP_I3.PS"
                 ]
               }
@@ -419,849 +760,190 @@
           "expression": 6378166.0
         }
       },
-      "equations": [],
-      "tests": []
-    }
-  },
-  "data_loaders": {
-    "GEOSFP_A1": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.A1.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T00:30:00Z",
-        "file_period": "P1D",
-        "frequency": "PT1H",
-        "records_per_file": 24,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center"
+      "subsystems": {
+        "GEOSFP_A1": {
+          "ref": "./geosfp_a1_loader.esm"
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
+        "GEOSFP_A3cld": {
+          "ref": "./geosfp_a3cld_loader.esm"
         },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ]
+        "GEOSFP_A3dyn": {
+          "ref": "./geosfp_a3dyn_loader.esm"
+        },
+        "GEOSFP_A3mstC": {
+          "ref": "./geosfp_a3mstc_loader.esm"
+        },
+        "GEOSFP_A3mstE": {
+          "ref": "./geosfp_a3mste_loader.esm"
+        },
+        "GEOSFP_I3": {
+          "ref": "./geosfp_i3_loader.esm"
         }
       },
-      "variables": {
+      "regrid": {
         "T2M": {
-          "file_variable": "T2M",
-          "units": "K",
-          "description": "Air temperature at 2m above displacement height. Time-averaged over 1-hour interval centered at record time."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "QV2M": {
-          "file_variable": "QV2M",
-          "units": "kg/kg",
-          "description": "Specific humidity at 2m above displacement height. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "U10M": {
-          "file_variable": "U10M",
-          "units": "m/s",
-          "description": "Eastward (zonal) wind at 10m above displacement height. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "V10M": {
-          "file_variable": "V10M",
-          "units": "m/s",
-          "description": "Northward (meridional) wind at 10m above displacement height. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PBLH": {
-          "file_variable": "PBLH",
-          "units": "m",
-          "description": "Planetary boundary layer height (m). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PRECTOT": {
-          "file_variable": "PRECTOT",
-          "units": "kg/m^2/s",
-          "description": "Total precipitation rate (large-scale + convective). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PRECANV": {
-          "file_variable": "PRECANV",
-          "units": "kg/m^2/s",
-          "description": "Anvil precipitation rate. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "SLP": {
-          "file_variable": "SLP",
-          "units": "Pa",
-          "description": "Sea-level pressure. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "TS": {
-          "file_variable": "TS",
-          "units": "K",
-          "description": "Surface skin temperature. Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "CLDTOT": {
-          "file_variable": "CLDTOT",
-          "units": "1",
-          "description": "Total cloud fraction (0–1). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "SWGDN": {
-          "file_variable": "SWGDN",
-          "units": "W/m^2",
-          "description": "Incident shortwave flux at ground (W m⁻²). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "TROPP_H": {
-          "file_variable": "TROPP_H",
-          "units": "Pa",
-          "description": "Tropopause pressure using the thermal definition (Pa). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "FRSEAICE": {
-          "file_variable": "FRSEAICE",
-          "units": "1",
-          "description": "Sea ice area fraction (0–1). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "GWETTOP": {
-          "file_variable": "GWETTOP",
-          "units": "1",
-          "description": "Topsoil wetness (dimensionless). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "LAI": {
-          "file_variable": "LAI",
-          "units": "1",
-          "description": "Leaf area index (m² m⁻²). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "USTAR": {
-          "file_variable": "USTAR",
-          "units": "m/s",
-          "description": "Surface friction velocity (m/s). Time-averaged over 1-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "Z0M": {
-          "file_variable": "Z0M",
-          "units": "m",
-          "description": "Surface roughness length for momentum (m). Time-averaged over 1-hour interval."
-        }
-      },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp"
-      },
-      "reference": {
-        "citation": "GEOS-FP A1 collection. NASA GMAO. AWS mirror: geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "meteorology",
-          "surface",
-          "1-hourly",
-          "2d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=A1)",
-        "filetype": "A1",
-        "domain": "0.25x0.3125",
-        "time_center_note": "A1 record times are centered: 00:30, 01:30, ..., 23:30 UTC (Delta_Time=010000). The start field records the center time of the first record on the first day of the archive."
-      }
-    },
-    "GEOSFP_A3cld": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.A3cld.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T01:30:00Z",
-        "file_period": "P1D",
-        "frequency": "PT3H",
-        "records_per_file": 8,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center",
-          "lev": "center"
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
-        },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ],
-          "lev": [
-            1.0,
-            72.0
-          ]
-        }
-      },
-      "variables": {
         "CLOUD": {
-          "file_variable": "CLOUD",
-          "units": "1",
-          "description": "3D cloud fraction (0–1). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "QI": {
-          "file_variable": "QI",
-          "units": "kg/kg",
-          "description": "Mass fraction of cloud ice water (kg/kg). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "QL": {
-          "file_variable": "QL",
-          "units": "kg/kg",
-          "description": "Mass fraction of cloud liquid water (kg/kg). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "OPTDEPTH": {
-          "file_variable": "OPTDEPTH",
-          "units": "1",
-          "description": "Grid-mean cloud optical depth at visible wavelengths. Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "TAUCLI": {
-          "file_variable": "TAUCLI",
-          "units": "1",
-          "description": "Optical thickness of convective ice cloud. Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "TAUCLW": {
-          "file_variable": "TAUCLW",
-          "units": "1",
-          "description": "Optical thickness of convective liquid cloud. Time-averaged over 3-hour interval."
-        }
-      },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp"
-      },
-      "reference": {
-        "citation": "GEOS-FP A3cld collection. NASA GMAO.",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "cloud",
-          "3-hourly",
-          "3d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=A3cld)",
-        "filetype": "A3cld",
-        "domain": "0.25x0.3125",
-        "time_center_note": "A3cld record times are centered: 01:30, 04:30, 07:30, 10:30, 13:30, 16:30, 19:30, 22:30 UTC (Delta_Time=030000)."
-      }
-    },
-    "GEOSFP_A3dyn": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.A3dyn.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T01:30:00Z",
-        "file_period": "P1D",
-        "frequency": "PT3H",
-        "records_per_file": 8,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center",
-          "lev": "center"
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
-        },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ],
-          "lev": [
-            1.0,
-            72.0
-          ]
-        }
-      },
-      "variables": {
         "U": {
-          "file_variable": "U",
-          "units": "m/s",
-          "description": "Eastward wind component (m/s). x-edge-staggered (defined at lon-face centres, i.e. lon edges; de-staggered by runtime). Time-averaged over 3-hour interval. Clamp extrapolation."
+          "method": "bspline",
+          "description": "GEOS-FP A3dyn staggered field on the x-edge (lon) of the Arakawa-C grid (geosfp_staggering(): (true,false,false)). Edge/face-staggered → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3)."
         },
         "V": {
-          "file_variable": "V",
-          "units": "m/s",
-          "description": "Northward wind component (m/s). y-edge-staggered (defined at lat-face centres; de-staggered by runtime). Time-averaged over 3-hour interval. Clamp extrapolation."
+          "method": "bspline",
+          "description": "GEOS-FP A3dyn staggered field on the y-edge (lat) of the Arakawa-C grid (geosfp_staggering(): (false,true,false)). Edge/face-staggered → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3)."
         },
         "OMEGA": {
-          "file_variable": "OMEGA",
-          "units": "Pa/s",
-          "description": "Vertical pressure velocity (Pa/s). z-edge-staggered (defined at lev-interface; de-staggered by runtime). Time-averaged over 3-hour interval. Zero-extrapolation (prevents spurious mass transport through surface/top boundary)."
+          "method": "bspline",
+          "description": "GEOS-FP A3dyn staggered field on the z-edge (lev interface) of the Arakawa-C grid (geosfp_staggering(): (false,false,true)). Edge/face-staggered → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3)."
         },
         "RH": {
-          "file_variable": "RH",
-          "units": "1",
-          "description": "Relative humidity with respect to liquid water (dimensionless, 0–1). Time-averaged over 3-hour interval. Clamp extrapolation."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "DTRAIN": {
-          "file_variable": "DTRAIN",
-          "units": "kg/m^2/s",
-          "description": "Cloud detrainment from convective updrafts (kg m⁻² s⁻¹). Time-averaged over 3-hour interval. Clamp extrapolation."
-        }
-      },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp",
-        "per_variable": {
-          "OMEGA": {
-            "extrapolation": "zero"
-          }
-        }
-      },
-      "reference": {
-        "citation": "GEOS-FP A3dyn collection. NASA GMAO.",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "dynamics",
-          "wind",
-          "3-hourly",
-          "3d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=A3dyn), geosfp_staggering()",
-        "filetype": "A3dyn",
-        "domain": "0.25x0.3125",
-        "staggering_note": "geosfp_staggering() returns (true,false,false) for U, (false,true,false) for V, (false,false,true) for OMEGA; all others (false,false,false). The runtime de-staggers to cell centres before spatiotemporal interpolation.",
-        "omega_extrapolation_note": "OMEGA uses zero extrapolation (extrapolate_type=0.0) vs Flat() for all others. This is encoded in per_variable.OMEGA.extrapolation='zero'.",
-        "time_center_note": "A3dyn record times are centered: 01:30, 04:30, ..., 22:30 UTC (Delta_Time=030000)."
-      }
-    },
-    "GEOSFP_A3mstC": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.A3mstC.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T01:30:00Z",
-        "file_period": "P1D",
-        "frequency": "PT3H",
-        "records_per_file": 8,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center",
-          "lev": "center"
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
-        },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ],
-          "lev": [
-            1.0,
-            72.0
-          ]
-        }
-      },
-      "variables": {
         "CMFMC": {
-          "file_variable": "CMFMC",
-          "units": "kg/m^2/s",
-          "description": "Upward moist convective mass flux (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "DQRCU": {
-          "file_variable": "DQRCU",
-          "units": "kg/kg/s",
-          "description": "Convective rain production (kg kg⁻¹ s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "DQRLSAN": {
-          "file_variable": "DQRLSAN",
-          "units": "kg/kg/s",
-          "description": "Large-scale rain and snow production (kg kg⁻¹ s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "REEEVAP": {
-          "file_variable": "REEEVAP",
-          "units": "kg/kg/s",
-          "description": "Evaporation of convective precipitation (kg kg⁻¹ s⁻¹). Time-averaged over 3-hour interval."
-        }
-      },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp"
-      },
-      "reference": {
-        "citation": "GEOS-FP A3mstC collection. NASA GMAO.",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "moisture",
-          "convection",
-          "3-hourly",
-          "3d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=A3mstC)",
-        "filetype": "A3mstC",
-        "domain": "0.25x0.3125",
-        "time_center_note": "A3mstC record times are centered: 01:30, 04:30, ..., 22:30 UTC (Delta_Time=030000)."
-      }
-    },
-    "GEOSFP_A3mstE": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.A3mstE.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T01:30:00Z",
-        "file_period": "P1D",
-        "frequency": "PT3H",
-        "records_per_file": 8,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center",
-          "lev": "center"
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
-        },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ],
-          "lev": [
-            1.0,
-            72.0
-          ]
-        }
-      },
-      "variables": {
         "CMFMC_OCE": {
-          "file_variable": "CMFMC_OCE",
-          "units": "kg/m^2/s",
-          "description": "Downward moist convective mass flux from ocean-type convection (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PFICU": {
-          "file_variable": "PFICU",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of ice mass from convection (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PFILSAN": {
-          "file_variable": "PFILSAN",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of ice mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PFLCU": {
-          "file_variable": "PFLCU",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of liquid mass from convection (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PFLLSAN": {
-          "file_variable": "PFLLSAN",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of liquid mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). Time-averaged over 3-hour interval."
-        }
-      },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp"
-      },
-      "reference": {
-        "citation": "GEOS-FP A3mstE collection. NASA GMAO.",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "moisture",
-          "precipitation",
-          "3-hourly",
-          "3d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=A3mstE)",
-        "filetype": "A3mstE",
-        "domain": "0.25x0.3125",
-        "time_center_note": "A3mstE record times are centered: 01:30, 04:30, ..., 22:30 UTC (Delta_Time=030000)."
-      }
-    },
-    "GEOSFP_I3": {
-      "kind": "grid",
-      "source": {
-        "url_template": "https://geos-chem.s3-us-west-2.amazonaws.com/GEOS_0.25x0.3125/GEOS_FP/{date:%Y}/{date:%m}/GEOSFP.{date:%Y%m%d}.I3.025x03125.nc"
-      },
-      "temporal": {
-        "start": "2013-01-01T00:00:00Z",
-        "file_period": "P1D",
-        "frequency": "PT3H",
-        "records_per_file": 8,
-        "time_variable": "time"
-      },
-      "spatial": {
-        "crs": "+proj=longlat +datum=WGS84 +no_defs",
-        "grid_type": "latlon",
-        "staggering": {
-          "lon": "center",
-          "lat": "center",
-          "lev": "center"
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
-        "resolution": {
-          "lon": 0.3125,
-          "lat": 0.25
-        },
-        "extent": {
-          "lon": [
-            -180.0,
-            180.0
-          ],
-          "lat": [
-            -90.0,
-            90.0
-          ],
-          "lev": [
-            1.0,
-            72.0
-          ]
-        }
-      },
-      "variables": {
         "T": {
-          "file_variable": "T",
-          "units": "K",
-          "description": "Air temperature (K). 3-hourly instantaneous 3D field at hybrid pressure levels. Clamp extrapolation."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "QV": {
-          "file_variable": "QV",
-          "units": "kg/kg",
-          "description": "Specific humidity of water vapor (kg/kg). 3-hourly instantaneous 3D field. Clamp extrapolation."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         },
         "PS": {
-          "file_variable": "PS",
-          "units": "Pa",
-          "description": "Surface pressure (Pa). 3-hourly instantaneous 2D field (lat×lon only, no lev dimension). Used for hybrid pressure calculation P = Ap[lev] + Bp[lev]*PS. Clamp extrapolation."
+          "method": "conservative",
+          "description": "Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
         }
       },
-      "regridding": {
-        "fill_value": 0.0,
-        "extrapolation": "clamp"
-      },
-      "reference": {
-        "citation": "GEOS-FP I3 collection. NASA GMAO.",
-        "url": "http://geoschemdata.wustl.edu/ExtData/"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "meteorology",
-          "instantaneous",
-          "3-hourly",
-          "3d"
-        ],
-        "earthscidata_source": "src/geosfp.jl::GEOSFPFileSet (filetype=I3)",
-        "filetype": "I3",
-        "domain": "0.25x0.3125",
-        "time_instant_note": "I3 records are instantaneous (not time-averaged): 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00 UTC (Delta_Time=030000, Start_Time=00:00:00.0). PS is a 2D variable with lon and lat dimensions but no lev dimension."
-      }
-    },
-    "GEOSFP_hybrid_coefs": {
-      "kind": "lookup",
-      "coordinate": {
-        "lev": {
-          "values": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17,
-            18,
-            19,
-            20,
-            21,
-            22,
-            23,
-            24,
-            25,
-            26,
-            27,
-            28,
-            29,
-            30,
-            31,
-            32,
-            33,
-            34,
-            35,
-            36,
-            37,
-            38,
-            39,
-            40,
-            41,
-            42,
-            43,
-            44,
-            45,
-            46,
-            47,
-            48,
-            49,
-            50,
-            51,
-            52,
-            53,
-            54,
-            55,
-            56,
-            57,
-            58,
-            59,
-            60,
-            61,
-            62,
-            63,
-            64,
-            65,
-            66,
-            67,
-            68,
-            69,
-            70,
-            71,
-            72,
-            73
-          ],
-          "units": "1",
-          "description": "Hybrid vertical level index (1-based). Level 1 = bottom interface (P≈PS); level 73 = top interface (P≈1 Pa)."
-        }
-      },
-      "variables": {
-        "Ap": {
-          "values": [
-            0.0,
-            4.804826,
-            659.3752,
-            1313.48,
-            1961.311,
-            2609.201,
-            3257.081,
-            3898.201,
-            4533.901,
-            5169.611,
-            5805.321,
-            6436.264,
-            7062.198,
-            7883.422,
-            8909.992,
-            9936.521,
-            10918.17,
-            11895.86,
-            12869.59,
-            14291.0,
-            15626.0,
-            16960.9,
-            18161.9,
-            19309.7,
-            20325.9,
-            21215.0,
-            21877.6,
-            22389.8,
-            22436.3,
-            21686.5,
-            20119.2,
-            17693.0,
-            15039.3,
-            12783.7,
-            10866.3,
-            9236.572,
-            7851.231,
-            6660.341,
-            5638.791,
-            4764.391,
-            4017.541,
-            3381.001,
-            2836.781,
-            2373.041,
-            1979.16,
-            1645.71,
-            1364.34,
-            1127.69,
-            929.2942,
-            761.9842,
-            621.6801,
-            504.6801,
-            407.6571,
-            327.6431,
-            262.0211,
-            208.497,
-            165.079,
-            130.051,
-            101.944,
-            79.51341,
-            61.67791,
-            47.58061,
-            36.50411,
-            27.85261,
-            21.1349,
-            15.9495,
-            11.9703,
-            8.934502,
-            6.600001,
-            4.758501,
-            3.27,
-            2.0,
-            1.0
-          ],
-          "units": "Pa",
-          "description": "GEOS-FP hybrid sigma-pressure A coefficient at interface level lev (Pa). P = Ap[lev] + Bp[lev]*PS. Values are from the GEOS-Chem 72-level standard grid (https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids). Embedded from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl (const Ap) multiplied by 100 (hPa→Pa)."
-        },
-        "Bp": {
-          "values": [
-            1.0,
-            0.984952,
-            0.963406,
-            0.941865,
-            0.920387,
-            0.898908,
-            0.877429,
-            0.856018,
-            0.8346609,
-            0.8133039,
-            0.7919469,
-            0.7706375,
-            0.7493782,
-            0.721166,
-            0.6858999,
-            0.6506349,
-            0.6158184,
-            0.5810415,
-            0.5463042,
-            0.4945902,
-            0.4437402,
-            0.3928911,
-            0.3433811,
-            0.2944031,
-            0.2467411,
-            0.2003501,
-            0.1562241,
-            0.1136021,
-            0.06372006,
-            0.02801004,
-            0.006960025,
-            8.175413e-09,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0
-          ],
-          "units": "1",
-          "description": "GEOS-FP hybrid sigma-pressure B coefficient at interface level lev (dimensionless). P = Ap[lev] + Bp[lev]*PS. Represents the surface pressure weighting: Bp[1]=1 (surface), Bp[73]=0 (top of atmosphere). Embedded from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl (const Bp)."
-        }
-      },
-      "interpolation": "linear",
-      "reference": {
-        "citation": "GEOS-Chem 72-level vertical grid parameters. Harvard seas wiki. https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids",
-        "url": "https://wiki.seas.harvard.edu/geos-chem/index.php/GEOS-Chem_vertical_grids"
-      },
-      "metadata": {
-        "tags": [
-          "geos_fp",
-          "hybrid_pressure",
-          "vertical_coordinate",
-          "constant"
-        ],
-        "earthscidata_source": "src/geosfp.jl::`const Ap` and `const Bp` (DataInterpolations.LinearInterpolation, 73 values each, 1:73 indexing)",
-        "validation": "P(lev=1) = Ap[1] + Bp[1]*PS = 0.0 + 1.0*PS = PS (surface pressure). P(lev=73) = Ap[73] + Bp[73]*PS = 1.0 + 0.0*PS = 1.0 Pa (top of atmosphere). Test: P([1,2,3,71,72,73]) = [102340.38, 101572.77, 100805.17, 2.0, 1.5, 1.0] Pa at PS≈102340 Pa.",
-        "derivative_note": "Derivatives of Ap and Bp with respect to lev (needed for δPδlev) are blocked by gt-6ohw. For the linear interpolation with unit spacing, d(Ap)/d(lev) = Ap[ceil(lev)] - Ap[floor(lev)] on integer segments. See reference.notes in GEOSFP model for the full δPδlev expression."
-      }
+      "equations": [],
+      "tests": []
     }
   }
 }
