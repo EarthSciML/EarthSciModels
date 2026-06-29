@@ -70,19 +70,9 @@
       },
       "variables": {
         "elevation": {
-          "file_variable": "elevation",
+          "file_variable": "Band1",
           "units": "m",
-          "description": "Terrain elevation above WGS84 ellipsoid (m). Fetched directly from the USGS 3DEP ImageServer GeoTIFF response. No-data pixels outside US territory are NaN."
-        },
-        "dzdx": {
-          "file_variable": "elevation",
-          "units": "1",
-          "description": "East-west terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdx[i,j] = Δelev_x / (Δlon * _LON2M * cos(lat[j])) where _LON2M = 40075.0e3 / (2π) ≈ 6378137 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdx) in EarthSciData.jl. Shares file_variable='elevation' because it is computed from the same downloaded GeoTIFF."
-        },
-        "dzdy": {
-          "file_variable": "elevation",
-          "units": "1",
-          "description": "North-south terrain slope (m/m, dimensionless), derived at runtime from the elevation field. dzdy[i,j] = Δelev_y / (Δlat * _LAT2M) where _LAT2M = 111.32e3 * (180/π) ≈ 6367449 m/rad. Central differences for interior grid points; forward/backward differences at boundaries. Corresponds to USGS3DEPSlopeFileSet(fs, :dzdy) in EarthSciData.jl. Shares file_variable='elevation' because it is computed from the same downloaded GeoTIFF."
+          "description": "Terrain elevation above WGS84 ellipsoid (m). Fetched directly from the USGS 3DEP ImageServer GeoTIFF response — a single-band raster, so the GeoTIFF reader keys it 'Band1'. No-data pixels outside US territory are NaN. The slope components dzdx/dzdy are NOT loaded here: this loader is pure I/O, and the slopes are derived declaratively from this elevation field by grad equations in the regridding model (usgs3dep.esm)."
         }
       },
       "reference": {
@@ -97,7 +87,7 @@
           "lon": 0.00009259,
           "lat": 0.00009259
         },
-        "native_staggering": "Cell-centered (lon 'center', lat 'center') — 3DEP is a regular non-staggered raster. The regridding model regrids elevation/dzdx/dzdy conservatively (RFC §5.2; bead esm-3nc.4 cell-centered → conservative); see usgs3dep.esm regrid.",
+        "native_staggering": "Cell-centered (lon 'center', lat 'center') — 3DEP is a regular non-staggered raster. The regridding model regrids elevation conservatively (RFC §5.2; bead esm-3nc.4 cell-centered → conservative); see usgs3dep.esm regrid. The slopes dzdx/dzdy are model-derived (grad of the regridded elevation), not loaded.",
         "native_extent": {
           "lon": [-180.0, -60.0],
           "lat": [17.0, 72.0]
@@ -108,7 +98,7 @@
         "url_defaults": {"size_cap": 1000},
         "max_request_pixels": "1000x1000",
         "file_format": "GeoTIFF (F32 pixel type)",
-        "slope_derivation": "runtime finite-difference on elevation grid; _LON2M = 40075.0e3 / (2*pi) m/rad; _LAT2M = 111.32e3 * (180/pi) m/rad; dzdx and dzdy use file_variable='elevation' because they are computed from the same downloaded GeoTIFF",
+        "slope_derivation": "Slope components dzdx/dzdy are derived declaratively in the regridding model usgs3dep.esm as grad(elevation, x|y) over the regridded elevation field — they are NOT loaded here. This loader exposes only the single-band elevation GeoTIFF (GDAL band 'Band1'). On a projected/metric target grid the gradient is already m/m, so no lon/lat metre correction is needed.",
         "static_note": "No temporal block: kind='static' and the absence of `temporal` seed CONST cadence (ess-v9a.5). The runtime fetches the GeoTIFF once per simulation domain. Upstream DataFrequencyInfo uses two bracketing time points solely to satisfy the interp_unsafe interface; no time interpolation occurs."
       }
     }

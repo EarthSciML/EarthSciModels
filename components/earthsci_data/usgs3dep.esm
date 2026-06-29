@@ -2,7 +2,7 @@
   "esm": "0.7.0",
   "metadata": {
     "name": "USGS3DEP",
-    "description": "USGS 3DEP regridding model — the coupler half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes USGS 3D Elevation Program terrain elevation and the derived slope components (dzdx, dzdy) on the simulation's target grid for terrain coupling in EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/usgs3dep_loader.esm) as the subsystem `raw` via {\"ref\": \"./usgs3dep_loader.esm\"}. Loader fields are referenced as raw.<var> (raw.elevation, raw.dzdx, raw.dzdy) and re-exposed as model-level observed variables USGS3DEP.elevation/.dzdx/.dzdy (Pattern B), preserving the public symbol paths for downstream consumers.\n  2. Reprojection: 3DEP's native grid is geographic (longlat/WGS84, EPSG:4326), so the coordinate transform is the identity reproject (ESD reprojection/longlat.esm, esd-47z.1) — selected by convention from the loader's grid.crs.projection = 'longlat'.\n  3. Regridding (per variable, RFC §5.2): the cell-centered scalars elevation, dzdx, dzdy → conservative (area-weighted, mass-conserving) regridding, per the esm-3nc.4 migration spec (cell-centered → conservative). Declared in the `regrid` block.\n\nThis is a STATIC (time-invariant) dataset: the loader carries no `temporal` block (CONST cadence). The elevation GeoTIFF is fetched once per simulation domain; slope components are derived from it at runtime by finite differences.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326 (USGS3DEP constructor, esm-tibb); split into pure loader + regridding model by esm-3nc.4.",
+    "description": "USGS 3DEP regridding model — the coupler half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes USGS 3D Elevation Program terrain elevation and the derived slope components (dzdx, dzdy) on the simulation's target grid for terrain coupling in EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/usgs3dep_loader.esm) as the subsystem `raw` via {\"ref\": \"./usgs3dep_loader.esm\"}. The single loader field raw.elevation is re-exposed as the model observed variable USGS3DEP.elevation (Pattern B); the slope components USGS3DEP.dzdx/.dzdy are computed in THIS model as grad equations over elevation (dzdx = grad(elevation, x), dzdy = grad(elevation, y)) — they are NOT loaded. This preserves the public symbol paths for downstream consumers while keeping the loader pure I/O and the derivation declarative.\n  2. Reprojection: 3DEP's native grid is geographic (longlat/WGS84, EPSG:4326), so the coordinate transform is the identity reproject (ESD reprojection/longlat.esm, esd-47z.1) — selected by convention from the loader's grid.crs.projection = 'longlat'.\n  3. Regridding (per variable, RFC §5.2): the cell-centered scalar elevation → conservative (area-weighted, mass-conserving) regridding, per the esm-3nc.4 migration spec (cell-centered → conservative); the derived slopes dzdx/dzdy are computed (grad) from the already-regridded elevation, so they carry no regrid entry. Declared in the `regrid` block.\n\nThis is a STATIC (time-invariant) dataset: the loader carries no `temporal` block (CONST cadence). The elevation GeoTIFF is fetched once per simulation domain; slope components are derived from it at runtime by finite differences.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326 (USGS3DEP constructor, esm-tibb); split into pure loader + regridding model by esm-3nc.4.",
     "tags": [
       "earthsci_data",
       "elevation",
@@ -60,14 +60,14 @@
         "dzdx": {
           "type": "observed",
           "units": "1",
-          "description": "East-west terrain slope at the model grid point (dimensionless, dz/dx in m/m). Sourced from the loader field raw.dzdx (derived at runtime from the 3DEP elevation field by finite differences with metric correction for latitude: dzdx = Δelev / (Δlon * _LON2M * cos(lat)), _LON2M ≈ 6378137 m/rad) and conservatively regridded. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdx).",
-          "expression": "raw.dzdx"
+          "description": "East-west terrain slope at the model grid point (dimensionless, dz/dx in m/m), computed declaratively as the x-gradient of the regridded elevation field: dzdx = grad(elevation, x). On a projected/metric target grid (x in metres) this is already m/m, so no lon→metre correction is needed (unlike the upstream lon/lat-grid derivation). Replaces the former loader field raw.dzdx — a terrain slope is a model-derived quantity, not a loaded one (loaders are pure I/O).",
+          "expression": {"op": "grad", "args": ["elevation"], "dim": "x"}
         },
         "dzdy": {
           "type": "observed",
           "units": "1",
-          "description": "North-south terrain slope at the model grid point (dimensionless, dz/dy in m/m). Sourced from the loader field raw.dzdy (derived at runtime from the 3DEP elevation field by finite differences: dzdy = Δelev / (Δlat * _LAT2M), _LAT2M ≈ 6367449 m/rad) and conservatively regridded. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPSlopeFileSet(fs, :dzdy).",
-          "expression": "raw.dzdy"
+          "description": "North-south terrain slope at the model grid point (dimensionless, dz/dy in m/m), computed declaratively as the y-gradient of the regridded elevation field: dzdy = grad(elevation, y). On a projected/metric target grid (y in metres) this is already m/m. Replaces the former loader field raw.dzdy — a terrain slope is a model-derived quantity, not a loaded one.",
+          "expression": {"op": "grad", "args": ["elevation"], "dim": "y"}
         }
       },
       "subsystems": {
@@ -78,15 +78,7 @@
       "regrid": {
         "elevation": {
           "method": "conservative",
-          "description": "Terrain elevation (m). Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm), per the esm-3nc.4 migration spec (cell-centered → conservative)."
-        },
-        "dzdx": {
-          "method": "conservative",
-          "description": "East-west terrain slope (m/m). Cell-centered scalar (runtime-derived from elevation) → conservative regridder (esm-3nc.4 cell-centered → conservative)."
-        },
-        "dzdy": {
-          "method": "conservative",
-          "description": "North-south terrain slope (m/m). Cell-centered scalar (runtime-derived from elevation) → conservative regridder (esm-3nc.4 cell-centered → conservative)."
+          "description": "Terrain elevation (m). Cell-centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm), per the esm-3nc.4 migration spec (cell-centered → conservative). Only elevation is regridded: the slope components dzdx/dzdy are computed (grad) from the already-regridded elevation on the target grid, so they carry no separate regrid entry."
         }
       },
       "equations": [],
