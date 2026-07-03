@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import resource
 import subprocess
 import sys
@@ -280,6 +281,47 @@ def _seed_denom_ic(
     return out
 
 
+def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
+    """Evaluate a §6.6.5 field assertion (``reduce`` / ``coords``) from a
+    ``SimulationResult``, reusing the official toolkit primitives so the gate
+    and ``run_pde_tests`` agree byte-for-byte. Collapses the spatial field of
+    ``a.variable`` to a scalar: ``reduce`` applies the named reduction (mean,
+    L2_error, …) over every cell (optionally against an analytic ``reference``);
+    ``coords`` picks one grid cell.
+    """
+    import numpy as np
+    from earthsci_toolkit.pde_inline_tests import (
+        evaluate_cellwise, field_reduce, state_cells,
+    )
+
+    if a.coords is not None and a.reduce is not None:
+        raise RuntimeError("`coords` and `reduce` are mutually exclusive")
+    var_map = {str(v): i for i, v in enumerate(res.vars)}
+    cells = state_cells(var_map, a.variable, model_name)
+    if not cells:
+        raise RuntimeError(
+            f"array field '{a.variable}' has no cells in simulate() output")
+    cell_tuples = [c for c, _ in cells]
+    field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
+    if a.coords is not None:
+        from earthsci_toolkit.pde_inline_tests import _coords_cell, _variable_shape
+        shape = _variable_shape(eval_ef, model_name, str(a.variable))
+        target = _coords_cell(a.coords, shape, eval_ef.index_sets)
+        try:
+            pos = cell_tuples.index(target)
+        except ValueError:
+            raise RuntimeError(
+                f"no grid sample at cell {target} of '{a.variable}'") from None
+        return float(field[pos])
+    ref = None
+    if a.reference is not None:
+        ref = evaluate_cellwise(
+            a.reference, cell_tuples,
+            index_sets=(eval_ef.index_sets if eval_ef is not None else None),
+            params=(getattr(insp, "params", None) or {}))
+    return field_reduce(a.reduce, field, reference=ref)
+
+
 def _run_tests_for_container(
     file_path: str,
     container_kind: str,
@@ -288,23 +330,57 @@ def _run_tests_for_container(
     tests,
     flat,
     rows: List[AssertionRow],
+    ef=None,
 ) -> None:
     if not tests:
         return
-    from earthsci_toolkit import simulate
+    from earthsci_toolkit import flatten, simulate
+    from earthsci_toolkit.pde_inline_tests import (
+        BuildInspection, _ephemeral_injected_file,
+    )
     import numpy as np
 
     sim_vars: List[str] = []
     cse_flag = _cse_for_file(file_path)
     method = _method_for_file(file_path)
+    base_dir = os.path.dirname(os.path.abspath(file_path))
     for t in tests:
         t_start = time.time()
+        # esm-spec §9.7.10 form C: a test that injects a discretization runs
+        # against an EPHEMERAL instance of the enclosing component with the
+        # test's imports appended to its scope (its spatial `D` lowered for this
+        # test only); the persisted component is untouched. A test with no
+        # injection runs against the shared flattened system. This is the one
+        # inline runner for both ODE (scalar) and PDE (array) components.
+        run_flat = flat
+        eval_ef = ef
+        if getattr(t, "expression_template_imports", None) and ef is not None:
+            try:
+                inj_ef = _ephemeral_injected_file(
+                    ef, file_path, container_name,
+                    t.expression_template_imports, base_dir,
+                )
+                run_flat = flatten(inj_ef)
+                eval_ef = inj_ef
+            except Exception as err:  # noqa: BLE001
+                for i, a in enumerate(t.assertions):
+                    rows.append(AssertionRow(
+                        file=file_path, container_kind=container_kind,
+                        container_name=container_name, test_id=t.id,
+                        assertion_idx=i, variable=a.variable, time=a.time,
+                        expected=a.expected, actual=None, status="ERROR",
+                        message=(f"discretization injection failed: "
+                                 f"{type(err).__name__}: {err}"),
+                        duration_s=time.time() - t_start,
+                    ))
+                continue
+        insp = BuildInspection()
         try:
             ic = dict(t.initial_conditions or {})
-            ic = _seed_denom_ic(ic, flat, container_name)
+            ic = _seed_denom_ic(ic, run_flat, container_name)
             params = dict(t.parameter_overrides or {})
             res = simulate(
-                flat,
+                run_flat,
                 tspan=(t.time_span.start, t.time_span.end),
                 parameters=params,
                 initial_conditions=ic,
@@ -312,6 +388,7 @@ def _run_tests_for_container(
                 rtol=1e-10,
                 atol=1e-12,
                 cse=cse_flag,
+                inspect=insp,
             )
         except Exception as err:  # noqa: BLE001
             for i, a in enumerate(t.assertions):
@@ -354,29 +431,35 @@ def _run_tests_for_container(
             rtol, atol = _resolve_tolerance(
                 container_tolerance, t.tolerance, a.tolerance
             )
-            idx = _resolve_var_index(a.variable, sim_vars, container_name)
-            if idx is None:
-                rows.append(AssertionRow(
-                    file=file_path,
-                    container_kind=container_kind,
-                    container_name=container_name,
-                    test_id=t.id,
-                    assertion_idx=i,
-                    variable=a.variable,
-                    time=a.time,
-                    expected=a.expected,
-                    actual=None,
-                    status="ERROR",
-                    message=(
-                        f"variable not found in simulate() output "
-                        f"(have {len(sim_vars)} vars; sample: "
-                        f"{sim_vars[:3]})"
-                    ),
-                    duration_s=time.time() - t_start,
-                ))
-                continue
             try:
-                actual = float(np.interp(a.time, res.t, res.y[idx]))
+                if getattr(a, "reduce", None) or getattr(a, "coords", None):
+                    # §6.6.5 field assertion (array/PDE): collapse the spatial
+                    # field to a scalar via the shared toolkit primitives.
+                    actual = _sample_pde_assertion(
+                        a, res, container_name, eval_ef, insp)
+                else:
+                    idx = _resolve_var_index(a.variable, sim_vars, container_name)
+                    if idx is None:
+                        rows.append(AssertionRow(
+                            file=file_path,
+                            container_kind=container_kind,
+                            container_name=container_name,
+                            test_id=t.id,
+                            assertion_idx=i,
+                            variable=a.variable,
+                            time=a.time,
+                            expected=a.expected,
+                            actual=None,
+                            status="ERROR",
+                            message=(
+                                f"variable not found in simulate() output "
+                                f"(have {len(sim_vars)} vars; sample: "
+                                f"{sim_vars[:3]})"
+                            ),
+                            duration_s=time.time() - t_start,
+                        ))
+                        continue
+                    actual = float(np.interp(a.time, res.t, res.y[idx]))
             except Exception as err:  # noqa: BLE001
                 rows.append(AssertionRow(
                     file=file_path,
@@ -389,7 +472,7 @@ def _run_tests_for_container(
                     expected=a.expected,
                     actual=None,
                     status="ERROR",
-                    message=f"sample failed: {err}",
+                    message=f"sample failed: {type(err).__name__}: {err}",
                     duration_s=time.time() - t_start,
                 ))
                 continue
@@ -477,9 +560,13 @@ def run_worker(file_path: str) -> int:
         _emit_worker_results(rows)
         return 1
 
+    # One inline runner for both ODE (scalar) and PDE (array/form-C) tests:
+    # `_run_tests_for_container` drives the official `simulate` engine, applying
+    # per-test discretization injection and `reduce`/`coords` field collapse when
+    # present, and plain scalar sampling otherwise.
     for kind, name, tol, tests in containers:
         _run_tests_for_container(
-            file_path, kind, name, tol, tests, flat, rows,
+            file_path, kind, name, tol, tests, flat, rows, ef=ef,
         )
 
     _emit_worker_results(rows)
