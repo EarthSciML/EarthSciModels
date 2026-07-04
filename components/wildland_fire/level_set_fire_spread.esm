@@ -1,15 +1,17 @@
 {
-    "esm": "0.7.0",
+    "esm": "0.8.0",
     "metadata": {
         "name": "LevelSetFireSpread",
-        "description": "Level-set fire front propagation PDE: Hamilton-Jacobi equation ∂ψ/∂t + S(n̂)|∇ψ| = 0, where S(n̂) is the Rothermel/Mandel (2011) direction-dependent spread rate projected onto the fire-front normal. Migrated from WildlandFire.jl src/level_set_fire_spread.jl:73. MIGRATION STATUS: structure-only (no inline tests — blocked by gt-vzwk: Python CI runner does not support PDE simulation; Julia runner required for full test coverage). The grad ops here assume Cartesian (x,y in meters) coordinates; geographic-coordinate (lon/lat) usage requires EarthSciMLBase.partialderivative_transforms metric-tensor scaling not yet expressible in ESM (other:P3-A-metric-tensor-coord-transforms gap).",
+        "description": "Level-set fire front propagation PDE: Hamilton-Jacobi equation ∂ψ/∂t + S(n̂)|∇ψ| = 0, where S(n̂) is the Rothermel/Mandel (2011) direction-dependent spread rate projected onto the fire-front normal. Migrated from WildlandFire.jl src/level_set_fire_spread.jl:73. v0.8.0: a DISCRETIZATION-AGNOSTIC library PDE leaf. (1) Spatial derivatives are bare `D` ops (op:D, wrt:x / wrt:y) instead of the `grad` sugar. (2) This leaf imports NO discretization of its own — the scheme is chosen by the ASSEMBLER that mounts this component, which carries the rule imports on its model-ref edge (esm-spec §9.7.10 form A: the edge's `expression_template_imports` register into this component's own template scope). The reference assembler (wildlandfire.esm/level_set_hj_2d.esm) mounts the first-order Godunov (Rouy-Tourin / Osher-Sethian) rule godunov_norm_D2_periodic, which fires by compound match on the gradient-magnitude term sqrt(D(psi,x)² + D(psi,y)²), plus the central rules central_D1x/D1y for the individual ∂ψ/∂x, ∂ψ/∂y in the wind/slope normal projections — but any grid + scheme satisfying the same D-op / grid-geometry contract composes here unchanged. (3) The direction-dependent right-hand side is authored as READABLE INTERMEDIATE array-shaped observed fields over the [x,y] index sets — psi_x, psi_y (central ∂ψ), grad_mag (Godunov |∇ψ|), grad_safe, U_n, tanphi_n (wind/slope normal projections), phi_W, phi_S, and S_n (the spread rate) — so the state equation is simply D(psi,t) = −S_n·grad_mag. Both toolkits evaluate these per cell: the Julia evaluator folds the elementwise ones into the state RHS (leaving the producer stencils psi_x/grad_mag for its index beta-reduction), and the Rust array runtime materializes each as a companion buffer in dependency order — identical numerics either way (front radii match to 4 places at NX=NY=32). The producer observeds (psi_x, psi_y, grad_mag) carry the bare D ops the mounted discretization lowers; grad_mag's exponent is the integer 2 on the bare D ops so the Godunov compound matches. Only the scalar grid observeds (dx, dy) remain scalar. (4) Grid geometry (index sets x,y; spacing dx=Lx/NX, dy=Ly/NY; extent x0,y0) is the consumer-supplied contract of grids/cartesian_uniform_2d/grid.esm (metaparameters NX,NY bound at load; extent Lx,Ly parameters), and BCs come from the mounted discretization. The initial perimeter is supplied by the ASSEMBLER (a §11.4.1 dedicated IC model), not baked here. The D ops assume Cartesian (x,y in meters) coordinates; geographic (lon/lat) usage needs metric-tensor scaling not yet expressible in ESM (other:P3-A-metric-tensor-coord-transforms gap).",
         "tags": [
             "wildland_fire",
             "level_set",
             "pde",
             "fire_spread",
             "mandel2011",
-            "munoz-esparza2018"
+            "munoz-esparza2018",
+            "grid:cartesian_uniform_2d",
+            "op:D"
         ],
         "created": "2026-05-21T00:00:00Z",
         "authors": [
@@ -22,46 +24,160 @@
             },
             {
                 "citation": "Muñoz-Esparza, D., Kosović, B., Jiménez, P.A., and Coen, J.L. (2018). An accurate fire-spread algorithm in the Weather Research and Forecasting model using the level-set method. J. Adv. Model. Earth Syst., 10, 908–926. doi:10.1002/2017MS001108 — Eq. 10 (normal-projection approach for wind/slope contribution)."
+            },
+            {
+                "citation": "Osher, S., & Sethian, J. A. (1988). Fronts propagating with curvature-dependent speed: Algorithms based on Hamilton-Jacobi formulations. J. Comput. Phys. 79(1), 12-49. doi:10.1016/0021-9991(88)90002-2 — the Godunov |∇ψ| upwind construction used by the mounted discretization."
             }
         ]
     },
-    "domains": {
-        "fire_domain": {
-            "independent_variable": "t",
-            "spatial": {
-                "x": { "min": 0.0, "max": 500.0, "units": "m", "grid_spacing": 5.0 },
-                "y": { "min": 0.0, "max": 500.0, "units": "m", "grid_spacing": 5.0 }
-            },
-            "element_type": "Float64"
+    "metaparameters": {
+        "NX": {
+            "type": "integer",
+            "default": 64,
+            "description": "Number of cells along x."
+        },
+        "NY": {
+            "type": "integer",
+            "default": 64,
+            "description": "Number of cells along y."
         }
     },
     "models": {
         "LevelSetFireSpread": {
-            "domain": "fire_domain",
-            "system_kind": "pde",
             "reference": {
-                "notes": "source_ref: WildlandFire.jl:src/level_set_fire_spread.jl:73\n\nThe fire front is tracked implicitly as the zero contour of the level-set function ψ(t,x,y), where ψ ≤ 0 is the burning region and ψ > 0 is unburned fuel. The PDE is the Hamilton-Jacobi equation (Mandel 2011, Eq. 9):\n\n  ∂ψ/∂t + S(n̂)|∇ψ| = 0   →   ∂ψ/∂t = −S(n̂)|∇ψ|\n\nwhere n̂ = ∇ψ/|∇ψ| is the inward fire-front normal and S(n̂) is the direction-dependent spread rate. The spread rate follows Mandel (2011) Eq. 2 / Muñoz-Esparza (2018) Eq. 10:\n\n  S(n̂) = R_0 · (1 + φ_W(n̂) + φ_S(n̂))\n  φ_W(n̂) = C_wind · (max(0, U_n)/U_ref)^B_wind · max(β_ratio, ε)^(−E_wind)\n  φ_S(n̂) = φ_s_coeff · max(0, tanφ_n)²\n  U_n    = (u_x·ψ_x + u_y·ψ_y) / |∇ψ|_safe   (normal wind speed)\n  tanφ_n = (dzdx·ψ_x + dzdy·ψ_y) / |∇ψ|_safe  (normal slope)\n  |∇ψ|_safe = |∇ψ| + 1e-10   (regularized to avoid division by zero)\n\nWhere:\n  U_ref = 0.3048/60 = 0.00508 m/s  (1 ft/min — Rothermel calibration unit)\n\nBLOCKING GAPS:\n  gt-vzwk (PDE-tests): The Python CI runner (earthsci_toolkit.simulate) explicitly\n    rejects PDE systems (UnsupportedDimensionalityError for spatial IVs). No inline\n    tests are included; the minimum-bar load() gate passes. A Julia PDE runner\n    (EarthSciSerialization + ModelingToolkit + MethodOfLines WENO) is required for\n    numerical validation.\n  other:P3-A-metric-tensor-coord-transforms: The upstream Julia implementation uses\n    EarthSciMLBase.partialderivatives(domain) which applies metric-tensor scaling\n    for non-Cartesian coordinate systems (e.g. lon/lat → meters). This ESM file\n    uses bare grad(psi, x) / grad(psi, y) ops which are correct only for Cartesian\n    (x,y in meters) domains. Geographic-coordinate support requires a metric-tensor\n    extension to the ESM grad operator not yet defined in the schema.\n\nEQUATION DECOMPOSITION into observed intermediate fields:\n  psi_x     = ∂ψ/∂x\n  psi_y     = ∂ψ/∂y\n  grad_mag  = |∇ψ| = sqrt(psi_x² + psi_y²)\n  safe_mag  = |∇ψ| + 1e-10   (regularized gradient magnitude)\n  U_n       = wind projected onto fire-front normal\n  tan_phi_n = terrain slope projected onto fire-front normal\n  phi_W     = wind factor  (Mandel 2011 Eq. 2 first term)\n  phi_S     = slope factor (Mandel 2011 Eq. 2 second term)\n  S_n       = total spread rate = R_0·(1 + phi_W + phi_S)\n  Equation  = D(psi, t) = −S_n · grad_mag"
+                "notes": "source_ref: WildlandFire.jl:src/level_set_fire_spread.jl:73. The fire front is tracked implicitly as the zero contour of ψ(t,x,y): ψ ≤ 0 burning, ψ > 0 unburned fuel. PDE (Mandel 2011, Eq. 9): ∂ψ/∂t = −S(n̂)|∇ψ|, with n̂ = ∇ψ/|∇ψ| the inward normal and S(n̂) = R_0·(1 + φ_W + φ_S) the direction-dependent spread rate (Mandel 2011 Eq. 2 / Muñoz-Esparza 2018 Eq. 10): φ_W = C_wind·(max(0,U_n)/U_ref)^B_wind·max(β_ratio,ε)^(−E_wind), φ_S = φ_s_coeff·max(0,tanφ_n)², U_n = (u·∇ψ)/|∇ψ|_safe, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe, |∇ψ|_safe = |∇ψ| + 1e-10, U_ref = 0.00508 m/s (1 ft/min). S(n̂) and |∇ψ| are decomposed into named array-shaped observed fields over [x,y]: grad_mag = |∇ψ| as the Godunov-lowered compound sqrt(D(psi,x)² + D(psi,y)²) (exponent MUST be the integer 2 to match the rule); psi_x, psi_y = the central-lowered bare D(psi,x)/D(psi,y) used by U_n/tanφ_n; grad_safe = grad_mag + 1e-10; and U_n, tanφ_n, φ_W, φ_S, S_n as above. The state equation is then D(psi,t) = −S_n·grad_mag. Array-shaped observeds ARE now supported by both evaluators (Julia elementwise fold + producer index beta-reduction; Rust dependency-ordered companion buffers), so the physics reads as authored rather than inlined into one expression."
             },
             "variables": {
                 "psi": {
                     "type": "state",
                     "units": "m",
-                    "shape": ["x", "y"],
-                    "description": "Level-set function. Fire front at ψ=0; ψ<0 is burning region, ψ>0 is unburned fuel. Initialized as signed distance to the initial fire perimeter."
+                    "shape": [
+                        "x",
+                        "y"
+                    ],
+                    "description": "Level-set function over the 2-D [x,y] index sets. Fire front at ψ=0; ψ<0 burning, ψ>0 unburned. Initialized as signed distance to the initial fire perimeter."
+                },
+                "R_0": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 1.0,
+                    "description": "No-wind no-slope rate of spread R_0 (m/s), the isotropic base spread rate. Derived from a Rothermel (1972) fuel model; default 1.0."
+                },
+                "C_wind": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Wind coefficient C in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 1.0."
+                },
+                "B_wind": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Wind exponent B in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5."
+                },
+                "E_wind": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.5,
+                    "description": "Relative-packing-ratio exponent E in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5."
+                },
+                "beta_ratio": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 1.0,
+                    "description": "Relative packing ratio β/β_op. Fuel-model dependent; default 1.0 (at optimum)."
+                },
+                "phi_s_coeff": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Slope factor coefficient φ_s_coeff = 5.275·β^(−0.3). Default 0 (flat terrain / slope effect disabled)."
+                },
+                "u_x": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Midflame wind x-component (eastward, m/s). Default 0 (calm)."
+                },
+                "u_y": {
+                    "type": "parameter",
+                    "units": "m/s",
+                    "default": 0.0,
+                    "description": "Midflame wind y-component (northward, m/s). Default 0 (calm)."
+                },
+                "dzdx": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Terrain gradient dz/dx (dimensionless). Default 0 (flat)."
+                },
+                "dzdy": {
+                    "type": "parameter",
+                    "units": "1",
+                    "default": 0.0,
+                    "description": "Terrain gradient dz/dy (dimensionless). Default 0 (flat)."
+                },
+                "x0": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0,
+                    "description": "Left x domain edge: the grid's x0 free name (consumer-supplied geometry contract, grids/cartesian_uniform_2d/grid.esm). Default 0; override for a shifted domain."
+                },
+                "y0": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 0,
+                    "description": "Bottom y domain edge: the grid's y0 free name. Default 0; override for a shifted domain."
+                },
+                "Lx": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Domain width along x (bx - x0): USER-SUPPLIED grid extent. The x-spacing dx = Lx/NX derives from it, so a run on a different-size box needs only this parameter (and Ly), not an edit to this component. Default 1.0 (unit box)."
+                },
+                "Ly": {
+                    "type": "parameter",
+                    "units": "m",
+                    "default": 1.0,
+                    "description": "Domain height along y (by - y0): USER-SUPPLIED grid extent; dy = Ly/NY derives from it. Default 1.0 (unit box)."
+                },
+                "dx": {
+                    "type": "observed",
+                    "units": "m",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            "Lx",
+                            "NX"
+                        ]
+                    },
+                    "description": "x-spacing dx = Lx/NX: the grid's dx free name, read by the mounted discretization rule's expanded body. Lx is the consumer-supplied x-extent; NX the document-scoped metaparameter (cell count), substituted as an integer literal at load (esm-spec §9.7.6). A loader-API rebinding of NX (a convergence sweep) keeps the spacing consistent automatically."
+                },
+                "dy": {
+                    "type": "observed",
+                    "units": "m",
+                    "expression": {
+                        "op": "/",
+                        "args": [
+                            "Ly",
+                            "NY"
+                        ]
+                    },
+                    "description": "y-spacing dy = Ly/NY: the grid's dy free name; Ly the consumer-supplied y-extent, NY substituted at load."
                 },
                 "psi_x": {
                     "type": "observed",
                     "units": "1",
                     "shape": ["x", "y"],
-                    "expression": { "op": "grad", "args": ["psi"], "dim": "x" },
-                    "description": "∂ψ/∂x — x-component of level-set gradient in Cartesian coordinates. Corresponds to EarthSciMLBase.partialderivatives(domain)[1](ψ) in the upstream Julia code (identity transform for Cartesian x in meters)."
+                    "expression": { "op": "D", "args": ["psi"], "wrt": "x" },
+                    "description": "∂ψ/∂x by the mounted central first-derivative rule (central_D1x). A bare D op the assembler's discretization lowers to a per-cell makearray stencil; used in the wind/slope normal projections."
                 },
                 "psi_y": {
                     "type": "observed",
                     "units": "1",
                     "shape": ["x", "y"],
-                    "expression": { "op": "grad", "args": ["psi"], "dim": "y" },
-                    "description": "∂ψ/∂y — y-component of level-set gradient in Cartesian coordinates. Corresponds to EarthSciMLBase.partialderivatives(domain)[2](ψ) in the upstream Julia code (identity transform for Cartesian y in meters)."
+                    "expression": { "op": "D", "args": ["psi"], "wrt": "y" },
+                    "description": "∂ψ/∂y by the mounted central first-derivative rule (central_D1y)."
                 },
                 "grad_mag": {
                     "type": "observed",
@@ -69,25 +185,19 @@
                     "shape": ["x", "y"],
                     "expression": {
                         "op": "sqrt",
-                        "args": [{
-                            "op": "+",
-                            "args": [
-                                { "op": "^", "args": ["psi_x", 2.0] },
-                                { "op": "^", "args": ["psi_y", 2.0] }
-                            ]
-                        }]
+                        "args": [ { "op": "+", "args": [
+                            { "op": "^", "args": [ { "op": "D", "args": ["psi"], "wrt": "x" }, 2 ] },
+                            { "op": "^", "args": [ { "op": "D", "args": ["psi"], "wrt": "y" }, 2 ] }
+                        ] } ]
                     },
-                    "description": "|∇ψ| = sqrt(ψ_x² + ψ_y²) — gradient magnitude. Dimensionless (m/m). Used as the speed multiplier in the level-set PDE and to normalize the fire-front normal."
+                    "description": "|∇ψ| by the mounted first-order Godunov (Rouy-Tourin / Osher-Sethian) upwind rule, which fires by compound match on sqrt(D(psi,x)²+D(psi,y)²) (exponent MUST be the integer 2). A producer-defined array observed; the exponent is written on the bare D ops so the compound matches the rule, NOT on the central-lowered psi_x/psi_y."
                 },
-                "safe_mag": {
+                "grad_safe": {
                     "type": "observed",
                     "units": "1",
                     "shape": ["x", "y"],
-                    "expression": {
-                        "op": "+",
-                        "args": ["grad_mag", 1.0e-10]
-                    },
-                    "description": "|∇ψ| + 1e-10 — regularized gradient magnitude used as divisor in U_n and tan_phi_n to avoid division by zero at flat ψ regions."
+                    "expression": { "op": "+", "args": ["grad_mag", 1e-10] },
+                    "description": "|∇ψ|_safe = |∇ψ| + 1e-10: the Godunov magnitude floored away from zero so the normal-projection quotients stay finite where the front is flat."
                 },
                 "U_n": {
                     "type": "observed",
@@ -96,36 +206,30 @@
                     "expression": {
                         "op": "/",
                         "args": [
-                            {
-                                "op": "+",
-                                "args": [
-                                    { "op": "*", "args": ["u_x", "psi_x"] },
-                                    { "op": "*", "args": ["u_y", "psi_y"] }
-                                ]
-                            },
-                            "safe_mag"
+                            { "op": "+", "args": [
+                                { "op": "*", "args": ["u_x", "psi_x"] },
+                                { "op": "*", "args": ["u_y", "psi_y"] }
+                            ] },
+                            "grad_safe"
                         ]
                     },
-                    "description": "Normal wind speed U_n = (u_f · ∇ψ) / |∇ψ|_safe — wind vector projected onto the fire-front inward normal n̂ = ∇ψ/|∇ψ|. Positive values drive spread in the fire-front normal direction (Muñoz-Esparza 2018, Eq. 10)."
+                    "description": "Wind projected onto the fire-front normal, U_n = (u·∇ψ)/|∇ψ|_safe (Muñoz-Esparza 2018 Eq. 10). Central-difference ∇ψ (psi_x, psi_y) in the numerator; the Godunov magnitude in the denominator, matching the original inlined form."
                 },
-                "tan_phi_n": {
+                "tanphi_n": {
                     "type": "observed",
                     "units": "1",
                     "shape": ["x", "y"],
                     "expression": {
                         "op": "/",
                         "args": [
-                            {
-                                "op": "+",
-                                "args": [
-                                    { "op": "*", "args": ["dzdx", "psi_x"] },
-                                    { "op": "*", "args": ["dzdy", "psi_y"] }
-                                ]
-                            },
-                            "safe_mag"
+                            { "op": "+", "args": [
+                                { "op": "*", "args": ["dzdx", "psi_x"] },
+                                { "op": "*", "args": ["dzdy", "psi_y"] }
+                            ] },
+                            "grad_safe"
                         ]
                     },
-                    "description": "tan(φ_n) = (∇z · ∇ψ) / |∇ψ|_safe — terrain slope in the fire-front normal direction. Used in the slope factor φ_S (Mandel 2011 Eq. 2)."
+                    "description": "Terrain slope projected onto the front normal, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe."
                 },
                 "phi_W": {
                     "type": "observed",
@@ -135,29 +239,17 @@
                         "op": "*",
                         "args": [
                             "C_wind",
-                            {
-                                "op": "^",
-                                "args": [
-                                    {
-                                        "op": "/",
-                                        "args": [
-                                            { "op": "max", "args": [0.0, "U_n"] },
-                                            0.00508
-                                        ]
-                                    },
-                                    "B_wind"
-                                ]
-                            },
-                            {
-                                "op": "^",
-                                "args": [
-                                    { "op": "max", "args": ["beta_ratio", 1.0e-10] },
-                                    { "op": "-", "args": ["E_wind"] }
-                                ]
-                            }
+                            { "op": "^", "args": [
+                                { "op": "/", "args": [ { "op": "max", "args": [0.0, "U_n"] }, 0.00508 ] },
+                                "B_wind"
+                            ] },
+                            { "op": "^", "args": [
+                                { "op": "max", "args": ["beta_ratio", 1e-10] },
+                                { "op": "-", "args": ["E_wind"] }
+                            ] }
                         ]
                     },
-                    "description": "Wind factor φ_W = C·(max(0,U_n)/U_ref)^B · max(β/β_op, ε)^(−E) — Mandel (2011) Eq. 2 wind term. U_ref = 0.00508 m/s (1 ft/min, Rothermel calibration unit). Non-negative: only upwind (U_n > 0) drives spread enhancement."
+                    "description": "Wind factor φ_W = C·(max(0,U_n)/U_ref)^B·max(β_ratio,ε)^(−E) (Mandel 2011 Eq. 2), U_ref = 0.00508 m/s (1 ft/min)."
                 },
                 "phi_S": {
                     "type": "observed",
@@ -167,236 +259,36 @@
                         "op": "*",
                         "args": [
                             "phi_s_coeff",
-                            {
-                                "op": "^",
-                                "args": [
-                                    { "op": "max", "args": [0.0, "tan_phi_n"] },
-                                    2.0
-                                ]
-                            }
+                            { "op": "^", "args": [ { "op": "max", "args": [0.0, "tanphi_n"] }, 2.0 ] }
                         ]
                     },
-                    "description": "Slope factor φ_S = φ_s_coeff · max(0, tanφ_n)² — Mandel (2011) Eq. 2 slope term. φ_s_coeff = 5.275·β^(−0.3) (fuel-model dependent; default 0). Non-negative: only uphill (tanφ_n > 0) drives spread enhancement."
+                    "description": "Slope factor φ_S = φ_s_coeff·max(0,tanφ_n)² (Mandel 2011 Eq. 2). Default 0 (flat terrain)."
                 },
                 "S_n": {
                     "type": "observed",
                     "units": "m/s",
                     "shape": ["x", "y"],
-                    "expression": {
-                        "op": "*",
-                        "args": [
-                            "R_0",
-                            {
-                                "op": "+",
-                                "args": [1.0, "phi_W", "phi_S"]
-                            }
-                        ]
-                    },
-                    "description": "Direction-dependent fire spread rate S(n̂) = R_0·(1 + φ_W + φ_S) — Mandel (2011) Eq. 1. At zero wind and zero slope S = R_0 (isotropic). Wind and slope each add non-negative increments via their respective factors."
-                },
-                "R_0": {
-                    "type": "parameter",
-                    "units": "m/s",
-                    "default": 1.0,
-                    "description": "No-wind no-slope rate of spread R_0 (m/s). The isotropic base spread rate at calm conditions. Derived from Rothermel (1972) fuel model via anderson_fuel_coefficients(); default 1.0 m/s for testing."
-                },
-                "C_wind": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 1.0,
-                    "description": "Wind coefficient C in φ_W = C·(U_n/U_ref)^B·β_ratio^(−E) — Mandel (2011) Eq. 2. Fuel-model dependent; derived from Rothermel (1972) via anderson_fuel_coefficients(). Default 1.0."
-                },
-                "B_wind": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 0.5,
-                    "description": "Wind exponent B in φ_W = C·(U_n/U_ref)^B·β_ratio^(−E) — Mandel (2011) Eq. 2. Fuel-model dependent; derived from Rothermel (1972) via anderson_fuel_coefficients(). Default 0.5."
-                },
-                "E_wind": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 0.5,
-                    "description": "Relative-packing-ratio exponent E in φ_W = C·(U_n/U_ref)^B·β_ratio^(−E) — Mandel (2011) Eq. 2. Fuel-model dependent; derived from Rothermel (1972) via anderson_fuel_coefficients(). Default 0.5."
-                },
-                "beta_ratio": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 1.0,
-                    "description": "Relative packing ratio β/β_op — ratio of actual packing ratio to optimum packing ratio. Fuel-model dependent; derived from Rothermel (1972) via anderson_fuel_coefficients(). Default 1.0 (at optimum)."
-                },
-                "phi_s_coeff": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 0.0,
-                    "description": "Slope factor coefficient φ_s_coeff = 5.275·β^(−0.3) (fuel-model dependent). Scales the terrain-slope contribution to spread rate in φ_S = φ_s_coeff·max(0,tanφ_n)². Default 0 (flat terrain / disable slope effect)."
-                },
-                "u_x": {
-                    "type": "parameter",
-                    "units": "m/s",
-                    "default": 0.0,
-                    "description": "Midflame wind x-component (eastward, m/s). In the coupled WRF-SFIRE pipeline this is driven by the atmospheric wind at midflame height. Default 0 (calm)."
-                },
-                "u_y": {
-                    "type": "parameter",
-                    "units": "m/s",
-                    "default": 0.0,
-                    "description": "Midflame wind y-component (northward, m/s). In the coupled WRF-SFIRE pipeline this is driven by the atmospheric wind at midflame height. Default 0 (calm)."
-                },
-                "dzdx": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 0.0,
-                    "description": "Terrain gradient in x direction dz/dx (dimensionless). Derived from a DEM. Default 0 (flat terrain)."
-                },
-                "dzdy": {
-                    "type": "parameter",
-                    "units": "1",
-                    "default": 0.0,
-                    "description": "Terrain gradient in y direction dz/dy (dimensionless). Derived from a DEM. Default 0 (flat terrain)."
+                    "expression": { "op": "*", "args": ["R_0", { "op": "+", "args": [1.0, "phi_W", "phi_S"] }] },
+                    "description": "Direction-dependent spread rate S(n̂) = R_0·(1 + φ_W + φ_S) (Mandel 2011 Eq. 2). With the default calm/flat parameters (u=0, dz=0, φ_s_coeff=0) this reduces to R_0."
                 }
             },
             "equations": [
                 {
-                    "lhs": { "op": "D", "args": ["psi"], "wrt": "t" },
+                    "lhs": {
+                        "op": "D",
+                        "args": [
+                            "psi"
+                        ],
+                        "wrt": "t"
+                    },
                     "rhs": {
                         "op": "*",
-                        "args": [-1.0, "S_n", "grad_mag"]
+                        "args": [
+                            -1.0,
+                            "S_n",
+                            "grad_mag"
+                        ]
                     }
-                }
-            ],
-            "boundary_conditions": {
-                "psi_xmin": {
-                    "variable": "psi",
-                    "side": "xmin",
-                    "kind": "zero_gradient",
-                    "description": "Zero-gradient (Neumann) BC at x=0 boundary — fire front does not propagate through the domain edge (Mandel 2011, §3.4)."
-                },
-                "psi_xmax": {
-                    "variable": "psi",
-                    "side": "xmax",
-                    "kind": "zero_gradient",
-                    "description": "Zero-gradient (Neumann) BC at x=500 m boundary."
-                },
-                "psi_ymin": {
-                    "variable": "psi",
-                    "side": "ymin",
-                    "kind": "zero_gradient",
-                    "description": "Zero-gradient (Neumann) BC at y=0 boundary."
-                },
-                "psi_ymax": {
-                    "variable": "psi",
-                    "side": "ymax",
-                    "kind": "zero_gradient",
-                    "description": "Zero-gradient (Neumann) BC at y=500 m boundary."
-                }
-            },
-            "examples": [
-                {
-                    "id": "circular_isotropic_spread",
-                    "description": "Circular initial fire front (radius 10 m, centered at 250 m) spreading isotropically at R_0=0.5 m/s with no wind or slope. The level-set function starts as the signed distance to the initial circle: ψ(0,x,y) = sqrt((x−250)²+(y−250)²) − 10. Under isotropic conditions (no wind, no slope) the circle should expand at constant rate R_0, reaching radius ~40 m at t=60 s. NOTE: requires a PDE-capable runner (Julia EarthSciSerialization + MethodOfLines) — the Python earthsci_toolkit runner does not support spatial PDE simulation (gt-vzwk gap).",
-                    "initial_state": {
-                        "type": "expression",
-                        "values": {
-                            "psi": {
-                                "op": "-",
-                                "args": [
-                                    {
-                                        "op": "sqrt",
-                                        "args": [{
-                                            "op": "+",
-                                            "args": [
-                                                { "op": "^", "args": [{ "op": "-", "args": ["x", 250.0] }, 2.0] },
-                                                { "op": "^", "args": [{ "op": "-", "args": ["y", 250.0] }, 2.0] }
-                                            ]
-                                        }]
-                                    },
-                                    10.0
-                                ]
-                            }
-                        }
-                    },
-                    "parameters": {
-                        "R_0": 0.5,
-                        "C_wind": 1.0,
-                        "B_wind": 0.5,
-                        "E_wind": 0.5,
-                        "beta_ratio": 1.0,
-                        "phi_s_coeff": 0.0,
-                        "u_x": 0.0,
-                        "u_y": 0.0,
-                        "dzdx": 0.0,
-                        "dzdy": 0.0
-                    },
-                    "time_span": { "start": 0.0, "end": 60.0 },
-                    "plots": [
-                        {
-                            "id": "fire_front_t30",
-                            "type": "field_snapshot",
-                            "description": "Level-set field ψ(x,y) at t=30 s. The zero contour (fire front) should be a circle of radius ≈25 m centered at (250,250). Blue (ψ<0) = burning; red (ψ>0) = unburned.",
-                            "at_time": 30.0,
-                            "x": { "variable": "x", "label": "x (m)" },
-                            "y": { "variable": "y", "label": "y (m)" },
-                            "value": { "variable": "psi" }
-                        },
-                        {
-                            "id": "fire_front_t60",
-                            "type": "field_snapshot",
-                            "description": "Level-set field ψ(x,y) at t=60 s. The zero contour should be a circle of radius ≈40 m centered at (250,250).",
-                            "at_time": 60.0,
-                            "x": { "variable": "x", "label": "x (m)" },
-                            "y": { "variable": "y", "label": "y (m)" },
-                            "value": { "variable": "psi" }
-                        }
-                    ]
-                },
-                {
-                    "id": "wind_driven_spread",
-                    "description": "Wind-driven fire spread: R_0=0.5 m/s, eastward wind u_x=5 m/s, Rothermel coefficients C_wind=1.0, B_wind=0.5, E_wind=0.5 for Anderson grass fuel (fuel model 1). The wind factor φ_W enhances spread in the downwind direction, elongating the fire front toward positive x. NOTE: requires a PDE-capable runner.",
-                    "initial_state": {
-                        "type": "expression",
-                        "values": {
-                            "psi": {
-                                "op": "-",
-                                "args": [
-                                    {
-                                        "op": "sqrt",
-                                        "args": [{
-                                            "op": "+",
-                                            "args": [
-                                                { "op": "^", "args": [{ "op": "-", "args": ["x", 250.0] }, 2.0] },
-                                                { "op": "^", "args": [{ "op": "-", "args": ["y", 250.0] }, 2.0] }
-                                            ]
-                                        }]
-                                    },
-                                    10.0
-                                ]
-                            }
-                        }
-                    },
-                    "parameters": {
-                        "R_0": 0.5,
-                        "C_wind": 1.0,
-                        "B_wind": 0.5,
-                        "E_wind": 0.5,
-                        "beta_ratio": 1.0,
-                        "phi_s_coeff": 0.0,
-                        "u_x": 5.0,
-                        "u_y": 0.0,
-                        "dzdx": 0.0,
-                        "dzdy": 0.0
-                    },
-                    "time_span": { "start": 0.0, "end": 60.0 },
-                    "plots": [
-                        {
-                            "id": "wind_driven_front_t60",
-                            "type": "field_snapshot",
-                            "description": "Level-set field ψ(x,y) at t=60 s under 5 m/s eastward wind. The fire front (ψ=0 contour) is elongated in the +x direction relative to the isotropic case.",
-                            "at_time": 60.0,
-                            "x": { "variable": "x", "label": "x (m)" },
-                            "y": { "variable": "y", "label": "y (m)" },
-                            "value": { "variable": "psi" }
-                        }
-                    ]
                 }
             ]
         }
