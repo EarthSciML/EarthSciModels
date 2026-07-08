@@ -16,6 +16,6 @@ Usage (positional args mirror scripts/roundtrip.jl):
 """
 
 using Printf
-const ESS_DIR = "/home/ctessum/esmlgt/EarthSciSerialization/refinery/rig/packages/EarthSciSerialization.jl"
+const ESS_DIR = "/home/ctessum/esmlgt/EarthSciAST/refinery/rig/pkg/EarthSciAST.jl"
 include(joinpath(ESS_DIR, "scripts", "roundtrip.jl"))
 main(ARGS)

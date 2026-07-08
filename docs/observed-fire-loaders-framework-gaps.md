@@ -7,7 +7,7 @@ This is the **F-data-4 feasibility verdict** for the three observed-fire pure-IO
 loaders. Per the acceptance contract, framework limitations are **reported
 (declarative-or-fail), not hacked around**: each loader is authored in the
 correct 0.7.0 pure-IO shape, and where the canonical runner
-(`earthsci_toolkit`) cannot yet do something, it is documented here and in the
+(`earthsci_ast`) cannot yet do something, it is documented here and in the
 loader `access_note`s rather than worked around in the `.esm`.
 
 ## What was delivered
@@ -48,7 +48,7 @@ fallback is **not** needed.
 ### F-1 — No local data-cache (`EARTHSCIDATADIR`) resolution in the loader URL layer  *(the plan's C2 gap; pre-existing, not introduced here)*
 The toolkit's `url_template` layer is **pure string templating** — there is no
 env-var / local-cache / `file://` fallback resolution anywhere under
-`earthsci_toolkit/data_loaders/` (no `environ`/`getenv`/`EARTHSCIDATADIR`/`cache`
+`earthsci_ast/data_loaders/` (no `environ`/`getenv`/`EARTHSCIDATADIR`/`cache`
 references). All three loaders document an `access_note` pointing at
 `EARTHSCIDATADIR`, exactly as the existing `era5_loader`/`openaq_loader` do, but
 the runner does not implement it.
@@ -57,7 +57,7 @@ the runner does not implement it.
   NIFC/MTBS/FIRMS data is therefore a downstream/consumer concern (AGENTS.md §2),
   consistent with the other earthsci_data loaders.
 - **Disposition (declarative):** unchanged loaders; the fix belongs in
-  EarthSciSerialization's runtime loader layer (EARTHSCIDATADIR-aware URL
+  EarthSciAST's runtime loader layer (EARTHSCIDATADIR-aware URL
   resolution), tracked as a framework follow-up. **Not** hacked into the `.esm`.
 
 ### F-2 — `points` column mapping does not coerce string CSV cells; numeric `unit_conversion` on a string column raises

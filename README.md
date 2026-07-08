@@ -3,7 +3,7 @@
 [![test-esm](https://github.com/EarthSciML/EarthSciModels/actions/workflows/test-esm.yml/badge.svg)](https://github.com/EarthSciML/EarthSciModels/actions/workflows/test-esm.yml)
 
 Authoritative `.esm` files for Earth-science model components expressed in the
-[EarthSciML Serialization Format](https://github.com/EarthSciML/EarthSciSerialization)
+[EarthSciML Serialization Format](https://github.com/EarthSciML/EarthSciAST)
 (`esm-schema.json`, `esm-spec.md`). Each file is a portable, runtime-agnostic
 snapshot of an MTK-derived component with inline tests and examples.
 
@@ -14,7 +14,7 @@ can `load_esm(...)` a single file and get a ready-to-simulate
 
 **How this repo is validated:** every push and PR runs each `.esm` file's
 inline `tests` block (ESM spec §6.6) through `tools/run_esm_inline_tests.py`
-(the Python gate of record, driving `earthsci_toolkit.simulation.simulate`).
+(the Python gate of record, driving `earthsci_ast.simulation.simulate`).
 Each scalar `(variable, time, expected)` assertion is checked by simulating
 the model and sampling its solution interpolant. One failed assertion turns
 the build red. The Julia equivalent `EarthSciModels.run_esm_tests` runs the
@@ -28,8 +28,8 @@ same contract via MTK and is the canonical local walker (see
 - [`docs/migration-tracker.md`](docs/migration-tracker.md) — Phase-0 inventory of
   the ~260 MTK components from 14 earthsciml repos, classified by schema-gap
   blockers.
-- [EarthSciSerialization spec](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md)
-  and [JSON schema](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-schema.json).
+- [EarthSciAST spec](https://github.com/EarthSciML/EarthSciAST/blob/main/esm-spec.md)
+  and [JSON schema](https://github.com/EarthSciML/EarthSciAST/blob/main/esm-schema.json).
 
 ## Top-level layout
 
@@ -71,8 +71,8 @@ For files with multiple models (or non-`Model` entries like `ReactionSystem` or
 `DataLoader`), use the underlying parser directly:
 
 ```julia
-using EarthSciSerialization
-esm_file = EarthSciSerialization.load(path)   # returns an EsmFile
+using EarthSciAST
+esm_file = EarthSciAST.load(path)   # returns an EsmFile
 # then pick the component you want and build its System / PDESystem / ReactionSystem
 ```
 
@@ -93,9 +93,9 @@ under CI. See the tracker for the current queue.
 Components declare reactions, parameters, and rate expressions. Rate
 laws should be written as ExpressionNode AST trees using existing ops
 (`+ - * / ^ exp log10 sqrt max min ifelse` etc.) — see
-[EarthSciSerialization esm-spec.md §4.2](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md#42-expressionnode-ops)
+[EarthSciAST esm-spec.md §4.2](https://github.com/EarthSciML/EarthSciAST/blob/main/esm-spec.md#42-expressionnode-ops)
 for the full op enum and
-[§9.2](https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md#92-when-a-call-op-is-justified)
+[§9.2](https://github.com/EarthSciML/EarthSciAST/blob/main/esm-spec.md#92-when-a-call-op-is-justified)
 for when (rarely) a `call` op is justified.
 
 Do NOT:

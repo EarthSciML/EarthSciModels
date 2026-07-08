@@ -1,7 +1,7 @@
 using Pkg
 Pkg.activate("scripts/migrations")
 using GasChem
-using EarthSciSerialization
+using EarthSciAST
 using Catalyst
 using ModelingToolkit
 const MT = ModelingToolkit
@@ -121,7 +121,7 @@ flush(stdout)
 
 println("[6/7] Calling mtk2esm on flat_rs...")
 flush(stdout)
-result = EarthSciSerialization.mtk2esm(flat_rs; metadata=(;
+result = EarthSciAST.mtk2esm(flat_rs; metadata=(;
     name="GEOSChemGasPhase",
     description="GEOS-Chem fullchem gas-phase mechanism (~819 reactions, ~272 species). Migrated from GasChem.jl GEOSChemGasPhase via mtk2esm with sub-system rate-law inlining.",
     version="0.1.0",

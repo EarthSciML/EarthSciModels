@@ -6,14 +6,14 @@ Discovery + inline-test runner for `.esm` files in this repo.
 Each `Model` and `ReactionSystem` may carry a `tests` block (ESM spec §6.6) of
 scalar `(variable, time, expected, [tolerance])` assertions. This module walks
 `components/` (organized by science domain), parses every `.esm` file via
-`EarthSciSerialization.load`, simulates each Test on the resulting MTK system,
+`EarthSciAST.load`, simulates each Test on the resulting MTK system,
 samples each Assertion via the solution interpolant, and compares to the
 declared expected value with the tolerance resolved per spec §6.6.4 (assertion
 > test > model > default `rel=1e-6`).
 
 The runner requires `ModelingToolkit`, `OrdinaryDiffEqTsit5` /
 `OrdinaryDiffEqRosenbrock`, and (for `ReactionSystem` tests) `Catalyst` to be
-loaded at the call site so the EarthSciSerialization MTK / Catalyst extensions
+loaded at the call site so the EarthSciAST MTK / Catalyst extensions
 are active.
 
 Public surface:
@@ -222,7 +222,7 @@ function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
 
     # For reaction_system containers, species and parameter defaults declared
     # in the ESM file are NOT propagated through the Catalyst.@species /
-    # @parameters metadata by the EarthSciSerialization Catalyst extension
+    # @parameters metadata by the EarthSciAST Catalyst extension
     # (the Core.eval path builds bare symbolics). Compensate by seeding u0
     # and p from the ESM defaults here — a pure-Model path still works as
     # before because `esm_container` is nothing and the maps stay empty.
@@ -337,7 +337,7 @@ end
 function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
     local esm_file
     try
-        esm_file = EarthSciSerialization.load(String(path))
+        esm_file = EarthSciAST.load(String(path))
     catch err
         push!(results, AssertionResult(
             path, :file, "<parse>", "<load>", 0, "", NaN, NaN, nothing,

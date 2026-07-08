@@ -8,14 +8,14 @@ only to the EarthSciModels repo.
 
 > **A model is simulated through exactly one pathway: an official ESS runner.**
 
-EarthSciML defines one canonical simulation toolchain — the EarthSciSerialization
+EarthSciML defines one canonical simulation toolchain — the EarthSciAST
 (ESS) runners — across every supported language:
 
 | Language | Official runner |
 | -------- | --------------- |
 | Julia    | `EarthSciModels.load_esm` → `ModelingToolkit` (or a `tree_walk` evaluator over the ESS AST) |
-| Python   | `earthsci_toolkit.load` + `earthsci_toolkit.evaluate` (the ESS `numpy_interpreter`) |
-| Rust     | `earthsci_toolkit::simulate` (ndarray runtime over the ESS AST) |
+| Python   | `earthsci_ast.load` + `earthsci_ast.evaluate` (the ESS `numpy_interpreter`) |
+| Rust     | `earthsci_ast::simulate` (ndarray runtime over the ESS AST) |
 
 Anything that takes a `.esm` file and produces numbers — at runtime, in CI, or
 in a docs build — **MUST** go through one of these runners. Building a parallel
@@ -29,14 +29,14 @@ Concrete things this rule forbids in this repo:
 - Hand-rolled RK4 / forward-Euler / Rosenbrock loops that walk the ESS AST.
 - Re-implementing `ifelse` / `max` / `min` / `^` / `log10` op semantics outside
   the toolkit. Op semantics are single-sourced in
-  [EarthSciSerialization](https://github.com/EarthSciML/EarthSciSerialization)
+  [EarthSciAST](https://github.com/EarthSciML/EarthSciAST)
   and exposed via the runners listed above.
 - Hand-translating an `.esm` to a different IR (e.g. emitting raw Julia
   `ODEProblem` code from the AST) for the purpose of simulating it. The
   runners are the IR.
 
 If the official runner is missing a feature you need, file a bead against
-EarthSciSerialization or the relevant toolkit — do not work around it locally.
+EarthSciAST or the relevant toolkit — do not work around it locally.
 
 ## 2. ESM contract
 
@@ -51,7 +51,7 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    assertions. Two canonical runners cover this:
 
    - **CI gate of record (Python):** `tools/run_esm_inline_tests.py`,
-     which drives `earthsci_toolkit.simulation.simulate(cse=False)` per
+     which drives `earthsci_ast.simulation.simulate(cse=False)` per
      §1 (mdl-w1j → mdl-lvu). Per-file subprocess for OOM isolation;
      walks both `components/**/*.esm` and `lib/**/*.esm`. This is the
      blocking gate on every PR and push.
@@ -70,9 +70,9 @@ What does **not** belong in this rig:
   repos).
 - Parallel solvers, custom integrators, or any code that simulates a model
   outside the ESS runners — see §1.
-- Schema or op-semantics changes — those belong in EarthSciSerialization.
+- Schema or op-semantics changes — those belong in EarthSciAST.
 - New runtime languages — those belong in the corresponding toolkit repo
-  (`earthsci_toolkit`, etc.), not here.
+  (`earthsci_ast`, etc.), not here.
 
 If you find yourself adding more than a thin call-through to a canonical runner,
 stop and check whether the work belongs upstream (ESS) or downstream (a
@@ -86,12 +86,12 @@ Tooling under `tools/` (e.g. `tools/render_example_plots.py`,
 If a docs build needs simulation output to render plots, it **MUST** drive an
 official ESS runner. Specifically:
 
-- Python plot rendering: call `earthsci_toolkit.load` + `evaluate` and, for
+- Python plot rendering: call `earthsci_ast.load` + `evaluate` and, for
   ODE examples, the toolkit's official integration entry point. Do **NOT**
   introduce `sympy.lambdify` + `scipy.solve_ivp` (or any equivalent homebrew
   ODE pipeline) in `tools/`.
 - Julia plot rendering: use `EarthSciModels.load_esm` (or
-  `EarthSciSerialization.load` for multi-component files) and integrate with
+  `EarthSciAST.load` for multi-component files) and integrate with
   `ModelingToolkit` / `OrdinaryDiffEq` — not a hand-rolled walker.
 
 CI pipelines that exercise `tools/` count as runtime for the purposes of §1:
@@ -99,10 +99,10 @@ the parallel-evaluator anti-pattern is just as forbidden in
 `.github/workflows/*` as in `src/`.
 
 `tools/render_example_plots.py`'s time-series path now drives
-`earthsci_toolkit.simulation.simulate` — the canonical Python ESS runner —
+`earthsci_ast.simulation.simulate` — the canonical Python ESS runner —
 for every ODE integration (mdl-5xp). The renderer keeps its own resolution
 plan only to recover *observed* variables from the integrated state via
-`earthsci_toolkit.evaluate` (the canonical AST evaluator). Do not add a
+`earthsci_ast.evaluate` (the canonical AST evaluator). Do not add a
 homebrew `sympy.lambdify` / `scipy.solve_ivp` branch back in; if simulate
 lacks a feature the doc-build needs, file a bead to extend simulate rather
 than re-introducing a side channel.
@@ -123,7 +123,7 @@ Rules for `scripts/_archive/`:
 
 - **MAY NOT** be invoked from CI (`.github/workflows/*`).
 - **MAY NOT** be invoked from runtime code (`src/`, the Julia shim, the
-  `earthsci_toolkit` Python/Rust bindings, or any consumer repo).
+  `earthsci_ast` Python/Rust bindings, or any consumer repo).
 - **MAY NOT** be imported by `tools/` or `test/` for ongoing functionality.
 - **MAY NOT** be added to `Project.toml`, `runtests.jl`, or any other
   active build/test manifest.
@@ -139,5 +139,5 @@ Rules for `scripts/_archive/`:
 - Polecat operating contract for this rig: [`./CLAUDE.md`](./CLAUDE.md)
 - Repo layout convention: [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md)
 - Migration tracker (Phase-0 inventory): [`docs/migration-tracker.md`](docs/migration-tracker.md)
-- ESS spec: <https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-spec.md>
-- ESS schema: <https://github.com/EarthSciML/EarthSciSerialization/blob/main/esm-schema.json>
+- ESS spec: <https://github.com/EarthSciML/EarthSciAST/blob/main/esm-spec.md>
+- ESS schema: <https://github.com/EarthSciML/EarthSciAST/blob/main/esm-schema.json>

@@ -17,7 +17,7 @@ Set environment variable PROBE_BUDGET_SECONDS to abort after that wall time
 
 using Pkg
 Pkg.activate("scripts/migrations")
-using EarthSciSerialization
+using EarthSciAST
 using ModelingToolkit
 using Catalyst
 using JSON3
@@ -28,7 +28,7 @@ println("[probe] loading $(ESM_PATH) ...")
 flush(stdout)
 GC.gc()
 t0 = time()
-esm_file = EarthSciSerialization.load(ESM_PATH)
+esm_file = EarthSciAST.load(ESM_PATH)
 t_load = time() - t0
 println("[probe] load done in $(round(t_load, digits=2)) s")
 flush(stdout)

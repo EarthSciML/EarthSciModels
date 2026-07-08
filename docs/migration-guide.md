@@ -3,19 +3,19 @@
 This guide is for polecats migrating an existing ModelingToolkit
 (MTK) / Catalyst component into an `.esm` file under this repo. It covers:
 
-1. Wiring `EarthSciSerialization.jl` (the `mtk2esm` provider) into your
+1. Wiring `EarthSciAST.jl` (the `mtk2esm` provider) into your
    polecat's Julia environment, and resolving a local checkout of the
    upstream source repo.
 2. Invoking `mtk2esm` to scaffold an `.esm` from an MTK `System` /
    `ReactionSystem`.
 3. Running the round-trip validator (`scripts/roundtrip.jl` in the
-   `EarthSciSerialization.jl` package) to confirm the migration preserves
+   `EarthSciAST.jl` package) to confirm the migration preserves
    trajectories within tolerance.
 4. Handling the `TODO_GAP` markers the scaffolder emits when it hits a
    schema gap.
 
 The companion tool — `mtk2esm` and the round-trip CLI — was landed in
-[`gt-dod2`](https://github.com/EarthSciML/EarthSciSerialization). This
+[`gt-dod2`](https://github.com/EarthSciML/EarthSciAST). This
 guide pairs with that tool's reference docs, not replaces them.
 
 ---
@@ -26,9 +26,9 @@ A fresh worktree needs two things wired up before any migration work: the
 `mtk2esm` provider (§1.1) and a local checkout of the upstream **source
 repo** the component is being migrated *from* (§1.2).
 
-### 1.1 Wire `EarthSciSerialization` into your env
+### 1.1 Wire `EarthSciAST` into your env
 
-`EarthSciSerialization.jl` is **not** in the Julia General registry. ESM's
+`EarthSciAST.jl` is **not** in the Julia General registry. ESM's
 `Project.toml` declares it as a dep, but `Pkg.instantiate` cannot resolve
 it on its own. Run the setup script once per fresh worktree before any
 other Julia work:
@@ -41,11 +41,11 @@ Resolution order (the script picks the first that works):
 
 1. `$EARTHSCI_SERIALIZATION_PATH` — explicit override.
 2. A Gas Town workspace checkout, in priority order:
-   - `../../../../EarthSciSerialization/refinery/rig/packages/EarthSciSerialization.jl`
-   - `../../../../EarthSciSerialization/mayor/rig/packages/EarthSciSerialization.jl`
-3. Fallback: `Pkg.add(url="https://github.com/EarthSciML/EarthSciSerialization.git", rev="main", subdir="packages/EarthSciSerialization.jl")`
+   - `../../../../EarthSciAST/refinery/rig/pkg/EarthSciAST.jl`
+   - `../../../../EarthSciAST/mayor/rig/pkg/EarthSciAST.jl`
+3. Fallback: `Pkg.add(url="https://github.com/EarthSciML/EarthSciAST.git", rev="main", subdir="pkg/EarthSciAST.jl")`
    (override the rev with `EARTHSCI_SERIALIZATION_REV=<sha>`). The `subdir` is
-   required because the Julia package lives at `packages/EarthSciSerialization.jl/`
+   required because the Julia package lives at `pkg/EarthSciAST.jl/`
    in the upstream repo, not at repo root.
 
 The script is idempotent — re-running it on an already-resolved env is a
@@ -54,11 +54,11 @@ no-op aside from `Pkg.instantiate`.
 After it succeeds, this works:
 
 ```bash
-julia --project=. -e 'using EarthSciSerialization; println(pathof(EarthSciSerialization))'
+julia --project=. -e 'using EarthSciAST; println(pathof(EarthSciAST))'
 ```
 
 If you see a `pathof` printed, you're set. If you get
-`ArgumentError: Package EarthSciSerialization not found`, the script
+`ArgumentError: Package EarthSciAST not found`, the script
 either didn't run or none of its resolution paths existed — re-run with
 `EARTHSCI_SERIALIZATION_PATH` pointing at a valid checkout.
 
@@ -123,13 +123,13 @@ like a full ESM file (top-level `models.<name>` or
 `reaction_systems.<name>`).
 
 ```julia
-using EarthSciSerialization
+using EarthSciAST
 using ModelingToolkit            # required: loads the MTK extension
 # using Catalyst                 # also load this if your system is a ReactionSystem
 
 # `sys` is whatever your migration source produces — a System,
 # ReactionSystem, ODESystem, NonlinearSystem, or PDESystem.
-esm_dict = EarthSciSerialization.mtk2esm(sys; metadata=(;
+esm_dict = EarthSciAST.mtk2esm(sys; metadata=(;
     name        = "SuperFast",
     description = "Gas-phase chemistry — SuperFast subset",
     tags        = ["chemistry", "gas-phase"],
@@ -163,23 +163,23 @@ using ModelingToolkit   # so the ESS MTK extension activates
 sys = load_esm(esm_path("components", "gaschem", "superfast.esm"))
 ```
 
-`load_esm` delegates to `EarthSciSerialization.load(...)` and asserts the
+`load_esm` delegates to `EarthSciAST.load(...)` and asserts the
 file contains exactly one model. For multi-component files, drop down
-to `EarthSciSerialization.load(path)` and pick the entry yourself.
+to `EarthSciAST.load(path)` and pick the entry yourself.
 
 ---
 
 ## 3. Run the round-trip validator
 
 The validator confirms `mtk → mtk2esm → file → load → mtk` preserves
-trajectories within tolerance. It lives in the `EarthSciSerialization.jl`
+trajectories within tolerance. It lives in the `EarthSciAST.jl`
 package at `scripts/roundtrip.jl`. Resolve the path via the env var the
 setup script honors, or invoke it from the workspace checkout. The MTK
 `.jl` file you pass it is the component's upstream source — resolve it
 under `$GASCHEM_SRC` (§1.2), never by searching the filesystem:
 
 ```bash
-ESS_DIR=$(julia --project=. -e 'using EarthSciSerialization; print(dirname(dirname(pathof(EarthSciSerialization))))')
+ESS_DIR=$(julia --project=. -e 'using EarthSciAST; print(dirname(dirname(pathof(EarthSciAST))))')
 
 julia --project=. "$ESS_DIR/scripts/roundtrip.jl" \
     "$GASCHEM_SRC/src/MyModel.jl" \
@@ -241,7 +241,7 @@ How to handle them:
    and on the bead you're working. Mark the migration as partial and
    open a follow-up bead that depends on the upstream tracker.
 3. **If the gap is `"unknown"`,** open a new bead under
-   `EarthSciSerialization` describing the construct. The scaffolder hit
+   `EarthSciAST` describing the construct. The scaffolder hit
    something it couldn't even classify — that's a serializer bug, not
    just a missing feature.
 4. **Never hand-edit a `TODO_GAP` away** without resolving the
@@ -386,7 +386,7 @@ environment), and do not paraphrase the command — copy it.
 
 > **CI runs the same inline-test contract via the Python gate of
 > record** (`tools/run_esm_inline_tests.py`, driving
-> `earthsci_toolkit.simulation.simulate(cse=False)` per AGENTS.md §1).
+> `earthsci_ast.simulation.simulate(cse=False)` per AGENTS.md §1).
 > The Julia walker is the local equivalent — it covers the same
 > `(variable, time, expected)` assertions and is the one to debug
 > against locally because the failure messages cite Julia/MTK
@@ -428,7 +428,7 @@ These are commonly confused. They are not interchangeable:
 
 | | `scripts/roundtrip.jl` | Walker (`run_esm_tests`) |
 |---|---|---|
-| **Lives in** | `EarthSciSerialization.jl` | `EarthSciModels` (`src/run_tests.jl`) |
+| **Lives in** | `EarthSciAST.jl` | `EarthSciModels` (`src/run_tests.jl`) |
 | **Input** | An upstream MTK `.jl` file | Every committed `.esm` under `components/` |
 | **What it checks** | `mtk → esm → mtk` trajectory drift on the upstream system | The committed `.esm`'s `tests:` assertions, sample-by-sample |
 | **Solve path** | Whatever `roundtrip.jl` configures (Tsit5, default reltol/abstol) | `run_esm_tests` solver pick (Tsit5 → Rosenbrock23 fallback), `reltol=1e-10`, `abstol=1e-12`, `combinatoric_ratelaws=false` for ReactionSystems |
@@ -468,14 +468,14 @@ substitute for §7.1. The checklist is a hard gate, not a suggestion.
 
 ## References
 
-- **Tool**: [`gt-dod2`](https://github.com/EarthSciML/EarthSciSerialization)
+- **Tool**: [`gt-dod2`](https://github.com/EarthSciML/EarthSciAST)
   — `mtk2esm` scaffolder + round-trip CLI source of truth.
 - **Friction report**: `mdl-uao` — slit's pilot-time notes that
   surfaced the wiring gap this guide addresses.
 - **Pilots**: `mdl-dkw` (SuperFast, hand-written), `mdl-qba`
   (CarbonCycle, in flight). Both are useful prior art for how
   `mtk2esm`-scaffolded `.esm` files differ from hand-written ones.
-- **Spec**: `EarthSciSerialization/refinery/rig/esm-spec.md` and
+- **Spec**: `EarthSciAST/refinery/rig/esm-spec.md` and
   `esm-schema.json` for the canonical `.esm` shape.
 - **Pure-I/O data loaders**: [`pure-io-loader-migration.md`](pure-io-loader-migration.md)
   — the loader + regridding-model split pattern for

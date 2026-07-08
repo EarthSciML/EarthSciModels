@@ -94,7 +94,7 @@ and should be split into several `.esm` files within `components/aerosol/`.
 - MTK Julia source (lives in `Aerosol.jl`, `GasChem.jl`, etc. under
   github.com/EarthSciML).
 - The ESM parser / schema / MTK-conversion code (lives in
-  `EarthSciSerialization.jl`).
+  `EarthSciAST.jl`).
 - Runtime simulation drivers (each model's inline tests + examples are
   self-contained; end-to-end drivers go in the consumer's code).
 

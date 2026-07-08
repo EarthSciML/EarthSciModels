@@ -10,7 +10,7 @@ site is a view over them.
 | Piece | Purpose |
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
-| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via the canonical Python ESS runner (`earthsci_toolkit.simulation.simulate`) (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
+| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via the canonical Python ESS runner (`earthsci_ast.simulation.simulate`) (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
 | [Hugo](https://gohugo.io) | Static site generator; renders taxonomies and markdown. |
 | [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded via CDN in `layouts/partials/head.html`). |
 | [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` in CI. Lazy-loads, no server required. |
@@ -95,11 +95,11 @@ docs/
 
 Examples in the `.esm` schema carry declarative plot specs (`type: line` /
 `heatmap`, axis labels, variable bindings — see
-[ESS §5.4.11](https://github.com/EarthSciML/EarthSciSerialization)). At
+[ESS §5.4.11](https://github.com/EarthSciML/EarthSciAST)). At
 build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
 walks `components/**/*.esm`, evaluates each example (cartesian
 `parameter_sweep` for algebraic models, or via the canonical Python ESS
-runner (`earthsci_toolkit.simulation.simulate`) of `time_span` +
+runner (`earthsci_ast.simulation.simulate`) of `time_span` +
 `initial_state` for ODE models), and writes a PNG per declared plot under
 
 ```
@@ -123,7 +123,7 @@ The renderer handles two example shapes:
 - **ODE models** (one or more `D(state)/dt = rhs` equations) drive the
   time-series path when the example carries `time_span` + `initial_state`
   (`per_variable` form). Each example integrates via the canonical Python
-  ESS runner (`earthsci_toolkit.simulation.simulate`) and emits one PNG
+  ESS runner (`earthsci_ast.simulation.simulate`) and emits one PNG
   per plot of state/algebraic trajectories vs `t`. A
   1-D `parameter_sweep` is allowed and produces a family of curves on
   one axes (one integration per grid point). Covers

@@ -13,7 +13,7 @@ Steps:
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t
 using Symbolics
-using EarthSciSerialization
+using EarthSciAST
 using JSON3
 using OrdinaryDiffEqTsit5
 using Unitful
@@ -32,7 +32,7 @@ end
 
 println()
 println("── mtk2esm scaffold ────────────────────────────────────────")
-esm_dict = EarthSciSerialization.mtk2esm(
+esm_dict = EarthSciAST.mtk2esm(
     system;
     metadata = (;
         name = "WaterEquilibrium",
@@ -49,7 +49,7 @@ end
 println("Scaffold written: ", out_path)
 
 # Quick structural summary
-esm_file = EarthSciSerialization.load(out_path)
+esm_file = EarthSciAST.load(out_path)
 model = esm_file.models["WaterEquilibrium"]
 println("Variables declared: ", length(model.variables))
 println("Equations: ", length(model.equations))

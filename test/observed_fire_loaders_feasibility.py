@@ -3,7 +3,7 @@
 
 F-data-4 FEASIBILITY GATE for the three observed-fire pure-IO data loaders
 (campfire-e2e plan, observed-fire-data-loaders-plan-2026-06-26.md): confirm
-that the canonical ESS Python runner (``earthsci_toolkit``) can READ each new
+that the canonical ESS Python runner (``earthsci_ast``) can READ each new
 loader END-TO-END — both the structural ``load()`` (the same path the
 ``tools/run_esm_inline_tests.py`` gate walks) AND the per-kind runtime
 slice (``load_grid`` / ``load_static`` / ``load_points``) — across THREE
@@ -82,11 +82,11 @@ def _have(mod: str) -> bool:
 
 def main() -> int:
     try:
-        from earthsci_toolkit import (
+        from earthsci_ast import (
             load, load_grid, load_points, load_static,
         )
     except Exception as e:  # pragma: no cover - environment guard
-        print(f"FATAL: cannot import earthsci_toolkit ({e}). "
+        print(f"FATAL: cannot import earthsci_ast ({e}). "
               f"Install the canonical ESS runner (see .github/workflows/test-esm.yml).")
         return 1
 

@@ -6,21 +6,21 @@ Python inline-test gate for the EarthSciModels rig.
 Walks ``components/**/*.esm`` and ``lib/**/*.esm`` (both default roots) and
 runs every inline test (``Model.tests`` / ``ReactionSystem.tests`` per ESM
 spec §6.6) through the canonical ESS Python runner
-``earthsci_toolkit.simulation.simulate``. For each ``(time, variable,
+``earthsci_ast.simulation.simulate``. For each ``(time, variable,
 expected[, tolerance])`` assertion, samples the ``SimulationResult``
 trajectory at the requested time and compares to the declared expected
 value with the spec §6.6.4 tolerance precedence (assertion > test >
 container > default rel=1e-6).
 
 Minimum-bar gate (mdl-14s): a discovered .esm with no inline tests still
-counts as a checked file — the worker calls ``earthsci_toolkit.load`` on
+counts as a checked file — the worker calls ``earthsci_ast.load`` on
 it and emits a synthetic ``<load>`` PASS row. A load failure emits an
 ERROR row and fails the gate. This catches structural-validation drift
 on lib/ files (e.g. lib/solar.esm) at PR time, which is the class of bug
 that motivated the extension (see closed beads mdl-pk3, mdl-97r).
 
 Single-pathway rule (CLAUDE.md "Simulation Pathway — ABSOLUTE Rule"):
-this driver invokes ``earthsci_toolkit.simulation.simulate`` as the
+this driver invokes ``earthsci_ast.simulation.simulate`` as the
 **official ESS Python runner** — no homebrew lambdify+solve_ivp, no
 parallel evaluator. The cse=False knob is requested via the public
 ``cse: bool`` kwarg on ``simulate`` (esm-5gk, ESS audit follow-up
@@ -31,7 +31,7 @@ original audit concern (mdl-167, mirrored in
 ``tools/render_example_plots.py`` near ``_RSS_HARD_ABORT_GB``) was
 defensive against ``sympy.lambdify(..., cse=True)``'s memory cliff
 on very large reaction systems. The cse=False path runs through
-``earthsci_toolkit.sympy_bridge._flat_to_sympy_rhs``'s topological
+``earthsci_ast.sympy_bridge._flat_to_sympy_rhs``'s topological
 algebraic-state substitution loop, which has the opposite cliff:
 models with many cross-referenced algebraic states explode in
 compile time (>30 min on a single file vs <30s under cse=True).
@@ -57,13 +57,13 @@ OOM guardrails (per bead mdl-w1j scope):
     spawns one subprocess at a time.
 
 Cross-rig dependency (mdl-79g substrate-detection heuristic, ESS):
-  Until the heuristic-removal series lands on EarthSciSerialization
+  Until the heuristic-removal series lands on EarthSciAST
   main, the geoschem_fullchem mechanism's RHS divides by SO2/SALAAL/
   SALCAL whose default initial values are 0 (denominators of 0 →
   non-finite RHS). Workaround: seed those species to a small positive
   ppb-scale value via the ``initial_conditions`` kwarg of simulate().
   Remove the seed (the ``_DENOM_SEED_PPB`` block below) once
-  EarthSciSerialization main contains a commit referencing the
+  EarthSciAST main contains a commit referencing the
   substrate-detection heuristic drop.
 
 Exit codes:
@@ -290,7 +290,7 @@ def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
     ``coords`` picks one grid cell.
     """
     import numpy as np
-    from earthsci_toolkit.pde_inline_tests import (
+    from earthsci_ast.pde_inline_tests import (
         evaluate_cellwise, field_reduce, state_cells,
     )
 
@@ -304,7 +304,7 @@ def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
     cell_tuples = [c for c, _ in cells]
     field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
     if a.coords is not None:
-        from earthsci_toolkit.pde_inline_tests import _coords_cell, _variable_shape
+        from earthsci_ast.pde_inline_tests import _coords_cell, _variable_shape
         shape = _variable_shape(eval_ef, model_name, str(a.variable))
         target = _coords_cell(a.coords, shape, eval_ef.index_sets)
         try:
@@ -334,8 +334,8 @@ def _run_tests_for_container(
 ) -> None:
     if not tests:
         return
-    from earthsci_toolkit import flatten, simulate
-    from earthsci_toolkit.pde_inline_tests import (
+    from earthsci_ast import flatten, simulate
+    from earthsci_ast.pde_inline_tests import (
         BuildInspection, _ephemeral_injected_file,
     )
     import numpy as np
@@ -499,7 +499,7 @@ def _run_tests_for_container(
 def run_worker(file_path: str) -> int:
     _set_memory_limit(WORKER_RLIMIT_BYTES)
 
-    from earthsci_toolkit import flatten, load
+    from earthsci_ast import flatten, load
 
     rows: List[AssertionRow] = []
     try:

@@ -15,7 +15,7 @@ before running any GasChem-based migration.
 ```
 Unsatisfiable requirements detected for package Catalyst
   GasChem [...] requires Catalyst = 15
-  EarthSciSerialization [...] requires Catalyst = 16
+  EarthSciAST [...] requires Catalyst = 16
 ```
 
 or, if you fall back to the registry:
@@ -23,12 +23,12 @@ or, if you fall back to the registry:
 ```
 Unsatisfiable requirements detected for package ModelingToolkit
   GasChem 0.11.0 requires ModelingToolkit = 10
-  EarthSciSerialization 0.0.3 requires ModelingToolkit = 11
+  EarthSciAST 0.0.3 requires ModelingToolkit = 11
 ```
 
 **Why:** GasChem.jl 0.12.0 (the unreleased dev version polecats need) declares
 `Catalyst = "15"` in `[compat]` but its `[sources]` entry pulls Catalyst master
-(v16+). EarthSciSerialization 0.0.3 requires `Catalyst = "16"` and
+(v16+). EarthSciAST 0.0.3 requires `Catalyst = "16"` and
 `ModelingToolkit = "11"`. The published GasChem 0.11.0 pins MTK 10, so the
 registry version cannot resolve against ESS either. The only resolvable shape
 today is "GasChem dev checkout, with `Catalyst = "15"` bumped to `"16"` in
@@ -51,15 +51,15 @@ The script:
    and rewrites `Catalyst = "15"` → `Catalyst = "16"` in its `Project.toml`. The
    sed is idempotent — re-running on an already-patched checkout is a no-op
    and does not error. Unfamiliar compat shapes are left alone with a warning.
-2. Locates the EarthSciSerialization checkout (`$EARTHSCI_SERIALIZATION_PATH`
+2. Locates the EarthSciAST checkout (`$EARTHSCI_SERIALIZATION_PATH`
    or the Gas Town workspace defaults — same rules as `scripts/setup_polecat_env.sh`).
-3. `Pkg.develop`s **EarthSciModels** (this repo), **EarthSciSerialization**, and
+3. `Pkg.develop`s **EarthSciModels** (this repo), **EarthSciAST**, and
    the patched **GasChem** into `scripts/migrations/`'s env in a single resolve,
    then instantiates. Developing all three at once is required: the migrations
-   env's `Project.toml` lists EarthSciModels + EarthSciSerialization as deps
+   env's `Project.toml` lists EarthSciModels + EarthSciAST as deps
    but neither is registered, so they have to come from local paths.
 
-After this, `julia --project=scripts/migrations -e 'using GasChem, EarthSciSerialization, Catalyst'` works.
+After this, `julia --project=scripts/migrations -e 'using GasChem, EarthSciAST, Catalyst'` works.
 
 ## When this can be retired
 

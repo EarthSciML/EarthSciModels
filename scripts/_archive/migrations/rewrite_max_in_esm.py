@@ -1,7 +1,7 @@
 """Rewrite ``max(a, 0.0)`` rate clamps in geoschem_fullchem.esm to
 ``(a + abs(a)) / 2``.
 
-EarthSciSerializationCatalystExt._esm_to_symbolic supports
+EarthSciASTCatalystExt._esm_to_symbolic supports
 {+, -, *, /, ^, exp, log, log10, sin, cos, tan, sqrt, abs} but NOT max/min.
 The migration generated 64 ``max(expr, 0.0)`` calls (Arrhenius branches that
 would otherwise go negative at very low T). The mathematical identity

@@ -1,7 +1,7 @@
 """
     EarthSciModels
 
-Thin Julia shim over `EarthSciSerialization.jl` for loading `.esm` files from
+Thin Julia shim over `EarthSciAST.jl` for loading `.esm` files from
 this repo as ready-to-simulate `ModelingToolkit.System` / `PDESystem` objects.
 
 This package intentionally contains no model content — the authoritative models
@@ -20,12 +20,12 @@ sys = load_esm(joinpath(pkgdir(EarthSciModels), "components/gaschem/superfast.es
 ```
 
 For multi-component files, or to choose which model in a file to materialize,
-use `EarthSciSerialization.load(path)` directly and then construct the desired
+use `EarthSciAST.load(path)` directly and then construct the desired
 `System`/`PDESystem`/`ReactionSystem` from the returned `EsmFile`.
 """
 module EarthSciModels
 
-import EarthSciSerialization
+import EarthSciAST
 using Printf: @printf
 
 export load_esm, esm_root, esm_path,
@@ -38,22 +38,22 @@ Load an ESM file and return a ModelingToolkit `System` built from its single
 top-level model.
 
 Requires `ModelingToolkit` (and optionally `Catalyst` / `DomainSets`) to be
-loaded at the call site so `EarthSciSerialization`'s MTK extension is active.
+loaded at the call site so `EarthSciAST`'s MTK extension is active.
 
 Raises an `ArgumentError` when the file contains zero or multiple models — in
-that case use `EarthSciSerialization.load(path)` directly and pick the model
+that case use `EarthSciAST.load(path)` directly and pick the model
 you want.
 """
 function load_esm(path::AbstractString)
-    esm_file = EarthSciSerialization.load(String(path))
+    esm_file = EarthSciAST.load(String(path))
     models = esm_file.models
     if models === nothing || isempty(models)
-        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciSerialization.load() for non-Model entries (reaction_systems, operators, data_loaders)."))
+        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciAST.load() for non-Model entries (reaction_systems, operators, data_loaders)."))
     elseif length(models) == 1
         return _to_system(first(values(models)))
     else
         names = collect(keys(models))
-        throw(ArgumentError("ESM file has multiple models $(names); call EarthSciSerialization.load() and materialize the one you want."))
+        throw(ArgumentError("ESM file has multiple models $(names); call EarthSciAST.load() and materialize the one you want."))
     end
 end
 

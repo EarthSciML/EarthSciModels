@@ -6,7 +6,7 @@
 # WHY this exists:
 #   GasChem.jl 0.12.0 (the unreleased dev version polecats need for migrations
 #   that target ESS 0.0.3+) declares `Catalyst = "15"` in [compat] but uses a
-#   [sources] entry that pulls Catalyst master (which is v16+). EarthSciSerialization
+#   [sources] entry that pulls Catalyst master (which is v16+). EarthSciAST
 #   0.0.3 requires `Catalyst = "16"`, so a naive `Pkg.develop("GasChem")` fails to
 #   resolve — Pkg trusts the [compat] string, not what [sources] actually points at.
 #   The published GasChem 0.11.0 is also unusable because it pins MTK 10 while ESS
@@ -18,7 +18,7 @@
 #   1. Pkg.develop the parent EarthSciModels project (this repo) into the
 #      scripts/migrations env. Required because that env's Project.toml lists
 #      EarthSciModels as a dep but it isn't registered.
-#   2. Pkg.develop EarthSciSerialization from the workspace checkout (same
+#   2. Pkg.develop EarthSciAST from the workspace checkout (same
 #      resolution rules as scripts/setup_polecat_env.sh) — required for the
 #      same registry reason.
 #   3. Locate the GasChem dev checkout, rewrite `Catalyst = "15"` →
@@ -30,9 +30,9 @@
 #   1. $GASCHEM_DEV_PATH (if set and a directory exists there)
 #   2. ~/.julia/dev/GasChem (the standard `Pkg.develop("GasChem")` location)
 #
-# Resolution order for EarthSciSerialization:
+# Resolution order for EarthSciAST:
 #   1. $EARTHSCI_SERIALIZATION_PATH
-#   2. ../../../../EarthSciSerialization/{refinery,mayor}/rig/packages/EarthSciSerialization.jl
+#   2. ../../../../EarthSciAST/{refinery,mayor}/rig/pkg/EarthSciAST.jl
 #      (matches scripts/setup_polecat_env.sh)
 #
 # Usage (from the repo root):
@@ -100,7 +100,7 @@ else
   grep -nE '^Catalyst = ' "$gaschem_proj" >&2 || true
 fi
 
-# --- 2. EarthSciSerialization checkout --------------------------------------
+# --- 2. EarthSciAST checkout --------------------------------------
 
 ess_path=""
 
@@ -114,8 +114,8 @@ fi
 
 if [[ -z "$ess_path" ]]; then
   for candidate in \
-    "$repo_root/../../../../EarthSciSerialization/refinery/rig/packages/EarthSciSerialization.jl" \
-    "$repo_root/../../../../EarthSciSerialization/mayor/rig/packages/EarthSciSerialization.jl"
+    "$repo_root/../../../../EarthSciAST/refinery/rig/pkg/EarthSciAST.jl" \
+    "$repo_root/../../../../EarthSciAST/mayor/rig/pkg/EarthSciAST.jl"
   do
     if [[ -f "$candidate/Project.toml" ]]; then
       ess_path="$(cd "$candidate" && pwd)"
@@ -126,11 +126,11 @@ fi
 
 if [[ -z "$ess_path" ]]; then
   cat >&2 <<EOF
-error: could not find an EarthSciSerialization.jl checkout.
+error: could not find an EarthSciAST.jl checkout.
 
 Tried:
   \$EARTHSCI_SERIALIZATION_PATH (unset or missing)
-  ../../../../EarthSciSerialization/{refinery,mayor}/rig/packages/EarthSciSerialization.jl
+  ../../../../EarthSciAST/{refinery,mayor}/rig/pkg/EarthSciAST.jl
 
 Fix: run scripts/setup_polecat_env.sh first, or set EARTHSCI_SERIALIZATION_PATH.
 EOF
@@ -141,7 +141,7 @@ fi
 
 echo "Pkg.develop into $migrations_env:"
 echo "  EarthSciModels       <- $repo_root"
-echo "  EarthSciSerialization <- $ess_path"
+echo "  EarthSciAST <- $ess_path"
 echo "  GasChem              <- $gaschem_path"
 
 julia --project="$migrations_env" -e "

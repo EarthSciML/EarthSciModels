@@ -41,7 +41,7 @@ semantics. That identity is what this check asserts, to tolerance.
 
 ## Validation matrix (esm-3nc.6, 2026-06-25)
 
-Validated against both the current CI ESS (`EarthSciSerialization@main`,
+Validated against both the current CI ESS (`EarthSciAST@main`,
 `_CURRENT_VERSION (0,4,0)`, schema `0.6.0`) and the **bumped** ESS
 (`ess-v9a.7`: `_CURRENT_VERSION (0,7,0)`, schema `0.7.0`,
 `reject_legacy_data_loader_shapes` active):

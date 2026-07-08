@@ -72,7 +72,7 @@ P3 (backlog). Effort: S (≤½ day) · M (1–3 days) · L (>3 days).
   pair (LSODA truncation, lambdify CSE precision, MTK structural ordering,
   reference-value precision). Avoids drift via "loosen until green".
 
-### F4 — Inline-test gate uses private `earthsci_toolkit` internals
+### F4 — Inline-test gate uses private `earthsci_ast` internals
 - **Severity:** P2 · **Effort:** S in this rig (M upstream)
 - **Files:** `tools/run_esm_inline_tests.py:166-233`
   (`_build_cse_false_cache`).
@@ -86,26 +86,26 @@ P3 (backlog). Effort: S (≤½ day) · M (1–3 days) · L (>3 days).
   upstream (mirrors `test_simulation_csefalse_geoschem.py` per esm-5gk),
   but we still ship CI behavior coupled to a private surface that can move
   without notice.
-- **Recommendation:** file an ESS bead asking `earthsci_toolkit.simulate`
+- **Recommendation:** file an ESS bead asking `earthsci_ast.simulate`
   to expose a public `cse: bool = True` kwarg, then reduce
   `_build_cse_false_cache` to a single `simulate(..., cse=False)` call
   here. Single-pathway-rule compliance ✓ (the canonical runner is what
   walks the AST), but the `_-prefixed` import surface is brittle.
 
-### F5 — Python `earthsci_toolkit` is unpinned in both CI legs
+### F5 — Python `earthsci_ast` is unpinned in both CI legs
 - **Severity:** P2 · **Effort:** S
 - **Files:**
   - `.github/workflows/test-esm.yml:90` —
-    `earthsci_toolkit @ git+...EarthSciSerialization.git@main#subdirectory=...`
+    `earthsci_ast @ git+...EarthSciAST.git@main#subdirectory=...`
   - `.github/workflows/docs.yml:55-60` —
     `git clone --depth=1 ... main` then `pip install`.
 - **Current state:** both Python jobs install whatever is at
-  `EarthSciSerialization main` HEAD when CI runs. The Julia leg pins
-  `EarthSciSerialization = "0.0.3"` in `Project.toml [compat]`, so the two
+  `EarthSciAST main` HEAD when CI runs. The Julia leg pins
+  `EarthSciAST = "0.0.3"` in `Project.toml [compat]`, so the two
   legs can disagree on parser/runner behavior across the same workflow run.
   Combined with F4 (private-name coupling), an upstream rename is a CI
   outage.
-- **Recommendation:** pin `earthsci_toolkit` to a commit SHA, refreshed in
+- **Recommendation:** pin `earthsci_ast` to a commit SHA, refreshed in
   step with the Julia compat bump. Mirror the resolution-order story in
   `scripts/setup_polecat_env.sh` (workspace checkout > pinned URL).
 
@@ -130,12 +130,12 @@ P3 (backlog). Effort: S (≤½ day) · M (1–3 days) · L (>3 days).
   `parameter_sweep` path … or via `scipy.integrate.solve_ivp` (ODE
   models …)".
 - **Current state:** mdl-5xp (commit `41fb39c`) routed every ODE
-  integration through `earthsci_toolkit.simulation.simulate` and updated
+  integration through `earthsci_ast.simulation.simulate` and updated
   `AGENTS.md §3` accordingly. `docs/README.md` was not updated. Reads as
   the single-pathway-rule violation it no longer is.
 - **Recommendation:** replace the offending phrase with
   "via the canonical Python ESS runner
-  (`earthsci_toolkit.simulation.simulate`)". One-line fix.
+  (`earthsci_ast.simulation.simulate`)". One-line fix.
 
 ### F8 — `lib/solar.esm` standard library is undocumented
 - **Severity:** P3 · **Effort:** S
@@ -256,11 +256,11 @@ P3 (backlog). Effort: S (≤½ day) · M (1–3 days) · L (>3 days).
    pathway). One-line edit; high signal-to-noise. **P2 · S**
 2. **F6** — rewrite `AGENTS.md §4` for `scripts/_archive/migrations/`.
    Two sources of truth disagree today. **P2 · S**
-3. **F5** — pin `earthsci_toolkit` to a commit SHA in both workflows.
+3. **F5** — pin `earthsci_ast` to a commit SHA in both workflows.
    Removes a class of "CI broke overnight, no commit landed" outages.
    **P2 · S**
 4. **F4** — request a public `cse=False` kwarg on
-   `earthsci_toolkit.simulate`; reduce the inline-test gate's
+   `earthsci_ast.simulate`; reduce the inline-test gate's
    `_build_cse_false_cache` to a single line. **P2 · S** (here) /
    **M** (upstream).
 5. **F1** — sweep `.esm` files onto schema `0.4.0` so newer expressive

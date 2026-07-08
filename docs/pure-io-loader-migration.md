@@ -4,7 +4,7 @@ This guide documents the **repeatable split pattern** for migrating the ten
 `components/earthsci_data/*.esm` files from the old **co-located** format (one
 file holding both a `models.X` coupler *and* a `data_loaders.X` block) into the
 new **pure-I/O loader + regridding-model** pair required by the merged ESS RFC
-[`pure-io-data-loaders`](https://github.com/EarthSciML/EarthSciSerialization/blob/main/docs/content/rfcs/pure-io-data-loaders.md)
+[`pure-io-data-loaders`](https://github.com/EarthSciML/EarthSciAST/blob/main/docs/content/rfcs/pure-io-data-loaders.md)
 (schema beads `ess-v9a.2`–`.8`; ESD rule beads `esd-47z.1`–`.5`).
 
 It is written for the polecats picking up the remaining migration beads
@@ -16,7 +16,7 @@ examples you can copy from.
 > already on `main`: a loader carrying the old `spatial` or `regridding`
 > sub-blocks is now **rejected** at load (`SchemaValidationError: Additional
 > properties ('spatial'|'regridding') are not allowed`). The CI gate installs
-> `earthsci_toolkit @ EarthSciSerialization main`, so every unmigrated
+> `earthsci_ast @ EarthSciAST main`, so every unmigrated
 > `earthsci_data` file fails the gate until it is split. Migrate in lockstep.
 
 ---
@@ -264,7 +264,7 @@ Notes for the projected/special cases:
 
 The CI gate (`tools/run_esm_inline_tests.py`) walks `components/**/*.esm` and,
 for a file with no inline `tests` (all loaders/regridding models — they need real
-NetCDF), runs a **load-only minimum-bar gate**: `earthsci_toolkit.load(file)`
+NetCDF), runs a **load-only minimum-bar gate**: `earthsci_ast.load(file)`
 must succeed. Both halves must load independently (the model load resolves the
 `{"ref": ...}` to the loader file).
 

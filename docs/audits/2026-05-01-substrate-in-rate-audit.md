@@ -11,8 +11,8 @@
 ## Method
 
 Walked every `.esm` under this rig with the OFFICIAL Python ESS parser
-(`earthsci_toolkit.parse.load`) and the OFFICIAL free-variable extractor
-(`earthsci_toolkit.expression.free_variables`). For each `Reaction`, flagged
+(`earthsci_ast.parse.load`) and the OFFICIAL free-variable extractor
+(`earthsci_ast.expression.free_variables`). For each `Reaction`, flagged
 substrates whose name appears in the rate's free variables. No regex, no
 custom JSON walker.
 

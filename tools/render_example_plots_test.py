@@ -21,8 +21,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import render_example_plots as mod  # noqa: E402
-from earthsci_toolkit import ExprNode, Model, ModelVariable  # noqa: E402
-from earthsci_toolkit.esm_types import Equation  # noqa: E402
+from earthsci_ast import ExprNode, Model, ModelVariable  # noqa: E402
+from earthsci_ast.esm_types import Equation  # noqa: E402
 
 
 def _model(variables: dict, equations: list | None = None) -> Model:
@@ -97,7 +97,7 @@ class ComponentHasDynamicsTest(unittest.TestCase):
 
 class BuildSweepGridTest(unittest.TestCase):
     def _sweep(self, dims: list) -> "ParameterSweep":
-        from earthsci_toolkit.esm_types import ParameterSweep, SweepDimension, SweepRange
+        from earthsci_ast.esm_types import ParameterSweep, SweepDimension, SweepRange
 
         out_dims = []
         for d in dims:
@@ -307,7 +307,7 @@ class SolveTimeSeriesTest(unittest.TestCase):
 
     def test_exponential_decay(self):
         # dy/dt = -k*y, y(0)=1 → y(t) = exp(-k*t).
-        from earthsci_toolkit.esm_types import TimeSpan
+        from earthsci_ast.esm_types import TimeSpan
 
         m = _model(
             {"k": {"type": "parameter", "default": 0.5}, "y": {"type": "state"}},
@@ -333,7 +333,7 @@ class SolveTimeSeriesTest(unittest.TestCase):
     def test_algebraic_observed_trajectory(self):
         # DiameterGrowthRate-shape: D(D_p)/dt = I_D, A = const, I_D = A/D_p
         # ⇒ D_p² = D_p0² + 2A*t. Verifies algebraic-equation post-processing.
-        from earthsci_toolkit.esm_types import TimeSpan
+        from earthsci_ast.esm_types import TimeSpan
 
         m = _model(
             {

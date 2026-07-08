@@ -11,9 +11,9 @@ PNG per plot under
 `tools/esm_to_docs.py` already understands this convention and will inline
 the artifacts on the rendered Hugo page (mdl-f42).
 
-Expression evaluation is delegated to the `earthsci_toolkit` Python binding
+Expression evaluation is delegated to the `earthsci_ast` Python binding
 (ESS) — this file imports `load` from the package root and the scalar AST
-evaluator `fold_constant_expr` from `earthsci_toolkit.numpy_interpreter`,
+evaluator `fold_constant_expr` from `earthsci_ast.numpy_interpreter`,
 walking each sweep grid point through the ESS evaluator. That keeps op
 semantics single-sourced with the rest of the toolchain (Rust ndarray
 runtime, Julia SymbolicUtils path, conformance fixtures).
@@ -25,7 +25,7 @@ Renderable components:
 - ODE models (one or more `D(state)/dt = rhs` equations) drive the
   time-series path when the example carries `initial_state` (per_variable
   form). Each example integrates via the canonical Python runner
-  (`earthsci_toolkit.simulation.simulate`) and plots state/algebraic
+  (`earthsci_ast.simulation.simulate`) and plots state/algebraic
   trajectories vs `t`. A 1-D `parameter_sweep` is allowed and produces a
   family of curves on one axes (one integration per grid point).
   DiameterGrowthRate's Fig. 13.2 examples drive this path.
@@ -61,7 +61,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from earthsci_toolkit import (  # noqa: E402
+from earthsci_ast import (  # noqa: E402
     EsmFile,
     ExprNode,
     Model,
@@ -70,7 +70,7 @@ from earthsci_toolkit import (  # noqa: E402
     load,
     to_sympy,
 )
-from earthsci_toolkit.esm_types import (  # noqa: E402
+from earthsci_ast.esm_types import (  # noqa: E402
     Equation,
     Example,
     InitialConditionType,
@@ -82,12 +82,12 @@ from earthsci_toolkit.esm_types import (  # noqa: E402
     PlotValue,
     SweepDimension,
 )
-from earthsci_toolkit.flatten import FlattenedSystem, flatten  # noqa: E402
-from earthsci_toolkit.numpy_interpreter import (  # noqa: E402
+from earthsci_ast.flatten import FlattenedSystem, flatten  # noqa: E402
+from earthsci_ast.numpy_interpreter import (  # noqa: E402
     NumpyInterpreterError,
     fold_constant_expr,
 )
-from earthsci_toolkit.simulation import simulate  # noqa: E402
+from earthsci_ast.simulation import simulate  # noqa: E402
 
 
 class UnsupportedExpression(Exception):
@@ -95,7 +95,7 @@ class UnsupportedExpression(Exception):
 
     Wraps both renderer-side problems (missing variable bindings, unsupported
     plot types, sweep shapes) and ESS-side errors propagated from
-    `earthsci_toolkit.numpy_interpreter.fold_constant_expr` (unbound symbols,
+    `earthsci_ast.numpy_interpreter.fold_constant_expr` (unbound symbols,
     unsupported ops including `call` and time-derivatives reached at
     evaluation time).
     """
@@ -445,14 +445,14 @@ def _solve_time_series(
 ) -> dict[str, np.ndarray]:
     """Integrate the model's ODE system over `time_span` and return trajectories.
 
-    Routes through `earthsci_toolkit.simulation.simulate` — the canonical
+    Routes through `earthsci_ast.simulation.simulate` — the canonical
     Python ESS runner — per CLAUDE.md "Simulation Pathway — ABSOLUTE Rule".
     The runner handles ODE compilation (sympy lambdify with shared CSE),
     integration, dense output, and algebraic-state trajectory recovery
     internally. simulate's `vars` only surface state variables; observed
     variables (e.g. fastjx's `j_NO2 = Σ F_i·σ_i`) are recovered here by
     walking the model's resolution plan against each saved time sample,
-    using `earthsci_toolkit.numpy_interpreter.fold_constant_expr` — the
+    using `earthsci_ast.numpy_interpreter.fold_constant_expr` — the
     canonical Python scalar AST evaluator — at every point. That's a
     post-integration consumer of the integrated state, not a parallel ODE
     pipeline.

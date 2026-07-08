@@ -7,7 +7,7 @@ Walks every example's parameter_sweep, materializes the model per sweep
 point, solves the ODEProblem, and records any run that fails. Closes the
 acceptance gate item "examples simulate end-to-end".
 
-Examples live in the raw JSON because EarthSciSerialization.Model does
+Examples live in the raw JSON because EarthSciAST.Model does
 not yet surface them as a struct field (migration-time note) — we parse
 them from the document ourselves.
 
@@ -16,7 +16,7 @@ Exits 0 on success, non-zero if any example run fails.
 
 using ModelingToolkit
 using OrdinaryDiffEqTsit5
-using EarthSciSerialization
+using EarthSciAST
 using EarthSciModels
 using JSON3
 
@@ -118,7 +118,7 @@ function run_example(example, simp)
 end
 
 println("── Loading water.esm ──────────────────────────────────────")
-esm_file = EarthSciSerialization.load(WATER_PATH)
+esm_file = EarthSciAST.load(WATER_PATH)
 model = esm_file.models["WaterEquilibrium"]
 sys = ModelingToolkit.System(model; name = :WaterEquilibrium)
 simp = ModelingToolkit.mtkcompile(sys)

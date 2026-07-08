@@ -13,8 +13,8 @@
 # any inline tests, or touch any other .esm file.
 #
 # Pipeline phases instrumented (all via the canonical pathway):
-#   1. deps_loaded         -- using ModelingToolkit, Catalyst, EarthSciSerialization
-#   2. esm_loaded          -- EarthSciSerialization.load(geoschem_fullchem.esm)
+#   1. deps_loaded         -- using ModelingToolkit, Catalyst, EarthSciAST
+#   2. esm_loaded          -- EarthSciAST.load(geoschem_fullchem.esm)
 #   3a. catalyst_rs_built  -- Catalyst.ReactionSystem(rs; name=...)
 #   3b. mtk_complete       -- ModelingToolkit.complete(catalyst_rs)
 #   4. odeproblem_built    -- ModelingToolkit.ODEProblem(simp, merged, tspan;
@@ -69,11 +69,11 @@ end
 # ----- 1. deps_loaded ------------------------------------------------------
 using ModelingToolkit
 using Catalyst
-using EarthSciSerialization
+using EarthSciAST
 phase!("deps_loaded")
 
 # ----- 2. esm_loaded -------------------------------------------------------
-esm_file = EarthSciSerialization.load(ESM_PATH)
+esm_file = EarthSciAST.load(ESM_PATH)
 phase!("esm_loaded")
 
 const RS_NAME = "GEOSChemGasPhase"

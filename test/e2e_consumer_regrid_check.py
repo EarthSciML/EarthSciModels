@@ -10,7 +10,7 @@ acceptance sentence:
      to the pre-migration inline pipeline."
 
 What it checks, using the canonical ESS Python runner
-(``earthsci_toolkit.load`` — the single simulation/resolution pathway per
+(``earthsci_ast.load`` — the single simulation/resolution pathway per
 AGENTS.md §1; no parallel evaluator):
 
   1. RESOLVES — ``load()`` the consumer fixture
@@ -96,9 +96,9 @@ def _exposed_vars(model: dict) -> dict:
 
 def main() -> int:
     try:
-        from earthsci_toolkit import load
+        from earthsci_ast import load
     except Exception as e:  # pragma: no cover - environment guard
-        print(f"FATAL: cannot import earthsci_toolkit ({e}). "
+        print(f"FATAL: cannot import earthsci_ast ({e}). "
               f"Install the canonical ESS runner (see .github/workflows/test-esm.yml).")
         return 1
 
