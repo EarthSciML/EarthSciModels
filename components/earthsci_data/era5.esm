@@ -1,8 +1,8 @@
 {
-  "esm": "0.7.0",
+  "esm": "0.8.0",
   "metadata": {
     "name": "ERA5",
-    "description": "ERA5 regridding model — the coupler half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.1). Exposes ERA5 ECMWF Reanalysis 5th Generation pressure-level fields on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/era5_loader.esm) as the subsystem `pl` via {\"ref\": \"./era5_loader.esm\"}. Loader fields are referenced as ERA5.pl.<var> (e.g. ERA5.pl.u).\n  2. Reprojection: ERA5's native grid is geographic (longlat/WGS84), so the coordinate transform is the longlat IDENTITY (ESD reprojection/longlat.esm, esd-47z.1) — selected by convention from the loader's grid.crs.projection = 'longlat'; a no-op for an unprojected grid.\n  3. Regridding (per variable, RFC §5.2): the horizontal wind components u, v use B-spline interpolation; all centered scalars (temperature, humidity, geopotential, cloud, ozone, vorticity/divergence, and the vertical-velocity field w) use conservative (area-weighted, mass-conserving) regridding. Declared in the `regrid` block.\n\nTop-level derived quantities computed on the target grid: pressure P (from the 37-entry pressure-level lookup table), and the lat/lon coordinate metrics δxδlon and δyδlat (emitted only for lat/lon coordinate domains).\n\nMeanWind coupling (from EarthSciData.jl@830435a coupling.jl): MeanWind.v_lon ~ ERA5.pl.u, MeanWind.v_lat ~ ERA5.pl.v, MeanWind.v_lev ~ ERA5.pl.w.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5 constructor, esm-te2e); split into pure loader + regridding model by esm-3nc.1.",
+    "description": "ERA5 regridding model — the coupler half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.1). Exposes ERA5 ECMWF Reanalysis 5th Generation pressure-level fields on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/era5_loader.esm) as the subsystem `pl` via {\"ref\": \"./era5_loader.esm\"}. Loader fields are referenced as ERA5.pl.<var> (e.g. ERA5.pl.u).\n  2. Reprojection & regridding are NOT model concerns at esm 0.8.0. ERA5's native grid is geographic (longlat/WGS84); the identity longlat reprojection and the per-variable regridding onto a consuming grid (conservative for centered scalars t/q/r/z/w/…, B-spline for the horizontal winds u/v) are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5) by importing the earthscidiscretizations reprojection/ and regridding/ template libraries — see the wildlandfire.esm assembler. This model no longer carries a `regrid` block.\n\nTop-level derived quantities computed on the target grid: pressure P (from the 37-entry pressure-level lookup table), and the lat/lon coordinate metrics δxδlon and δyδlat (emitted only for lat/lon coordinate domains).\n\nMeanWind coupling (from EarthSciData.jl@830435a coupling.jl): MeanWind.v_lon ~ ERA5.pl.u, MeanWind.v_lat ~ ERA5.pl.v, MeanWind.v_lev ~ ERA5.pl.w.\n\nMigration esm 0.7.0 -> 0.8.0 (this file): v0.8.0 is a clean break that REMOVED `Model.regrid`/`RegridSpec` (esm-spec §8.6). Accordingly the former model `regrid` block (per-variable conservative/bspline methods) has been REMOVED and the regridding is now performed at the coupling edge via imported template libraries. The loader fields are consumed directly as ERA5.pl.<var>.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5 constructor, esm-te2e); split into pure loader + regridding model by esm-3nc.1.",
     "tags": [
       "earthsci_data",
       "meteorology",
@@ -78,6 +78,47 @@
           "default": 0.0,
           "description": "Reference epoch (seconds since the Julian date epoch) from which the ERA5 file time axis (valid_time) is offset. Set from DomainInfo.get_tref(domaininfo) at construction time."
         },
+        "t_interp_ref": {
+          "type": "parameter",
+          "units": "s",
+          "default": 0.0,
+          "description": "TIME INTERPOLATION (loader records_per_sample=2): simulation-clock time (s) of any cadence anchor of the interpolated loader — i.e. a time at which a fresh ERA5 record lands, so the interpolation weight is 0 there. Together with dt_interp it lets the model locate the current time within its bracketing pair WITHOUT the runtime injecting timestamps (the provider still LOADS the two bracketing records; this fixes only the phase of the weight). Set once by the runner (like the src-geometry params); for a run whose t=0 coincides with an ERA5 hour, 0.0 is correct."
+        },
+        "dt_interp": {
+          "type": "parameter",
+          "units": "s",
+          "default": 3600.0,
+          "description": "TIME INTERPOLATION: the loader's cadence step (s) between the two bracketing records — ERA5 is hourly, so 3600. Set by the runner to match the loader frequency. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so the model's weight phase agrees with which two records the provider loaded."
+        },
+        "w_time": {
+          "type": "observed",
+          "units": "1",
+          "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records (replacing the former piecewise-constant hourly step). It stays consistent with WHICH two records the provider loaded because both floor the same cadence grid (t_interp_ref phase, dt_interp step). At the end of the data the provider returns a degenerate bracket (both records equal), so any w yields the held endpoint. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear), so only this cheap blend is per-step; a pointwise consumer blends the two record values directly.",
+          "expression": {
+            "op": "-",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {"op": "-", "args": ["t", "t_interp_ref"]},
+                  "dt_interp"
+                ]
+              },
+              {
+                "op": "floor",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {"op": "-", "args": ["t", "t_interp_ref"]},
+                      "dt_interp"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
         "P": {
           "type": "observed",
           "units": "Pa",
@@ -118,72 +159,6 @@
       "subsystems": {
         "pl": {
           "ref": "./era5_loader.esm"
-        }
-      },
-      "regrid": {
-        "u": {
-          "method": "bspline",
-          "description": "U component of wind — zonal (west–east) wind. Horizontal wind component → B-spline interpolating regridder (ESD regridding/bspline_regrid.esm, esd-47z.3). Coupled to MeanWind.v_lon."
-        },
-        "v": {
-          "method": "bspline",
-          "description": "V component of wind — meridional (south–north) wind. Horizontal wind component → B-spline interpolating regridder (esd-47z.3). Coupled to MeanWind.v_lat."
-        },
-        "w": {
-          "method": "conservative",
-          "description": "Vertical velocity (omega, Pa/s). A centered scalar field (not a horizontal wind) → conservative area-weighted regridder. Coupled to MeanWind.v_lev."
-        },
-        "t": {
-          "method": "conservative",
-          "description": "Temperature (K). Centered scalar → conservative area-weighted overlap-join regridder (ESD regridding/conservative_regrid_overlap_join.esm)."
-        },
-        "q": {
-          "method": "conservative",
-          "description": "Specific humidity (kg/kg). Centered scalar → conservative regridder."
-        },
-        "r": {
-          "method": "conservative",
-          "description": "Relative humidity (%). Centered scalar → conservative regridder."
-        },
-        "z": {
-          "method": "conservative",
-          "description": "Geopotential (m²/s²). Centered scalar → conservative regridder."
-        },
-        "d": {
-          "method": "conservative",
-          "description": "Divergence (1/s). Centered scalar → conservative regridder."
-        },
-        "vo": {
-          "method": "conservative",
-          "description": "Relative vorticity (1/s). Centered scalar → conservative regridder."
-        },
-        "o3": {
-          "method": "conservative",
-          "description": "Ozone mass mixing ratio (kg/kg). Centered scalar → conservative regridder."
-        },
-        "cc": {
-          "method": "conservative",
-          "description": "Fraction of cloud cover (0–1). Centered scalar → conservative regridder."
-        },
-        "ciwc": {
-          "method": "conservative",
-          "description": "Specific cloud ice water content (kg/kg). Centered scalar → conservative regridder."
-        },
-        "clwc": {
-          "method": "conservative",
-          "description": "Specific cloud liquid water content (kg/kg). Centered scalar → conservative regridder."
-        },
-        "crwc": {
-          "method": "conservative",
-          "description": "Specific rain water content (kg/kg). Centered scalar → conservative regridder."
-        },
-        "cswc": {
-          "method": "conservative",
-          "description": "Specific snow water content (kg/kg). Centered scalar → conservative regridder."
-        },
-        "pv": {
-          "method": "conservative",
-          "description": "Potential vorticity (K·m²/(kg·s)). Centered scalar → conservative regridder."
         }
       },
       "equations": [],

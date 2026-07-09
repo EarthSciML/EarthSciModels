@@ -1,8 +1,8 @@
 {
-  "esm": "0.7.0",
+  "esm": "0.8.0",
   "metadata": {
     "name": "ERA5_pl_loader",
-    "description": "Pure-I/O data loader for ERA5 ECMWF Reanalysis 5th Generation pressure-level fields. Provides hourly pressure-level atmospheric variables (wind, temperature, humidity, geopotential, cloud, ozone, and derived fields) on the native 0.25°×0.25° global longitude/latitude grid, 1940–present, sourced from monthly NetCDF files.\n\nThis is the loader half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.1). It is PURE I/O: it declares its source (url_template), the file variables it reads (with units), its temporal cadence, and its NATIVE grid expressed as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/era5.esm), which references this file as a subsystem via {\"ref\": \"./era5_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (crs string / grid_type / staggering / resolution / extent) is replaced by the GDD `grid` (family + crs + dimensions + extents); the old per-loader `regridding` block (fill_value / extrapolation) is gone — regridding is declared per-variable on the model (era5.esm `regrid`). Because a `temporal` block is present, this loader seeds DISCRETE cadence for its variables (ess-v9a.5): the runtime refreshes the file buffers hourly.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5FileSet, pressure-level variables). Split out of the pre-migration components/earthsci_data/era5.esm (esm-te2e).",
+    "description": "Pure-I/O data loader for ERA5 ECMWF Reanalysis 5th Generation pressure-level fields. Provides hourly pressure-level atmospheric variables (wind, temperature, humidity, geopotential, cloud, ozone, and derived fields) on the native 0.25°×0.25° global longitude/latitude grid, 1940–present, sourced from monthly NetCDF files.\n\nThis is the loader half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.1). It is PURE I/O: it declares its source (url_template), the file variables it reads (with units), and its temporal cadence. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/era5.esm), which references this file as a subsystem via {\"ref\": \"./era5_loader.esm\"}.\n\nBecause a `temporal` block is present, this loader seeds DISCRETE cadence for its variables (ess-v9a.5): the runtime refreshes the file buffers hourly. (A consumer that needs a single time slice as a static field — e.g. the wildlandfire.esm surface-met coupling — binds one resolved hour as a CONST provider.)\n\nMigration esm 0.7.0 -> 0.8.0 (this file): v0.8.0 is a clean break that REMOVED the DataLoader `grid`/`mesh` descriptor (esm-spec §8.4; esm-schema.json DataLoader is now additionalProperties:false over {kind, source, temporal, determinism, variables, reference, metadata} with no `grid` key). Accordingly the former GDD `grid` block (family/crs/dimensions/extents + the n_pressure_level parameter) has been REMOVED. Grid geometry is now ordinary data: the native 0.25°×0.25° lon/lat lattice and the 37 pressure levels are documented in metadata below and materialized downstream by `aggregate` FAQs / coupling expressions (esm-spec §8.6). Reprojection (longlat identity) and conservative/bspline regridding onto a consuming grid are performed at the coupling edge via the reprojection/ and regridding/ template libraries in earthscidiscretizations, NOT here.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5FileSet, pressure-level variables). Split out of the pre-migration components/earthsci_data/era5.esm (esm-te2e); grid block removed in the 0.7.0 -> 0.8.0 migration.",
     "tags": [
       "earthsci_data",
       "meteorology",
@@ -43,39 +43,8 @@
         "file_period": "P1M",
         "frequency": "PT1H",
         "records_per_file": 744,
-        "time_variable": "valid_time"
-      },
-      "grid": {
-        "family": "cartesian",
-        "crs": {
-          "projection": "longlat",
-          "datum": "WGS84"
-        },
-        "description": "Native ERA5 grid: regular global 0.25°×0.25° longitude/latitude lattice on 37 pressure levels. Geographic (unprojected) crs — the regridding model applies the longlat identity reprojection (ESD reprojection/longlat.esm, esd-47z.1). Migrated from the loader's former DataLoaderSpatial block (RFC pure-io-data-loaders §4.1); the loader describes this grid but performs no reprojection or regridding. Dimension cell counts are resolved from the source dataset at load time; the documented native geometry is lon ∈ [-180°, 180°] (1440 cells), lat ∈ [-90°, 90°] (720 cells), pressure_level = 37 standard ERA5 levels (1000–1 hPa).",
-        "dimensions": [
-          "lon",
-          "lat",
-          "pressure_level"
-        ],
-        "extents": {
-          "lon": {
-            "n": 1440,
-            "spacing": "uniform"
-          },
-          "lat": {
-            "n": 720,
-            "spacing": "uniform"
-          },
-          "pressure_level": {
-            "n": "n_pressure_level",
-            "spacing": "uniform"
-          }
-        },
-        "parameters": {
-          "n_pressure_level": {
-            "description": "pressure_level cell count, resolved from the source dataset at load time (37 for the standard ERA5 pressure-level product: 1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100, 70, 50, 30, 20, 10, 7, 5, 3, 2, 1 hPa)."
-          }
-        }
+        "time_variable": "valid_time",
+        "records_per_sample": 2
       },
       "variables": {
         "t": {
@@ -195,7 +164,7 @@
           "dataset": "reanalysis-era5-pressure-levels",
           "format": "netcdf",
           "pressure_levels": [1000],
-          "description": "Opt-in CDS request descriptor (gap G7). When the loader seam is routed through the EarthSciIO provider adapter (earthsci_toolkit.data_loaders.esio_provider.esio_provider_factory), this block makes the loader resolve to the real Copernicus CDS API instead of the placeholder earthsci.dev mirror: the adapter builds a per-month `cds://reanalysis-era5-pressure-levels?<request>` URL (earthsciio.era5.era5_cds_url) whose `area` is the simulation domain's WGS84 bounding box, whose `variable` list maps this loader's NetCDF short names (t, u, v, r, …) to the CDS long names, and whose `pressure_level` set is `pressure_levels` below (default: all 37 ERA5 levels). EarthSciIO's registered `cds` transport then submits/polls/downloads the NetCDF asset, authenticating with the PRIVATE-TOKEN from ~/.cdsapirc or $CDSAPI_KEY. The submit→poll→download handshake cannot be expressed as the default ESS opener/fetcher's single HTTP GET, which is why the CDS path lives in the esio adapter rather than the default provider.",
+          "description": "Opt-in CDS request descriptor (gap G7). When the loader seam is routed through the EarthSciIO provider adapter (earthsci_ast.data_loaders.esio_provider.esio_provider_factory), this block makes the loader resolve to the real Copernicus CDS API instead of the placeholder earthsci.dev mirror: the adapter builds a per-month `cds://reanalysis-era5-pressure-levels?<request>` URL (earthsciio.era5.era5_cds_url) whose `area` is the simulation domain's WGS84 bounding box, whose `variable` list maps this loader's NetCDF short names (t, u, v, r, …) to the CDS long names, and whose `pressure_level` set is `pressure_levels` below (default: all 37 ERA5 levels). EarthSciIO's registered `cds` transport then submits/polls/downloads the NetCDF asset, authenticating with the PRIVATE-TOKEN from ~/.cdsapirc or $CDSAPI_KEY. The submit→poll→download handshake cannot be expressed as the default ESS opener/fetcher's single HTTP GET, which is why the CDS path lives in the esio adapter rather than the default provider.",
           "pressure_levels_note": "The `pressure_levels` key (a list of hPa integers) trims the CDS request to the levels actually needed; omit it to request the full 37-level set (a large download that exceeds the CDS per-request cost limit when combined with a full month × 24 h × 16 variables). It is set to [1000] here because the consuming wildfire model reduces ERA5 to the ground surface (camp_fire's ground_surface interface, lev=min = 1000 hPa), so only the near-surface level is needed; raise it to the full set for a model that uses the vertical column."
         },
         "temporal_note": "ERA5 monthly files are released with a ~2-month lag. The temporal.end above is approximate; update as new months are released. ERA5 Back Extension covers 1940–1978 with slightly reduced quality; the main ERA5 record begins January 1979."
