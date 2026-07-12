@@ -1,0 +1,55 @@
+{
+  "esm": "0.8.0",
+  "metadata": {
+    "name": "WildlandFireBehaviorCoupling",
+    "description": "Rothermel (1972) + NFDRS surface fire-behavior stack wired to a level-set Hamilton-Jacobi front leaf. A pure coupling-library file (esm-spec §10.9): top-level `coupling_roles` + a role-scoped `coupling` array of param_to_var edges, no models/loaders. Reusable wiring for the pointwise behavior physics: an Anderson-13 fuel-property source (Fuel) and an NFDRS moisture chain (EMC -> FuelMoisture) feed the Rothermel spread model (Rothermel), which — together with a midflame-wind model (Wind) and a terrain-slope model (Slope) — yields the base rate of spread R_0 and the fuel/wind/slope coefficients consumed by the direction-dependent spread rate S(n̂) of the level-set leaf (LevelSet). Fuel load also drives a fuel-consumption model (Consumption). Imported by ../../wildlandfire.esm/wildlandfire.esm; the canonical binding is Fuel=FuelModelLookup, EMC=EquilibriumMoistureContent, FuelMoisture=OneHourFuelMoisture, Wind=MidflameWind, Slope=TerrainSlope, Rothermel=RothermelFireSpread, LevelSet=LevelSetFireSpread, Consumption=FuelConsumption. Extracted verbatim (param_to_var edges only) from the previously-inline wildlandfire.esm coupling block; §10.10.3 guarantees the imported assembly flattens to the same system as the inline form.",
+    "tags": [
+      "wildland_fire",
+      "coupling",
+      "coupling_library",
+      "param_to_var",
+      "rothermel",
+      "nfdrs",
+      "level_set"
+    ],
+    "references": [
+      {
+        "citation": "Rothermel, R. C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Research Paper INT-115. — Surface fire spread-rate model producing the base rate R_0 and the wind/slope coefficients wired here into the level-set leaf."
+      },
+      {
+        "citation": "Mandel, J., Beezley, J. D., & Kochanski, A. K. (2011). Coupled atmosphere-wildland fire modeling with WRF 3.3 and SFIRE 2011. Geoscientific Model Development, 4(3), 591-610. — Level-set front-propagation formulation ψ_t = -S(n̂)|∇ψ| and fuel-consumption relation that consume this coupling's outputs."
+      }
+    ]
+  },
+  "coupling_roles": {
+    "Fuel": { "description": "Anderson-13 fuel-property source: exposes sigma, w_0, delta, M_x, h (surface-area-to-volume ratio, oven-dry load, fuel-bed depth, dead-fuel moisture of extinction, low heat content)." },
+    "EMC": { "description": "NFDRS equilibrium-moisture-content model: exposes EMC (dead-fuel equilibrium moisture from temperature and relative humidity)." },
+    "FuelMoisture": { "description": "NFDRS 1-h dead-fuel moisture model: consumes EMCPRM and exposes MC1 (1-h timelag dead-fuel moisture)." },
+    "Wind": { "description": "Midflame-wind model: consumes slope_aspect, exposes midflame wind speed U and its components u_mf_x/u_mf_y." },
+    "Slope": { "description": "Terrain-slope model: exposes slope steepness tan_phi, upslope aspect slope_aspect, and slope components dzdx_out/dzdy_out." },
+    "Rothermel": { "description": "Rothermel (1972) surface fire-spread model: consumes fuel properties, moisture, wind and slope; exposes base rate R0 and coefficients C_coeff/B_coeff/E_coeff/beta_ratio/phi_s_coeff." },
+    "LevelSet": { "description": "Level-set Hamilton-Jacobi front-propagation leaf: consumes R_0 and the wind/slope coefficients that parameterize its direction-dependent spread rate S(n̂)." },
+    "Consumption": { "description": "Fuel-consumption model (Mandel 2011): consumes the initial fuel load w0_initial." }
+  },
+  "coupling": [
+    { "type": "variable_map", "from": "Fuel.sigma", "to": "Rothermel.sigma", "transform": "param_to_var", "description": "Fuel surface-area-to-volume ratio σ (Anderson FM code -> Rothermel)." },
+    { "type": "variable_map", "from": "Fuel.w_0", "to": "Rothermel.w0", "transform": "param_to_var", "description": "Oven-dry fuel load w0." },
+    { "type": "variable_map", "from": "Fuel.delta", "to": "Rothermel.delta", "transform": "param_to_var", "description": "Fuel-bed depth δ." },
+    { "type": "variable_map", "from": "Fuel.M_x", "to": "Rothermel.Mx", "transform": "param_to_var", "description": "Dead-fuel moisture of extinction Mx." },
+    { "type": "variable_map", "from": "Fuel.h", "to": "Rothermel.h", "transform": "param_to_var", "description": "Fuel low heat content h." },
+    { "type": "variable_map", "from": "Fuel.wind_reduction", "to": "Wind.wind_reduction", "transform": "param_to_var", "description": "Per-fuel midflame wind adjustment factor (Baughman–Albini unsheltered WAF derived from fuel-bed depth δ) -> MidflameWind.wind_reduction, replacing its fixed 0.4 so the wind reduction (hence φ_W) is fuel-dependent." },
+    { "type": "variable_map", "from": "EMC.EMC", "to": "FuelMoisture.EMCPRM", "transform": "param_to_var", "description": "NFDRS equilibrium moisture content -> 1-h interface EMC." },
+    { "type": "variable_map", "from": "FuelMoisture.MC1", "to": "Rothermel.Mf", "transform": "param_to_var", "description": "1-h dead-fuel moisture MC1 -> Rothermel fuel moisture Mf." },
+    { "type": "variable_map", "from": "Rothermel.R0", "to": "LevelSet.R_0", "transform": "param_to_var", "description": "No-wind/no-slope base rate of spread R_0 (m/s)." },
+    { "type": "variable_map", "from": "Rothermel.C_coeff", "to": "LevelSet.C_wind", "transform": "param_to_var", "description": "Wind coefficient C (fuel-specific)." },
+    { "type": "variable_map", "from": "Rothermel.B_coeff", "to": "LevelSet.B_wind", "transform": "param_to_var", "description": "Wind exponent B (fuel-specific)." },
+    { "type": "variable_map", "from": "Rothermel.E_coeff", "to": "LevelSet.E_wind", "transform": "param_to_var", "description": "Wind exponent E (fuel-specific)." },
+    { "type": "variable_map", "from": "Rothermel.beta_ratio", "to": "LevelSet.beta_ratio", "transform": "param_to_var", "description": "Relative packing ratio β/β_op." },
+    { "type": "variable_map", "from": "Rothermel.phi_s_coeff", "to": "LevelSet.phi_s_coeff", "transform": "param_to_var", "description": "Slope factor coefficient." },
+    { "type": "variable_map", "from": "Wind.u_mf_x", "to": "LevelSet.u_x", "transform": "param_to_var", "description": "Midflame east wind component -> leaf u_x." },
+    { "type": "variable_map", "from": "Wind.u_mf_y", "to": "LevelSet.u_y", "transform": "param_to_var", "description": "Midflame north wind component -> leaf u_y." },
+    { "type": "variable_map", "from": "Slope.dzdx_out", "to": "LevelSet.dzdx", "transform": "param_to_var", "description": "Terrain dz/dx -> leaf slope x." },
+    { "type": "variable_map", "from": "Slope.dzdy_out", "to": "LevelSet.dzdy", "transform": "param_to_var", "description": "Terrain dz/dy -> leaf slope y." },
+    { "type": "variable_map", "from": "Fuel.w_0", "to": "Consumption.w0_initial", "transform": "param_to_var", "description": "Initial fuel load -> consumption model." }
+  ]
+}

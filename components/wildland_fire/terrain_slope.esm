@@ -1,5 +1,5 @@
 {
-    "esm": "0.7.0",
+    "esm": "0.8.0",
     "metadata": {
         "name": "TerrainSlope",
         "description": "Terrain slope magnitude and aspect from elevation gradients. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:205 (`TerrainSlope` @component). Observed-only: dzdx and dzdy are inputs (parameters); tan_phi, slope_aspect, dzdx_out, dzdy_out are algebraic outputs.",
@@ -26,7 +26,7 @@
                 "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:205\nUpstream `TerrainSlope` is an MTK `@component` whose two inputs (dzdx, dzdy) are `@parameters` and whose four outputs (tanϕ, slope_aspect, dzdx_out, dzdy_out) are time-indexed `@variables` with algebraic-only equations. Identical structure preserved here; the unicode `tanϕ` symbol is rendered as ASCII `tan_phi` (other ESM components in this rig use ASCII identifiers — see e.g. components/aerosol/aq_eq/water.esm). The upstream `zero_rad` and `zero_1` `@constants` are MTK unit-balancing zero literals (added to the RHS to keep MTK's unit checker happy); they are preserved here as zero-valued parameters and kept in the equations to maintain 1:1 fidelity with the upstream component used by the Rothermel coupling.\n\nNote on slope_aspect: upstream uses `atan(dzdy, dzdx)` which is two-argument atan — represented as op `atan2` in the ESS expression vocabulary (see esm-schema.json operator enum). Returned in radians, in (-π, π], measured counter-clockwise from the +x (east) axis.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equations are sqrt-of-sum-of-squares and atan2 — both single floating-point operations on hardware-supported intrinsics — so float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on rise/run gradients."
             },
             "tolerance": {
-                "rel": 1.0e-12
+                "rel": 1e-12
             },
             "variables": {
                 "dzdx": {
@@ -54,30 +54,10 @@
                     "description": "Zero-valued dimensionless constant (MTK unit-balancing literal preserved from upstream)"
                 },
                 "tan_phi": {
-                    "type": "state",
+                    "type": "observed",
                     "units": "1",
-                    "description": "Slope steepness (rise/run, dimensionless) = sqrt(dzdx^2 + dzdy^2)"
-                },
-                "slope_aspect": {
-                    "type": "state",
-                    "units": "rad",
-                    "description": "Aspect angle of the upslope direction, measured from +x (east) axis, in (-pi, pi]"
-                },
-                "dzdx_out": {
-                    "type": "state",
-                    "units": "1",
-                    "description": "Pass-through of dzdx (output port for downstream couplings)"
-                },
-                "dzdy_out": {
-                    "type": "state",
-                    "units": "1",
-                    "description": "Pass-through of dzdy (output port for downstream couplings)"
-                }
-            },
-            "equations": [
-                {
-                    "lhs": "tan_phi",
-                    "rhs": {
+                    "description": "Slope steepness (rise/run, dimensionless) = sqrt(dzdx^2 + dzdy^2)",
+                    "expression": {
                         "op": "+",
                         "args": [
                             {
@@ -86,8 +66,20 @@
                                     {
                                         "op": "+",
                                         "args": [
-                                            { "op": "^", "args": ["dzdx", 2] },
-                                            { "op": "^", "args": ["dzdy", 2] }
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "dzdx",
+                                                    2
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "dzdy",
+                                                    2
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -96,31 +88,50 @@
                         ]
                     }
                 },
-                {
-                    "lhs": "slope_aspect",
-                    "rhs": {
+                "slope_aspect": {
+                    "type": "observed",
+                    "units": "rad",
+                    "description": "Aspect angle of the upslope direction, measured from +x (east) axis, in (-pi, pi]",
+                    "expression": {
                         "op": "+",
                         "args": [
-                            { "op": "atan2", "args": ["dzdy", "dzdx"] },
+                            {
+                                "op": "atan2",
+                                "args": [
+                                    "dzdy",
+                                    "dzdx"
+                                ]
+                            },
                             "zero_rad"
                         ]
                     }
                 },
-                {
-                    "lhs": "dzdx_out",
-                    "rhs": {
+                "dzdx_out": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Pass-through of dzdx (output port for downstream couplings)",
+                    "expression": {
                         "op": "+",
-                        "args": ["dzdx", "zero_1"]
+                        "args": [
+                            "dzdx",
+                            "zero_1"
+                        ]
                     }
                 },
-                {
-                    "lhs": "dzdy_out",
-                    "rhs": {
+                "dzdy_out": {
+                    "type": "observed",
+                    "units": "1",
+                    "description": "Pass-through of dzdy (output port for downstream couplings)",
+                    "expression": {
                         "op": "+",
-                        "args": ["dzdy", "zero_1"]
+                        "args": [
+                            "dzdy",
+                            "zero_1"
+                        ]
                     }
                 }
-            ],
+            },
+            "equations": [],
             "tests": [
                 {
                     "id": "flat_terrain",
@@ -129,12 +140,43 @@
                         "dzdx": 0.0,
                         "dzdy": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -144,12 +186,37 @@
                         "dzdx": 0.1,
                         "dzdy": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.1 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -159,12 +226,34 @@
                         "dzdx": 0.0,
                         "dzdy": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 1.5707963267948966 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.1 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 1.5707963267948966
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.1
+                        }
                     ]
                 },
                 {
@@ -174,12 +263,34 @@
                         "dzdx": 0.0,
                         "dzdy": -0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": -1.5707963267948966 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.1 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": -1.5707963267948966
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": -0.1
+                        }
                     ]
                 },
                 {
@@ -189,12 +300,34 @@
                         "dzdx": -0.1,
                         "dzdy": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.1 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 3.141592653589793 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.1 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 3.141592653589793
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": -0.1
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -204,12 +337,31 @@
                         "dzdx": 0.1,
                         "dzdy": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.14142135623730953 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.7853981633974483 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.1 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.1 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.14142135623730953
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 0.7853981633974483
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.1
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.1
+                        }
                     ]
                 },
                 {
@@ -219,12 +371,31 @@
                         "dzdx": 0.3,
                         "dzdy": 0.4
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.9272952180016122 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.3 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.4 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 0.9272952180016122
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.4
+                        }
                     ]
                 },
                 {
@@ -234,12 +405,31 @@
                         "dzdx": -0.3,
                         "dzdy": 0.4
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 2.214297435588181 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.3 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.4 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 2.214297435588181
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": -0.3
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.4
+                        }
                     ]
                 },
                 {
@@ -249,12 +439,31 @@
                         "dzdx": -0.3,
                         "dzdy": -0.4
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": -2.214297435588181 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": -0.3 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.4 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": -2.214297435588181
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": -0.3
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": -0.4
+                        }
                     ]
                 },
                 {
@@ -264,12 +473,31 @@
                         "dzdx": 0.3,
                         "dzdy": -0.4
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.5 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": -0.9272952180016122 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.3 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": -0.4 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": -0.9272952180016122
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.3
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": -0.4
+                        }
                     ]
                 },
                 {
@@ -279,12 +507,31 @@
                         "dzdx": 0.5,
                         "dzdy": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "tan_phi",      "time": 0.0, "expected": 0.7071067811865476 },
-                        { "variable": "slope_aspect", "time": 0.0, "expected": 0.7853981633974483 },
-                        { "variable": "dzdx_out",     "time": 0.0, "expected": 0.5 },
-                        { "variable": "dzdy_out",     "time": 0.0, "expected": 0.5 }
+                        {
+                            "variable": "tan_phi",
+                            "time": 0.0,
+                            "expected": 0.7071067811865476
+                        },
+                        {
+                            "variable": "slope_aspect",
+                            "time": 0.0,
+                            "expected": 0.7853981633974483
+                        },
+                        {
+                            "variable": "dzdx_out",
+                            "time": 0.0,
+                            "expected": 0.5
+                        },
+                        {
+                            "variable": "dzdy_out",
+                            "time": 0.0,
+                            "expected": 0.5
+                        }
                     ]
                 }
             ],
@@ -292,20 +539,25 @@
                 {
                     "id": "aspect_vs_dzdy_at_fixed_dzdx",
                     "description": "Sweep dzdy from -0.5 to +0.5 at fixed dzdx = 0.1 — produces the canonical S-shape of slope_aspect vs cross-slope gradient (transitions through zero at dzdy = 0, asymptotes toward ±π/2 as |dzdy|/dzdx grows).",
-                    "initial_state": {
-                        "type": "per_variable",
-                        "values": {}
-                    },
+                    "initial_state": {},
                     "parameters": {
                         "dzdx": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "dzdy",
-                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": -0.5,
+                                    "stop": 0.5,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -314,37 +566,59 @@
                             "id": "aspect_curve",
                             "type": "line",
                             "description": "slope_aspect (rad) as a function of north-gradient at fixed east-gradient.",
-                            "x": { "variable": "dzdy",         "label": "dzdy (rise/run)" },
-                            "y": { "variable": "slope_aspect", "label": "slope_aspect (rad)" }
+                            "x": {
+                                "variable": "dzdy",
+                                "label": "dzdy (rise/run)"
+                            },
+                            "y": {
+                                "variable": "slope_aspect",
+                                "label": "slope_aspect (rad)"
+                            }
                         },
                         {
                             "id": "tan_phi_curve",
                             "type": "line",
                             "description": "Slope steepness as a function of north-gradient at fixed east-gradient — V-shape with minimum tan_phi = |dzdx| at dzdy = 0.",
-                            "x": { "variable": "dzdy",    "label": "dzdy (rise/run)" },
-                            "y": { "variable": "tan_phi", "label": "tan_phi (rise/run)" }
+                            "x": {
+                                "variable": "dzdy",
+                                "label": "dzdy (rise/run)"
+                            },
+                            "y": {
+                                "variable": "tan_phi",
+                                "label": "tan_phi (rise/run)"
+                            }
                         }
                     ]
                 },
                 {
                     "id": "tan_phi_heatmap",
                     "description": "Two-dimensional sweep over (dzdx, dzdy) covering ±50% gradients — surfaces the radial sqrt-of-sum-of-squares dependence of tan_phi (concentric circles) that drives Rothermel's slope coefficient φ_s.",
-                    "initial_state": {
-                        "type": "per_variable",
-                        "values": {}
-                    },
+                    "initial_state": {},
                     "parameters": {},
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "dzdx",
-                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": -0.5,
+                                    "stop": 0.5,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "dzdy",
-                                "range": { "start": -0.5, "stop": 0.5, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": -0.5,
+                                    "stop": 0.5,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -353,17 +627,35 @@
                             "id": "tan_phi_surface",
                             "type": "heatmap",
                             "description": "tan_phi(dzdx, dzdy) — the radial slope-magnitude field over the elevation-gradient plane.",
-                            "x": { "variable": "dzdx", "label": "dzdx (rise/run)" },
-                            "y": { "variable": "dzdy", "label": "dzdy (rise/run)" },
-                            "value": { "variable": "tan_phi", "reduce": "final" }
+                            "x": {
+                                "variable": "dzdx",
+                                "label": "dzdx (rise/run)"
+                            },
+                            "y": {
+                                "variable": "dzdy",
+                                "label": "dzdy (rise/run)"
+                            },
+                            "value": {
+                                "variable": "tan_phi",
+                                "reduce": "final"
+                            }
                         },
                         {
                             "id": "aspect_surface",
                             "type": "heatmap",
                             "description": "slope_aspect(dzdx, dzdy) — the upslope-direction angle field, with the −π↔+π branch cut along the −x axis.",
-                            "x": { "variable": "dzdx", "label": "dzdx (rise/run)" },
-                            "y": { "variable": "dzdy", "label": "dzdy (rise/run)" },
-                            "value": { "variable": "slope_aspect", "reduce": "final" }
+                            "x": {
+                                "variable": "dzdx",
+                                "label": "dzdx (rise/run)"
+                            },
+                            "y": {
+                                "variable": "dzdy",
+                                "label": "dzdy (rise/run)"
+                            },
+                            "value": {
+                                "variable": "slope_aspect",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

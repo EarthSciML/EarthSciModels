@@ -1,5 +1,5 @@
 {
-    "esm": "0.7.0",
+    "esm": "0.8.0",
     "metadata": {
         "name": "OneHourFuelMoisture",
         "description": "1-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 3. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:149 (`OneHourFuelMoisture` @component). Observed-only: EMCPRM, MC10, use_fuel_sticks, is_raining are inputs (parameters); MC1 is the algebraic output.",
@@ -26,19 +26,19 @@
                 "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:149\nUpstream `OneHourFuelMoisture` is an MTK `@component` whose inputs (EMCPRM, MC10, use_fuel_sticks, is_raining) are `@parameters` and whose single output (MC1) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` that selects between three branches per Cohen & Deeming 1985 page 3:\n  - is_raining > 0.5  ⇒ MC1 = 0.35 (35% saturation)\n  - else use_fuel_sticks > 0.5  ⇒ MC1 = (4*EMCPRM + MC10)/5 (with-sticks branch)\n  - else  ⇒ MC1 = 1.03*EMCPRM (without-sticks branch)\n\nThe rain branch dominates over fuel-sticks dispatch (outer ifelse). The dispatch threshold (0.5) is encoded as a strict `>` comparison so any value > 0.5 selects the corresponding branch. Defaults are 0.0 for both flags so the standalone component selects the without-sticks branch by default and is well-posed without overrides.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a nested `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs."
             },
             "tolerance": {
-                "rel": 1.0e-12
+                "rel": 1e-12
             },
             "variables": {
                 "EMCPRM": {
                     "type": "parameter",
                     "units": "1",
-                    "default": 0.10,
+                    "default": 0.1,
                     "description": "Equilibrium moisture content at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture, mid-range NFDRS value."
                 },
                 "MC10": {
                     "type": "parameter",
                     "units": "1",
-                    "default": 0.10,
+                    "default": 0.1,
                     "description": "10-hour fuel moisture content (dimensionless fraction). Coupled input from `TenHourFuelMoisture` when fuel sticks are used. Default 0.10 = 10%."
                 },
                 "use_fuel_sticks": {
@@ -54,43 +54,63 @@
                     "description": "Flag: 1 if raining at observation time, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. Rain branch dominates: MC1 pinned to 0.35 regardless of sticks/EMCPRM."
                 },
                 "MC1": {
-                    "type": "state",
+                    "type": "observed",
                     "units": "1",
-                    "description": "1-hour fuel moisture content (dimensionless fraction)."
-                }
-            },
-            "equations": [
-                {
-                    "lhs": "MC1",
-                    "rhs": {
+                    "description": "1-hour fuel moisture content (dimensionless fraction).",
+                    "expression": {
                         "op": "ifelse",
                         "args": [
-                            { "op": ">", "args": ["is_raining", 0.5] },
+                            {
+                                "op": ">",
+                                "args": [
+                                    "is_raining",
+                                    0.5
+                                ]
+                            },
                             0.35,
                             {
                                 "op": "ifelse",
                                 "args": [
-                                    { "op": ">", "args": ["use_fuel_sticks", 0.5] },
+                                    {
+                                        "op": ">",
+                                        "args": [
+                                            "use_fuel_sticks",
+                                            0.5
+                                        ]
+                                    },
                                     {
                                         "op": "/",
                                         "args": [
                                             {
                                                 "op": "+",
                                                 "args": [
-                                                    { "op": "*", "args": [4.0, "EMCPRM"] },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            4.0,
+                                                            "EMCPRM"
+                                                        ]
+                                                    },
                                                     "MC10"
                                                 ]
                                             },
                                             5.0
                                         ]
                                     },
-                                    { "op": "*", "args": [1.03, "EMCPRM"] }
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            1.03,
+                                            "EMCPRM"
+                                        ]
+                                    }
                                 ]
                             }
                         ]
                     }
                 }
-            ],
+            },
+            "equations": [],
             "tests": [
                 {
                     "id": "no_rain_no_sticks_emcprm10",
@@ -98,11 +118,18 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.10
+                        "EMCPRM": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.103 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.103
+                        }
                     ]
                 },
                 {
@@ -113,9 +140,16 @@
                         "use_fuel_sticks": 0.0,
                         "EMCPRM": 0.05
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.0515 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.0515
+                        }
                     ]
                 },
                 {
@@ -124,11 +158,18 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.30
+                        "EMCPRM": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.309 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.309
+                        }
                     ]
                 },
                 {
@@ -137,12 +178,19 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 1.0,
-                        "EMCPRM": 0.10,
-                        "MC10": 0.10
+                        "EMCPRM": 0.1,
+                        "MC10": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.10 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.1
+                        }
                     ]
                 },
                 {
@@ -154,9 +202,16 @@
                         "EMCPRM": 0.05,
                         "MC10": 0.05
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.05 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.05
+                        }
                     ]
                 },
                 {
@@ -165,12 +220,19 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 1.0,
-                        "EMCPRM": 0.20,
+                        "EMCPRM": 0.2,
                         "MC10": 0.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.19 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.19
+                        }
                     ]
                 },
                 {
@@ -179,12 +241,19 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 1.0,
-                        "EMCPRM": 0.30,
-                        "MC10": 0.10
+                        "EMCPRM": 0.3,
+                        "MC10": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.26 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.26
+                        }
                     ]
                 },
                 {
@@ -193,11 +262,18 @@
                     "parameter_overrides": {
                         "is_raining": 1.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.10
+                        "EMCPRM": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.35 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.35
+                        }
                     ]
                 },
                 {
@@ -209,9 +285,16 @@
                         "EMCPRM": 0.05,
                         "MC10": 0.05
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.35 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.35
+                        }
                     ]
                 },
                 {
@@ -220,11 +303,18 @@
                     "parameter_overrides": {
                         "is_raining": 1.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.50
+                        "EMCPRM": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.35 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.35
+                        }
                     ]
                 },
                 {
@@ -233,11 +323,18 @@
                     "parameter_overrides": {
                         "is_raining": 0.4,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.10
+                        "EMCPRM": 0.1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.103 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.103
+                        }
                     ]
                 },
                 {
@@ -248,9 +345,16 @@
                         "use_fuel_sticks": 0.0,
                         "EMCPRM": 0.99
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.35 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.35
+                        }
                     ]
                 },
                 {
@@ -262,9 +366,16 @@
                         "EMCPRM": 0.15,
                         "MC10": 0.99
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.1545 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.1545
+                        }
                     ]
                 },
                 {
@@ -273,12 +384,19 @@
                     "parameter_overrides": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 0.6,
-                        "EMCPRM": 0.10,
-                        "MC10": 0.20
+                        "EMCPRM": 0.1,
+                        "MC10": 0.2
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "MC1", "time": 0.0, "expected": 0.12 }
+                        {
+                            "variable": "MC1",
+                            "time": 0.0,
+                            "expected": 0.12
+                        }
                     ]
                 }
             ],
@@ -286,32 +404,41 @@
                 {
                     "id": "no_sticks_typical_day",
                     "description": "Typical NFDRS station without 1-hour fuel sticks: EMCPRM = 0.10 (10% interface EMC), no rain. Output MC1 = 1.03 * 0.10 = 0.103, the standard scaling that boosts atmospheric EMC by 3% to account for the shorter timelag of 1-hour fuels (Cohen & Deeming 1985 p.3).",
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameters": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.10
+                        "EMCPRM": 0.1
                     }
                 },
                 {
                     "id": "with_sticks_typical_day",
                     "description": "NFDRS station equipped with 1-hour fuel sticks: EMCPRM = 0.10, MC10 = 0.10 (typical 10-hour state). With sticks the 1-hour fuel moisture is a 4:1 weighted blend toward EMCPRM, MC1 = (4*0.10 + 0.10)/5 = 0.10. Compare to the no-sticks branch (MC1 = 0.103) — with sticks the output is slightly damped by the MC10 contribution.",
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameters": {
                         "is_raining": 0.0,
                         "use_fuel_sticks": 1.0,
-                        "EMCPRM": 0.10,
-                        "MC10": 0.10
+                        "EMCPRM": 0.1,
+                        "MC10": 0.1
                     }
                 },
                 {
                     "id": "rainy_observation",
                     "description": "Wet observation: precipitation at the observation time pins MC1 to the saturation default of 35% (Cohen & Deeming 1985 p.4). All other inputs are ignored. This is the operational fallback when accurate fuel-moisture measurement is impossible due to wet conditions.",
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameters": {
                         "is_raining": 1.0,
                         "use_fuel_sticks": 0.0,
-                        "EMCPRM": 0.10
+                        "EMCPRM": 0.1
                     }
                 }
             ]
