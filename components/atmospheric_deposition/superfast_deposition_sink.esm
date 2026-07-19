@@ -1,0 +1,32 @@
+{
+  "esm": "0.8.0",
+  "metadata": {
+    "name": "SuperFastDepositionSink",
+    "description": "Applicator model that turns first-order dry + wet deposition loss-rate coefficients into additive sink terms on the SuperFast gas-phase species ODEs. Each equation is D(SuperFast.<X>) ~ -(k_dry + k_wet)*SuperFast.<X>; when this model is merged with the SuperFast reaction system via an `operator_compose` coupling, the flattener sums these RHS contributions onto the matching D(SuperFast.<X>) chemistry equations (dc/dt += -k*c). The deposition rate coefficients are exposed as parameters so they can be driven from the full DryDepositionGas (Wesley 1989) and WetDeposition (EMEP) components via param_to_var edges in an assembly. Species->rate mapping mirrors AtmosphericDeposition.jl/ext/GasChemExt.jl couple2(SuperFastCoupler, DryDepositionGasCoupler / WetDepositionCoupler): NO reuses NO2's dry-dep rate; CH2O uses the formaldehyde (HCHO) dry-dep rate; the wet rate k_wet is the lumped soluble-gas WetDeposition.k_othergas applied to HNO3, H2O2, CH2O, CH3OOH.\n\nIMPORTANT (esm implementation note): the additive sink MUST be delivered this way (a model with D(SuperFast.<X>) equations merged by operator_compose), NOT via a `couple` connector with transform:\"additive\". The additive/from/to connector form is accepted by the schema (esm-spec 10.3) but the current EarthSciAST flatten pipeline (_apply_couple!) only applies connector equations written as {lhs, rhs}; a {from,to,transform:additive,expression} edge is pushed to opaque_refs and silently discarded, so it has no effect on the ODEs. operator_compose (which sums equations sharing a dependent variable) is the working construct.",
+    "tags": ["atmospheric_deposition", "gaschem", "superfast", "deposition-sink", "operator-compose"],
+    "references": [
+      { "citation": "Wesely, M. L. (1989). Parameterization of surface resistances to gaseous dry deposition in regional-scale numerical models. Atmospheric Environment 23(6):1293-1304." }
+    ]
+  },
+  "models": {
+    "SuperFastDepositionSink": {
+      "variables": {
+        "k_O3":   { "type": "parameter", "units": "1/s", "default": 0.0, "description": "O3 dry-deposition first-order loss rate (from DryDepositionGas.k_O3)." },
+        "k_NO2":  { "type": "parameter", "units": "1/s", "default": 0.0, "description": "NO2 dry-deposition rate (also applied to NO, per GasChemExt)." },
+        "k_HNO3": { "type": "parameter", "units": "1/s", "default": 0.0, "description": "HNO3 dry-deposition rate." },
+        "k_H2O2": { "type": "parameter", "units": "1/s", "default": 0.0, "description": "H2O2 dry-deposition rate." },
+        "k_HCHO": { "type": "parameter", "units": "1/s", "default": 0.0, "description": "CH2O (formaldehyde) dry-deposition rate." },
+        "k_wet":  { "type": "parameter", "units": "1/s", "default": 0.0, "description": "Lumped soluble-gas wet-scavenging rate (from WetDeposition.k_othergas), applied to HNO3, H2O2, CH2O, CH3OOH." }
+      },
+      "equations": [
+        { "lhs": { "op": "D", "args": ["SuperFast.O3"],     "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": ["k_O3"] }, "SuperFast.O3" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.NO2"],    "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": ["k_NO2"] }, "SuperFast.NO2" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.NO"],     "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": ["k_NO2"] }, "SuperFast.NO" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.HNO3"],   "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": [ { "op": "+", "args": ["k_HNO3", "k_wet"] } ] }, "SuperFast.HNO3" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.H2O2"],   "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": [ { "op": "+", "args": ["k_H2O2", "k_wet"] } ] }, "SuperFast.H2O2" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.CH2O"],   "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": [ { "op": "+", "args": ["k_HCHO", "k_wet"] } ] }, "SuperFast.CH2O" ] } },
+        { "lhs": { "op": "D", "args": ["SuperFast.CH3OOH"], "wrt": "t" }, "rhs": { "op": "*", "args": [ { "op": "-", "args": ["k_wet"] }, "SuperFast.CH3OOH" ] } }
+      ]
+    }
+  }
+}

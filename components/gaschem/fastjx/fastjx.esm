@@ -1,8 +1,8 @@
 {
-  "esm": "0.4.0",
+  "esm": "0.8.0",
   "metadata": {
     "name": "FastJX",
-    "description": "Fast-JX UV photolysis rates (main model, src/Fast-JX.jl:1276). 0-D component computing 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_O31D, j_o32OH, j_NO2, j_NO3a, j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, j_PAN) from atmospheric state (lat, lon, t_utc, T, P, H2O). Computes the cosine of the solar zenith angle inline using the NOAA Spencer-Fourier formula (same as lib/solar.esm Solar.cos_zenith), then calls the flux_interp_1..18 registered functions for the 18-band tropospheric actinic flux bilinear lookup. Cross-section (\u03c3_X) and quantum-yield (\u03d5_O31D) interpolation use interp.linear over T. The O(1D) photolysis adjustment (adjust_j_o31D) accounts for quenching by H2O, H2, N2, O2.\n\nMigration from esm-lnl6 (polecat/esm-lnl6). Registered function calls resolved:\n  cos_solar_zenith_angle \u2192 inlined as NOAA Spencer-Fourier AST (gt-p3ep resolved)\n  flux_interp_1..18      \u2192 registered_functions/flux_interp_{1..18}.esm (esm-9vcj)\n  calc_direct_flux       \u2192 registered_functions/calc_direct_flux.esm (esm-hlrp; not used in j-rate computation \u2014 exposed as registered function for caller use)\n  calc_direct_fluxes     \u2192 registered_functions/calc_direct_fluxes.esm (esm-2u1x; same note)\n\nCompared to FastJX_interpolation_troposphere (fastjx_interp_troposphere.esm):\n  - cos_sza is computed internally from lat/lon/t_utc (not a parameter)\n  - F_i uses registered function calls (fn: flux_interp_i) rather than inline tables\n  - \u03c3, \u03d5, j-rate, and O(1D) adjustment computations are identical",
+    "description": "Fast-JX UV photolysis rates (main model, src/Fast-JX.jl:1276). 0-D component computing 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_O31D, j_o32OH, j_NO2, j_NO3a, j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, j_PAN) from atmospheric state (lat, lon, t_utc, T, P, H2O). Computes the cosine of the solar zenith angle inline using the NOAA Spencer-Fourier formula (same as lib/solar.esm Solar.cos_zenith), then calls the flux_interp_1..18 registered functions for the 18-band tropospheric actinic flux bilinear lookup. Cross-section (σ_X) and quantum-yield (ϕ_O31D) interpolation use interp.linear over T. The O(1D) photolysis adjustment (adjust_j_o31D) accounts for quenching by H2O, H2, N2, O2.\n\nMigration from esm-lnl6 (polecat/esm-lnl6). Registered function calls resolved:\n  cos_solar_zenith_angle → inlined as NOAA Spencer-Fourier AST (gt-p3ep resolved)\n  flux_interp_1..18      → registered_functions/flux_interp_{1..18}.esm (esm-9vcj)\n  calc_direct_flux       → registered_functions/calc_direct_flux.esm (esm-hlrp; not used in j-rate computation — exposed as registered function for caller use)\n  calc_direct_fluxes     → registered_functions/calc_direct_fluxes.esm (esm-2u1x; same note)\n\nCompared to FastJX_interpolation_troposphere (fastjx_interp_troposphere.esm):\n  - cos_sza is computed internally from lat/lon/t_utc (not a parameter)\n  - F_i uses registered function calls (fn: flux_interp_i) rather than inline tables\n  - σ, ϕ, j-rate, and O(1D) adjustment computations are identical",
     "authors": [
       "GasChem.jl contributors",
       "EarthSciModels migration (esm-lnl6)"
@@ -22,7 +22,7 @@
         "citation": "Neu, J.L., Prather, M.J., and Penner, J.E. (2007), Global atmospheric chemistry: Integrating over fractional cloud cover, J. Geophys. Res., 112, D11306."
       },
       {
-        "citation": "Wild, O., Zhu, X., and Prather, M.J. (2000), Fast-J: Accurate Simulation of In- and Below-Cloud Photolysis in Tropospheric Chemical Models. J. Atmos. Chem., 37(3), 245\u2013282."
+        "citation": "Wild, O., Zhu, X., and Prather, M.J. (2000), Fast-J: Accurate Simulation of In- and Below-Cloud Photolysis in Tropospheric Chemical Models. J. Atmos. Chem., 37(3), 245–282."
       },
       {
         "citation": "Burkholder, J.B. et al. (2015), Chemical Kinetics and Photochemical Data for Use in Atmospheric Studies, Evaluation No. 18, JPL Publication 15-10."
@@ -37,7 +37,6 @@
   },
   "models": {
     "FastJX": {
-      "coupletype": "FastJX",
       "variables": {
         "lat": {
           "type": "parameter",
@@ -61,7 +60,7 @@
           "type": "parameter",
           "units": "K",
           "default": 298.0,
-          "description": "Air temperature (K). Drives \u03c3_X(T) and \u03d5_O31D(T) and adjust_j_o31D."
+          "description": "Air temperature (K). Drives σ_X(T) and ϕ_O31D(T) and adjust_j_o31D."
         },
         "P": {
           "type": "parameter",
@@ -126,7 +125,7 @@
         "gamma": {
           "type": "observed",
           "units": "rad",
-          "description": "NOAA fractional-year angle \u03b3 = 0.01721420632103996 \u00b7 ((day_of_year - 1) + (hour - 12)/24). Same formula as lib/solar.esm Solar.cos_zenith.",
+          "description": "NOAA fractional-year angle γ = 0.01721420632103996 · ((day_of_year - 1) + (hour - 12)/24). Same formula as lib/solar.esm Solar.cos_zenith.",
           "expression": {
             "op": "*",
             "args": [
@@ -162,7 +161,7 @@
         "solar_declination": {
           "type": "observed",
           "units": "rad",
-          "description": "Solar declination \u03b4 (radians) \u2014 Spencer (1971) 6-term Fourier series in \u03b3.",
+          "description": "Solar declination δ (radians) — Spencer (1971) 6-term Fourier series in γ.",
           "expression": {
             "op": "+",
             "args": [
@@ -269,7 +268,7 @@
         "equation_of_time": {
           "type": "observed",
           "units": "1",
-          "description": "Equation of time (minutes, dimensionless for TST): 229.18 \u00b7 (0.000075 + 0.001868 cos \u03b3 - 0.032077 sin \u03b3 - 0.014615 cos 2\u03b3 - 0.040849 sin 2\u03b3).",
+          "description": "Equation of time (minutes, dimensionless for TST): 229.18 · (0.000075 + 0.001868 cos γ - 0.032077 sin γ - 0.014615 cos 2γ - 0.040849 sin 2γ).",
           "expression": {
             "op": "*",
             "args": [
@@ -277,7 +276,7 @@
               {
                 "op": "+",
                 "args": [
-                  7.5e-05,
+                  0.000075,
                   {
                     "op": "*",
                     "args": [
@@ -346,7 +345,7 @@
         "true_solar_time": {
           "type": "observed",
           "units": "1",
-          "description": "True solar time (minutes since midnight at local meridian): hour\u00b760 + minute + second/60 + equation_of_time + 4\u00b7lon.",
+          "description": "True solar time (minutes since midnight at local meridian): hour·60 + minute + second/60 + equation_of_time + 4·lon.",
           "expression": {
             "op": "+",
             "args": [
@@ -379,7 +378,7 @@
         "hour_angle": {
           "type": "observed",
           "units": "rad",
-          "description": "Solar hour angle \u03c9 (radians): (true_solar_time/4 \u2212 180) \u00b7 \u03c0/180. Zero at local solar noon.",
+          "description": "Solar hour angle ω (radians): (true_solar_time/4 − 180) · π/180. Zero at local solar noon.",
           "expression": {
             "op": "*",
             "args": [
@@ -403,7 +402,7 @@
         "lat_rad": {
           "type": "observed",
           "units": "rad",
-          "description": "Latitude in radians: lat \u00b7 \u03c0/180.",
+          "description": "Latitude in radians: lat · π/180.",
           "expression": {
             "op": "*",
             "args": [
@@ -415,7 +414,7 @@
         "cos_sza": {
           "type": "observed",
           "units": "1",
-          "description": "Cosine of the solar zenith angle (clamped to [-1, 1]): clamp(sin(lat_rad)\u00b7sin(solar_declination) + cos(lat_rad)\u00b7cos(solar_declination)\u00b7cos(hour_angle), -1, 1). Feeds flux_interp_i(P, cos_sza).",
+          "description": "Cosine of the solar zenith angle (clamped to [-1, 1]): clamp(sin(lat_rad)·sin(solar_declination) + cos(lat_rad)·cos(solar_declination)·cos(hour_angle), -1, 1). Feeds flux_interp_i(P, cos_sza).",
           "expression": {
             "op": "min",
             "args": [
@@ -477,7 +476,7 @@
         "F_1": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 1 (187 nm). Simplified formula: max(0, cos_sza * 1.391e+12) where 1.391e+12 is the tropospheric actinic flux constant for bin 1 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 1 (187 nm). Simplified formula: max(0, cos_sza * 1.391e+12) where 1.391e+12 is the tropospheric actinic flux constant for bin 1 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -495,7 +494,7 @@
         "F_2": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 2 (191 nm). Simplified formula: max(0, cos_sza * 1.627e+12) where 1.627e+12 is the tropospheric actinic flux constant for bin 2 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 2 (191 nm). Simplified formula: max(0, cos_sza * 1.627e+12) where 1.627e+12 is the tropospheric actinic flux constant for bin 2 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -513,7 +512,7 @@
         "F_3": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 3 (193 nm). Simplified formula: max(0, cos_sza * 1.664e+12) where 1.664e+12 is the tropospheric actinic flux constant for bin 3 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 3 (193 nm). Simplified formula: max(0, cos_sza * 1.664e+12) where 1.664e+12 is the tropospheric actinic flux constant for bin 3 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -531,7 +530,7 @@
         "F_4": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 4 (196 nm). Simplified formula: max(0, cos_sza * 9.278e+11) where 9.278e+11 is the tropospheric actinic flux constant for bin 4 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 4 (196 nm). Simplified formula: max(0, cos_sza * 9.278e+11) where 9.278e+11 is the tropospheric actinic flux constant for bin 4 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -549,7 +548,7 @@
         "F_5": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 5 (202 nm). Simplified formula: max(0, cos_sza * 7.842e+12) where 7.842e+12 is the tropospheric actinic flux constant for bin 5 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 5 (202 nm). Simplified formula: max(0, cos_sza * 7.842e+12) where 7.842e+12 is the tropospheric actinic flux constant for bin 5 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -567,7 +566,7 @@
         "F_6": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 6 (208 nm). Simplified formula: max(0, cos_sza * 4.680e+12) where 4.680e+12 is the tropospheric actinic flux constant for bin 6 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 6 (208 nm). Simplified formula: max(0, cos_sza * 4.680e+12) where 4.680e+12 is the tropospheric actinic flux constant for bin 6 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -585,7 +584,7 @@
         "F_7": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 7 (211 nm). Simplified formula: max(0, cos_sza * 9.918e+12) where 9.918e+12 is the tropospheric actinic flux constant for bin 7 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 7 (211 nm). Simplified formula: max(0, cos_sza * 9.918e+12) where 9.918e+12 is the tropospheric actinic flux constant for bin 7 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -603,7 +602,7 @@
         "F_8": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 8 (214 nm). Simplified formula: max(0, cos_sza * 1.219e+13) where 1.219e+13 is the tropospheric actinic flux constant for bin 8 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 8 (214 nm). Simplified formula: max(0, cos_sza * 1.219e+13) where 1.219e+13 is the tropospheric actinic flux constant for bin 8 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -621,7 +620,7 @@
         "F_9": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 9 (261 nm). Simplified formula: max(0, cos_sza * 6.364e+14) where 6.364e+14 is the tropospheric actinic flux constant for bin 9 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 9 (261 nm). Simplified formula: max(0, cos_sza * 6.364e+14) where 6.364e+14 is the tropospheric actinic flux constant for bin 9 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -639,7 +638,7 @@
         "F_10": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 10 (267 nm). Simplified formula: max(0, cos_sza * 4.049e+14) where 4.049e+14 is the tropospheric actinic flux constant for bin 10 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 10 (267 nm). Simplified formula: max(0, cos_sza * 4.049e+14) where 4.049e+14 is the tropospheric actinic flux constant for bin 10 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -657,7 +656,7 @@
         "F_11": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 11 (277 nm). Simplified formula: max(0, cos_sza * 3.150e+14) where 3.150e+14 is the tropospheric actinic flux constant for bin 11 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 11 (277 nm). Simplified formula: max(0, cos_sza * 3.150e+14) where 3.150e+14 is the tropospheric actinic flux constant for bin 11 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -675,7 +674,7 @@
         "F_12": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 12 (295 nm). Simplified formula: max(0, cos_sza * 5.889e+14) where 5.889e+14 is the tropospheric actinic flux constant for bin 12 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 12 (295 nm). Simplified formula: max(0, cos_sza * 5.889e+14) where 5.889e+14 is the tropospheric actinic flux constant for bin 12 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -693,7 +692,7 @@
         "F_13": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 13 (303 nm). Simplified formula: max(0, cos_sza * 7.678e+14) where 7.678e+14 is the tropospheric actinic flux constant for bin 13 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 13 (303 nm). Simplified formula: max(0, cos_sza * 7.678e+14) where 7.678e+14 is the tropospheric actinic flux constant for bin 13 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -711,7 +710,7 @@
         "F_14": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 14 (310 nm). Simplified formula: max(0, cos_sza * 5.045e+14) where 5.045e+14 is the tropospheric actinic flux constant for bin 14 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 14 (310 nm). Simplified formula: max(0, cos_sza * 5.045e+14) where 5.045e+14 is the tropospheric actinic flux constant for bin 14 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -729,7 +728,7 @@
         "F_15": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 15 (316 nm). Simplified formula: max(0, cos_sza * 8.902e+14) where 8.902e+14 is the tropospheric actinic flux constant for bin 15 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 15 (316 nm). Simplified formula: max(0, cos_sza * 8.902e+14) where 8.902e+14 is the tropospheric actinic flux constant for bin 15 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -747,7 +746,7 @@
         "F_16": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 16 (333 nm). Simplified formula: max(0, cos_sza * 3.853e+15) where 3.853e+15 is the tropospheric actinic flux constant for bin 16 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 16 (333 nm). Simplified formula: max(0, cos_sza * 3.853e+15) where 3.853e+15 is the tropospheric actinic flux constant for bin 16 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -765,7 +764,7 @@
         "F_17": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 17 (380 nm). Simplified formula: max(0, cos_sza * 1.547e+16) where 1.547e+16 is the tropospheric actinic flux constant for bin 17 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 17 (380 nm). Simplified formula: max(0, cos_sza * 1.547e+16) where 1.547e+16 is the tropospheric actinic flux constant for bin 17 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -774,7 +773,7 @@
                 "op": "*",
                 "args": [
                   "cos_sza",
-                  1.547e+16
+                  1.547E+16
                 ]
               }
             ]
@@ -783,7 +782,7 @@
         "F_18": {
           "type": "observed",
           "units": "1/s",
-          "description": "Actinic flux at Fast-JX wavelength bin 18 (574 nm). Simplified formula: max(0, cos_sza * 2.131e+17) where 2.131e+17 is the tropospheric actinic flux constant for bin 18 (photons cm\u207b\u00b2 s\u207b\u00b9).",
+          "description": "Actinic flux at Fast-JX wavelength bin 18 (574 nm). Simplified formula: max(0, cos_sza * 2.131e+17) where 2.131e+17 is the tropospheric actinic flux constant for bin 18 (photons cm⁻² s⁻¹).",
           "expression": {
             "op": "max",
             "args": [
@@ -792,7 +791,7 @@
                 "op": "*",
                 "args": [
                   "cos_sza",
-                  2.131e+17
+                  2.131E+17
                 ]
               }
             ]
@@ -801,7 +800,7 @@
         "sigma_ActAld_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -829,7 +828,7 @@
         "sigma_ActAld_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -857,7 +856,7 @@
         "sigma_ActAld_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -885,7 +884,7 @@
         "sigma_ActAld_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -913,7 +912,7 @@
         "sigma_ActAld_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -941,7 +940,7 @@
         "sigma_ActAld_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -969,7 +968,7 @@
         "sigma_ActAld_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -997,7 +996,7 @@
         "sigma_ActAld_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1025,7 +1024,7 @@
         "sigma_ActAld_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1034,8 +1033,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  6.844000198822923e-22,
-                  7.282000007208637e-22
+                  6.844000198822923E-22,
+                  7.282000007208637E-22
                 ]
               },
               {
@@ -1053,7 +1052,7 @@
         "sigma_ActAld_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1062,8 +1061,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.713000044883129e-21,
-                  6.121000015779591e-21
+                  5.713000044883129E-21,
+                  6.121000015779591E-21
                 ]
               },
               {
@@ -1081,7 +1080,7 @@
         "sigma_ActAld_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1090,8 +1089,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.3389999898192774e-20,
-                  1.4299999546196972e-20
+                  1.3389999898192774E-20,
+                  1.4299999546196972E-20
                 ]
               },
               {
@@ -1109,7 +1108,7 @@
         "sigma_ActAld_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1118,8 +1117,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.233999897947965e-20,
-                  4.507999921564461e-20
+                  4.233999897947965E-20,
+                  4.507999921564461E-20
                 ]
               },
               {
@@ -1137,7 +1136,7 @@
         "sigma_ActAld_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1146,8 +1145,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.53100006623741e-20,
-                  4.8530001529541363e-20
+                  4.53100006623741E-20,
+                  4.8530001529541363E-20
                 ]
               },
               {
@@ -1165,7 +1164,7 @@
         "sigma_ActAld_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1174,8 +1173,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.0519998385228894e-20,
-                  3.2459998646781435e-20
+                  3.0519998385228894E-20,
+                  3.2459998646781435E-20
                 ]
               },
               {
@@ -1193,7 +1192,7 @@
         "sigma_ActAld_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1202,8 +1201,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.86699973476626e-21,
-                  9.443000168851598e-21
+                  8.86699973476626E-21,
+                  9.443000168851598E-21
                 ]
               },
               {
@@ -1221,7 +1220,7 @@
         "sigma_ActAld_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1249,7 +1248,7 @@
         "sigma_ActAld_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1277,7 +1276,7 @@
         "sigma_ActAld_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_ActAld at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_ActAld at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [235.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1305,115 +1304,115 @@
         "sigma_CH3OOH_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 1 (187 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 1 (187 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_CH3OOH_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 2 (191 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 2 (191 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_CH3OOH_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 3 (193 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 3 (193 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_CH3OOH_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 4 (196 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 4 (196 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_CH3OOH_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 5 (202 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 5 (202 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_CH3OOH_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 6 (208 nm). (T-independent JPL-10 cross section)",
-          "expression": 3.1199999009884303e-19
+          "description": "σ_CH3OOH at wavelength bin 6 (208 nm). (T-independent JPL-10 cross section)",
+          "expression": 3.1199999009884303E-19
         },
         "sigma_CH3OOH_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 7 (211 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.8819998762294933e-19
+          "description": "σ_CH3OOH at wavelength bin 7 (211 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.8819998762294933E-19
         },
         "sigma_CH3OOH_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 8 (214 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.2500000255326537e-19
+          "description": "σ_CH3OOH at wavelength bin 8 (214 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.2500000255326537E-19
         },
         "sigma_CH3OOH_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 9 (261 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.71600004305613e-20
+          "description": "σ_CH3OOH at wavelength bin 9 (261 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.71600004305613E-20
         },
         "sigma_CH3OOH_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 10 (267 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.739999913047532e-20
+          "description": "σ_CH3OOH at wavelength bin 10 (267 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.739999913047532E-20
         },
         "sigma_CH3OOH_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 11 (277 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.143000077395857e-20
+          "description": "σ_CH3OOH at wavelength bin 11 (277 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.143000077395857E-20
         },
         "sigma_CH3OOH_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 12 (295 nm). (T-independent JPL-10 cross section)",
-          "expression": 5.624000176954468e-21
+          "description": "σ_CH3OOH at wavelength bin 12 (295 nm). (T-independent JPL-10 cross section)",
+          "expression": 5.624000176954468E-21
         },
         "sigma_CH3OOH_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 13 (303 nm). (T-independent JPL-10 cross section)",
-          "expression": 3.520000049853353e-21
+          "description": "σ_CH3OOH at wavelength bin 13 (303 nm). (T-independent JPL-10 cross section)",
+          "expression": 3.520000049853353E-21
         },
         "sigma_CH3OOH_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 14 (310 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.4030000691448927e-21
+          "description": "σ_CH3OOH at wavelength bin 14 (310 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.4030000691448927E-21
         },
         "sigma_CH3OOH_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 15 (316 nm). (T-independent JPL-10 cross section)",
-          "expression": 1.6970000026921414e-21
+          "description": "σ_CH3OOH at wavelength bin 15 (316 nm). (T-independent JPL-10 cross section)",
+          "expression": 1.6970000026921414E-21
         },
         "sigma_CH3OOH_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 16 (333 nm). (T-independent JPL-10 cross section)",
-          "expression": 7.229999810949406e-22
+          "description": "σ_CH3OOH at wavelength bin 16 (333 nm). (T-independent JPL-10 cross section)",
+          "expression": 7.229999810949406E-22
         },
         "sigma_CH3OOH_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 17 (380 nm). (T-independent JPL-10 cross section)",
-          "expression": 2.2849999830225267e-23
+          "description": "σ_CH3OOH at wavelength bin 17 (380 nm). (T-independent JPL-10 cross section)",
+          "expression": 2.2849999830225267E-23
         },
         "sigma_CH3OOH_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_CH3OOH at wavelength bin 18 (574 nm). (T-independent JPL-10 cross section)",
+          "description": "σ_CH3OOH at wavelength bin 18 (574 nm). (T-independent JPL-10 cross section)",
           "expression": 0.0
         },
         "sigma_H2COa_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1441,7 +1440,7 @@
         "sigma_H2COa_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1469,7 +1468,7 @@
         "sigma_H2COa_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1497,7 +1496,7 @@
         "sigma_H2COa_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1525,7 +1524,7 @@
         "sigma_H2COa_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1553,7 +1552,7 @@
         "sigma_H2COa_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1581,7 +1580,7 @@
         "sigma_H2COa_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1609,7 +1608,7 @@
         "sigma_H2COa_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1637,7 +1636,7 @@
         "sigma_H2COa_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1646,8 +1645,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.1429999648820227e-21,
-                  3.146999956677149e-21
+                  3.1429999648820227E-21,
+                  3.146999956677149E-21
                 ]
               },
               {
@@ -1665,7 +1664,7 @@
         "sigma_H2COa_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1674,8 +1673,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.0210000160667125e-20,
-                  1.0180000323177873e-20
+                  1.0210000160667125E-20,
+                  1.0180000323177873E-20
                 ]
               },
               {
@@ -1693,7 +1692,7 @@
         "sigma_H2COa_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1702,8 +1701,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.2689999920406908e-20,
-                  1.2660000082917656e-20
+                  1.2689999920406908E-20,
+                  1.2660000082917656E-20
                 ]
               },
               {
@@ -1721,7 +1720,7 @@
         "sigma_H2COa_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1730,8 +1729,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.323000071683651e-20,
-                  2.3150000073140414e-20
+                  2.323000071683651E-20,
+                  2.3150000073140414E-20
                 ]
               },
               {
@@ -1749,7 +1748,7 @@
         "sigma_H2COa_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1758,8 +1757,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.4979999853507607e-20,
-                  2.496999936914881e-20
+                  2.4979999853507607E-20,
+                  2.496999936914881E-20
                 ]
               },
               {
@@ -1777,7 +1776,7 @@
         "sigma_H2COa_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1786,8 +1785,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.1330000286683224e-20,
-                  1.13100001257592e-20
+                  1.1330000286683224E-20,
+                  1.13100001257592E-20
                 ]
               },
               {
@@ -1805,7 +1804,7 @@
         "sigma_H2COa_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1814,8 +1813,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.1830000761264778e-20,
-                  2.1890000436243282e-20
+                  2.1830000761264778E-20,
+                  2.1890000436243282E-20
                 ]
               },
               {
@@ -1833,7 +1832,7 @@
         "sigma_H2COa_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1842,8 +1841,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.746000059414497e-21,
-                  4.7509998976971116e-21
+                  4.746000059414497E-21,
+                  4.7509998976971116E-21
                 ]
               },
               {
@@ -1861,7 +1860,7 @@
         "sigma_H2COa_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1889,7 +1888,7 @@
         "sigma_H2COa_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COa at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COa at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1917,7 +1916,7 @@
         "sigma_H2COb_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1945,7 +1944,7 @@
         "sigma_H2COb_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -1973,7 +1972,7 @@
         "sigma_H2COb_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2001,7 +2000,7 @@
         "sigma_H2COb_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2029,7 +2028,7 @@
         "sigma_H2COb_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2057,7 +2056,7 @@
         "sigma_H2COb_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2085,7 +2084,7 @@
         "sigma_H2COb_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2113,7 +2112,7 @@
         "sigma_H2COb_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2141,7 +2140,7 @@
         "sigma_H2COb_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2150,8 +2149,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.6419999005789044e-21,
-                  3.648999835733278e-21
+                  3.6419999005789044E-21,
+                  3.648999835733278E-21
                 ]
               },
               {
@@ -2169,7 +2168,7 @@
         "sigma_H2COb_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2178,8 +2177,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.786999994067164e-21,
-                  5.767999881579019e-21
+                  5.786999994067164E-21,
+                  5.767999881579019E-21
                 ]
               },
               {
@@ -2197,7 +2196,7 @@
         "sigma_H2COb_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2206,8 +2205,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.315999798987775e-21,
-                  5.305000073986667e-21
+                  5.315999798987775E-21,
+                  5.305000073986667E-21
                 ]
               },
               {
@@ -2225,7 +2224,7 @@
         "sigma_H2COb_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2234,8 +2233,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.18099962728914e-21,
-                  8.153999935107527e-21
+                  8.18099962728914E-21,
+                  8.153999935107527E-21
                 ]
               },
               {
@@ -2253,7 +2252,7 @@
         "sigma_H2COb_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2262,8 +2261,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  7.916999764914013e-21,
-                  7.913999619606375e-21
+                  7.916999764914013E-21,
+                  7.913999619606375E-21
                 ]
               },
               {
@@ -2281,7 +2280,7 @@
         "sigma_H2COb_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2290,8 +2289,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.0110000019599816e-21,
-                  4.001999969933849e-21
+                  4.0110000019599816E-21,
+                  4.001999969933849E-21
                 ]
               },
               {
@@ -2309,7 +2308,7 @@
         "sigma_H2COb_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2318,8 +2317,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.0810000141626439e-20,
-                  1.084999965568092e-20
+                  1.0810000141626439E-20,
+                  1.084999965568092E-20
                 ]
               },
               {
@@ -2337,7 +2336,7 @@
         "sigma_H2COb_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2346,8 +2345,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.0819999818191667e-20,
-                  1.084999965568092e-20
+                  1.0819999818191667E-20,
+                  1.084999965568092E-20
                 ]
               },
               {
@@ -2365,7 +2364,7 @@
         "sigma_H2COb_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2374,8 +2373,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  6.842000152438262e-23,
-                  6.819000123885638e-23
+                  6.842000152438262E-23,
+                  6.819000123885638E-23
                 ]
               },
               {
@@ -2393,7 +2392,7 @@
         "sigma_H2COb_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2COb at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2COb at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [223.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2421,7 +2420,7 @@
         "sigma_H2O2_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2430,8 +2429,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.324999974684954e-19,
-                  2.324999974684954e-19
+                  2.324999974684954E-19,
+                  2.324999974684954E-19
                 ]
               },
               {
@@ -2449,7 +2448,7 @@
         "sigma_H2O2_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2458,8 +2457,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.628999901568718e-19,
-                  4.628999901568718e-19
+                  4.628999901568718E-19,
+                  4.628999901568718E-19
                 ]
               },
               {
@@ -2477,7 +2476,7 @@
         "sigma_H2O2_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2486,8 +2485,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.393999796512486e-19,
-                  5.393999796512486e-19
+                  5.393999796512486E-19,
+                  5.393999796512486E-19
                 ]
               },
               {
@@ -2505,7 +2504,7 @@
         "sigma_H2O2_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2514,8 +2513,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.428999876181136e-19,
-                  5.428999876181136e-19
+                  5.428999876181136E-19,
+                  5.428999876181136E-19
                 ]
               },
               {
@@ -2533,7 +2532,7 @@
         "sigma_H2O2_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2542,8 +2541,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.447000004279621e-19,
-                  4.447000004279621e-19
+                  4.447000004279621E-19,
+                  4.447000004279621E-19
                 ]
               },
               {
@@ -2561,7 +2560,7 @@
         "sigma_H2O2_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2570,8 +2569,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.7550000908633645e-19,
-                  3.7550000908633645e-19
+                  3.7550000908633645E-19,
+                  3.7550000908633645E-19
                 ]
               },
               {
@@ -2589,7 +2588,7 @@
         "sigma_H2O2_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2598,8 +2597,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.457000003385011e-19,
-                  3.457000003385011e-19
+                  3.457000003385011E-19,
+                  3.457000003385011E-19
                 ]
               },
               {
@@ -2617,7 +2616,7 @@
         "sigma_H2O2_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2626,8 +2625,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.1970000762594603e-19,
-                  3.1970000762594603e-19
+                  3.1970000762594603E-19,
+                  3.1970000762594603E-19
                 ]
               },
               {
@@ -2645,7 +2644,7 @@
         "sigma_H2O2_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2654,8 +2653,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.3460001211531676e-20,
-                  5.465000068909151e-20
+                  5.3460001211531676E-20,
+                  5.465000068909151E-20
                 ]
               },
               {
@@ -2673,7 +2672,7 @@
         "sigma_H2O2_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2682,8 +2681,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.8549999267084686e-20,
-                  4.966000133212269e-20
+                  4.8549999267084686E-20,
+                  4.966000133212269E-20
                 ]
               },
               {
@@ -2701,7 +2700,7 @@
         "sigma_H2O2_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2710,8 +2709,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.423000036775726e-20,
-                  3.5240000820381575e-20
+                  3.423000036775726E-20,
+                  3.5240000820381575E-20
                 ]
               },
               {
@@ -2729,7 +2728,7 @@
         "sigma_H2O2_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2738,8 +2737,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.407000072481546e-21,
-                  9.353999897026154e-21
+                  8.407000072481546E-21,
+                  9.353999897026154E-21
                 ]
               },
               {
@@ -2757,7 +2756,7 @@
         "sigma_H2O2_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2766,8 +2765,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.029000034277769e-21,
-                  5.763000043296405e-21
+                  5.029000034277769E-21,
+                  5.763000043296405E-21
                 ]
               },
               {
@@ -2785,7 +2784,7 @@
         "sigma_H2O2_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2794,8 +2793,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.308000080814869e-21,
-                  3.911000005133429e-21
+                  3.308000080814869E-21,
+                  3.911000005133429E-21
                 ]
               },
               {
@@ -2813,7 +2812,7 @@
         "sigma_H2O2_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2822,8 +2821,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.2209999375956612e-21,
-                  2.7179999783691756e-21
+                  2.2209999375956612E-21,
+                  2.7179999783691756E-21
                 ]
               },
               {
@@ -2841,7 +2840,7 @@
         "sigma_H2O2_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2850,8 +2849,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.59800023605691e-22,
-                  1.1379999881199717e-21
+                  8.59800023605691E-22,
+                  1.1379999881199717E-21
                 ]
               },
               {
@@ -2869,7 +2868,7 @@
         "sigma_H2O2_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2878,8 +2877,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.920999839110756e-24,
-                  7.926999757023604e-24
+                  5.920999839110756E-24,
+                  7.926999757023604E-24
                 ]
               },
               {
@@ -2897,7 +2896,7 @@
         "sigma_H2O2_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_H2O2 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_H2O2 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2925,7 +2924,7 @@
         "sigma_N2O5_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2953,7 +2952,7 @@
         "sigma_N2O5_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2981,7 +2980,7 @@
         "sigma_N2O5_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -2990,8 +2989,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.922000072294162e-19,
-                  1.0779999722525818e-18
+                  8.922000072294162E-19,
+                  1.0779999722525818E-18
                 ]
               },
               {
@@ -3009,7 +3008,7 @@
         "sigma_N2O5_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3018,8 +3017,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.1830000044633786e-18,
-                  1.4290000031190457e-18
+                  1.1830000044633786E-18,
+                  1.4290000031190457E-18
                 ]
               },
               {
@@ -3037,7 +3036,7 @@
         "sigma_N2O5_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3046,8 +3045,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.867999826706783e-18,
-                  7.087999826764812e-18
+                  5.867999826706783E-18,
+                  7.087999826764812E-18
                 ]
               },
               {
@@ -3065,7 +3064,7 @@
         "sigma_N2O5_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3074,8 +3073,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.681999844956828e-18,
-                  5.654999991793766e-18
+                  4.681999844956828E-18,
+                  5.654999991793766E-18
                 ]
               },
               {
@@ -3093,7 +3092,7 @@
         "sigma_N2O5_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3102,8 +3101,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.3950000764383823e-18,
-                  4.101000176818463e-18
+                  3.3950000764383823E-18,
+                  4.101000176818463E-18
                 ]
               },
               {
@@ -3121,7 +3120,7 @@
         "sigma_N2O5_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3130,8 +3129,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.613000068943001e-18,
-                  3.1560000937164452e-18
+                  2.613000068943001E-18,
+                  3.1560000937164452E-18
                 ]
               },
               {
@@ -3149,7 +3148,7 @@
         "sigma_N2O5_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3158,8 +3157,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.1380000290869152e-19,
-                  2.6059999496116944e-19
+                  2.1380000290869152E-19,
+                  2.6059999496116944E-19
                 ]
               },
               {
@@ -3177,7 +3176,7 @@
         "sigma_N2O5_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3186,8 +3185,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.1550000123915578e-19,
-                  2.644999964529921e-19
+                  2.1550000123915578E-19,
+                  2.644999964529921E-19
                 ]
               },
               {
@@ -3205,7 +3204,7 @@
         "sigma_N2O5_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3214,8 +3213,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.9880000015353442e-19,
-                  2.4540000836823057e-19
+                  1.9880000015353442E-19,
+                  2.4540000836823057E-19
                 ]
               },
               {
@@ -3233,7 +3232,7 @@
         "sigma_N2O5_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3242,8 +3241,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.7720001387914924e-20,
-                  5.153999868752246e-20
+                  3.7720001387914924E-20,
+                  5.153999868752246E-20
                 ]
               },
               {
@@ -3261,7 +3260,7 @@
         "sigma_N2O5_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3270,8 +3269,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.1820000276905982e-20,
-                  3.210000059691041e-20
+                  2.1820000276905982E-20,
+                  3.210000059691041E-20
                 ]
               },
               {
@@ -3289,7 +3288,7 @@
         "sigma_N2O5_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3298,8 +3297,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.3339999899779497e-20,
-                  2.1350000130262473e-20
+                  1.3339999899779497E-20,
+                  2.1350000130262473E-20
                 ]
               },
               {
@@ -3317,7 +3316,7 @@
         "sigma_N2O5_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3326,8 +3325,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.418999845918534e-21,
-                  1.4680000180372724e-20
+                  8.418999845918534E-21,
+                  1.4680000180372724E-20
                 ]
               },
               {
@@ -3345,7 +3344,7 @@
         "sigma_N2O5_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3354,8 +3353,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.6209999249018702e-21,
-                  5.901999909638342e-21
+                  2.6209999249018702E-21,
+                  5.901999909638342E-21
                 ]
               },
               {
@@ -3373,7 +3372,7 @@
         "sigma_N2O5_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3382,8 +3381,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.355000028403774e-23,
-                  2.02500001146833e-22
+                  4.355000028403774E-23,
+                  2.02500001146833E-22
                 ]
               },
               {
@@ -3401,7 +3400,7 @@
         "sigma_N2O5_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_N2O5 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_N2O5 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [233.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3429,7 +3428,7 @@
         "sigma_NO2_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3457,7 +3456,7 @@
         "sigma_NO2_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3485,7 +3484,7 @@
         "sigma_NO2_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3513,7 +3512,7 @@
         "sigma_NO2_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3541,7 +3540,7 @@
         "sigma_NO2_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3569,7 +3568,7 @@
         "sigma_NO2_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3597,7 +3596,7 @@
         "sigma_NO2_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3625,7 +3624,7 @@
         "sigma_NO2_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3653,7 +3652,7 @@
         "sigma_NO2_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3662,8 +3661,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.833999974110711e-20,
-                  2.3539999576087827e-20
+                  1.833999974110711E-20,
+                  2.3539999576087827E-20
                 ]
               },
               {
@@ -3681,7 +3680,7 @@
         "sigma_NO2_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3690,8 +3689,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.6959999802218646e-20,
-                  4.697000028657744e-20
+                  4.6959999802218646E-20,
+                  4.697000028657744E-20
                 ]
               },
               {
@@ -3709,7 +3708,7 @@
         "sigma_NO2_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3718,8 +3717,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  7.70700009469568e-20,
-                  7.54599972821989e-20
+                  7.70700009469568E-20,
+                  7.54599972821989E-20
                 ]
               },
               {
@@ -3737,7 +3736,7 @@
         "sigma_NO2_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3746,8 +3745,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.077999998101976e-19,
-                  1.0629999824221218e-19
+                  1.077999998101976E-19,
+                  1.0629999824221218E-19
                 ]
               },
               {
@@ -3765,7 +3764,7 @@
         "sigma_NO2_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3774,8 +3773,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.4699999856620608e-19,
-                  1.4770000015957908e-19
+                  1.4699999856620608E-19,
+                  1.4770000015957908E-19
                 ]
               },
               {
@@ -3793,7 +3792,7 @@
         "sigma_NO2_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3802,8 +3801,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.8319999418624373e-19,
-                  1.8719999405930582e-19
+                  1.8319999418624373E-19,
+                  1.8719999405930582E-19
                 ]
               },
               {
@@ -3821,7 +3820,7 @@
         "sigma_NO2_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3830,8 +3829,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.1809999792547187e-19,
-                  2.3030000723183405e-19
+                  2.1809999792547187E-19,
+                  2.3030000723183405E-19
                 ]
               },
               {
@@ -3849,7 +3848,7 @@
         "sigma_NO2_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3858,8 +3857,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.1380001265994085e-19,
-                  3.4690000676276824e-19
+                  3.1380001265994085E-19,
+                  3.4690000676276824E-19
                 ]
               },
               {
@@ -3877,7 +3876,7 @@
         "sigma_NO2_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3886,8 +3885,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.4219999871853157e-19,
-                  1.5460000478737259e-19
+                  1.4219999871853157E-19,
+                  1.5460000478737259E-19
                 ]
               },
               {
@@ -3905,7 +3904,7 @@
         "sigma_NO2_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO2 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO2 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [200.0, 300.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3933,7 +3932,7 @@
         "sigma_NO3_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3963,7 +3962,7 @@
         "sigma_NO3_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -3993,7 +3992,7 @@
         "sigma_NO3_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4023,7 +4022,7 @@
         "sigma_NO3_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4053,7 +4052,7 @@
         "sigma_NO3_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4083,7 +4082,7 @@
         "sigma_NO3_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4113,7 +4112,7 @@
         "sigma_NO3_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4143,7 +4142,7 @@
         "sigma_NO3_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4173,7 +4172,7 @@
         "sigma_NO3_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4203,7 +4202,7 @@
         "sigma_NO3_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4233,7 +4232,7 @@
         "sigma_NO3_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4263,7 +4262,7 @@
         "sigma_NO3_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4293,7 +4292,7 @@
         "sigma_NO3_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4302,9 +4301,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.4199999587235744e-23,
-                  1.4199999587235744e-23,
-                  1.4199999587235744e-23
+                  1.4199999587235744E-23,
+                  1.4199999587235744E-23,
+                  1.4199999587235744E-23
                 ]
               },
               {
@@ -4323,7 +4322,7 @@
         "sigma_NO3_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4332,9 +4331,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.1600000497381263e-22,
-                  4.1600000497381263e-22,
-                  4.1600000497381263e-22
+                  4.1600000497381263E-22,
+                  4.1600000497381263E-22,
+                  4.1600000497381263E-22
                 ]
               },
               {
@@ -4353,7 +4352,7 @@
         "sigma_NO3_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4362,9 +4361,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.7400000659510443e-21,
-                  1.7400000659510443e-21,
-                  1.7400000659510443e-21
+                  1.7400000659510443E-21,
+                  1.7400000659510443E-21,
+                  1.7400000659510443E-21
                 ]
               },
               {
@@ -4383,7 +4382,7 @@
         "sigma_NO3_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4392,9 +4391,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.7400000094054946e-19,
-                  1.7400000094054946e-19,
-                  1.7400000094054946e-19
+                  1.7400000094054946E-19,
+                  1.7400000094054946E-19,
+                  1.7400000094054946E-19
                 ]
               },
               {
@@ -4413,7 +4412,7 @@
         "sigma_NO3_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4422,9 +4421,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.9109999658510426e-17,
-                  1.9109999658510426e-17,
-                  1.9109999658510426e-17
+                  1.9109999658510426E-17,
+                  1.9109999658510426E-17,
+                  1.9109999658510426E-17
                 ]
               },
               {
@@ -4443,7 +4442,7 @@
         "sigma_NO3_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_NO3 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_NO3 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 3-point grid [190.0, 230.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4473,7 +4472,7 @@
         "sigma_O3_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 1 (187 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4482,9 +4481,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.987999745350464e-19,
-                  5.98900011690377e-19,
-                  5.989999971469193e-19
+                  5.987999745350464E-19,
+                  5.98900011690377E-19,
+                  5.989999971469193E-19
                 ]
               },
               {
@@ -4503,7 +4502,7 @@
         "sigma_O3_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 2 (191 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4512,9 +4511,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.859000055828501e-19,
-                  4.862000136512655e-19,
-                  4.866000071762231e-19
+                  4.859000055828501E-19,
+                  4.862000136512655E-19,
+                  4.866000071762231E-19
                 ]
               },
               {
@@ -4533,7 +4532,7 @@
         "sigma_O3_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 3 (193 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4542,9 +4541,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.3069999440989623e-19,
-                  4.3139999600326923e-19,
-                  4.320000121400999e-19
+                  4.3069999440989623E-19,
+                  4.3139999600326923E-19,
+                  4.320000121400999E-19
                 ]
               },
               {
@@ -4563,7 +4562,7 @@
         "sigma_O3_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 4 (196 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4572,9 +4571,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.6540000456009327e-19,
-                  3.6660001098436044e-19,
-                  3.6779999155923346e-19
+                  3.6540000456009327E-19,
+                  3.6660001098436044E-19,
+                  3.6779999155923346E-19
                 ]
               },
               {
@@ -4593,7 +4592,7 @@
         "sigma_O3_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 5 (202 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4602,9 +4601,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.4100001179676306e-19,
-                  3.4210000691509373e-19,
-                  3.432000020334244e-19
+                  3.4100001179676306E-19,
+                  3.4210000691509373E-19,
+                  3.432000020334244E-19
                 ]
               },
               {
@@ -4623,7 +4622,7 @@
         "sigma_O3_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 6 (208 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4632,9 +4631,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.848999959210618e-19,
-                  4.845000023961041e-19,
-                  4.840000234146041e-19
+                  4.848999959210618E-19,
+                  4.845000023961041E-19,
+                  4.840000234146041E-19
                 ]
               },
               {
@@ -4653,7 +4652,7 @@
         "sigma_O3_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 7 (211 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4662,9 +4661,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  6.533999954205638e-19,
-                  6.519000067772754e-19,
-                  6.504000181339871e-19
+                  6.533999954205638E-19,
+                  6.519000067772754E-19,
+                  6.504000181339871E-19
                 ]
               },
               {
@@ -4683,7 +4682,7 @@
         "sigma_O3_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 8 (214 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4692,9 +4691,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  9.320000091975582e-19,
-                  9.299000044174392e-19,
-                  9.277999996373202e-19
+                  9.320000091975582E-19,
+                  9.299000044174392E-19,
+                  9.277999996373202E-19
                 ]
               },
               {
@@ -4713,7 +4712,7 @@
         "sigma_O3_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 9 (261 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4722,9 +4721,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.756999667171218e-18,
-                  8.825999765147942e-18,
-                  8.895999924485242e-18
+                  8.756999667171218E-18,
+                  8.825999765147942E-18,
+                  8.895999924485242E-18
                 ]
               },
               {
@@ -4743,7 +4742,7 @@
         "sigma_O3_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 10 (267 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4752,9 +4751,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.5130000791560625e-18,
-                  3.566000022544173e-18,
-                  3.617999904571706e-18
+                  3.5130000791560625E-18,
+                  3.566000022544173E-18,
+                  3.617999904571706E-18
                 ]
               },
               {
@@ -4773,7 +4772,7 @@
         "sigma_O3_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 11 (277 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4782,9 +4781,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.5079999909184992e-18,
-                  1.547000005836726e-18,
-                  1.5860000207549526e-18
+                  1.5079999909184992E-18,
+                  1.547000005836726E-18,
+                  1.5860000207549526E-18
                 ]
               },
               {
@@ -4803,7 +4802,7 @@
         "sigma_O3_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 12 (295 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4812,9 +4811,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  7.92499979697188e-19,
-                  8.260000190237614e-19,
-                  8.595000066515464e-19
+                  7.92499979697188E-19,
+                  8.260000190237614E-19,
+                  8.595000066515464E-19
                 ]
               },
               {
@@ -4833,7 +4832,7 @@
         "sigma_O3_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 13 (303 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4842,9 +4841,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.456000051307094e-19,
-                  2.616999900795001e-19,
-                  2.7780000087768496e-19
+                  2.456000051307094E-19,
+                  2.616999900795001E-19,
+                  2.7780000087768496E-19
                 ]
               },
               {
@@ -4863,7 +4862,7 @@
         "sigma_O3_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 14 (310 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4872,9 +4871,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.904000234424096e-20,
-                  9.739000288705164e-20,
-                  1.0579999987366655e-19
+                  8.904000234424096E-20,
+                  9.739000288705164E-20,
+                  1.0579999987366655E-19
                 ]
               },
               {
@@ -4893,7 +4892,7 @@
         "sigma_O3_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 15 (316 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4902,9 +4901,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.660999932287692e-20,
-                  4.1390001433008106e-20,
-                  4.617000031196502e-20
+                  3.660999932287692E-20,
+                  4.1390001433008106E-20,
+                  4.617000031196502E-20
                 ]
               },
               {
@@ -4923,7 +4922,7 @@
         "sigma_O3_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 16 (333 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4932,9 +4931,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.5390001306070196e-21,
-                  5.5150001481017836e-21,
-                  6.492999858571523e-21
+                  4.5390001306070196E-21,
+                  5.5150001481017836E-21,
+                  6.492999858571523E-21
                 ]
               },
               {
@@ -4953,7 +4952,7 @@
         "sigma_O3_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 17 (380 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4962,9 +4961,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  6.16700027483323e-23,
-                  6.16700027483323e-23,
-                  6.16700027483323e-23
+                  6.16700027483323E-23,
+                  6.16700027483323E-23,
+                  6.16700027483323E-23
                 ]
               },
               {
@@ -4983,7 +4982,7 @@
         "sigma_O3_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_O3 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_O3 at wavelength bin 18 (574 nm). Linearly interpolated in T over the 3-point grid [218.0, 258.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -4992,9 +4991,9 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.6660000157928137e-21,
-                  1.6660000157928137e-21,
-                  1.6660000157928137e-21
+                  1.6660000157928137E-21,
+                  1.6660000157928137E-21,
+                  1.6660000157928137E-21
                 ]
               },
               {
@@ -5013,7 +5012,7 @@
         "sigma_PAN_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 1 (187 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5041,7 +5040,7 @@
         "sigma_PAN_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 2 (191 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5050,8 +5049,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.800000203680943e-19,
-                  6.210000029111094e-19
+                  5.800000203680943E-19,
+                  6.210000029111094E-19
                 ]
               },
               {
@@ -5069,7 +5068,7 @@
         "sigma_PAN_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 3 (193 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5078,8 +5077,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.36000024937859e-19,
-                  4.789999751056625e-19
+                  4.36000024937859E-19,
+                  4.789999751056625E-19
                 ]
               },
               {
@@ -5097,7 +5096,7 @@
         "sigma_PAN_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 4 (196 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5106,8 +5105,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  3.7000000764528895e-19,
-                  4.050000097657565e-19
+                  3.7000000764528895E-19,
+                  4.050000097657565E-19
                 ]
               },
               {
@@ -5125,7 +5124,7 @@
         "sigma_PAN_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 5 (202 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5134,8 +5133,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.456000051307094e-19,
-                  2.678999931139206e-19
+                  2.456000051307094E-19,
+                  2.678999931139206E-19
                 ]
               },
               {
@@ -5153,7 +5152,7 @@
         "sigma_PAN_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 6 (208 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5162,8 +5161,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.7659999762686555e-19,
-                  2.0830000146764401e-19
+                  1.7659999762686555E-19,
+                  2.0830000146764401E-19
                 ]
               },
               {
@@ -5181,7 +5180,7 @@
         "sigma_PAN_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 7 (211 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5190,8 +5189,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.5150000327016233e-19,
-                  1.8789999565267882e-19
+                  1.5150000327016233E-19,
+                  1.8789999565267882E-19
                 ]
               },
               {
@@ -5209,7 +5208,7 @@
         "sigma_PAN_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 8 (214 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5218,8 +5217,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.301999990993453e-19,
-                  1.6769999952488953e-19
+                  1.301999990993453E-19,
+                  1.6769999952488953E-19
                 ]
               },
               {
@@ -5237,7 +5236,7 @@
         "sigma_PAN_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 9 (261 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5246,8 +5245,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.6590000604436013e-20,
-                  3.396000021476685e-20
+                  1.6590000604436013E-20,
+                  3.396000021476685E-20
                 ]
               },
               {
@@ -5265,7 +5264,7 @@
         "sigma_PAN_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 10 (267 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5274,8 +5273,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.0389999993396206e-20,
-                  2.1960000595580582e-20
+                  1.0389999993396206E-20,
+                  2.1960000595580582E-20
                 ]
               },
               {
@@ -5293,7 +5292,7 @@
         "sigma_PAN_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 11 (277 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5302,8 +5301,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  4.281999799489482e-21,
-                  9.526000150061765e-21
+                  4.281999799489482E-21,
+                  9.526000150061765E-21
                 ]
               },
               {
@@ -5321,7 +5320,7 @@
         "sigma_PAN_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 12 (295 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5330,8 +5329,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.401000179992289e-22,
-                  1.4850000336536577e-21
+                  5.401000179992289E-22,
+                  1.4850000336536577E-21
                 ]
               },
               {
@@ -5349,7 +5348,7 @@
         "sigma_PAN_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 13 (303 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5358,8 +5357,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  2.492999884535237e-22,
-                  7.490999931913678e-22
+                  2.492999884535237E-22,
+                  7.490999931913678E-22
                 ]
               },
               {
@@ -5377,7 +5376,7 @@
         "sigma_PAN_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 14 (310 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5386,8 +5385,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  1.1839999442510234e-22,
-                  3.8810000161828833e-22
+                  1.1839999442510234E-22,
+                  3.8810000161828833E-22
                 ]
               },
               {
@@ -5405,7 +5404,7 @@
         "sigma_PAN_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 15 (316 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5414,8 +5413,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  5.44399978886731e-23,
-                  1.927000010539341e-22
+                  5.44399978886731E-23,
+                  1.927000010539341E-22
                 ]
               },
               {
@@ -5433,7 +5432,7 @@
         "sigma_PAN_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 16 (333 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5442,8 +5441,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  7.411999803659118e-24,
-                  3.0870001554809e-23
+                  7.411999803659118E-24,
+                  3.0870001554809E-23
                 ]
               },
               {
@@ -5461,7 +5460,7 @@
         "sigma_PAN_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 17 (380 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5470,8 +5469,8 @@
                 "op": "const",
                 "args": [],
                 "value": [
-                  8.045999745050936e-26,
-                  4.917999978761946e-25
+                  8.045999745050936E-26,
+                  4.917999978761946E-25
                 ]
               },
               {
@@ -5489,7 +5488,7 @@
         "sigma_PAN_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03c3_PAN at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
+          "description": "σ_PAN at wavelength bin 18 (574 nm). Linearly interpolated in T over the 2-point grid [250.0, 298.0] K with flat extrapolation (interp.linear).",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5517,7 +5516,7 @@
         "phi_O31D_1": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 1, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 1, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5547,7 +5546,7 @@
         "phi_O31D_2": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 2, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 2, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5577,7 +5576,7 @@
         "phi_O31D_3": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 3, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 3, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5607,7 +5606,7 @@
         "phi_O31D_4": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 4, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 4, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5637,7 +5636,7 @@
         "phi_O31D_5": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 5, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 5, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5667,7 +5666,7 @@
         "phi_O31D_6": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 6, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 6, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5697,7 +5696,7 @@
         "phi_O31D_7": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 7, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 7, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5727,7 +5726,7 @@
         "phi_O31D_8": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 8, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 8, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5757,7 +5756,7 @@
         "phi_O31D_9": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 9, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 9, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5787,7 +5786,7 @@
         "phi_O31D_10": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 10, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 10, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5817,7 +5816,7 @@
         "phi_O31D_11": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 11, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 11, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5847,7 +5846,7 @@
         "phi_O31D_12": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 12, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 12, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5877,7 +5876,7 @@
         "phi_O31D_13": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 13, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 13, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5907,7 +5906,7 @@
         "phi_O31D_14": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 14, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 14, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5937,7 +5936,7 @@
         "phi_O31D_15": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 15, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 15, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5967,7 +5966,7 @@
         "phi_O31D_16": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 16, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 16, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -5997,7 +5996,7 @@
         "phi_O31D_17": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 17, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 17, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -6027,7 +6026,7 @@
         "phi_O31D_18": {
           "type": "observed",
           "units": "1",
-          "description": "\u03d5_O31D quantum yield at wavelength bin 18, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
+          "description": "ϕ_O31D quantum yield at wavelength bin 18, linearly interpolated in T over the 3-point grid [200.0, 260.0, 300.0] K (Burkholder/JPL-10) via interp.linear.",
           "expression": {
             "op": "fn",
             "name": "interp.linear",
@@ -6057,7 +6056,7 @@
         "j_H2O2": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_H2O2 = (\u03a3_i F_i \u00b7 \u03c3_H2O2_i) \u00b7 \u03d5_H2O2.",
+          "description": "j_H2O2 = (Σ_i F_i · σ_H2O2_i) · ϕ_H2O2.",
           "expression": {
             "op": "*",
             "args": [
@@ -6199,7 +6198,7 @@
         "j_H2COa": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_H2COa = (\u03a3_i F_i \u00b7 \u03c3_H2COa_i) \u00b7 \u03d5_H2COa.",
+          "description": "j_H2COa = (Σ_i F_i · σ_H2COa_i) · ϕ_H2COa.",
           "expression": {
             "op": "*",
             "args": [
@@ -6341,7 +6340,7 @@
         "j_H2COb": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_H2COb = (\u03a3_i F_i \u00b7 \u03c3_H2COb_i) \u00b7 \u03d5_H2COb.",
+          "description": "j_H2COb = (Σ_i F_i · σ_H2COb_i) · ϕ_H2COb.",
           "expression": {
             "op": "*",
             "args": [
@@ -6483,7 +6482,7 @@
         "j_O3": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_O3 = (\u03a3_i F_i \u00b7 \u03c3_O3_i) \u00b7 \u03d5_O3.",
+          "description": "j_O3 = (Σ_i F_i · σ_O3_i) · ϕ_O3.",
           "expression": {
             "op": "*",
             "args": [
@@ -6625,7 +6624,7 @@
         "j_NO2": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_NO2 = (\u03a3_i F_i \u00b7 \u03c3_NO2_i) \u00b7 \u03d5_NO2.",
+          "description": "j_NO2 = (Σ_i F_i · σ_NO2_i) · ϕ_NO2.",
           "expression": {
             "op": "*",
             "args": [
@@ -6767,7 +6766,7 @@
         "j_NO3a": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_NO3a = (\u03a3_i F_i \u00b7 \u03c3_NO3_i) \u00b7 \u03d5_NO3 \u00b7 0.886 (branching ratio for the (NO + O2) channel; upstream FastJX_interpolation_troposphere applies this fixed split to the shared j_NO3 mean rate).",
+          "description": "j_NO3a = (Σ_i F_i · σ_NO3_i) · ϕ_NO3 · 0.886 (branching ratio for the (NO + O2) channel; upstream FastJX_interpolation_troposphere applies this fixed split to the shared j_NO3 mean rate).",
           "expression": {
             "op": "*",
             "args": [
@@ -6909,7 +6908,7 @@
         "j_NO3b": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_NO3b = (\u03a3_i F_i \u00b7 \u03c3_NO3_i) \u00b7 \u03d5_NO3 \u00b7 0.114 (branching ratio for the (NO2 + O) channel; upstream FastJX_interpolation_troposphere applies this fixed split to the shared j_NO3 mean rate).",
+          "description": "j_NO3b = (Σ_i F_i · σ_NO3_i) · ϕ_NO3 · 0.114 (branching ratio for the (NO2 + O) channel; upstream FastJX_interpolation_troposphere applies this fixed split to the shared j_NO3 mean rate).",
           "expression": {
             "op": "*",
             "args": [
@@ -7051,7 +7050,7 @@
         "j_N2O5": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_N2O5 = (\u03a3_i F_i \u00b7 \u03c3_N2O5_i) \u00b7 \u03d5_N2O5.",
+          "description": "j_N2O5 = (Σ_i F_i · σ_N2O5_i) · ϕ_N2O5.",
           "expression": {
             "op": "*",
             "args": [
@@ -7193,7 +7192,7 @@
         "j_CH3OOH": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_CH3OOH = (\u03a3_i F_i \u00b7 \u03c3_CH3OOH_i) \u00b7 \u03d5_CH3OOH.",
+          "description": "j_CH3OOH = (Σ_i F_i · σ_CH3OOH_i) · ϕ_CH3OOH.",
           "expression": {
             "op": "*",
             "args": [
@@ -7335,7 +7334,7 @@
         "j_ActAld": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_ActAld = (\u03a3_i F_i \u00b7 \u03c3_ActAld_i) \u00b7 \u03d5_ActAld.",
+          "description": "j_ActAld = (Σ_i F_i · σ_ActAld_i) · ϕ_ActAld.",
           "expression": {
             "op": "*",
             "args": [
@@ -7477,7 +7476,7 @@
         "j_PAN": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_PAN = (\u03a3_i F_i \u00b7 \u03c3_PAN_i) \u00b7 \u03d5_PAN.",
+          "description": "j_PAN = (Σ_i F_i · σ_PAN_i) · ϕ_PAN.",
           "expression": {
             "op": "*",
             "args": [
@@ -7619,7 +7618,7 @@
         "j_O31D": {
           "type": "observed",
           "units": "1/s",
-          "description": "j_O31D = \u03a3_i F_i \u00b7 \u03c3_O3_i \u00b7 \u03d5_O31D_i(T). Uses \u03c3_O3 with the temperature-dependent \u03d5_O31D quantum yield (Burkholder/JPL-10).",
+          "description": "j_O31D = Σ_i F_i · σ_O3_i · ϕ_O31D_i(T). Uses σ_O3 with the temperature-dependent ϕ_O31D quantum yield (Burkholder/JPL-10).",
           "expression": {
             "op": "+",
             "args": [
@@ -7773,7 +7772,7 @@
         "num_density": {
           "type": "observed",
           "units": "1",
-          "description": "Air number density (molec/cm^3, expressed unitless to match the upstream adjust_j_o31D convention): A \u00b7 P / (R \u00b7 T).",
+          "description": "Air number density (molec/cm^3, expressed unitless to match the upstream adjust_j_o31D convention): A · P / (R · T).",
           "expression": {
             "op": "/",
             "args": [
@@ -7804,12 +7803,12 @@
         "C_H2O": {
           "type": "observed",
           "units": "1",
-          "description": "H2O concentration (molec/cm^3 unitless): H2O[ppb] \u00b7 1e-9 \u00b7 num_density.",
+          "description": "H2O concentration (molec/cm^3 unitless): H2O[ppb] · 1e-9 · num_density.",
           "expression": {
             "op": "*",
             "args": [
               "H2O",
-              1e-09,
+              1E-9,
               "num_density"
             ]
           }
@@ -7817,7 +7816,7 @@
         "C_O2": {
           "type": "observed",
           "units": "1",
-          "description": "O2 concentration: 0.2095 \u00b7 num_density.",
+          "description": "O2 concentration: 0.2095 · num_density.",
           "expression": {
             "op": "*",
             "args": [
@@ -7829,7 +7828,7 @@
         "C_N2": {
           "type": "observed",
           "units": "1",
-          "description": "N2 concentration: 0.7808 \u00b7 num_density.",
+          "description": "N2 concentration: 0.7808 · num_density.",
           "expression": {
             "op": "*",
             "args": [
@@ -7841,11 +7840,11 @@
         "C_H2": {
           "type": "observed",
           "units": "1",
-          "description": "H2 concentration: 0.5e-6 \u00b7 num_density.",
+          "description": "H2 concentration: 0.5e-6 · num_density.",
           "expression": {
             "op": "*",
             "args": [
-              5e-07,
+              5E-7,
               "num_density"
             ]
           }
@@ -7853,11 +7852,11 @@
         "RO1DplH2O": {
           "type": "observed",
           "units": "1",
-          "description": "Rate constant for O(1D) + H2O: 1.63e-10 \u00b7 exp(60/T) \u00b7 C_H2O.",
+          "description": "Rate constant for O(1D) + H2O: 1.63e-10 · exp(60/T) · C_H2O.",
           "expression": {
             "op": "*",
             "args": [
-              1.63e-10,
+              1.63E-10,
               {
                 "op": "exp",
                 "args": [
@@ -7877,11 +7876,11 @@
         "RO1DplH2": {
           "type": "observed",
           "units": "1",
-          "description": "Rate constant for O(1D) + H2: 1.2e-10 \u00b7 C_H2.",
+          "description": "Rate constant for O(1D) + H2: 1.2e-10 · C_H2.",
           "expression": {
             "op": "*",
             "args": [
-              1.2e-10,
+              1.2E-10,
               "C_H2"
             ]
           }
@@ -7889,11 +7888,11 @@
         "RO1DplN2": {
           "type": "observed",
           "units": "1",
-          "description": "Rate constant for O(1D) + N2: 2.15e-11 \u00b7 exp(110/T) \u00b7 C_N2.",
+          "description": "Rate constant for O(1D) + N2: 2.15e-11 · exp(110/T) · C_N2.",
           "expression": {
             "op": "*",
             "args": [
-              2.15e-11,
+              2.15E-11,
               {
                 "op": "exp",
                 "args": [
@@ -7913,11 +7912,11 @@
         "RO1DplO2": {
           "type": "observed",
           "units": "1",
-          "description": "Rate constant for O(1D) + O2: 3.3e-11 \u00b7 exp(55/T) \u00b7 C_O2.",
+          "description": "Rate constant for O(1D) + O2: 3.3e-11 · exp(55/T) · C_O2.",
           "expression": {
             "op": "*",
             "args": [
-              3.3e-11,
+              3.3E-11,
               {
                 "op": "exp",
                 "args": [
@@ -7951,7 +7950,7 @@
         "j_O31D_adj": {
           "type": "observed",
           "units": "1",
-          "description": "Fraction of O(1D) that reacts with H2O (producing 2 OH). j_o32OH = j_O31D \u00b7 j_O31D_adj. Inlined from GasChem.jl `adjust_j_o31D(T, P, H2O)`.",
+          "description": "Fraction of O(1D) that reacts with H2O (producing 2 OH). j_o32OH = j_O31D · j_O31D_adj. Inlined from GasChem.jl `adjust_j_o31D(T, P, H2O)`.",
           "expression": {
             "op": "/",
             "args": [
@@ -7963,7 +7962,7 @@
         "j_o32OH": {
           "type": "observed",
           "units": "1/s",
-          "description": "Effective rate for O3 \u2192 2 OH: j_o32OH = j_O31D \u00b7 j_O31D_adj.",
+          "description": "Effective rate for O3 → 2 OH: j_o32OH = j_O31D · j_O31D_adj.",
           "expression": {
             "op": "*",
             "args": [
@@ -7977,7 +7976,7 @@
       "tests": [
         {
           "id": "noon_summer_eq",
-          "description": "Reference scenario: lat=0.0\u00b0, lon=0.0\u00b0, t_utc=1782043200 s (2026-06-21 12:00:00 UTC, noon summer equator \u2192 cos_sza\u22480.9174), T=298.0 K, P=101325 Pa, H2O=450.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): FastJX J-rates are returned from interpolated lookup tables; 5e-3 absorbs differences between Julia (upstream FastJX_interpolation_troposphere) and Python (lambdify) interpolation kernels on the cross-section / quantum-yield grids \u2014 interpolation roundoff dominates the negligible ODE truncation since tspan=[0,1] s. abs=1e-15 floors the dark-sibling scenarios where every J-rate is exactly 0.",
+          "description": "Reference scenario: lat=0.0°, lon=0.0°, t_utc=1782043200 s (2026-06-21 12:00:00 UTC, noon summer equator → cos_sza≈0.9174), T=298.0 K, P=101325 Pa, H2O=450.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): FastJX J-rates are returned from interpolated lookup tables; 5e-3 absorbs differences between Julia (upstream FastJX_interpolation_troposphere) and Python (lambdify) interpolation kernels on the cross-section / quantum-yield grids — interpolation roundoff dominates the negligible ODE truncation since tspan=[0,1] s. abs=1e-15 floors the dark-sibling scenarios where every J-rate is exactly 0.",
           "parameter_overrides": {
             "T": 298.0,
             "P": 101325.0,
@@ -7992,7 +7991,7 @@
           },
           "tolerance": {
             "rel": 0.005,
-            "abs": 1e-15
+            "abs": 1E-15
           },
           "assertions": [
             {
@@ -8008,7 +8007,7 @@
             {
               "variable": "j_o32OH",
               "time": 0.0,
-              "expected": 1.9051399824626528e-08
+              "expected": 1.9051399824626528E-8
             },
             {
               "variable": "j_NO2",
@@ -8033,32 +8032,32 @@
             {
               "variable": "j_H2O2",
               "time": 0.0,
-              "expected": 9.153504300134295e-05
+              "expected": 0.00009153504300134295
             },
             {
               "variable": "j_H2COa",
               "time": 0.0,
-              "expected": 7.927569431680207e-05
+              "expected": 0.00007927569431680207
             },
             {
               "variable": "j_H2COb",
               "time": 0.0,
-              "expected": 6.581696733212547e-05
+              "expected": 0.00006581696733212547
             },
             {
               "variable": "j_CH3OOH",
               "time": 0.0,
-              "expected": 4.960027768503218e-05
+              "expected": 0.00004960027768503218
             },
             {
               "variable": "j_ActAld",
               "time": 0.0,
-              "expected": 8.810269197300674e-05
+              "expected": 0.00008810269197300674
             },
             {
               "variable": "j_PAN",
               "time": 0.0,
-              "expected": 4.092859837238189e-05
+              "expected": 0.00004092859837238189
             },
             {
               "variable": "F_12",
@@ -8074,7 +8073,7 @@
         },
         {
           "id": "morning_midlat",
-          "description": "Reference scenario: lat=40.0\u00b0, lon=-97.0\u00b0, t_utc=1782032400 s (2026-06-21 09:00:00 UTC \u2192 local pre-dawn, cos_sza\u2248-0.300), T=298.0 K, P=101325 Pa, H2O=450.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): cos_sza is negative (sun below horizon) so all J-rates are 0 \u2014 abs=1e-15 is the operative floor; rel=5e-3 mirrors the daytime test for consistency.",
+          "description": "Reference scenario: lat=40.0°, lon=-97.0°, t_utc=1782032400 s (2026-06-21 09:00:00 UTC → local pre-dawn, cos_sza≈-0.300), T=298.0 K, P=101325 Pa, H2O=450.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): cos_sza is negative (sun below horizon) so all J-rates are 0 — abs=1e-15 is the operative floor; rel=5e-3 mirrors the daytime test for consistency.",
           "parameter_overrides": {
             "T": 298.0,
             "P": 101325.0,
@@ -8089,7 +8088,7 @@
           },
           "tolerance": {
             "rel": 0.005,
-            "abs": 1e-15
+            "abs": 1E-15
           },
           "assertions": [
             {
@@ -8171,7 +8170,7 @@
         },
         {
           "id": "noon_winter_midlat",
-          "description": "Reference scenario: lat=40.0\u00b0, lon=-97.0\u00b0, t_utc=1797854400 s (2026-12-21 12:00:00 UTC \u2192 local pre-dawn, cos_sza\u2248-0.335), T=273.0 K, P=95000 Pa, H2O=100.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): cos_sza is negative (sun below horizon) so all J-rates are 0 \u2014 abs=1e-15 is the operative floor; rel=5e-3 mirrors the daytime test for consistency.",
+          "description": "Reference scenario: lat=40.0°, lon=-97.0°, t_utc=1797854400 s (2026-12-21 12:00:00 UTC → local pre-dawn, cos_sza≈-0.335), T=273.0 K, P=95000 Pa, H2O=100.0 ppb. Compares the migrated component's 13 J-rates and 2 spot-checked F_i fluxes against the upstream GasChem.jl FastJX_interpolation_troposphere reference computed at the same conditions (see scripts/migrations/extract_fastjx_data.jl).\n\nTolerance rationale (rel=5e-3 / abs=1e-15): cos_sza is negative (sun below horizon) so all J-rates are 0 — abs=1e-15 is the operative floor; rel=5e-3 mirrors the daytime test for consistency.",
           "parameter_overrides": {
             "T": 273.0,
             "P": 95000.0,
@@ -8186,7 +8185,7 @@
           },
           "tolerance": {
             "rel": 0.005,
-            "abs": 1e-15
+            "abs": 1E-15
           },
           "assertions": [
             {
@@ -8270,12 +8269,9 @@
       "examples": [
         {
           "id": "noon_photolysis_decay",
-          "description": "NO2 tracer decay at summer-solstice noon at the equator (lat=0, lon=0, t_utc=1782043200 = 2026-06-21 12:00:00 UTC). cos_sza \u2248 0.917 (Spencer-Fourier). Demonstrates the full cos_sza \u2192 F_i \u2192 j_NO2 pipeline driven by lat/lon/t_utc inputs.",
+          "description": "NO2 tracer decay at summer-solstice noon at the equator (lat=0, lon=0, t_utc=1782043200 = 2026-06-21 12:00:00 UTC). cos_sza ≈ 0.917 (Spencer-Fourier). Demonstrates the full cos_sza → F_i → j_NO2 pipeline driven by lat/lon/t_utc inputs.",
           "initial_state": {
-            "type": "per_variable",
-            "values": {
-              "NO2": 1e-09
-            }
+            "NO2": 1E-9
           },
           "parameters": {
             "lat": 0.0,

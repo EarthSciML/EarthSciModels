@@ -1,5 +1,5 @@
 {
-  "esm": "0.7.0",
+  "esm": "0.8.0",
   "metadata": {
     "name": "NEI2016_loader",
     "description": "Pure-I/O data loader for the US EPA 2016 National Emissions Inventory (NEI2016 v1) monthly gridded anthropogenic emissions on the 12US1 CONUS domain. Supplies 69 CMAQ/CB6-speciated surface emission flux densities (kg m⁻² s⁻¹) on the native Lambert Conformal Conic 12 km grid, monthly for 2016, sourced per sector ({sector} URL substitution) from EPA gridded monthly NetCDF (IOAPI) files.\n\nThis is the loader half of the nei2016_monthly loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.3). It is PURE I/O: it declares its source (url_template + mirrors), the 69 file variables it reads (with units), its temporal cadence, and its NATIVE grid expressed as a GDD Grid with a PROJECTED (lambert_conformal) crs descriptor carrying the LCC projection parameters. It performs NO reprojection and NO regridding — those are concerns of the regridding model (components/earthsci_data/nei2016_monthly.esm), which references this file as the subsystem `NEI2016` via {\"ref\": \"./nei2016_monthly_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (proj4 crs string / grid_type / resolution) is replaced by the GDD `grid` (family + crs{projection:lambert_conformal, datum:sphere, R, parameters} + dimensions + extents); the old per-loader `regridding` block (fill_value / extrapolation) is gone — regridding is declared per-variable on the model (nei2016_monthly.esm `regrid`). Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5).\n\nThe LCC projection parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97, R:6370997} match the 12US1 grid and are consumed by the downstream reprojection rule (ESD reprojection/lambert_conformal.esm, esd-47z.2) — the second LCC dataset after wrf, with a different parameter set.\n\nMigrated from EarthSciData.jl@830435a src/nei2016monthly.jl (NEI2016MonthlyEmisFileSet). Split out of the pre-migration components/earthsci_data/nei2016_monthly.esm (esm-ftdf).",
@@ -39,6 +39,7 @@
       "source": {
         "url_template": "https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf",
         "mirrors": [
+          "file://${EARTHSCIDATADIR}/https_gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf",
           "file://${EARTHSCIDATADIR}/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf"
         ]
       },
@@ -49,43 +50,6 @@
         "frequency": "P1M",
         "records_per_file": 1,
         "time_variable": "TSTEP"
-      },
-      "grid": {
-        "family": "cartesian",
-        "crs": {
-          "projection": "lambert_conformal",
-          "datum": "sphere",
-          "R": 6370997.0,
-          "parameters": {
-            "lat_1": 33.0,
-            "lat_2": 45.0,
-            "lat_0": 40.0,
-            "lon_0": -97.0
-          }
-        },
-        "description": "Native NEI2016 grid: Lambert Conformal Conic projection on the EPA 12US1 CONUS modeling domain at 12 km horizontal resolution, cell-centered (CMAQ/IOAPI gridded emissions). The crs descriptor carries the spherical LCC parameters (standard parallels 33°/45°, origin 40°N/-97°E, sphere radius 6370997 m) consumed by the regridding model's reprojection (ESD reprojection/lambert_conformal.esm, esd-47z.2). This is the second LCC dataset in the migration (cf. wrf): one reprojection rule, a different parameter set (the declarative-or-fail proof). Migrated from the loader's former DataLoaderSpatial block (proj4 +proj=lcc +lat_1=33 +lat_2=45 +lat_0=40 +lon_0=-97 +a=+b=6370997 +to_meter=1). The projected x/y cell counts resolve from the source dataset at load time; the documented nominal 12US1 geometry is 459 columns × 299 rows (XCELL=YCELL=12000 m, XORIG=-2556000 m, YORIG=-1728000 m).",
-        "dimensions": [
-          "x",
-          "y"
-        ],
-        "extents": {
-          "x": {
-            "n": "n_x",
-            "spacing": "uniform"
-          },
-          "y": {
-            "n": "n_y",
-            "spacing": "uniform"
-          }
-        },
-        "parameters": {
-          "n_x": {
-            "description": "x (west–east / COL) cell count, resolved from the source dataset at load time (nominal 12US1 value 459)."
-          },
-          "n_y": {
-            "description": "y (south–north / ROW) cell count, resolved from the source dataset at load time (nominal 12US1 value 299)."
-          }
-        }
       },
       "variables": {
         "ACET": {
@@ -464,7 +428,12 @@
           "rows": 299
         },
         "proj4_string": "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=40 +lon_0=-97 +x_0=0 +y_0=0 +a=6370997.0 +b=6370997.0 +to_meter=1",
-        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (nei2016_monthly.esm `regrid`)."
+        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (nei2016_monthly.esm `regrid`).",
+        "default_sector": "mrggrid_withbeis_withrwc",
+        "grid_origin_m": {
+          "x": -2556000.0,
+          "y": -1728000.0
+        }
       }
     }
   }
