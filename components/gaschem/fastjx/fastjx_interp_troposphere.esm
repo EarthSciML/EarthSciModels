@@ -2,7 +2,7 @@
   "esm": "0.8.0",
   "metadata": {
     "name": "FastJX",
-    "description": "\n\n=== MIGRATION NOTES (mdl-09u) ===\nMigration scope: full 13-J-rate FastJX_interpolation_troposphere using the v0.3\nnamed tensor-interpolation primitives (esm-94w / esm-q7a). Follows mdl-0u6's\ntrimmed soak test, which deferred the bilinear flux pipeline + 5 J-rates because\nthe previous inlined-AST formulation (~10 nodes per lookup × 18 wavelengths\n+ 220 σ chains) blew MTK 11.x structural_simplify wall time past 5 minutes.\n\nSource: GasChem.jl/src/interpolations_FastJX.jl (FastJX_interpolation_troposphere).\n\nMappings:\n  - flux_interp_1..18(P, csa)  →  18 observed F_i = interp.bilinear(Z_all[i],\n    P_axis, cosSZA_axis, P, cos_sza). Single fn-op per F_i, kept opaque to MTK\n    structural_simplify by the @register_symbolic on the binding side.\n  - σ_X interp(T)  →  σ_X_i = interp.linear(σ_per_T, T_grid, T) for each\n    (species, bin). T-independent species use a literal scalar.\n  - ϕ_O31D(T) interp  →  phi_O31D_i = interp.linear(...) — same shape.\n  - j_mean_X(T, fluxes)  →  observed j_X = (Σ_i F_i · σ_X_i [· phi_O31D_i]) · ϕ_X.\n  - j_NO3a / j_NO3b      →  shared j_NO3 mean rate scaled by 0.886 / 0.114\n    (NO3 → NO + O2 vs NO3 → NO2 + O branching ratio).\n  - adjust_j_o31D(T, P, H2O)  →  inline observed C_H2O / C_O2 / C_N2 / C_H2 +\n    rate-constant AST + j_O31D_adj = RO1DplH2O / RO1D. j_o32OH = j_O31D · j_O31D_adj.\n\nAll upstream registered functions are recovered as AST compositions of the closed\nfunction registry (interp.linear + interp.bilinear) + AST ops. No registered\nfunctions remain in the migrated component.\n\nNote on cos_sza routing:\n  mdl-0u6 mounted lib/solar.esm via §4.7 inclusion and read Solar.cos_zenith\n  through a §4.6 scoped reference. The ESS Julia binding's namespace_expr\n  short-circuits on dotted names and never rewrites Sub.x → Parent.Sub.x for\n  parent-model expressions, so the prior file failed to load (see mdl-2aq).\n  Until that bug is fixed, cos_sza is exposed as a FastJX parameter and the\n  caller pins it (typically by mounting Solar at a higher level and forwarding\n  cos_sza ← Solar.cos_zenith there). Tests pin cos_sza to lib/solar.esm's\n  reference value computed in extract_fastjx_data.jl using the same NOAA\n  Spencer-Fourier formula.\n\n=== END MIGRATION NOTES ===\n\nFast-JX UV photolysis rates (interpolation-based variant). 0-D component computing 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_O31D, j_o32OH, j_NO2, j_NO3a, j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, j_PAN) from atmospheric (cos_sza, T, P, H2O). Uses the v0.3 named tensor-interpolation primitives interp.linear (σ_X(T) and ϕ_O31D(T)) and interp.bilinear (actinic flux F_i on a (P, cosSZA) grid) so MTK structural_simplify sees one symbolic node per interpolation rather than a deeply-nested chain.",
+    "description": "\n\n=== MIGRATION NOTES (mdl-09u) ===\nMigration scope: full 13-J-rate FastJX_interpolation_troposphere using the v0.3\nnamed tensor-interpolation primitives (esm-94w / esm-q7a). Follows mdl-0u6's\ntrimmed soak test, which deferred the bilinear flux pipeline + 5 J-rates because\nthe previous inlined-AST formulation (~10 nodes per lookup × 18 wavelengths\n+ 220 σ chains) blew MTK 11.x structural_simplify wall time past 5 minutes.\n\nSource: GasChem.jl/src/interpolations_FastJX.jl (FastJX_interpolation_troposphere).\n\nMappings:\n  - flux_interp_1..18(P, csa)  →  18 observed F_i = interp.bilinear(Z_all[i],\n    P_axis, cosSZA_axis, P, cos_sza). Single fn-op per F_i, kept opaque to MTK\n    structural_simplify by the @register_symbolic on the binding side.\n  - σ_X interp(T)  →  σ_X_i = interp.linear(σ_per_T, T_grid, T) for each\n    (species, bin). T-independent species use a literal scalar.\n  - ϕ_O31D(T) interp  →  phi_O31D_i = interp.linear(...) — same shape.\n  - j_mean_X(T, fluxes)  →  observed j_X = (Σ_i F_i · σ_X_i [· phi_O31D_i]) · ϕ_X.\n  - j_NO3a / j_NO3b      →  shared j_NO3 mean rate scaled by 0.886 / 0.114\n    (NO3 → NO + O2 vs NO3 → NO2 + O branching ratio).\n  - adjust_j_o31D(T, P, H2O)  →  inline observed C_H2O / C_O2 / C_N2 / C_H2 +\n    rate-constant AST + j_O31D_adj = RO1DplH2O / RO1D. j_o32OH = j_O31D · j_O31D_adj.\n\nAll upstream registered functions are recovered as AST compositions of the closed\nfunction registry (interp.linear + interp.bilinear) + AST ops. No registered\nfunctions remain in the migrated component.\n\nNote on cos_sza routing:\n  mdl-0u6 mounted lib/solar.esm via §4.7 inclusion and read Solar.cos_zenith\n  through a §4.6 scoped reference. The ESS Julia binding's namespace_expr\n  short-circuits on dotted names and never rewrites Sub.x → Parent.Sub.x for\n  parent-model expressions, so the prior file failed to load (see mdl-2aq).\n  Until that bug is fixed, cos_sza is exposed as a FastJX parameter and the\n  caller pins it (typically by mounting Solar at a higher level and forwarding\n  cos_sza ← Solar.cos_zenith there). Tests pin cos_sza to lib/solar.esm's\n  reference value computed in extract_fastjx_data.jl using the same NOAA\n  Spencer-Fourier formula.\n\n=== END MIGRATION NOTES ===\n\nFast-JX UV photolysis rates (interpolation-based variant). 0-D component computing 13 J-rates (j_H2O2, j_H2COa, j_H2COb, j_O3, j_O31D, j_o32OH, j_NO2, j_NO3a, j_NO3b, j_N2O5, j_CH3OOH, j_ActAld, j_PAN) from atmospheric (cos_sza, T, P, H2O). Uses the v0.3 named tensor-interpolation primitives interp.linear (σ_X(T) and ϕ_O31D(T)) and interp.bilinear (actinic flux F_i on a (P, cosSZA) grid) so MTK structural_simplify sees one symbolic node per interpolation rather than a deeply-nested chain.\n\nSTATELESS. This component has no state variables and no equations — every output is an observed algebraic function of (cos_sza, T, P, H2O), which is what a photolysis component IS. It previously carried a trivial `NO2` tracer with `D(NO2) = -j_NO2*NO2`, described as an \"ODE skeleton\"; that was scaffolding for the example plots, not physics, and it made the component unmountable in a gridded host: a consumer that feeds cos_sza/T/P per cell has every observed here promoted to the grid shape, leaving the scalar `NO2` state with an array-valued RHS. The skeleton is gone and the shape now matches the sibling fastjx.esm, which has always been stateless. The three inline `tests` are unaffected — they only assert J-rates and F_i at t=0, all observeds.",
     "authors": [
       "EarthSciML"
     ],
@@ -36751,37 +36751,9 @@
               "j_O31D_adj"
             ]
           }
-        },
-        "NO2": {
-          "type": "state",
-          "units": "mol/mol",
-          "default": 1E-9,
-          "description": "Trivial NO2 tracer decayed by j_NO2 — provides the ODE skeleton."
         }
       },
-      "equations": [
-        {
-          "lhs": {
-            "op": "D",
-            "args": [
-              "NO2"
-            ],
-            "wrt": "t"
-          },
-          "rhs": {
-            "op": "-",
-            "args": [
-              {
-                "op": "*",
-                "args": [
-                  "j_NO2",
-                  "NO2"
-                ]
-              }
-            ]
-          }
-        }
-      ],
+      "equations": [],
       "tests": [
         {
           "id": "noon_summer_eq",
@@ -37072,10 +37044,7 @@
       "examples": [
         {
           "id": "diurnal_decay_summer_eq",
-          "description": "Decay of NO2 under fixed-conditions photolysis at the noon-summer-equator scenario. Demonstrates that the migrated component runs as a real 0-D ODE driven by AST-composed j_NO2.",
-          "initial_state": {
-            "NO2": 1E-9
-          },
+          "description": "j_NO2 at the noon-summer-equator scenario over a 1 h window. Demonstrates the cos_sza -> F_i -> j_NO2 pipeline; j_NO2 is algebraic in the (fixed) inputs, so the trace is flat. Matches the stateless shape of the sibling fastjx.esm example.",
           "parameters": {
             "T": 298.0,
             "P": 101325.0,
@@ -37088,26 +37057,23 @@
           },
           "plots": [
             {
-              "id": "NO2_vs_time",
+              "id": "jNO2_vs_time",
               "type": "line",
-              "description": "Tracer NO2 decaying over 1 h under noon-summer-equator photolysis (j_NO2 ≈ const).",
+              "description": "j_NO2 over a 1 h run at noon-summer-equator photolysis (constant: the inputs are fixed).",
               "x": {
                 "variable": "t",
                 "label": "time (s)"
               },
               "y": {
-                "variable": "NO2",
-                "label": "NO2 (mol/mol)"
+                "variable": "j_NO2",
+                "label": "j_NO2 (1/s)"
               }
             }
           ]
         },
         {
           "id": "cos_sza_sweep",
-          "description": "Solar-zenith sensitivity of the NO2 photolysis rate. Sweeps cos_sza from 0.1 (low sun) to 1.0 (sub-solar / noon equator) at default T=298 K, P=101325 Pa, H2O=450 ppb. The bilinear actinic-flux interpolation drives F_i upward as the sun rises, so j_NO2 = (Σ_i F_i · σ_NO2_i) · ϕ_NO2 grows monotonically with cos_sza. Each grid point integrates the trivial NO2 ODE for 1 s; the renderer collapses each trajectory to its endpoint (j_NO2 is algebraic, so the value is constant over t) to plot j_NO2 vs cos_sza.",
-          "initial_state": {
-            "NO2": 1E-9
-          },
+          "description": "Solar-zenith sensitivity of the NO2 photolysis rate. Sweeps cos_sza from 0.1 (low sun) to 1.0 (sub-solar / noon equator) at default T=298 K, P=101325 Pa, H2O=450 ppb. The bilinear actinic-flux interpolation drives F_i upward as the sun rises, so j_NO2 = (Σ_i F_i · σ_NO2_i) · ϕ_NO2 grows monotonically with cos_sza. Each grid point is evaluated over a 1 s window; the renderer collapses each trajectory to its endpoint (j_NO2 is algebraic, so the value is constant over t) to plot j_NO2 vs cos_sza.",
           "parameters": {
             "T": 298.0,
             "P": 101325.0,
@@ -37169,9 +37135,6 @@
         {
           "id": "T_sweep",
           "description": "Temperature sensitivity of the photolysis rates at fixed actinic flux (cos_sza=0.917, noon summer equator). Sweeps T from 240 K (cold UT) to 310 K (warm BL) at default P=101325 Pa, H2O=450 ppb. j_NO2 is largely T-insensitive (σ_NO2 has no T dependence in this binning), while j_O(1D) carries the strong ϕ_O(1D)(T) quantum-yield temperature dependence and the σ_O3(T) cross-section adjustment — making j_O31D the canonical T-sensitive J-rate.",
-          "initial_state": {
-            "NO2": 1E-9
-          },
           "parameters": {
             "P": 101325.0,
             "H2O": 450.0,
