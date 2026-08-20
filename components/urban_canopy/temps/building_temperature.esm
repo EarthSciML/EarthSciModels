@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "BuildingTemperature",
         "description": "Weighted-average internal building temperature from canyon and roof surface temperatures, implementing Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.37–4.38. The roof length L_roof in an infinite canyon (Eq. 4.38) and the unclamped building temperature T_iB_unclamped (Eq. 4.37) are both algebraic functions of the canyon geometry (H_canyon, H_W, W_roof) and the inner-surface temperatures of the shaded wall, sunlit wall, and roof. T_iB is the area-weighted average with the two walls contributing 2*H_canyon of effective length and the roof contributing L_roof. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:401 (`BuildingTemperature` @component). NOTE: the migration-tracker entry listed `blocking_gap: other:discretization-plan` citing line :1152, but that line belongs to `RoofWallHeatConduction` (a separate non-exported helper function). `BuildingTemperature` itself is a pure two-equation algebraic `@component` with no PDESystem or MOLFiniteDifference — this migration is unblocked.",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:401\n\nUpstream `BuildingTemperature` is an MTK `@component` with six `@parameters` (T_inner_shdwall, T_inner_sunwall, T_inner_roof in K; H_canyon in m; W_roof and H_W dimensionless) and two time-indexed `@variables` (L_roof in m, T_iB_unclamped in K). Two algebraic equations close the system:\n\n  Eq. 4.38: L_roof = (H_canyon / H_W) * (W_roof / (1 - W_roof))\n    Converts the H/W ratio and roof fraction into the roof length in an infinite canyon. This is the canyon geometry length that W_roof road/roof width occupies relative to the street width (1-W_roof).\n\n  Eq. 4.37: T_iB_unclamped = [H_canyon * (T_inner_shdwall + T_inner_sunwall) + L_roof * T_inner_roof] / (2*H_canyon + L_roof)\n    Area-weighted average of inner surface temperatures. The two walls (shaded + sunlit) each have length H_canyon, contributing 2*H_canyon total. The roof contributes L_roof. If all temperatures are equal, T_iB_unclamped = that temperature identically.\n\nObservability classification: observed-only — both outputs are algebraic functions of the six parameters with no time derivatives. Test scenarios use `time_span: [0, 1]` and sample at t=0 following the convention of sibling observed-only ESM files in this rig.\n\nTracker note: the migration-tracker entry listed `blocking_gap: other:discretization-plan` citing line :1152 in the source file (where `@named pdesys` appears inside `RoofWallHeatConduction`, a separate private helper function). The `BuildingTemperature` `@component` at :401 has no PDESystem, no MOLFiniteDifference, and no spatial discretization — it is purely algebraic and requires no discretization plan for migration. The same mis-classification occurred for `PhaseChangeAdjustment` (esm-eya8) and `SoilWaterEquilibrium` (esm-4kir) in the same tracker section.\n\nW_roof constraint: the equation for L_roof has a singularity at W_roof = 1.0 (division by 1 - W_roof = 0). Physical values of W_roof are in (0, 1); for urban canyons the typical range is 0.1–0.7. Test cases use W_roof ∈ (0, 1) strictly.\n\nDefault parameter values: T_inner_shdwall=293.0 K, T_inner_sunwall=295.0 K, T_inner_roof=290.0 K are representative inner-surface temperatures for a modestly solar-heated urban surface in mid-latitude summer. H_canyon=10.0 m, W_roof=0.3, H_W=1.0 match the upstream `BuildingTemperature - Equation Verification` test fixture (roof_wall_road_snow_temperatures_test.jl) and represent a medium-density urban canyon.\n\nUpstream tolerances: both upstream `@testitem` assertions use `rtol = 1.0e-10`. Reproduced via per-assertion `tolerance: { rel: 1.0e-10 }` on the upstream-canonical tests; model-level default rel=1.0e-10 (observed-only two-equation system, no ODE integration — roundoff at IEEE-754 ULP level ~1e-16)."
             },
             "tolerance": {
-                "rel": 1.0e-10
+                "rel": 1e-10
             },
             "variables": {
                 "T_inner_shdwall": {
@@ -68,12 +68,12 @@
                     "description": "Canyon height-to-width ratio H/W (dimensionless, Oleson Eq. 4.38 input); larger values correspond to deeper/narrower canyons"
                 },
                 "L_roof": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Roof length in the infinite-canyon representation (Oleson Eq. 4.38): L = (H/H_W)*(W_roof/(1−W_roof)). Equals the canyon width times the roof-to-street ratio; used as the weighting length for the roof contribution in T_iB."
                 },
                 "T_iB_unclamped": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "K",
                     "description": "Unclamped internal building temperature (Oleson Eq. 4.37): area-weighted average of inner wall (×2H) and roof (×L_roof) temperatures. Called 'unclamped' because the downstream model clamps T_iB to [T_iB_min, T_iB_max] (handled by HeatingCoolingFlux)."
                 }
@@ -178,7 +178,7 @@
                             "time": 0.0,
                             "expected": 4.285714285714286,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         },
                         {
@@ -186,7 +186,7 @@
                             "time": 0.0,
                             "expected": 293.29411764705884,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         }
                     ]
@@ -212,7 +212,7 @@
                             "time": 0.0,
                             "expected": 295.0,
                             "tolerance": {
-                                "abs": 1.0e-12
+                                "abs": 1e-12
                             }
                         }
                     ]
@@ -238,7 +238,7 @@
                             "time": 0.0,
                             "expected": 1.0,
                             "tolerance": {
-                                "abs": 1.0e-12
+                                "abs": 1e-12
                             }
                         },
                         {
@@ -246,7 +246,7 @@
                             "time": 0.0,
                             "expected": 287.4390243902439,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         }
                     ]
@@ -272,7 +272,7 @@
                             "time": 0.0,
                             "expected": 23.333333333333332,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         },
                         {
@@ -280,7 +280,7 @@
                             "time": 0.0,
                             "expected": 288.9,
                             "tolerance": {
-                                "abs": 1.0e-10
+                                "abs": 1e-10
                             }
                         }
                     ]
@@ -306,7 +306,7 @@
                             "time": 0.0,
                             "expected": 292.5,
                             "tolerance": {
-                                "abs": 1.0e-10
+                                "abs": 1e-10
                             }
                         }
                     ]
@@ -332,7 +332,7 @@
                             "time": 0.0,
                             "expected": 1.0,
                             "tolerance": {
-                                "abs": 1.0e-12
+                                "abs": 1e-12
                             }
                         },
                         {
@@ -340,7 +340,7 @@
                             "time": 0.0,
                             "expected": 286.6666666666667,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         }
                     ]
@@ -364,9 +364,9 @@
                         {
                             "variable": "L_roof",
                             "time": 0.0,
-                            "expected": 3.5897435897435897,
+                            "expected": 3.58974358974359,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         },
                         {
@@ -374,13 +374,13 @@
                             "time": 0.0,
                             "expected": 291.8586387434555,
                             "tolerance": {
-                                "rel": 1.0e-10
+                                "rel": 1e-10
                             }
                         }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "T_iB_vs_H_W_sweep",
                     "description": "Sweep H_W from 0.2 to 5.0 (shallow to deep canyon) at fixed W_roof=0.3, H_canyon=10 m with three surface temperatures. As H_W increases, L_roof decreases (narrower canyon has smaller roof-to-wall ratio), shifting T_iB toward the wall-temperature average. Surfaces the geometric transition from roof-dominated (low H_W) to wall-dominated (high H_W) weighting.",

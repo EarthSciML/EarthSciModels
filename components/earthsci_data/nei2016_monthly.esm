@@ -1,5 +1,5 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "NEI2016MonthlyEmis",
     "description": "US EPA 2016 NEI CMAQ-formatted monthly DataLoader. Converts monthly gridded anthropogenic+biogenic emissions from the 12US1 12-km Lambert Conformal domain to mixing ratio source rates (1/s) for 69 species. Species-specific temporal scaling: CO (day-of-week×diurnal), FORM (diurnal), ISOP (isoprene diurnal), NO/NO2 (NOx day-of-week×NOx diurnal), others (none). The gt-p3ep(lookup) gap is resolved via datetime.hour+floor+interp.linear for diurnal/day-of-week and interp.bilinear for the 94x49 delp_dry_surface field. Migrated from EarthSciData.jl src/nei2016monthly.jl:358 (esm-ftdf).\n\n[esm-3nc.3] Split into a pure-I/O loader (nei2016_monthly_loader.esm) + this regridding model per RFC pure-io-data-loaders §6/§7. The loader is referenced as the subsystem NEI2016; each of the 69 species emission observeds references its regridded loader field as NEI2016.<SP> and is regridded conservatively (cell-centered emissions). The native Lambert Conformal Conic grid (params 33/45/40/-97, R=6370997) is reprojected by ESD reprojection/lambert_conformal.esm (esd-47z.2). The pre-migration 69 flux_<SP> parameters and top-level param_to_var coupling block are removed.",
@@ -40,8 +40,8 @@
         "notes": "source_ref: EarthSciData.jl:src/nei2016monthly.jl:358\n\nAll 69 species are observed (algebraic) variables — upstream test: \"NEI has no state variables.\"\n\ngt-p3ep(lookup) resolution:\n  diurnal_itp(t, lon): local_hour = datetime.hour(t+t_ref+floor(lon_deg/15)*3600)+1\n    → interp.linear(DIURNAL_FACTORS, [1..24], local_hour)\n  diurnal_itp_NOx / diurnal_itp_ISOP: same with NOx/ISOP factor arrays\n  dayofweek_itp_CO/NOx(t, lon): iso_weekday = (floor(t_local/86400)+3) mod 7+1\n    → interp.linear(DayofWeekFactors, [1..7], iso_weekday)\n  delp_dry_surface_itp(lon, lat): interp.bilinear 94×49 bilinear from JLD2 file\n\nSpecies from 'mrggrid_withbeis_withrwc' sector (verified by reading NCF header):\n  69 species including NO, NO2, CO, FORM, ISOP, ACET, SO2, NH3, and PM components.\n\nUnit conversion (runtime): native IOAPI units → kg/m²/s\n  data *= to_unit(attrib['units'])  # e.g. tons/day → kg/s per cell\n  data /= (XCELL * YCELL)  # 12000 × 12000 = 1.44e8 m²\n  → conservative regridding to target domain\n\n--- esm-3nc.3 pure-IO split ---\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration nei2016_monthly.esm carried this coupler model, a co-located data_loaders.NEI2016 block (with the now-removed `spatial` and `regridding` sub-blocks), AND a top-level `coupling` block that fed the model's 69 flux_<SP> parameters from the loader via param_to_var (from NEI2016.<SP> to NEI2016MonthlyEmis.flux_<SP>). In the pure-IO form the loader is the pure-I/O file components/earthsci_data/nei2016_monthly_loader.esm, referenced here as the subsystem `NEI2016`; each emission observed now references its regridded loader field directly as NEI2016.<SP>, so the 69 flux_<SP> parameters and the top-level coupling block are removed (no external consumer referenced flux_<SP> — couplings/earthscidata_spatial_params.esm only routes lat/lon/lev).\nReprojection (RFC §6 step 2): NEI2016's native grid.crs.projection is 'lambert_conformal', so the reprojection rule selected by convention is ESD reprojection/lambert_conformal.esm (esd-47z.2), parameterized by the loader crs parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97} on a sphere of radius R=6370997 m — the same rule as wrf with a different parameter set.\nRegridding (RFC §6 step 3 / §5.2): every NEI2016 species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block. function_tables.delp_dry_surface_table stays top-level in this model file (RFC §8 gotcha).\n\nInline tests emptied (matching the era5/wrf reference migrations): the pre-migration model carried 7 inline tests, but (a) tests 6–7 set parameter_overrides on the now-removed flux_<SP> parameters, and (b) all 7 exercise observeds built on the `interp.bilinear` op (delp_dry_surface, the diurnal/day-of-week factor tables), which the canonical ESS Python runner does not yet support ('Unsupported operation: interp.bilinear') — the same reason era5's interp.bilinear-based `P` ships with empty inline tests and a load-only gate. The 7 scenarios are preserved here as informational live tests (require real NEI2016 12US1 NetCDF and interp.bilinear runner support; not run in CI):\n  1. diurnal_factor_6am_utc: t=21600 s, lon=0 → local_hour=7, diurnal_factor=DIURNAL_FACTORS[7]=1.45 (datetime.hour extraction, 1-based indexing).\n  2. diurnal_factor_6pm_utc: t=64800 s, lon=0 → local_hour=19, diurnal_factor=DIURNAL_FACTORS[19]=0.65.\n  3. day_of_week_sunday: t=0, lon=0, t_ref=2016-05-01 (Sunday, ISO 7) → day_of_week=7, dayofweek_co=0.683, dayofweek_nox=0.784.\n  4. delp_dry_surface_neg94_44: lon=-94.375°, lat=44.5° → delp_dry_surface≈14.721285536474896 (rel 1e-4).\n  5. delp_dry_surface_neg88_42: lon=-88.125°, lat=42.0° → delp_dry_surface≈14.8498301901334 (rel 1e-4).\n  6. zero_emission_above_surface: lev=2 (above surface) → every species observed is 0 via the ifelse(lev<2, …, 0) gate.\n  7. co_emission_surface_scaling: lev=1, lon=0, lat=40°N, t=21600, NEI2016.CO=1e-8 kg/m²/s → CO = NEI2016.CO/Δz*scale*dayofweek_co(0.683)*diurnal_factor(1.45)/(g0_100*delp_dry_surface) ≈ 6.89e-11 1/s (was flux_CO before the pure-IO split; the loader field NEI2016.CO now supplies the regridded flux)."
       },
       "tolerance": {
-        "rel": 0.000001,
-        "abs": 1E-14
+        "rel": 1e-06,
+        "abs": 1e-14
       },
       "variables": {
         "t_ref": {
@@ -87,10 +87,440 @@
           "description": "Vertical level index (1=surface). Emissions applied only at lev<2."
         },
         "lon_deg": {
-          "type": "observed",
+          "type": "unknown",
           "units": "deg",
-          "description": "Longitude in degrees: lon × (180/π). Used for timezone offset and delp_dry_surface lookup.",
-          "expression": {
+          "description": "Longitude in degrees: lon × (180/π). Used for timezone offset and delp_dry_surface lookup."
+        },
+        "lat_deg": {
+          "type": "unknown",
+          "units": "deg",
+          "description": "Latitude in degrees: lat × (180/π). Used for delp_dry_surface lookup."
+        },
+        "tz_offset_h": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Timezone offset in hours: floor(lon_deg/15). 1 hour per 15° longitude."
+        },
+        "t_local_utc": {
+          "type": "unknown",
+          "units": "s",
+          "description": "Local solar time (Unix s): t + t_ref + tz_offset_h×3600."
+        },
+        "local_hour": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Local hour of day 1..24: datetime.hour(t_local_utc)+1 (1-based to match DIURNAL_FACTORS)."
+        },
+        "day_of_week": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Local ISO weekday 1..7 (Mon..Sun). Derived from t_local_utc: days=floor(t/86400); dow=(days+3) mod 7+1. Offset +3 because Unix epoch (day 0) is Thursday (ISO 4)."
+        },
+        "diurnal_factor": {
+          "type": "unknown",
+          "units": "1",
+          "description": "General diurnal factor at local_hour. DIURNAL_FACTORS=[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45] (24 values, UTC-0). Applied to CO, FORM, and default species."
+        },
+        "diurnal_factor_nox": {
+          "type": "unknown",
+          "units": "1",
+          "description": "NOx diurnal factor at local_hour. DIURNAL_FACTORS_NOx=[0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]. Applied to NO and NO2."
+        },
+        "diurnal_factor_isop": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Isoprene diurnal factor (zero at night, peaks ~2.66 at midday). Applied to ISOP."
+        },
+        "dayofweek_co": {
+          "type": "unknown",
+          "units": "1",
+          "description": "CO day-of-week factor (ISO 1..7). DayofWeekFactors_CO=[1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]. Weekday>weekend."
+        },
+        "dayofweek_nox": {
+          "type": "unknown",
+          "units": "1",
+          "description": "NOx day-of-week factor (ISO 1..7). DayofWeekFactors_NOx=[1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]. Reduced weekends."
+        },
+        "delp_dry_surface": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Dry pressure thickness (hPa, unitless) bilinearly interpolated from the 94x49 mean-domain table (lon -125..-66.875 deg, lat 25..49 deg), flat-clamped outside the domain. Used in the flux-to-mixing-ratio conversion: mixing_ratio_rate = flux/(g0_100 x delp). Typical 10-16 hPa."
+        },
+        "t_utc": {
+          "type": "unknown",
+          "units": "s",
+          "description": "Absolute UTC time (Unix s) = t + t_ref. Distinct from t_local_utc, which carries the cell's timezone offset: the days-in-month normalisation is a property of the DATA FILE's month, not of local time."
+        },
+        "month_utc": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Calendar month (1-12) of the current UTC time, selecting the monthly EPA file whose totals are being normalised."
+        },
+        "is_leap_year_utc": {
+          "type": "unknown",
+          "units": "1",
+          "description": "1 if the current UTC year is a leap year, else 0 (datetime.is_leap_year), giving February 29 days."
+        },
+        "days_in_month": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Days in the current calendar month, leap-aware -- the equivalent of Julia's Dates.daysinmonth(t). EarthSciAST has no datetime.daysinmonth, so this is a 12-entry table over datetime.month plus a February correction gated on datetime.is_leap_year. Every species emission is divided by this: the EPA gridded-merge monthly files store a whole month's emissions on one 24-hour TSTEP despite their 'tons/day' units attribute, so treating the stored value as a daily rate over-emits by this factor (~30.5x measured domain-wide). Mirrors EarthSciData.jl `data ./= Dates.daysinmonth(t)` in loadslice!; see EarthSciData.jl issue #209 / PR #210."
+        },
+        "ACET": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ACET mixing ratio source rate (1/s) at surface (lev<2). = flux_ACET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ACROLEIN": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ACROLEIN mixing ratio source rate (1/s) at surface (lev<2). = flux_ACROLEIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ALD2": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ALD2 mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ALD2_PRIMARY": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ALD2_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ALDX": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ALDX mixing ratio source rate (1/s) at surface (lev<2). = flux_ALDX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "APIN": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 APIN mixing ratio source rate (1/s) at surface (lev<2). = flux_APIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "BENZ": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 BENZ mixing ratio source rate (1/s) at surface (lev<2). = flux_BENZ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "BPIN": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 BPIN mixing ratio source rate (1/s) at surface (lev<2). = flux_BPIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "BUTADIENE13": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 BUTADIENE13 mixing ratio source rate (1/s) at surface (lev<2). = flux_BUTADIENE13/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "CH4": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 CH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "CH4_INV": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 CH4_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "CL2": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 CL2 mixing ratio source rate (1/s) at surface (lev<2). = flux_CL2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "CO": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 CO mixing ratio source rate (1/s) at surface (lev<2). = flux_CO/Δz×scale×(dayofweek_co×diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "CO2_INV": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 CO2_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CO2_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ETH": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ETH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ETHA": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ETHA mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ETHY": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ETHY mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ETOH": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ETOH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "FORM": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 FORM mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM/Δz×scale×(diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "FORM_PRIMARY": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 FORM_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "HCL": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 HCL mixing ratio source rate (1/s) at surface (lev<2). = flux_HCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "HONO": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 HONO mixing ratio source rate (1/s) at surface (lev<2). = flux_HONO/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "IOLE": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 IOLE mixing ratio source rate (1/s) at surface (lev<2). = flux_IOLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "ISOP": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 ISOP mixing ratio source rate (1/s) at surface (lev<2). = flux_ISOP/Δz×scale×(diurnal_factor_isop)/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "KET": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 KET mixing ratio source rate (1/s) at surface (lev<2). = flux_KET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "MEOH": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 MEOH mixing ratio source rate (1/s) at surface (lev<2). = flux_MEOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "N2O_INV": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 N2O_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_N2O_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NAPH": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NAPH mixing ratio source rate (1/s) at surface (lev<2). = flux_NAPH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NH3": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NH3 mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NH3_FERT": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NH3_FERT mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3_FERT/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NO": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NO mixing ratio source rate (1/s) at surface (lev<2). = flux_NO/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NO2": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_NO2/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NOX": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NOX mixing ratio source rate (1/s) at surface (lev<2). = flux_NOX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NR": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NR mixing ratio source rate (1/s) at surface (lev<2). = flux_NR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "NVOL": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 NVOL mixing ratio source rate (1/s) at surface (lev<2). = flux_NVOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "OLE": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 OLE mixing ratio source rate (1/s) at surface (lev<2). = flux_OLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PAL": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PAL mixing ratio source rate (1/s) at surface (lev<2). = flux_PAL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PAR": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PAR mixing ratio source rate (1/s) at surface (lev<2). = flux_PAR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PCA": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PCA mixing ratio source rate (1/s) at surface (lev<2). = flux_PCA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PCL": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PCL mixing ratio source rate (1/s) at surface (lev<2). = flux_PCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PEC": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PEC mixing ratio source rate (1/s) at surface (lev<2). = flux_PEC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PFE": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PFE mixing ratio source rate (1/s) at surface (lev<2). = flux_PFE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PH2O": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PH2O mixing ratio source rate (1/s) at surface (lev<2). = flux_PH2O/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PK": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PK mixing ratio source rate (1/s) at surface (lev<2). = flux_PK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PM2_5": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PM2_5 mixing ratio source rate (1/s) at surface (lev<2). = flux_PM2_5/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PMC": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PMC mixing ratio source rate (1/s) at surface (lev<2). = flux_PMC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PMG": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PMG mixing ratio source rate (1/s) at surface (lev<2). = flux_PMG/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PMN": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PMN mixing ratio source rate (1/s) at surface (lev<2). = flux_PMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PMOTHR": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PMOTHR mixing ratio source rate (1/s) at surface (lev<2). = flux_PMOTHR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PNA": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PNA mixing ratio source rate (1/s) at surface (lev<2). = flux_PNA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PNCOM": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PNCOM mixing ratio source rate (1/s) at surface (lev<2). = flux_PNCOM/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PNH4": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PNH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PNO3": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PNO3 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNO3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "POC": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 POC mixing ratio source rate (1/s) at surface (lev<2). = flux_POC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PRPA": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PRPA mixing ratio source rate (1/s) at surface (lev<2). = flux_PRPA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PSI": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PSI mixing ratio source rate (1/s) at surface (lev<2). = flux_PSI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PSO4": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PSO4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PSO4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "PTI": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 PTI mixing ratio source rate (1/s) at surface (lev<2). = flux_PTI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "SESQ": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 SESQ mixing ratio source rate (1/s) at surface (lev<2). = flux_SESQ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "SO2": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 SO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_SO2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "SOAALK": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 SOAALK mixing ratio source rate (1/s) at surface (lev<2). = flux_SOAALK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "SULF": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 SULF mixing ratio source rate (1/s) at surface (lev<2). = flux_SULF/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "TERP": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 TERP mixing ratio source rate (1/s) at surface (lev<2). = flux_TERP/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "TOL": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 TOL mixing ratio source rate (1/s) at surface (lev<2). = flux_TOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "UNK": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 UNK mixing ratio source rate (1/s) at surface (lev<2). = flux_UNK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "UNR": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 UNR mixing ratio source rate (1/s) at surface (lev<2). = flux_UNR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "VOC_BEIS": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 VOC_BEIS mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_BEIS/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "VOC_INV": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 VOC_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        },
+        "XYLMN": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "NEI2016 XYLMN mixing ratio source rate (1/s) at surface (lev<2). = flux_XYLMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+        }
+      },
+      "subsystems": {
+        "NEI2016": {
+          "ref": "./nei2016_monthly_loader.esm"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "lon_deg",
+          "rhs": {
             "op": "*",
             "args": [
               57.29577951308232,
@@ -98,11 +528,9 @@
             ]
           }
         },
-        "lat_deg": {
-          "type": "observed",
-          "units": "deg",
-          "description": "Latitude in degrees: lat × (180/π). Used for delp_dry_surface lookup.",
-          "expression": {
+        {
+          "lhs": "lat_deg",
+          "rhs": {
             "op": "*",
             "args": [
               57.29577951308232,
@@ -110,11 +538,9 @@
             ]
           }
         },
-        "tz_offset_h": {
-          "type": "observed",
-          "units": "1",
-          "description": "Timezone offset in hours: floor(lon_deg/15). 1 hour per 15° longitude.",
-          "expression": {
+        {
+          "lhs": "tz_offset_h",
+          "rhs": {
             "op": "floor",
             "args": [
               {
@@ -127,11 +553,9 @@
             ]
           }
         },
-        "t_local_utc": {
-          "type": "observed",
-          "units": "s",
-          "description": "Local solar time (Unix s): t + t_ref + tz_offset_h×3600.",
-          "expression": {
+        {
+          "lhs": "t_local_utc",
+          "rhs": {
             "op": "+",
             "args": [
               "t",
@@ -146,11 +570,9 @@
             ]
           }
         },
-        "local_hour": {
-          "type": "observed",
-          "units": "1",
-          "description": "Local hour of day 1..24: datetime.hour(t_local_utc)+1 (1-based to match DIURNAL_FACTORS).",
-          "expression": {
+        {
+          "lhs": "local_hour",
+          "rhs": {
             "op": "+",
             "args": [
               {
@@ -164,11 +586,9 @@
             ]
           }
         },
-        "day_of_week": {
-          "type": "observed",
-          "units": "1",
-          "description": "Local ISO weekday 1..7 (Mon..Sun). Derived from t_local_utc: days=floor(t/86400); dow=(days+3) mod 7+1. Offset +3 because Unix epoch (day 0) is Thursday (ISO 4).",
-          "expression": {
+        {
+          "lhs": "day_of_week",
+          "rhs": {
             "op": "+",
             "args": [
               {
@@ -228,11 +648,9 @@
             ]
           }
         },
-        "diurnal_factor": {
-          "type": "observed",
-          "units": "1",
-          "description": "General diurnal factor at local_hour. DIURNAL_FACTORS=[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45] (24 values, UTC-0). Applied to CO, FORM, and default species.",
-          "expression": {
+        {
+          "lhs": "diurnal_factor",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -300,11 +718,9 @@
             ]
           }
         },
-        "diurnal_factor_nox": {
-          "type": "observed",
-          "units": "1",
-          "description": "NOx diurnal factor at local_hour. DIURNAL_FACTORS_NOx=[0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]. Applied to NO and NO2.",
-          "expression": {
+        {
+          "lhs": "diurnal_factor_nox",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -372,11 +788,9 @@
             ]
           }
         },
-        "diurnal_factor_isop": {
-          "type": "observed",
-          "units": "1",
-          "description": "Isoprene diurnal factor (zero at night, peaks ~2.66 at midday). Applied to ISOP.",
-          "expression": {
+        {
+          "lhs": "diurnal_factor_isop",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -444,11 +858,9 @@
             ]
           }
         },
-        "dayofweek_co": {
-          "type": "observed",
-          "units": "1",
-          "description": "CO day-of-week factor (ISO 1..7). DayofWeekFactors_CO=[1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]. Weekday>weekend.",
-          "expression": {
+        {
+          "lhs": "dayofweek_co",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -482,11 +894,9 @@
             ]
           }
         },
-        "dayofweek_nox": {
-          "type": "observed",
-          "units": "1",
-          "description": "NOx day-of-week factor (ISO 1..7). DayofWeekFactors_NOx=[1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]. Reduced weekends.",
-          "expression": {
+        {
+          "lhs": "dayofweek_nox",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -520,11 +930,9 @@
             ]
           }
         },
-        "delp_dry_surface": {
-          "type": "observed",
-          "units": "1",
-          "description": "Dry pressure thickness (hPa, unitless) bilinearly interpolated from the 94x49 mean-domain table (lon -125..-66.875 deg, lat 25..49 deg), flat-clamped outside the domain. Used in the flux-to-mixing-ratio conversion: mixing_ratio_rate = flux/(g0_100 x delp). Typical 10-16 hPa.",
-          "expression": {
+        {
+          "lhs": "delp_dry_surface",
+          "rhs": {
             "op": "fn",
             "name": "interp.bilinear",
             "args": [
@@ -5488,11 +5896,9 @@
             ]
           }
         },
-        "t_utc": {
-          "type": "observed",
-          "units": "s",
-          "description": "Absolute UTC time (Unix s) = t + t_ref. Distinct from t_local_utc, which carries the cell's timezone offset: the days-in-month normalisation is a property of the DATA FILE's month, not of local time.",
-          "expression": {
+        {
+          "lhs": "t_utc",
+          "rhs": {
             "op": "+",
             "args": [
               "t",
@@ -5500,11 +5906,9 @@
             ]
           }
         },
-        "month_utc": {
-          "type": "observed",
-          "units": "1",
-          "description": "Calendar month (1-12) of the current UTC time, selecting the monthly EPA file whose totals are being normalised.",
-          "expression": {
+        {
+          "lhs": "month_utc",
+          "rhs": {
             "op": "fn",
             "name": "datetime.month",
             "args": [
@@ -5512,11 +5916,9 @@
             ]
           }
         },
-        "is_leap_year_utc": {
-          "type": "observed",
-          "units": "1",
-          "description": "1 if the current UTC year is a leap year, else 0 (datetime.is_leap_year), giving February 29 days.",
-          "expression": {
+        {
+          "lhs": "is_leap_year_utc",
+          "rhs": {
             "op": "fn",
             "name": "datetime.is_leap_year",
             "args": [
@@ -5524,11 +5926,9 @@
             ]
           }
         },
-        "days_in_month": {
-          "type": "observed",
-          "units": "1",
-          "description": "Days in the current calendar month, leap-aware -- the equivalent of Julia's Dates.daysinmonth(t). EarthSciAST has no datetime.daysinmonth, so this is a 12-entry table over datetime.month plus a February correction gated on datetime.is_leap_year. Every species emission is divided by this: the EPA gridded-merge monthly files store a whole month's emissions on one 24-hour TSTEP despite their 'tons/day' units attribute, so treating the stored value as a daily rate over-emits by this factor (~30.5x measured domain-wide). Mirrors EarthSciData.jl `data ./= Dates.daysinmonth(t)` in loadslice!; see EarthSciData.jl issue #209 / PR #210.",
-          "expression": {
+        {
+          "lhs": "days_in_month",
+          "rhs": {
             "op": "+",
             "args": [
               {
@@ -5626,11 +6026,9 @@
             ]
           }
         },
-        "ACET": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ACET mixing ratio source rate (1/s) at surface (lev<2). = flux_ACET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ACET",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5676,11 +6074,9 @@
             ]
           }
         },
-        "ACROLEIN": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ACROLEIN mixing ratio source rate (1/s) at surface (lev<2). = flux_ACROLEIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ACROLEIN",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5726,11 +6122,9 @@
             ]
           }
         },
-        "ALD2": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ALD2 mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ALD2",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5776,11 +6170,9 @@
             ]
           }
         },
-        "ALD2_PRIMARY": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ALD2_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ALD2_PRIMARY",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5826,11 +6218,9 @@
             ]
           }
         },
-        "ALDX": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ALDX mixing ratio source rate (1/s) at surface (lev<2). = flux_ALDX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ALDX",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5876,11 +6266,9 @@
             ]
           }
         },
-        "APIN": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 APIN mixing ratio source rate (1/s) at surface (lev<2). = flux_APIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "APIN",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5926,11 +6314,9 @@
             ]
           }
         },
-        "BENZ": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 BENZ mixing ratio source rate (1/s) at surface (lev<2). = flux_BENZ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "BENZ",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -5976,11 +6362,9 @@
             ]
           }
         },
-        "BPIN": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 BPIN mixing ratio source rate (1/s) at surface (lev<2). = flux_BPIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "BPIN",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6026,11 +6410,9 @@
             ]
           }
         },
-        "BUTADIENE13": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 BUTADIENE13 mixing ratio source rate (1/s) at surface (lev<2). = flux_BUTADIENE13/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "BUTADIENE13",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6076,11 +6458,9 @@
             ]
           }
         },
-        "CH4": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 CH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "CH4",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6126,11 +6506,9 @@
             ]
           }
         },
-        "CH4_INV": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 CH4_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "CH4_INV",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6176,11 +6554,9 @@
             ]
           }
         },
-        "CL2": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 CL2 mixing ratio source rate (1/s) at surface (lev<2). = flux_CL2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "CL2",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6226,11 +6602,9 @@
             ]
           }
         },
-        "CO": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 CO mixing ratio source rate (1/s) at surface (lev<2). = flux_CO/Δz×scale×(dayofweek_co×diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "CO",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6283,11 +6657,9 @@
             ]
           }
         },
-        "CO2_INV": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 CO2_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CO2_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "CO2_INV",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6333,11 +6705,9 @@
             ]
           }
         },
-        "ETH": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ETH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ETH",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6383,11 +6753,9 @@
             ]
           }
         },
-        "ETHA": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ETHA mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ETHA",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6433,11 +6801,9 @@
             ]
           }
         },
-        "ETHY": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ETHY mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ETHY",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6483,11 +6849,9 @@
             ]
           }
         },
-        "ETOH": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ETOH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ETOH",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6533,11 +6897,9 @@
             ]
           }
         },
-        "FORM": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 FORM mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM/Δz×scale×(diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "FORM",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6589,11 +6951,9 @@
             ]
           }
         },
-        "FORM_PRIMARY": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 FORM_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "FORM_PRIMARY",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6639,11 +6999,9 @@
             ]
           }
         },
-        "HCL": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 HCL mixing ratio source rate (1/s) at surface (lev<2). = flux_HCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "HCL",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6689,11 +7047,9 @@
             ]
           }
         },
-        "HONO": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 HONO mixing ratio source rate (1/s) at surface (lev<2). = flux_HONO/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "HONO",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6739,11 +7095,9 @@
             ]
           }
         },
-        "IOLE": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 IOLE mixing ratio source rate (1/s) at surface (lev<2). = flux_IOLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "IOLE",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6789,11 +7143,9 @@
             ]
           }
         },
-        "ISOP": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 ISOP mixing ratio source rate (1/s) at surface (lev<2). = flux_ISOP/Δz×scale×(diurnal_factor_isop)/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "ISOP",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6845,11 +7197,9 @@
             ]
           }
         },
-        "KET": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 KET mixing ratio source rate (1/s) at surface (lev<2). = flux_KET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "KET",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6895,11 +7245,9 @@
             ]
           }
         },
-        "MEOH": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 MEOH mixing ratio source rate (1/s) at surface (lev<2). = flux_MEOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "MEOH",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6945,11 +7293,9 @@
             ]
           }
         },
-        "N2O_INV": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 N2O_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_N2O_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "N2O_INV",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -6995,11 +7341,9 @@
             ]
           }
         },
-        "NAPH": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NAPH mixing ratio source rate (1/s) at surface (lev<2). = flux_NAPH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NAPH",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7045,11 +7389,9 @@
             ]
           }
         },
-        "NH3": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NH3 mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NH3",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7095,11 +7437,9 @@
             ]
           }
         },
-        "NH3_FERT": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NH3_FERT mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3_FERT/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NH3_FERT",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7145,11 +7485,9 @@
             ]
           }
         },
-        "NO": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NO mixing ratio source rate (1/s) at surface (lev<2). = flux_NO/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NO",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7202,11 +7540,9 @@
             ]
           }
         },
-        "NO2": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_NO2/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NO2",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7259,11 +7595,9 @@
             ]
           }
         },
-        "NOX": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NOX mixing ratio source rate (1/s) at surface (lev<2). = flux_NOX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NOX",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7309,11 +7643,9 @@
             ]
           }
         },
-        "NR": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NR mixing ratio source rate (1/s) at surface (lev<2). = flux_NR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NR",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7359,11 +7691,9 @@
             ]
           }
         },
-        "NVOL": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 NVOL mixing ratio source rate (1/s) at surface (lev<2). = flux_NVOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "NVOL",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7409,11 +7739,9 @@
             ]
           }
         },
-        "OLE": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 OLE mixing ratio source rate (1/s) at surface (lev<2). = flux_OLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "OLE",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7459,11 +7787,9 @@
             ]
           }
         },
-        "PAL": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PAL mixing ratio source rate (1/s) at surface (lev<2). = flux_PAL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PAL",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7509,11 +7835,9 @@
             ]
           }
         },
-        "PAR": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PAR mixing ratio source rate (1/s) at surface (lev<2). = flux_PAR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PAR",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7559,11 +7883,9 @@
             ]
           }
         },
-        "PCA": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PCA mixing ratio source rate (1/s) at surface (lev<2). = flux_PCA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PCA",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7609,11 +7931,9 @@
             ]
           }
         },
-        "PCL": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PCL mixing ratio source rate (1/s) at surface (lev<2). = flux_PCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PCL",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7659,11 +7979,9 @@
             ]
           }
         },
-        "PEC": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PEC mixing ratio source rate (1/s) at surface (lev<2). = flux_PEC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PEC",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7709,11 +8027,9 @@
             ]
           }
         },
-        "PFE": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PFE mixing ratio source rate (1/s) at surface (lev<2). = flux_PFE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PFE",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7759,11 +8075,9 @@
             ]
           }
         },
-        "PH2O": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PH2O mixing ratio source rate (1/s) at surface (lev<2). = flux_PH2O/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PH2O",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7809,11 +8123,9 @@
             ]
           }
         },
-        "PK": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PK mixing ratio source rate (1/s) at surface (lev<2). = flux_PK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PK",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7859,11 +8171,9 @@
             ]
           }
         },
-        "PM2_5": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PM2_5 mixing ratio source rate (1/s) at surface (lev<2). = flux_PM2_5/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PM2_5",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7909,11 +8219,9 @@
             ]
           }
         },
-        "PMC": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PMC mixing ratio source rate (1/s) at surface (lev<2). = flux_PMC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PMC",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -7959,11 +8267,9 @@
             ]
           }
         },
-        "PMG": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PMG mixing ratio source rate (1/s) at surface (lev<2). = flux_PMG/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PMG",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8009,11 +8315,9 @@
             ]
           }
         },
-        "PMN": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PMN mixing ratio source rate (1/s) at surface (lev<2). = flux_PMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PMN",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8059,11 +8363,9 @@
             ]
           }
         },
-        "PMOTHR": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PMOTHR mixing ratio source rate (1/s) at surface (lev<2). = flux_PMOTHR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PMOTHR",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8109,11 +8411,9 @@
             ]
           }
         },
-        "PNA": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PNA mixing ratio source rate (1/s) at surface (lev<2). = flux_PNA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PNA",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8159,11 +8459,9 @@
             ]
           }
         },
-        "PNCOM": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PNCOM mixing ratio source rate (1/s) at surface (lev<2). = flux_PNCOM/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PNCOM",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8209,11 +8507,9 @@
             ]
           }
         },
-        "PNH4": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PNH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PNH4",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8259,11 +8555,9 @@
             ]
           }
         },
-        "PNO3": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PNO3 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNO3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PNO3",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8309,11 +8603,9 @@
             ]
           }
         },
-        "POC": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 POC mixing ratio source rate (1/s) at surface (lev<2). = flux_POC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "POC",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8359,11 +8651,9 @@
             ]
           }
         },
-        "PRPA": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PRPA mixing ratio source rate (1/s) at surface (lev<2). = flux_PRPA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PRPA",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8409,11 +8699,9 @@
             ]
           }
         },
-        "PSI": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PSI mixing ratio source rate (1/s) at surface (lev<2). = flux_PSI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PSI",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8459,11 +8747,9 @@
             ]
           }
         },
-        "PSO4": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PSO4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PSO4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PSO4",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8509,11 +8795,9 @@
             ]
           }
         },
-        "PTI": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 PTI mixing ratio source rate (1/s) at surface (lev<2). = flux_PTI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "PTI",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8559,11 +8843,9 @@
             ]
           }
         },
-        "SESQ": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 SESQ mixing ratio source rate (1/s) at surface (lev<2). = flux_SESQ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "SESQ",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8609,11 +8891,9 @@
             ]
           }
         },
-        "SO2": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 SO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_SO2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "SO2",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8659,11 +8939,9 @@
             ]
           }
         },
-        "SOAALK": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 SOAALK mixing ratio source rate (1/s) at surface (lev<2). = flux_SOAALK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "SOAALK",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8709,11 +8987,9 @@
             ]
           }
         },
-        "SULF": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 SULF mixing ratio source rate (1/s) at surface (lev<2). = flux_SULF/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "SULF",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8759,11 +9035,9 @@
             ]
           }
         },
-        "TERP": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 TERP mixing ratio source rate (1/s) at surface (lev<2). = flux_TERP/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "TERP",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8809,11 +9083,9 @@
             ]
           }
         },
-        "TOL": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 TOL mixing ratio source rate (1/s) at surface (lev<2). = flux_TOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "TOL",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8859,11 +9131,9 @@
             ]
           }
         },
-        "UNK": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 UNK mixing ratio source rate (1/s) at surface (lev<2). = flux_UNK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "UNK",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8909,11 +9179,9 @@
             ]
           }
         },
-        "UNR": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 UNR mixing ratio source rate (1/s) at surface (lev<2). = flux_UNR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "UNR",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -8959,11 +9227,9 @@
             ]
           }
         },
-        "VOC_BEIS": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 VOC_BEIS mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_BEIS/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "VOC_BEIS",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -9009,11 +9275,9 @@
             ]
           }
         },
-        "VOC_INV": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 VOC_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "VOC_INV",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -9059,11 +9323,9 @@
             ]
           }
         },
-        "XYLMN": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "NEI2016 XYLMN mixing ratio source rate (1/s) at surface (lev<2). = flux_XYLMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2.",
-          "expression": {
+        {
+          "lhs": "XYLMN",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -9109,13 +9371,7 @@
             ]
           }
         }
-      },
-      "subsystems": {
-        "NEI2016": {
-          "ref": "./nei2016_monthly_loader.esm"
-        }
-      },
-      "equations": [],
+      ],
       "tests": []
     }
   }

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "WasteHeatAirConditioning",
         "description": "Waste heat and air-conditioning heat removal aggregation for the urban canopy thermal column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:440 (`WasteHeatAirConditioning` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.55-4.56: the unclamped total waste heat H_wasteheat_unclamped distributes heating/cooling fluxes from the roof and the two walls (sunlit and shaded) into the canyon air, weighted by the efficiency factors f_heat = 1/0.75 and f_cool = 1/0.25, the roof area fraction W_roof, and the canyon-wall geometry factor (1 - W_roof) * H_W per Eq. 4.55; this is clamped at H_wasteheat_max = 100 W/m^2 to produce H_wasteheat. The air-conditioning heat removal H_aircond is the sum of the three cooling fluxes (F_cool_roof + F_cool_sunwall + F_cool_shdwall) per Eq. 4.56. Parameterized as observed-only with three algebraic equations: H_wasteheat_unclamped, H_wasteheat, H_aircond are state variables; F_heat_roof, F_cool_roof, F_heat_sunwall, F_cool_sunwall, F_heat_shdwall, F_cool_shdwall, W_roof, H_W are inputs (parameters in standalone form).",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:440\nUpstream `WasteHeatAirConditioning` is an MTK `@component` with eight `@parameters` (F_heat_roof, F_cool_roof, F_heat_sunwall, F_cool_sunwall, F_heat_shdwall, F_cool_shdwall, W_roof, H_W), three time-indexed `@variables` (H_wasteheat_unclamped, H_wasteheat, H_aircond), and three algebraic equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares three `@constants`, all encoded here as parameters with the upstream default values: f_heat = 1.0/0.75 (heating efficiency factor, dimensionless), f_cool = 1.0/0.25 = 4.0 (cooling efficiency factor, dimensionless), and H_wasteheat_max = 100.0 W/m^2 (maximum waste heat limit on the clamped output). f_heat is encoded as the exact ratio 1.0/0.75 = 1.3333333333333333... in IEEE-754 — the upstream Julia literal `1.0/0.75` resolves to the same double; preserving the value as a parameter default keeps the rational structure visible and matches the convention used by sibling files (heating_cooling_flux.esm preserves alpha_CN = 0.5 and zero_flux = 0.0 W/m^2 as parameters with upstream default values).\n\nThe clamp uses `min(H_wasteheat_unclamped, H_wasteheat_max)` — the upstream uses Julia's two-argument `min` which the ESS AST exposes as the `min` op. When H_wasteheat_unclamped <= H_wasteheat_max, H_wasteheat = H_wasteheat_unclamped (pass-through); when H_wasteheat_unclamped > H_wasteheat_max, H_wasteheat = H_wasteheat_max = 100 W/m^2 exactly. The equality case (H_wasteheat_unclamped == H_wasteheat_max) is well-defined by `min` semantics — both branches give the same numeric value.\n\nThe Eq. 4.56 air-conditioning heat removal H_aircond is a simple three-term sum of cooling fluxes (F_cool_roof + F_cool_sunwall + F_cool_shdwall). It is decoupled from H_wasteheat and the geometry parameters W_roof, H_W — exercised independently in the H_aircond_decoupled_from_geometry test.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters, and the `(t)` time index has no role since there are no derivatives. Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (heating_cooling_flux.esm, snow_capping_runoff.esm, total_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations involve only multiplication, addition, subtraction, and `min` — all at IEEE-754 ULP precision (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (heating_cooling_flux.esm uses 1e-9 for the analogous Crank-Nicholson + ifelse equations). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "f_heat": {
@@ -98,17 +98,17 @@
                     "description": "Height-to-width ratio (dimensionless) — canyon-wall geometry factor that scales the wall contribution to Eq. 4.55. At H_W = 0, the walls contribute nothing regardless of W_roof; at H_W = 1, the walls have unit weighting on the (1 - W_roof) road-area fraction"
                 },
                 "H_wasteheat_unclamped": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Unclamped total waste heat (Oleson Eq. 4.55, before the max clamp): W_roof * (f_heat * F_heat_roof + f_cool * F_cool_roof) + (1 - W_roof) * H_W * (f_heat * F_heat_sunwall + f_cool * F_cool_sunwall + f_heat * F_heat_shdwall + f_cool * F_cool_shdwall)"
                 },
                 "H_wasteheat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Total waste heat clamped at H_wasteheat_max (Oleson Eq. 4.55): min(H_wasteheat_unclamped, H_wasteheat_max). This is the waste heat dumped to the canyon air after the upper-bound cap is applied"
                 },
                 "H_aircond": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Heat removed by air conditioning (Oleson Eq. 4.56): F_cool_roof + F_cool_sunwall + F_cool_shdwall — sum of cooling fluxes from all three building surfaces"
                 }
@@ -126,8 +126,20 @@
                                     {
                                         "op": "+",
                                         "args": [
-                                            { "op": "*", "args": ["f_heat", "F_heat_roof"] },
-                                            { "op": "*", "args": ["f_cool", "F_cool_roof"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_heat",
+                                                    "F_heat_roof"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_cool",
+                                                    "F_cool_roof"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -135,15 +147,45 @@
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "-", "args": [1.0, "W_roof"] },
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            1.0,
+                                            "W_roof"
+                                        ]
+                                    },
                                     "H_W",
                                     {
                                         "op": "+",
                                         "args": [
-                                            { "op": "*", "args": ["f_heat", "F_heat_sunwall"] },
-                                            { "op": "*", "args": ["f_cool", "F_cool_sunwall"] },
-                                            { "op": "*", "args": ["f_heat", "F_heat_shdwall"] },
-                                            { "op": "*", "args": ["f_cool", "F_cool_shdwall"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_heat",
+                                                    "F_heat_sunwall"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_cool",
+                                                    "F_cool_sunwall"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_heat",
+                                                    "F_heat_shdwall"
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "f_cool",
+                                                    "F_cool_shdwall"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -155,14 +197,21 @@
                     "lhs": "H_wasteheat",
                     "rhs": {
                         "op": "min",
-                        "args": ["H_wasteheat_unclamped", "H_wasteheat_max"]
+                        "args": [
+                            "H_wasteheat_unclamped",
+                            "H_wasteheat_max"
+                        ]
                     }
                 },
                 {
                     "lhs": "H_aircond",
                     "rhs": {
                         "op": "+",
-                        "args": ["F_cool_roof", "F_cool_sunwall", "F_cool_shdwall"]
+                        "args": [
+                            "F_cool_roof",
+                            "F_cool_sunwall",
+                            "F_cool_shdwall"
+                        ]
                     }
                 }
             ],
@@ -180,11 +229,26 @@
                         "W_roof": 0.3,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 38.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 38.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 10.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 38.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 38.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 10.0
+                        }
                     ]
                 },
                 {
@@ -200,11 +264,26 @@
                         "W_roof": 0.3,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 380.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 100.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 100.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 380.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 100.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 100.0
+                        }
                     ]
                 },
                 {
@@ -220,11 +299,35 @@
                         "W_roof": 0.3,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -240,10 +343,21 @@
                         "W_roof": 1.0,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 100.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 100.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 100.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 100.0
+                        }
                     ]
                 },
                 {
@@ -259,11 +373,26 @@
                         "W_roof": 1.0,
                         "H_W": 2.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 44.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 44.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 19.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 44.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 44.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 19.0
+                        }
                     ]
                 },
                 {
@@ -279,11 +408,26 @@
                         "W_roof": 0.0,
                         "H_W": 1.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 78.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 78.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 107.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 78.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 78.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 107.0
+                        }
                     ]
                 },
                 {
@@ -299,11 +443,26 @@
                         "W_roof": 0.5,
                         "H_W": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 26.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 26.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 119.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 26.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 26.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 119.0
+                        }
                     ]
                 },
                 {
@@ -319,10 +478,21 @@
                         "W_roof": 0.5,
                         "H_W": 5.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 100.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 10.0 }
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 100.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 10.0
+                        }
                     ]
                 },
                 {
@@ -338,11 +508,26 @@
                         "W_roof": 0.4,
                         "H_W": 1.2
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 64.64 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 64.64 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 26.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 64.64
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 64.64
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 26.0
+                        }
                     ]
                 },
                 {
@@ -358,11 +543,29 @@
                         "W_roof": 0.25,
                         "H_W": 2.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 70.0 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 70.0 },
-                        { "variable": "H_aircond", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 70.0
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 70.0
+                        },
+                        {
+                            "variable": "H_aircond",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -378,14 +581,25 @@
                         "W_roof": 1.0,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "H_wasteheat_unclamped", "time": 0.0, "expected": 100.04 },
-                        { "variable": "H_wasteheat", "time": 0.0, "expected": 100.0 }
+                        {
+                            "variable": "H_wasteheat_unclamped",
+                            "time": 0.0,
+                            "expected": 100.04
+                        },
+                        {
+                            "variable": "H_wasteheat",
+                            "time": 0.0,
+                            "expected": 100.0
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "wasteheat_vs_roof_heating_flux_with_clamp",
                     "description": "Sweep F_heat_roof from 0 to a value large enough to drive the unclamped waste heat past H_wasteheat_max = 100 W/m^2, with W_roof = 1 (all-roof canyon so walls do not contribute) and all cooling fluxes = 0. Unclamped grows linearly as f_heat * F_heat_roof = (4/3) * F_heat_roof; H_wasteheat tracks it until F_heat_roof = 75 W/m^2 (where unclamped = 100) and then saturates at 100. Surfaces the saturation knee of the Eq. 4.55 clamp directly.",
@@ -399,13 +613,21 @@
                         "W_roof": 1.0,
                         "H_W": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "F_heat_roof",
-                                "range": { "start": 0.0, "stop": 150.0, "count": 31, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 150.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -414,15 +636,27 @@
                             "id": "H_wasteheat_unclamped_curve",
                             "type": "line",
                             "description": "Unclamped waste heat vs F_heat_roof: a straight line through the origin with slope f_heat = 4/3 per Eq. 4.55.",
-                            "x": { "variable": "F_heat_roof", "label": "F_heat_roof (W/m^2)" },
-                            "y": { "variable": "H_wasteheat_unclamped", "label": "H_wasteheat_unclamped (W/m^2)" }
+                            "x": {
+                                "variable": "F_heat_roof",
+                                "label": "F_heat_roof (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "H_wasteheat_unclamped",
+                                "label": "H_wasteheat_unclamped (W/m^2)"
+                            }
                         },
                         {
                             "id": "H_wasteheat_clamped_curve",
                             "type": "line",
                             "description": "Clamped waste heat vs F_heat_roof: tracks the unclamped curve up to F_heat_roof = 75 W/m^2 (where the unclamped value equals H_wasteheat_max = 100) and then saturates flat at 100 W/m^2 — the Eq. 4.55 `min` cap.",
-                            "x": { "variable": "F_heat_roof", "label": "F_heat_roof (W/m^2)" },
-                            "y": { "variable": "H_wasteheat", "label": "H_wasteheat (W/m^2)" }
+                            "x": {
+                                "variable": "F_heat_roof",
+                                "label": "F_heat_roof (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "H_wasteheat",
+                                "label": "H_wasteheat (W/m^2)"
+                            }
                         }
                     ]
                 },
@@ -438,17 +672,30 @@
                         "F_heat_shdwall": 6.0,
                         "F_cool_shdwall": 6.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "W_roof",
-                                "range": { "start": 0.0, "stop": 1.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 1.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "H_W",
-                                "range": { "start": 0.0, "stop": 3.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 3.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -457,17 +704,35 @@
                             "id": "H_wasteheat_unclamped_heatmap",
                             "type": "heatmap",
                             "description": "H_wasteheat_unclamped as a bilinear function of (W_roof, H_W) per Eq. 4.55: the roof term is linear in W_roof and the wall term is bilinear in (1 - W_roof) * H_W.",
-                            "x": { "variable": "W_roof", "label": "W_roof (dimensionless)" },
-                            "y": { "variable": "H_W", "label": "H_W (dimensionless)" },
-                            "value": { "variable": "H_wasteheat_unclamped", "reduce": "final" }
+                            "x": {
+                                "variable": "W_roof",
+                                "label": "W_roof (dimensionless)"
+                            },
+                            "y": {
+                                "variable": "H_W",
+                                "label": "H_W (dimensionless)"
+                            },
+                            "value": {
+                                "variable": "H_wasteheat_unclamped",
+                                "reduce": "final"
+                            }
                         },
                         {
                             "id": "H_wasteheat_heatmap",
                             "type": "heatmap",
                             "description": "H_wasteheat (clamped) over the same (W_roof, H_W) grid: same shape as the unclamped surface where it remains below 100 W/m^2, but flattens at 100 W/m^2 in the upper-right where the wall contribution drives the sum past the cap.",
-                            "x": { "variable": "W_roof", "label": "W_roof (dimensionless)" },
-                            "y": { "variable": "H_W", "label": "H_W (dimensionless)" },
-                            "value": { "variable": "H_wasteheat", "reduce": "final" }
+                            "x": {
+                                "variable": "W_roof",
+                                "label": "W_roof (dimensionless)"
+                            },
+                            "y": {
+                                "variable": "H_W",
+                                "label": "H_W (dimensionless)"
+                            },
+                            "value": {
+                                "variable": "H_wasteheat",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

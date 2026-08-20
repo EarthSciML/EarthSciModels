@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "HeatingCoolingFlux",
         "description": "Heating/cooling fluxes through the building floor for the urban canopy thermal column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:638 (`HeatingCoolingFlux` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) Eqs. 4.51 and 4.52: the building uses HVAC to clamp the internal building temperature T_iB to the prescribed comfort window [T_iB_min, T_iB_max]. The combined floor flux F_combined is the Crank-Nicholson average of F_bottom_n (time n) and F_bottom_np1 (time n+1) per Eq. 4.53/4.54; if T_iB falls below T_iB_min the absolute value of F_combined is reported as the heating flux F_heat (Eq. 4.51); if T_iB rises above T_iB_max the absolute value is reported as the cooling flux F_cool (Eq. 4.52); inside the comfort window both F_heat and F_cool are zero (no HVAC demand). Parameterized as observed-only with three algebraic equations: F_combined, F_heat, F_cool are state variables; T_iB, T_iB_min, T_iB_max, F_bottom_n, F_bottom_np1 are inputs (parameters in standalone form).",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:638\nUpstream `HeatingCoolingFlux` is an MTK `@component` with five `@parameters` (T_iB, T_iB_min, T_iB_max, F_bottom_n, F_bottom_np1), three time-indexed `@variables` (F_combined, F_heat, F_cool), and three algebraic equations (no derivatives). Identical equation structure preserved here. Upstream structural test (test/roof_wall_road_snow_temperatures_test.jl:590) asserts `length(equations(sys)) == 3` and `length(unknowns(sys)) == 3` — matched here.\n\nThe upstream component declares two `@constants`, both encoded here as parameters with the upstream default values: α_CN = 0.5 (Crank-Nicholson weight, dimensionless) and zero_flux = 0.0 W/m^2 (zero-flux reference used as the inactive-HVAC branch). Greek `α_CN` is renamed `alpha_CN` for ASCII parameter names per the rig convention (matches snow_density.esm rho_* convention).\n\nThe HVAC threshold conditions use strict `<` and `>` per the upstream `ifelse` semantics: at T_iB = T_iB_min, the heating condition `T_iB < T_iB_min` is FALSE (strict less-than), so F_heat = 0; at T_iB = T_iB_max, the cooling condition `T_iB > T_iB_max` is FALSE (strict greater-than), so F_cool = 0. Equality at either threshold goes to the no-HVAC branch.\n\nInactive-branch encoding: the upstream component uses `zero_flux` (a `@constants` with unit W/m^2) rather than the bare numeric literal `0.0` in the inactive `ifelse` branch. This is unit-balancing in MTK's symbolic algebra — the active branch `abs(F_combined)` carries unit W/m^2, so the inactive branch must too, otherwise MTK rejects the equation as unit-inconsistent. Preserving `zero_flux` as a parameter with default 0.0 W/m^2 here keeps that contract explicit at the .esm level for any future unit-checking ESS reader.\n\nObservability classification: this component is functionally observed-only — the three output variables are each given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (snow_density.esm, snow_capping_runoff.esm, total_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations involve only multiplication, addition, `ifelse`, and `abs` — all at IEEE-754 ULP precision (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (total_phase_change_energy.esm uses 1e-9 for the analogous additive-identity equations). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (the inactive HVAC branches) so the assertion does not silently accept a stuck-at-1e-3 regression."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "alpha_CN": {
@@ -74,17 +74,17 @@
                     "description": "Bottom heat flux at time n+1 (Oleson Eq. 4.54) — heat flux from the building floor at the end of the time step"
                 },
                 "F_combined": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Combined bottom flux (Crank-Nicholson average): alpha_CN*F_bottom_n + (1-alpha_CN)*F_bottom_np1"
                 },
                 "F_heat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Heating flux (Oleson Eq. 4.51): |F_combined| if T_iB < T_iB_min, else 0 — the HVAC heating demand needed to clamp T_iB at the lower comfort threshold"
                 },
                 "F_cool": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Cooling flux (Oleson Eq. 4.52): |F_combined| if T_iB > T_iB_max, else 0 — the HVAC cooling demand needed to clamp T_iB at the upper comfort threshold"
                 }
@@ -97,12 +97,21 @@
                         "args": [
                             {
                                 "op": "*",
-                                "args": ["alpha_CN", "F_bottom_n"]
+                                "args": [
+                                    "alpha_CN",
+                                    "F_bottom_n"
+                                ]
                             },
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "-", "args": [1.0, "alpha_CN"] },
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            1.0,
+                                            "alpha_CN"
+                                        ]
+                                    },
                                     "F_bottom_np1"
                                 ]
                             }
@@ -116,11 +125,16 @@
                         "args": [
                             {
                                 "op": "<",
-                                "args": ["T_iB", "T_iB_min"]
+                                "args": [
+                                    "T_iB",
+                                    "T_iB_min"
+                                ]
                             },
                             {
                                 "op": "abs",
-                                "args": ["F_combined"]
+                                "args": [
+                                    "F_combined"
+                                ]
                             },
                             "zero_flux"
                         ]
@@ -133,11 +147,16 @@
                         "args": [
                             {
                                 "op": ">",
-                                "args": ["T_iB", "T_iB_max"]
+                                "args": [
+                                    "T_iB",
+                                    "T_iB_max"
+                                ]
                             },
                             {
                                 "op": "abs",
-                                "args": ["F_combined"]
+                                "args": [
+                                    "F_combined"
+                                ]
                             },
                             "zero_flux"
                         ]
@@ -155,11 +174,29 @@
                         "F_bottom_n": -20.0,
                         "F_bottom_np1": -25.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": -22.5 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 22.5 },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": -22.5
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 22.5
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -172,11 +209,29 @@
                         "F_bottom_n": 30.0,
                         "F_bottom_np1": 35.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 32.5 },
-                        { "variable": "F_cool", "time": 0.0, "expected": 32.5 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 32.5
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 32.5
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -189,11 +244,32 @@
                         "F_bottom_n": 10.0,
                         "F_bottom_np1": 12.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 11.0 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 11.0
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -206,11 +282,32 @@
                         "F_bottom_n": -20.0,
                         "F_bottom_np1": -25.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": -22.5 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": -22.5
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -223,11 +320,32 @@
                         "F_bottom_n": 30.0,
                         "F_bottom_np1": 35.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 32.5 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 32.5
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -240,11 +358,29 @@
                         "F_bottom_n": 15.0,
                         "F_bottom_np1": 25.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 20.0 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 20.0 },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 20.0
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 20.0
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -257,11 +393,35 @@
                         "F_bottom_n": 0.0,
                         "F_bottom_np1": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -274,15 +434,36 @@
                         "F_bottom_n": 100.0,
                         "F_bottom_np1": -50.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "F_combined", "time": 0.0, "expected": 25.0 },
-                        { "variable": "F_heat", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "F_cool", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "F_combined",
+                            "time": 0.0,
+                            "expected": 25.0
+                        },
+                        {
+                            "variable": "F_heat",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "F_cool",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "hvac_demand_vs_internal_temperature",
                     "description": "Sweep T_iB across a range spanning both the heating and cooling comfort thresholds with fixed floor fluxes (F_bottom_n = F_bottom_np1 = -40 W/m^2 so F_combined = -40). F_heat = 40 for T_iB below 290 K, drops to 0 in the comfort window, and stays 0 above 300 K; F_cool = 0 for T_iB below 300 K, jumps to 40 above. Surfaces the dual-threshold HVAC dead band of Eqs. 4.51-4.52 directly.",
@@ -293,13 +474,21 @@
                         "F_bottom_n": -40.0,
                         "F_bottom_np1": -40.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_iB",
-                                "range": { "start": 280.0, "stop": 310.0, "count": 31, "scale": "linear" }
+                                "range": {
+                                    "start": 280.0,
+                                    "stop": 310.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -308,15 +497,27 @@
                             "id": "F_heat_curve",
                             "type": "line",
                             "description": "F_heat vs T_iB: nonzero (= |F_combined| = 40) below T_iB_min = 290 K, zero in the comfort window and above — the heating dead band.",
-                            "x": { "variable": "T_iB", "label": "T_iB (K)" },
-                            "y": { "variable": "F_heat", "label": "F_heat (W/m^2)" }
+                            "x": {
+                                "variable": "T_iB",
+                                "label": "T_iB (K)"
+                            },
+                            "y": {
+                                "variable": "F_heat",
+                                "label": "F_heat (W/m^2)"
+                            }
                         },
                         {
                             "id": "F_cool_curve",
                             "type": "line",
                             "description": "F_cool vs T_iB: zero below T_iB_max = 300 K, nonzero (= |F_combined| = 40) above — the cooling dead band.",
-                            "x": { "variable": "T_iB", "label": "T_iB (K)" },
-                            "y": { "variable": "F_cool", "label": "F_cool (W/m^2)" }
+                            "x": {
+                                "variable": "T_iB",
+                                "label": "T_iB (K)"
+                            },
+                            "y": {
+                                "variable": "F_cool",
+                                "label": "F_cool (W/m^2)"
+                            }
                         }
                     ]
                 },
@@ -329,17 +530,30 @@
                         "T_iB_min": 290.0,
                         "T_iB_max": 300.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "F_bottom_n",
-                                "range": { "start": -100.0, "stop": 100.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": -100.0,
+                                    "stop": 100.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "F_bottom_np1",
-                                "range": { "start": -100.0, "stop": 100.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": -100.0,
+                                    "stop": 100.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -348,9 +562,18 @@
                             "id": "F_combined_heatmap",
                             "type": "heatmap",
                             "description": "F_combined as a function of F_bottom_n and F_bottom_np1: planar Crank-Nicholson surface with slope 0.5 in each dimension per Eq. 4.53/4.54.",
-                            "x": { "variable": "F_bottom_n",   "label": "F_bottom_n (W/m^2)" },
-                            "y": { "variable": "F_bottom_np1", "label": "F_bottom_np1 (W/m^2)" },
-                            "value": { "variable": "F_combined", "reduce": "final" }
+                            "x": {
+                                "variable": "F_bottom_n",
+                                "label": "F_bottom_n (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "F_bottom_np1",
+                                "label": "F_bottom_np1 (W/m^2)"
+                            },
+                            "value": {
+                                "variable": "F_combined",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

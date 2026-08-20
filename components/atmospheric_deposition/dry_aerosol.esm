@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "DryDepositionAerosol",
         "description": "ModelingToolkit implementation of particle (aerosol) dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.7. Computes the particle dry deposition velocity v [m/s] for a single aerosol size and the corresponding first-order deposition rate k = v/z [1/s], as a resistance network: v = 1/(R_a + R_b + R_a*R_b*V_s) + V_s, where R_a is the aerodynamic resistance (Eqs. 19.13-19.14), R_b is the quasi-laminar sublayer resistance (Eq. 19.27), and V_s is the gravitational settling velocity (Eq. 9.42). R_b combines Brownian diffusion (Schmidt number), inertial impaction (Stokes number) and interception, with land-use-dependent collector geometry from the Seinfeld & Pandis Table 19.2 characteristic-radius table. Migrated from AtmosphericDeposition.jl@e4468c79 src/dry_deposition.jl:1040 (the DryDepositionAerosol builder); its DryDepParticle kernel (src/dry_deposition.jl:272) and the whole helper chain (ra, mu, mfp, cc, vs, dParticle, sc, stSmooth/stVeg, RbParticle) are inlined. Purely algebraic: no differential states -- the 27 computed quantities are observed variables defined by inline expressions.",
@@ -68,7 +68,7 @@
                 "Dp": {
                     "type": "parameter",
                     "units": "m",
-                    "default": 8.0e-07,
+                    "default": 8e-07,
                     "description": "Particle diameter."
                 },
                 "Ts": {
@@ -138,58 +138,254 @@
                     "description": "Ideal gas constant (upstream @constant)."
                 },
                 "zeta": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "1",
-                    "description": "Stability parameter z/L of the surface layer, 0 in the neutral limit L = 0 (Eqs. 19.13-19.14). Written as z*L/(L*L + 1e-300): the 1e-300 floor keeps the denominator strictly positive (so neither the value nor any comparison on it ever divides by L = 0), and is far below the rounding scale of L*L for every physical L, so for L != 0 this equals z/L and for L = 0 it equals 0.",
-                    "expression": {
-                        "op": "/",
-                        "args": [
-                            { "op": "*", "args": ["z", "L"] },
-                            {
-                                "op": "+",
-                                "args": [
-                                    { "op": "*", "args": ["L", "L"] },
-                                    1e-300
-                                ]
-                            }
-                        ]
-                    }
+                    "description": "Stability parameter z/L of the surface layer, 0 in the neutral limit L = 0 (Eqs. 19.13-19.14). Written as z*L/(L*L + 1e-300): the 1e-300 floor keeps the denominator strictly positive (so neither the value nor any comparison on it ever divides by L = 0), and is far below the rounding scale of L*L for every physical L, so for L != 0 this equals z/L and for L = 0 it equals 0."
                 },
                 "zeta_0": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "1",
-                    "description": "Stability parameter z_0/L at the roughness height, 0 in the neutral limit L = 0. Written as z0*L/(L*L + 1e-300) for the same strictly-positive-denominator reason as zeta.",
-                    "expression": {
-                        "op": "/",
-                        "args": [
-                            { "op": "*", "args": ["z0", "L"] },
-                            {
-                                "op": "+",
-                                "args": [
-                                    { "op": "*", "args": ["L", "L"] },
-                                    1e-300
-                                ]
-                            }
-                        ]
-                    }
+                    "description": "Stability parameter z_0/L at the roughness height, 0 in the neutral limit L = 0. Written as z0*L/(L*L + 1e-300) for the same strictly-positive-denominator reason as zeta."
                 },
                 "ra_neutral_stable": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "s/m",
-                    "description": "Aerodynamic resistance in the neutral/stable regimes (zeta >= 0): the log profile, plus the 4.7*(zeta - zeta_0) correction when stable (upstream r_a_1).",
-                    "expression": {
-                        "op": "ifelse",
+                    "description": "Aerodynamic resistance in the neutral/stable regimes (zeta >= 0): the log profile, plus the 4.7*(zeta - zeta_0) correction when stable (upstream r_a_1)."
+                },
+                "i_unstable": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Domain-guard indicator: 1 when the layer is unstable (zeta < 0), else 0. Forces the base of eta / eta_0 to 1 in the stable/neutral regimes (upstream src comment at ra)."
+                },
+                "eta_0": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Similarity variable (1 - 15*zeta_0)^(1/4) at the roughness height, used in the unstable aerodynamic resistance."
+                },
+                "eta": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Similarity variable (1 - 15*zeta)^(1/4) at the surface-layer top, used in the unstable aerodynamic resistance."
+                },
+                "Ra": {
+                    "type": "unknown",
+                    "units": "s/m",
+                    "description": "Aerodynamic resistance to dry deposition (Eqs. 19.13-19.14): unstable integrated-similarity form when zeta < 0, else ra_neutral_stable."
+                },
+                "mu": {
+                    "type": "unknown",
+                    "units": "kg/(m*s)",
+                    "description": "Dynamic viscosity of air from the Sutherland relation (upstream `mu`); unit_T and unit_convert_mu folded away."
+                },
+                "mfp": {
+                    "type": "unknown",
+                    "units": "m",
+                    "description": "Mean free path of air (S&P Eq. 9.6, upstream `mfp`)."
+                },
+                "Cc": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Cunningham slip correction factor (S&P Eq. 9.34, upstream `cc`)."
+                },
+                "Vs": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Gravitational settling (terminal) velocity (S&P Eq. 9.42, upstream `vs`); the 99999999 m/s sentinel for Dp > 20 um, where Stokes settling no longer applies."
+                },
+                "A_table_index": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Flattened (column-major) lookup coordinate into the 25-entry season x land-use characteristic-radius table: (SeinfeldLandUse - 1)*5 + SeinfeldSeason."
+                },
+                "A_collector": {
+                    "type": "unknown",
+                    "units": "m",
+                    "description": "Characteristic radius of surface collectors (S&P Table 19.2, upstream A_table * 1e-3). 1e25 for desert land use, the finite stand-in for the upstream Inf sentinel."
+                },
+                "st_smooth": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Stokes number for smooth / bluff-roughness surfaces (S&P Eq. 19.23, upstream `stSmooth`)."
+                },
+                "st_veg": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Stokes number for vegetated surfaces (S&P Eq. 19.24, upstream `stVeg`)."
+                },
+                "St": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Selected Stokes number: st_smooth for desert land use (index 4), else st_veg."
+                },
+                "D_brownian": {
+                    "type": "unknown",
+                    "units": "m^2/s",
+                    "description": "Brownian diffusivity of the particle from the Stokes-Einstein-Sutherland relation (S&P Eq. 9.73, upstream `dParticle`)."
+                },
+                "Sc": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Schmidt number of the particle (upstream `sc`)."
+                },
+                "alpha": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Land-use impaction-efficiency parameter (S&P Table 19.2, upstream alpha_table)."
+                },
+                "gamma": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Land-use Brownian-diffusion exponent (S&P Table 19.2, upstream gamma_table)."
+                },
+                "R1": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Particle-rebound correction factor exp(-sqrt(St)) of the sublayer resistance (Eq. 19.27)."
+                },
+                "term_1": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Brownian-diffusion collection term Sc^(-gamma) of the sublayer resistance (Eq. 19.27)."
+                },
+                "term_2": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Inertial-impaction collection term (St/(alpha + St))^2 of the sublayer resistance (Eq. 19.27)."
+                },
+                "term_3": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Interception collection term 0.5*(Dp/A_collector)^2 of the sublayer resistance (Eq. 19.27); ~0 for desert land use."
+                },
+                "Rb": {
+                    "type": "unknown",
+                    "units": "s/m",
+                    "description": "Quasi-laminar sublayer resistance to particle dry deposition (S&P Eq. 19.27, upstream `RbParticle`)."
+                },
+                "v": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Particle dry deposition velocity (S&P Eq. 19.7); 0 above the surface layer (lev != 1)."
+                },
+                "k": {
+                    "type": "unknown",
+                    "units": "1/s",
+                    "description": "First-order particle dry deposition rate, v/z."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "zeta",
+                    "rhs": {
+                        "op": "/",
                         "args": [
-                            { "op": "<", "args": [0, "zeta"] },
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "/", "args": [1, { "op": "*", "args": ["kappa", "u_star"] }] },
+                                    "z",
+                                    "L"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "L",
+                                            "L"
+                                        ]
+                                    },
+                                    1e-300
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "zeta_0",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "z0",
+                                    "L"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "L",
+                                            "L"
+                                        ]
+                                    },
+                                    1e-300
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "ra_neutral_stable",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": "<",
+                                "args": [
+                                    0,
+                                    "zeta"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star"
+                                                ]
+                                            }
+                                        ]
+                                    },
                                     {
                                         "op": "+",
                                         "args": [
-                                            { "op": "log", "args": [{ "op": "/", "args": ["z", "z0"] }] },
-                                            { "op": "*", "args": [4.7, { "op": "-", "args": ["zeta", "zeta_0"] }] }
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z0"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    4.7,
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            "zeta",
+                                                            "zeta_0"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -197,66 +393,142 @@
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "/", "args": [1, { "op": "*", "args": ["kappa", "u_star"] }] },
-                                    { "op": "log", "args": [{ "op": "/", "args": ["z", "z0"] }] }
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "log",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "z",
+                                                    "z0"
+                                                ]
+                                            }
+                                        ]
+                                    }
                                 ]
                             }
                         ]
                     }
                 },
-                "i_unstable": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Domain-guard indicator: 1 when the layer is unstable (zeta < 0), else 0. Forces the base of eta / eta_0 to 1 in the stable/neutral regimes (upstream src comment at ra).",
-                    "expression": {
+                {
+                    "lhs": "i_unstable",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": "<", "args": ["zeta", 0] },
+                            {
+                                "op": "<",
+                                "args": [
+                                    "zeta",
+                                    0
+                                ]
+                            },
                             1,
                             0
                         ]
                     }
                 },
-                "eta_0": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Similarity variable (1 - 15*zeta_0)^(1/4) at the roughness height, used in the unstable aerodynamic resistance.",
-                    "expression": {
+                {
+                    "lhs": "eta_0",
+                    "rhs": {
                         "op": "^",
                         "args": [
-                            { "op": "-", "args": [1, { "op": "*", "args": [15, "zeta_0", "i_unstable"] }] },
+                            {
+                                "op": "-",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            15,
+                                            "zeta_0",
+                                            "i_unstable"
+                                        ]
+                                    }
+                                ]
+                            },
                             0.25
                         ]
                     }
                 },
-                "eta": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Similarity variable (1 - 15*zeta)^(1/4) at the surface-layer top, used in the unstable aerodynamic resistance.",
-                    "expression": {
+                {
+                    "lhs": "eta",
+                    "rhs": {
                         "op": "^",
                         "args": [
-                            { "op": "-", "args": [1, { "op": "*", "args": [15, "zeta", "i_unstable"] }] },
+                            {
+                                "op": "-",
+                                "args": [
+                                    1,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            15,
+                                            "zeta",
+                                            "i_unstable"
+                                        ]
+                                    }
+                                ]
+                            },
                             0.25
                         ]
                     }
                 },
-                "Ra": {
-                    "type": "observed",
-                    "units": "s/m",
-                    "description": "Aerodynamic resistance to dry deposition (Eqs. 19.13-19.14): unstable integrated-similarity form when zeta < 0, else ra_neutral_stable.",
-                    "expression": {
+                {
+                    "lhs": "Ra",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": "<", "args": ["zeta", 0] },
+                            {
+                                "op": "<",
+                                "args": [
+                                    "zeta",
+                                    0
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "/", "args": [1, { "op": "*", "args": ["kappa", "u_star"] }] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "kappa",
+                                                    "u_star"
+                                                ]
+                                            }
+                                        ]
+                                    },
                                     {
                                         "op": "+",
                                         "args": [
-                                            { "op": "log", "args": [{ "op": "/", "args": ["z", "z0"] }] },
+                                            {
+                                                "op": "log",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "z",
+                                                            "z0"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
                                             {
                                                 "op": "log",
                                                 "args": [
@@ -266,15 +538,63 @@
                                                             {
                                                                 "op": "*",
                                                                 "args": [
-                                                                    { "op": "+", "args": [{ "op": "^", "args": ["eta_0", 2] }, 1] },
-                                                                    { "op": "^", "args": [{ "op": "+", "args": ["eta_0", 1] }, 2] }
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    "eta_0",
+                                                                                    2
+                                                                                ]
+                                                                            },
+                                                                            1
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "+",
+                                                                                "args": [
+                                                                                    "eta_0",
+                                                                                    1
+                                                                                ]
+                                                                            },
+                                                                            2
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             },
                                                             {
                                                                 "op": "*",
                                                                 "args": [
-                                                                    { "op": "+", "args": [{ "op": "^", "args": ["eta", 2] }, 1] },
-                                                                    { "op": "^", "args": [{ "op": "+", "args": ["eta", 1] }, 2] }
+                                                                    {
+                                                                        "op": "+",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "^",
+                                                                                "args": [
+                                                                                    "eta",
+                                                                                    2
+                                                                                ]
+                                                                            },
+                                                                            1
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "^",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "+",
+                                                                                "args": [
+                                                                                    "eta",
+                                                                                    1
+                                                                                ]
+                                                                            },
+                                                                            2
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             }
                                                         ]
@@ -288,8 +608,18 @@
                                                     {
                                                         "op": "-",
                                                         "args": [
-                                                            { "op": "atan", "args": ["eta"] },
-                                                            { "op": "atan", "args": ["eta_0"] }
+                                                            {
+                                                                "op": "atan",
+                                                                "args": [
+                                                                    "eta"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "atan",
+                                                                "args": [
+                                                                    "eta_0"
+                                                                ]
+                                                            }
                                                         ]
                                                     }
                                                 ]
@@ -302,26 +632,46 @@
                         ]
                     }
                 },
-                "mu": {
-                    "type": "observed",
-                    "units": "kg/(m*s)",
-                    "description": "Dynamic viscosity of air from the Sutherland relation (upstream `mu`); unit_T and unit_convert_mu folded away.",
-                    "expression": {
+                {
+                    "lhs": "mu",
+                    "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": [1.458e-06, { "op": "^", "args": ["Ts", 1.5] }] },
-                            { "op": "+", "args": ["Ts", 110.4] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    1.458e-06,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "Ts",
+                                            1.5
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "Ts",
+                                    110.4
+                                ]
+                            }
                         ]
                     }
                 },
-                "mfp": {
-                    "type": "observed",
-                    "units": "m",
-                    "description": "Mean free path of air (S&P Eq. 9.6, upstream `mfp`).",
-                    "expression": {
+                {
+                    "lhs": "mfp",
+                    "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": [2, "mu"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    2,
+                                    "mu"
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
@@ -332,8 +682,21 @@
                                             {
                                                 "op": "/",
                                                 "args": [
-                                                    { "op": "*", "args": [8, "M_air"] },
-                                                    { "op": "*", "args": [3.141592653589793, "R", "Ts"] }
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            8,
+                                                            "M_air"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            3.141592653589793,
+                                                            "R",
+                                                            "Ts"
+                                                        ]
+                                                    }
                                                 ]
                                             },
                                             0.5
@@ -344,18 +707,28 @@
                         ]
                     }
                 },
-                "Cc": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Cunningham slip correction factor (S&P Eq. 9.34, upstream `cc`).",
-                    "expression": {
+                {
+                    "lhs": "Cc",
+                    "rhs": {
                         "op": "+",
                         "args": [
                             1,
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "/", "args": [{ "op": "*", "args": [2, "mfp"] }, "Dp"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    2,
+                                                    "mfp"
+                                                ]
+                                            },
+                                            "Dp"
+                                        ]
+                                    },
                                     {
                                         "op": "+",
                                         "args": [
@@ -370,8 +743,20 @@
                                                             {
                                                                 "op": "/",
                                                                 "args": [
-                                                                    { "op": "*", "args": [-1.1, "Dp"] },
-                                                                    { "op": "*", "args": [2, "mfp"] }
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            -1.1,
+                                                                            "Dp"
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            2,
+                                                                            "mfp"
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             }
                                                         ]
@@ -385,216 +770,398 @@
                         ]
                     }
                 },
-                "Vs": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Gravitational settling (terminal) velocity (S&P Eq. 9.42, upstream `vs`); the 99999999 m/s sentinel for Dp > 20 um, where Stokes settling no longer applies.",
-                    "expression": {
+                {
+                    "lhs": "Vs",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": ">", "args": ["Dp", 2.0e-05] },
+                            {
+                                "op": ">",
+                                "args": [
+                                    "Dp",
+                                    2e-05
+                                ]
+                            },
                             99999999.0,
                             {
                                 "op": "/",
                                 "args": [
-                                    { "op": "*", "args": [{ "op": "^", "args": ["Dp", 2] }, "rho_particle", "g", "Cc"] },
-                                    { "op": "*", "args": [18, "mu"] }
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "Dp",
+                                                    2
+                                                ]
+                                            },
+                                            "rho_particle",
+                                            "g",
+                                            "Cc"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            18,
+                                            "mu"
+                                        ]
+                                    }
                                 ]
                             }
                         ]
                     }
                 },
-                "A_table_index": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Flattened (column-major) lookup coordinate into the 25-entry season x land-use characteristic-radius table: (SeinfeldLandUse - 1)*5 + SeinfeldSeason.",
-                    "expression": {
+                {
+                    "lhs": "A_table_index",
+                    "rhs": {
                         "op": "+",
                         "args": [
-                            { "op": "*", "args": [{ "op": "-", "args": ["SeinfeldLandUse", 1] }, 5] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "SeinfeldLandUse",
+                                            1
+                                        ]
+                                    },
+                                    5
+                                ]
+                            },
                             "SeinfeldSeason"
                         ]
                     }
                 },
-                "A_collector": {
-                    "type": "observed",
-                    "units": "m",
-                    "description": "Characteristic radius of surface collectors (S&P Table 19.2, upstream A_table * 1e-3). 1e25 for desert land use, the finite stand-in for the upstream Inf sentinel.",
-                    "expression": {
+                {
+                    "lhs": "A_collector",
+                    "rhs": {
                         "op": "fn",
                         "name": "interp.linear",
                         "args": [
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [0.002, 0.002, 0.002, 0.002, 0.002, 0.005, 0.005, 0.01, 0.01, 0.005, 0.002, 0.002, 0.005, 0.002, 0.002, 1e+25, 1e+25, 1e+25, 1e+25, 1e+25, 0.01, 0.01, 0.01, 0.01, 0.01]
+                                "value": [
+                                    0.002,
+                                    0.002,
+                                    0.002,
+                                    0.002,
+                                    0.002,
+                                    0.005,
+                                    0.005,
+                                    0.01,
+                                    0.01,
+                                    0.005,
+                                    0.002,
+                                    0.002,
+                                    0.005,
+                                    0.002,
+                                    0.002,
+                                    1e+25,
+                                    1e+25,
+                                    1e+25,
+                                    1e+25,
+                                    1e+25,
+                                    0.01,
+                                    0.01,
+                                    0.01,
+                                    0.01,
+                                    0.01
+                                ]
                             },
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+                                "value": [
+                                    1,
+                                    2,
+                                    3,
+                                    4,
+                                    5,
+                                    6,
+                                    7,
+                                    8,
+                                    9,
+                                    10,
+                                    11,
+                                    12,
+                                    13,
+                                    14,
+                                    15,
+                                    16,
+                                    17,
+                                    18,
+                                    19,
+                                    20,
+                                    21,
+                                    22,
+                                    23,
+                                    24,
+                                    25
+                                ]
                             },
                             "A_table_index"
                         ]
                     }
                 },
-                "st_smooth": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Stokes number for smooth / bluff-roughness surfaces (S&P Eq. 19.23, upstream `stSmooth`).",
-                    "expression": {
+                {
+                    "lhs": "st_smooth",
+                    "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": ["Vs", { "op": "^", "args": ["u_star", 2] }, "rho_a"] },
-                            { "op": "*", "args": ["g", "mu"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    "Vs",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "u_star",
+                                            2
+                                        ]
+                                    },
+                                    "rho_a"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "g",
+                                    "mu"
+                                ]
+                            }
                         ]
                     }
                 },
-                "st_veg": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Stokes number for vegetated surfaces (S&P Eq. 19.24, upstream `stVeg`).",
-                    "expression": {
+                {
+                    "lhs": "st_veg",
+                    "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": ["Vs", "u_star"] },
-                            { "op": "*", "args": ["g", "A_collector"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    "Vs",
+                                    "u_star"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "g",
+                                    "A_collector"
+                                ]
+                            }
                         ]
                     }
                 },
-                "St": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Selected Stokes number: st_smooth for desert land use (index 4), else st_veg.",
-                    "expression": {
+                {
+                    "lhs": "St",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": "==", "args": ["SeinfeldLandUse", 4] },
+                            {
+                                "op": "==",
+                                "args": [
+                                    "SeinfeldLandUse",
+                                    4
+                                ]
+                            },
                             "st_smooth",
                             "st_veg"
                         ]
                     }
                 },
-                "D_brownian": {
-                    "type": "observed",
-                    "units": "m^2/s",
-                    "description": "Brownian diffusivity of the particle from the Stokes-Einstein-Sutherland relation (S&P Eq. 9.73, upstream `dParticle`).",
-                    "expression": {
+                {
+                    "lhs": "D_brownian",
+                    "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": ["k_B", "Ts", "Cc"] },
-                            { "op": "*", "args": [3, 3.141592653589793, "mu", "Dp"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    "k_B",
+                                    "Ts",
+                                    "Cc"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    3,
+                                    3.141592653589793,
+                                    "mu",
+                                    "Dp"
+                                ]
+                            }
                         ]
                     }
                 },
-                "Sc": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Schmidt number of the particle (upstream `sc`).",
-                    "expression": {
+                {
+                    "lhs": "Sc",
+                    "rhs": {
                         "op": "/",
                         "args": [
                             "mu",
-                            { "op": "*", "args": ["rho_a", "D_brownian"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho_a",
+                                    "D_brownian"
+                                ]
+                            }
                         ]
                     }
                 },
-                "alpha": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Land-use impaction-efficiency parameter (S&P Table 19.2, upstream alpha_table).",
-                    "expression": {
+                {
+                    "lhs": "alpha",
+                    "rhs": {
                         "op": "fn",
                         "name": "interp.linear",
                         "args": [
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [1.0, 0.800000011920929, 1.2000000476837158, 50.0, 1.2999999523162842]
+                                "value": [
+                                    1.0,
+                                    0.800000011920929,
+                                    1.2000000476837158,
+                                    50.0,
+                                    1.2999999523162842
+                                ]
                             },
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [1, 2, 3, 4, 5]
+                                "value": [
+                                    1,
+                                    2,
+                                    3,
+                                    4,
+                                    5
+                                ]
                             },
                             "SeinfeldLandUse"
                         ]
                     }
                 },
-                "gamma": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Land-use Brownian-diffusion exponent (S&P Table 19.2, upstream gamma_table).",
-                    "expression": {
+                {
+                    "lhs": "gamma",
+                    "rhs": {
                         "op": "fn",
                         "name": "interp.linear",
                         "args": [
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [0.5600000023841858, 0.5600000023841858, 0.5400000214576721, 0.5400000214576721, 0.5400000214576721]
+                                "value": [
+                                    0.5600000023841858,
+                                    0.5600000023841858,
+                                    0.5400000214576721,
+                                    0.5400000214576721,
+                                    0.5400000214576721
+                                ]
                             },
                             {
                                 "op": "const",
                                 "args": [],
-                                "value": [1, 2, 3, 4, 5]
+                                "value": [
+                                    1,
+                                    2,
+                                    3,
+                                    4,
+                                    5
+                                ]
                             },
                             "SeinfeldLandUse"
                         ]
                     }
                 },
-                "R1": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Particle-rebound correction factor exp(-sqrt(St)) of the sublayer resistance (Eq. 19.27).",
-                    "expression": {
+                {
+                    "lhs": "R1",
+                    "rhs": {
                         "op": "exp",
                         "args": [
-                            { "op": "-", "args": [{ "op": "^", "args": ["St", 0.5] }] }
+                            {
+                                "op": "-",
+                                "args": [
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "St",
+                                            0.5
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 },
-                "term_1": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Brownian-diffusion collection term Sc^(-gamma) of the sublayer resistance (Eq. 19.27).",
-                    "expression": {
+                {
+                    "lhs": "term_1",
+                    "rhs": {
                         "op": "^",
                         "args": [
                             "Sc",
-                            { "op": "-", "args": ["gamma"] }
+                            {
+                                "op": "-",
+                                "args": [
+                                    "gamma"
+                                ]
+                            }
                         ]
                     }
                 },
-                "term_2": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Inertial-impaction collection term (St/(alpha + St))^2 of the sublayer resistance (Eq. 19.27).",
-                    "expression": {
+                {
+                    "lhs": "term_2",
+                    "rhs": {
                         "op": "^",
                         "args": [
-                            { "op": "/", "args": ["St", { "op": "+", "args": ["alpha", "St"] }] },
+                            {
+                                "op": "/",
+                                "args": [
+                                    "St",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "alpha",
+                                            "St"
+                                        ]
+                                    }
+                                ]
+                            },
                             2
                         ]
                     }
                 },
-                "term_3": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Interception collection term 0.5*(Dp/A_collector)^2 of the sublayer resistance (Eq. 19.27); ~0 for desert land use.",
-                    "expression": {
+                {
+                    "lhs": "term_3",
+                    "rhs": {
                         "op": "*",
                         "args": [
                             0.5,
-                            { "op": "^", "args": [{ "op": "/", "args": ["Dp", "A_collector"] }, 2] }
+                            {
+                                "op": "^",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "Dp",
+                                            "A_collector"
+                                        ]
+                                    },
+                                    2
+                                ]
+                            }
                         ]
                     }
                 },
-                "Rb": {
-                    "type": "observed",
-                    "units": "s/m",
-                    "description": "Quasi-laminar sublayer resistance to particle dry deposition (S&P Eq. 19.27, upstream `RbParticle`).",
-                    "expression": {
+                {
+                    "lhs": "Rb",
+                    "rhs": {
                         "op": "/",
                         "args": [
                             1,
@@ -603,21 +1170,32 @@
                                 "args": [
                                     3,
                                     "u_star",
-                                    { "op": "+", "args": ["term_1", "term_2", "term_3"] },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "term_1",
+                                            "term_2",
+                                            "term_3"
+                                        ]
+                                    },
                                     "R1"
                                 ]
                             }
                         ]
                     }
                 },
-                "v": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Particle dry deposition velocity (S&P Eq. 19.7); 0 above the surface layer (lev != 1).",
-                    "expression": {
+                {
+                    "lhs": "v",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": "==", "args": ["lev", 1] },
+                            {
+                                "op": "==",
+                                "args": [
+                                    "lev",
+                                    1
+                                ]
+                            },
                             {
                                 "op": "+",
                                 "args": [
@@ -630,7 +1208,14 @@
                                                 "args": [
                                                     "Ra",
                                                     "Rb",
-                                                    { "op": "*", "args": ["Ra", "Rb", "Vs"] }
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "Ra",
+                                                            "Rb",
+                                                            "Vs"
+                                                        ]
+                                                    }
                                                 ]
                                             }
                                         ]
@@ -642,17 +1227,17 @@
                         ]
                     }
                 },
-                "k": {
-                    "type": "observed",
-                    "units": "1/s",
-                    "description": "First-order particle dry deposition rate, v/z.",
-                    "expression": {
+                {
+                    "lhs": "k",
+                    "rhs": {
                         "op": "/",
-                        "args": ["v", "z"]
+                        "args": [
+                            "v",
+                            "z"
+                        ]
                     }
                 }
-            },
-            "equations": [],
+            ],
             "tests": [
                 {
                     "id": "default_grass_midsummer",
@@ -663,7 +1248,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -671,21 +1256,76 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Ra", "time": 0.0, "expected": 40.516470626683784 },
-                        { "variable": "mu", "time": 0.0, "expected": 1.8365222177118288e-05 },
-                        { "variable": "mfp", "time": 0.0, "expected": 6.643401132906948e-08 },
-                        { "variable": "Cc", "time": 0.0, "expected": 1.2088571903835552 },
-                        { "variable": "Vs", "time": 0.0, "expected": 2.2959122625324298e-05 },
-                        { "variable": "A_collector", "time": 0.0, "expected": 0.002 },
-                        { "variable": "St", "time": 0.0, "expected": 0.0005148834839522268 },
-                        { "variable": "D_brownian", "time": 0.0, "expected": 3.5918416393193584e-11 },
-                        { "variable": "Sc", "time": 0.0, "expected": 426086.4857384236 },
-                        { "variable": "Rb", "time": 0.0, "expected": 849.3445918950064 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0011457331839425675 },
-                        { "variable": "v", "time": 1.0, "expected": 0.0011457331839425675 },
-                        { "variable": "k", "time": 0.0, "expected": 2.291466367885135e-05 }
+                        {
+                            "variable": "Ra",
+                            "time": 0.0,
+                            "expected": 40.516470626683784
+                        },
+                        {
+                            "variable": "mu",
+                            "time": 0.0,
+                            "expected": 1.8365222177118288e-05
+                        },
+                        {
+                            "variable": "mfp",
+                            "time": 0.0,
+                            "expected": 6.643401132906948e-08
+                        },
+                        {
+                            "variable": "Cc",
+                            "time": 0.0,
+                            "expected": 1.2088571903835552
+                        },
+                        {
+                            "variable": "Vs",
+                            "time": 0.0,
+                            "expected": 2.2959122625324298e-05
+                        },
+                        {
+                            "variable": "A_collector",
+                            "time": 0.0,
+                            "expected": 0.002
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.0005148834839522268
+                        },
+                        {
+                            "variable": "D_brownian",
+                            "time": 0.0,
+                            "expected": 3.5918416393193584e-11
+                        },
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 426086.4857384236
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 849.3445918950064
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0011457331839425675
+                        },
+                        {
+                            "variable": "v",
+                            "time": 1.0,
+                            "expected": 0.0011457331839425675
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 2.291466367885135e-05
+                        }
                     ]
                 },
                 {
@@ -697,7 +1337,7 @@
                         "z0": 0.02,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 1.0e-06,
+                        "Dp": 1e-06,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -705,16 +1345,51 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Ra", "time": 0.0, "expected": 39.24860953967123 },
-                        { "variable": "Cc", "time": 0.0, "expected": 1.167028594215202 },
-                        { "variable": "Vs", "time": 0.0, "expected": 3.463233810695372e-05 },
-                        { "variable": "St", "time": 0.0, "expected": 0.0007766681328776572 },
-                        { "variable": "Sc", "time": 0.0, "expected": 551697.8274604002 },
-                        { "variable": "Rb", "time": 0.0, "expected": 1277.5083605045559 },
-                        { "variable": "v", "time": 0.0, "expected": 0.000793073724223562 },
-                        { "variable": "k", "time": 0.0, "expected": 3.96536862111781e-05 }
+                        {
+                            "variable": "Ra",
+                            "time": 0.0,
+                            "expected": 39.24860953967123
+                        },
+                        {
+                            "variable": "Cc",
+                            "time": 0.0,
+                            "expected": 1.167028594215202
+                        },
+                        {
+                            "variable": "Vs",
+                            "time": 0.0,
+                            "expected": 3.463233810695372e-05
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.0007766681328776572
+                        },
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 551697.8274604002
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 1277.5083605045559
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.000793073724223562
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 3.96536862111781e-05
+                        }
                     ]
                 },
                 {
@@ -726,7 +1401,7 @@
                         "z0": 0.02,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 1.0e-08,
+                        "Dp": 1e-08,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -734,16 +1409,51 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Cc", "time": 0.0, "expected": 22.59395252273215 },
-                        { "variable": "Vs", "time": 0.0, "expected": 6.704903434400587e-08 },
-                        { "variable": "D_brownian", "time": 0.0, "expected": 5.370619465295475e-08 },
-                        { "variable": "Sc", "time": 0.0, "expected": 284.9643679497453 },
-                        { "variable": "St", "time": 0.0, "expected": 1.503648068876788e-06 },
-                        { "variable": "Rb", "time": 0.0, "expected": 17.97385914365418 },
-                        { "variable": "v", "time": 0.0, "expected": 0.017475705489978052 },
-                        { "variable": "k", "time": 0.0, "expected": 0.0008737852744989026 }
+                        {
+                            "variable": "Cc",
+                            "time": 0.0,
+                            "expected": 22.59395252273215
+                        },
+                        {
+                            "variable": "Vs",
+                            "time": 0.0,
+                            "expected": 6.704903434400587e-08
+                        },
+                        {
+                            "variable": "D_brownian",
+                            "time": 0.0,
+                            "expected": 5.370619465295475e-08
+                        },
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 284.9643679497453
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 1.503648068876788e-06
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 17.97385914365418
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.017475705489978052
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0008737852744989026
+                        }
                     ]
                 },
                 {
@@ -755,7 +1465,7 @@
                         "z0": 0.02,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 1.0e-05,
+                        "Dp": 1e-05,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -763,15 +1473,46 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 1
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Cc", "time": 0.0, "expected": 1.016701510448128 },
-                        { "variable": "Vs", "time": 0.0, "expected": 0.00301712834100423 },
-                        { "variable": "St", "time": 0.0, "expected": 0.06766240927838231 },
-                        { "variable": "Sc", "time": 0.0, "expected": 6332705.650539515 },
-                        { "variable": "Rb", "time": 0.0, "expected": 234.85193351994351 },
-                        { "variable": "v", "time": 0.0, "expected": 0.006329359878097312 },
-                        { "variable": "k", "time": 0.0, "expected": 0.0003164679939048656 }
+                        {
+                            "variable": "Cc",
+                            "time": 0.0,
+                            "expected": 1.016701510448128
+                        },
+                        {
+                            "variable": "Vs",
+                            "time": 0.0,
+                            "expected": 0.00301712834100423
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.06766240927838231
+                        },
+                        {
+                            "variable": "Sc",
+                            "time": 0.0,
+                            "expected": 6332705.650539515
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 234.85193351994351
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.006329359878097312
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0003164679939048656
+                        }
                     ]
                 },
                 {
@@ -783,7 +1524,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -791,15 +1532,46 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 4
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "A_table_index", "time": 0.0, "expected": 16 },
-                        { "variable": "A_collector", "time": 0.0, "expected": 1e+25 },
-                        { "variable": "alpha", "time": 0.0, "expected": 50.0 },
-                        { "variable": "St", "time": 0.0, "expected": 0.02960579261224418 },
-                        { "variable": "Rb", "time": 0.0, "expected": 986.085201011979 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0009961771830953518 },
-                        { "variable": "k", "time": 0.0, "expected": 1.9923543661907037e-05 }
+                        {
+                            "variable": "A_table_index",
+                            "time": 0.0,
+                            "expected": 16
+                        },
+                        {
+                            "variable": "A_collector",
+                            "time": 0.0,
+                            "expected": 1e+25
+                        },
+                        {
+                            "variable": "alpha",
+                            "time": 0.0,
+                            "expected": 50.0
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.02960579261224418
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 986.085201011979
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0009961771830953518
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1.9923543661907037e-05
+                        }
                     ]
                 },
                 {
@@ -811,7 +1583,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": -50.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -819,12 +1591,31 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Ra", "time": 0.0, "expected": 34.375953454599696 },
-                        { "variable": "Rb", "time": 0.0, "expected": 849.3445918950064 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0011536808641150783 },
-                        { "variable": "k", "time": 0.0, "expected": 2.307361728230157e-05 }
+                        {
+                            "variable": "Ra",
+                            "time": 0.0,
+                            "expected": 34.375953454599696
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 849.3445918950064
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0011536808641150783
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 2.307361728230157e-05
+                        }
                     ]
                 },
                 {
@@ -836,7 +1627,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": 200.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -844,12 +1635,31 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Ra", "time": 0.0, "expected": 47.18726608122924 },
-                        { "variable": "Rb", "time": 0.0, "expected": 849.3445918950064 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0011372248196944183 },
-                        { "variable": "k", "time": 0.0, "expected": 2.2744496393888367e-05 }
+                        {
+                            "variable": "Ra",
+                            "time": 0.0,
+                            "expected": 47.18726608122924
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 849.3445918950064
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0011372248196944183
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 2.2744496393888367e-05
+                        }
                     ]
                 },
                 {
@@ -861,7 +1671,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 295.0,
                         "P": 101325.0,
                         "rho_particle": 1500.0,
@@ -869,18 +1679,61 @@
                         "SeinfeldSeason": 2,
                         "SeinfeldLandUse": 2
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "mu", "time": 0.0, "expected": 1.8222451524644062e-05 },
-                        { "variable": "Cc", "time": 0.0, "expected": 1.206180616865411 },
-                        { "variable": "Vs", "time": 0.0, "expected": 3.463165743042412e-05 },
-                        { "variable": "A_table_index", "time": 0.0, "expected": 7 },
-                        { "variable": "A_collector", "time": 0.0, "expected": 0.005 },
-                        { "variable": "alpha", "time": 0.0, "expected": 0.800000011920929 },
-                        { "variable": "St", "time": 0.0, "expected": 0.00031066114718423263 },
-                        { "variable": "Rb", "time": 0.0, "expected": 1093.207496642624 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0009154887704771684 },
-                        { "variable": "k", "time": 0.0, "expected": 1.8309775409543368e-05 }
+                        {
+                            "variable": "mu",
+                            "time": 0.0,
+                            "expected": 1.8222451524644062e-05
+                        },
+                        {
+                            "variable": "Cc",
+                            "time": 0.0,
+                            "expected": 1.206180616865411
+                        },
+                        {
+                            "variable": "Vs",
+                            "time": 0.0,
+                            "expected": 3.463165743042412e-05
+                        },
+                        {
+                            "variable": "A_table_index",
+                            "time": 0.0,
+                            "expected": 7
+                        },
+                        {
+                            "variable": "A_collector",
+                            "time": 0.0,
+                            "expected": 0.005
+                        },
+                        {
+                            "variable": "alpha",
+                            "time": 0.0,
+                            "expected": 0.800000011920929
+                        },
+                        {
+                            "variable": "St",
+                            "time": 0.0,
+                            "expected": 0.00031066114718423263
+                        },
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 1093.207496642624
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0009154887704771684
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 1.8309775409543368e-05
+                        }
                     ]
                 },
                 {
@@ -892,7 +1745,7 @@
                         "z0": 0.04,
                         "u_star": 0.44,
                         "L": 0.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -900,15 +1753,36 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Rb", "time": 0.0, "expected": 849.3445918950064 },
-                        { "variable": "v", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1e-12 } },
-                        { "variable": "k", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1e-12 } }
+                        {
+                            "variable": "Rb",
+                            "time": 0.0,
+                            "expected": 849.3445918950064
+                        },
+                        {
+                            "variable": "v",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "k",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "deposition_velocity_vs_particle_diameter",
                     "description": "Particle dry deposition velocity v as a function of particle diameter Dp for midsummer grass at neutral stability. Sweeping Dp logarithmically from 1 nm to 10 um traces the classic U-shaped curve: Brownian diffusion drives v up at the fine end, inertial impaction and gravitational settling drive it up at the coarse end, and v reaches its minimum in the 0.1-1 um accumulation mode.",
@@ -926,13 +1800,21 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "Dp",
-                                "range": { "start": 1.0e-09, "stop": 1.0e-05, "count": 25, "scale": "log" }
+                                "range": {
+                                    "start": 1e-09,
+                                    "stop": 1e-05,
+                                    "count": 25,
+                                    "scale": "log"
+                                }
                             }
                         ]
                     },
@@ -941,8 +1823,14 @@
                             "id": "v_vs_Dp",
                             "type": "line",
                             "description": "Dry deposition velocity v versus particle diameter Dp.",
-                            "x": { "variable": "Dp", "label": "Particle diameter (m)" },
-                            "y": { "variable": "v", "label": "Deposition velocity v (m/s)" }
+                            "x": {
+                                "variable": "Dp",
+                                "label": "Particle diameter (m)"
+                            },
+                            "y": {
+                                "variable": "v",
+                                "label": "Deposition velocity v (m/s)"
+                            }
                         }
                     ]
                 },
@@ -955,7 +1843,7 @@
                         "z": 50.0,
                         "z0": 0.04,
                         "L": 0.0,
-                        "Dp": 8.0e-07,
+                        "Dp": 8e-07,
                         "Ts": 298.0,
                         "P": 101325.0,
                         "rho_particle": 1000.0,
@@ -963,13 +1851,21 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "u_star",
-                                "range": { "start": 0.1, "stop": 1.0, "count": 19, "scale": "linear" }
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 1.0,
+                                    "count": 19,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -978,8 +1874,14 @@
                             "id": "v_vs_u_star",
                             "type": "line",
                             "description": "Dry deposition velocity v versus friction velocity u_star.",
-                            "x": { "variable": "u_star", "label": "Friction velocity (m/s)" },
-                            "y": { "variable": "v", "label": "Deposition velocity v (m/s)" }
+                            "x": {
+                                "variable": "u_star",
+                                "label": "Friction velocity (m/s)"
+                            },
+                            "y": {
+                                "variable": "v",
+                                "label": "Deposition velocity v (m/s)"
+                            }
                         }
                     ]
                 },
@@ -999,17 +1901,30 @@
                         "SeinfeldSeason": 1,
                         "SeinfeldLandUse": 3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "Dp",
-                                "range": { "start": 1.0e-09, "stop": 1.0e-05, "count": 13, "scale": "log" }
+                                "range": {
+                                    "start": 1e-09,
+                                    "stop": 1e-05,
+                                    "count": 13,
+                                    "scale": "log"
+                                }
                             },
                             {
                                 "parameter": "u_star",
-                                "range": { "start": 0.1, "stop": 1.0, "count": 7, "scale": "linear" }
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 1.0,
+                                    "count": 7,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -1018,9 +1933,18 @@
                             "id": "v_heatmap",
                             "type": "heatmap",
                             "description": "Dry deposition velocity v over particle diameter Dp and friction velocity u_star.",
-                            "x": { "variable": "Dp", "label": "Particle diameter (m)" },
-                            "y": { "variable": "u_star", "label": "Friction velocity (m/s)" },
-                            "value": { "variable": "v", "reduce": "final" }
+                            "x": {
+                                "variable": "Dp",
+                                "label": "Particle diameter (m)"
+                            },
+                            "y": {
+                                "variable": "u_star",
+                                "label": "Friction velocity (m/s)"
+                            },
+                            "value": {
+                                "variable": "v",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

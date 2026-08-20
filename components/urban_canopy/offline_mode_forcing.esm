@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "OfflineModeForcing",
         "description": "Offline-mode atmospheric forcing processor for the Community Land Model Urban (CLMU). Migrated from UrbanCanopy.jl@9200edd4 src/offline_mode.jl:33 (`OfflineModeForcing` @component). Implements Oleson et al. (2010, NCAR Tech Note CLMU Ch. 6): given the raw observational inputs total incident solar radiation S_atm, atmospheric temperature T_atm, pressure P_atm, specific humidity q_atm, wind speed W_atm, and total precipitation rate P_precip, it derives (a) the four-way solar partition into direct/diffuse × visible/NIR via the Eq. 6.7-6.8 cubic polynomials and Eqs. 6.2-6.5 visibility / NIR weighting; (b) the downwelling longwave radiation L_atm_down from the Idso (1981) formula (Eqs. 6.9-6.10) including the vapor-pressure conversion from specific humidity; (c) the rain/snow phase partition from a linear T_atm - T_f ramp (Eqs. 6.11-6.13); and (d) the wind components, potential temperature, and atmospheric reference height (p.149) needed by CLMU's surface-layer routines. Eq. 6.1 (temporal downscaling of 6-hourly solar to model time steps) and Eqs. 6.14-6.15 (specific humidity from RH / dewpoint) are upstream data-preprocessing steps and are intentionally not implemented here; S_atm and q_atm are taken as already at the model time step. Parameterized as observed-only with 18 algebraic equations and 18 state-variable outputs — no time derivatives, no `@register_symbolic` dependencies, no PDE — matching the upstream `length(equations(sys)) == 18` / `length(unknowns(sys)) == 18` structural tests.",
@@ -32,13 +32,13 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/offline_mode.jl:33\nUpstream `OfflineModeForcing` is an MTK `@component` with six `@parameters` (S_atm, T_atm, P_atm, q_atm, W_atm, P_precip), 24 `@constants` (σ_SB, T_f, MW_da, MW_wv, ε_ratio, one_minus_ε, α_vis, a_0-a_3, b_0-b_3, idso_base, idso_coeff, idso_T_ref, f_P_slope, R_min, R_max, zero_dimless, one_dimless, sqrt2_inv, z_prime_atm_val), 18 time-indexed `@variables` (R_vis_raw, R_nir_raw, R_vis, R_nir, S_atm_dir_vis, S_atm_dir_nir, S_atm_dif_vis, S_atm_dif_nir, e_atm, L_atm_down, f_P_raw, f_P, q_rain, q_snow, u_atm, v_atm, θ_atm, z_prime_atm), and 18 algebraic equations (no derivatives). Identical equation structure preserved here.\n\nThe upstream component declares 24 `@constants`, all encoded here as parameters with the upstream default values (matching the convention used by sibling files: surface_energy_flux.esm encodes sigma_SB and one_K as parameters; waste_heat_ac.esm encodes f_heat, f_cool, H_wasteheat_max as parameters; soil_thermal.esm encodes the Oleson Table 1.4 constants ρ_liq, C_liq, λ_liq, etc. as parameters). Greek `σ_SB`, `α_vis`, `ε_ratio`, `one_minus_ε`, and the variable `θ_atm` are renamed `sigma_SB`, `alpha_vis`, `epsilon_ratio`, `one_minus_epsilon`, and `theta_atm` for ASCII identifier names per the surface_energy_flux.esm rig convention. The upstream-derived constants ε_ratio = MW_wv/MW_da and one_minus_ε = 1 - MW_wv/MW_da are evaluated once at the upstream-default MW_wv = 0.018016, MW_da = 0.028966 and frozen in as 0.6219705862045157 and 0.37802941379548427 respectively — the IEEE-754 double values produced by the literal Julia expression `0.018016 / 0.028966`. MW_wv and MW_da are also exposed as parameters (with their upstream defaults) so a user can rebind them and recompute the ratio externally if needed, but the ratio itself is a leaf parameter in the AST (the AST does not contain a `MW_wv / MW_da` op tree; this matches the upstream Julia AST after the `@constants` initializer evaluates the division).\n\nUnits: SI throughout. Solar fluxes W/m^2, longwave fluxes W/m^2, precipitation rates kg/(m^2*s), temperatures K, vapor pressures Pa, wind components m/s, reference height m. The Idso coefficient idso_coeff = 5.95e-7 Pa^-1 encodes the upstream pre-multiplied form `5.95e-5 * 0.01` (Eq. 6.9 as written in the upstream comment) so the equation reads `idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)` without an inline literal 0.01 factor — preserves the upstream Julia formulation verbatim.\n\nClamping pattern: Eqs. 6.7-6.8 produce R_vis_raw and R_nir_raw which may go outside [0.01, 0.99] at extreme S_atm; these are clamped to R_vis and R_nir via `max(R_min, min(R_max, R_raw))`. Eq. 6.13 produces f_P_raw = 0.5*(T_atm - T_f) which may go outside [0, 1]; clamped to f_P via `max(0, min(1, f_P_raw))`. Both clamps follow the convention used by sibling files (waste_heat_ac.esm uses `min(H_wasteheat_unclamped, H_wasteheat_max)` for the upper-bound clamp). The raw and clamped variables are both exposed as state outputs — the upstream test exercises both (R_vis_raw appears implicitly in the polynomial cross-check at S_atm = 0).\n\nSign and energy conservation: by construction `S_atm_dir_vis + S_atm_dir_nir + S_atm_dif_vis + S_atm_dif_nir = S_atm` (sum of the four solar partition components equals the input total). Within the visible band `S_atm_dir_vis + S_atm_dif_vis = α_vis * S_atm`; within NIR `S_atm_dir_nir + S_atm_dif_nir = (1 - α_vis) * S_atm`. Each component is non-negative for non-negative S_atm because R_vis and R_nir are clamped to [0.01, 0.99]. These conservation properties are anchored by the `solar_partition_energy_conservation` test.\n\nNote on Eq. 6.10 special case: the formula `e_atm = P_atm * q_atm / (epsilon_ratio + one_minus_epsilon * q_atm)` is the exact algebraic form from the upstream component. At q_atm = 0 the numerator is 0 and the denominator is epsilon_ratio = 0.6219... ≠ 0, so e_atm = 0 exactly (anchored by the `dry_air_zero_vapor_pressure` test). The denominator is bounded below by min(epsilon_ratio, 1.0) > 0 for all physical q_atm ∈ [0, 1], so no division-by-zero is reachable from physical inputs.\n\nNote on Eq. 6.11-6.12 conservation: by construction `q_rain + q_snow = P_precip * (f_P + (1 - f_P)) = P_precip` for any f_P ∈ [0, 1], so total precipitation mass is conserved by the rain/snow partition. Anchored by the `precipitation_mass_conservation` test.\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of parameters and other state outputs (the `(t)` time index has no role since there are no derivatives anywhere). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (surface_energy_flux.esm, waste_heat_ac.esm, heat_flux.esm, exponential_grid.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); equations involve addition, subtraction, multiplication, division, integer powers (^2, ^3, ^4), min/max clamps, and a single `exp` call in the Idso formula — all at IEEE-754 ULP precision (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files in this rig (surface_energy_flux.esm uses 1e-9, waste_heat_ac.esm uses 1e-9, heat_flux.esm uses 1e-9). The Idso formula's `exp(1500/T_atm)` at T_atm ≈ 293 K evaluates to `exp(5.12...)` ≈ 167.4 — well within the range where exp's transcendental implementation is ULP-accurate. Tighter `abs: 1.0e-12` is asserted on outputs that are exactly zero by construction (S_atm = 0 → all four radiation components = 0; q_atm = 0 → e_atm = 0; T_atm ≤ T_f → f_P = 0, q_rain = 0; T_atm ≥ T_f + 2 → q_snow = 0; P_precip = 0 → q_rain = q_snow = 0) so the assertion does not silently accept a stuck-at-1e-3 regression."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "sigma_SB": {
                     "type": "parameter",
                     "units": "W/(m^2*K^4)",
-                    "default": 5.67e-8,
+                    "default": 5.67e-08,
                     "description": "Stefan-Boltzmann constant (Oleson Table 1.4) — upstream `@constants` σ_SB; coefficient on the T_atm^4 upward emission term in Eq. 6.9"
                 },
                 "T_f": {
@@ -92,13 +92,13 @@
                 "a_2": {
                     "type": "parameter",
                     "units": "m^4/W^2",
-                    "default": -9.0039e-6,
+                    "default": -9.0039e-06,
                     "description": "Visible direct-fraction polynomial coefficient a_2 (Oleson Eq. 6.7) — quadratic term in (alpha_vis * S_atm); negative, bending the cubic downward at mid-range fluxes"
                 },
                 "a_3": {
                     "type": "parameter",
                     "units": "m^6/W^3",
-                    "default": 8.1351e-9,
+                    "default": 8.1351e-09,
                     "description": "Visible direct-fraction polynomial coefficient a_3 (Oleson Eq. 6.7) — cubic term in (alpha_vis * S_atm); positive, bending the cubic back upward at high fluxes"
                 },
                 "b_0": {
@@ -116,13 +116,13 @@
                 "b_2": {
                     "type": "parameter",
                     "units": "m^4/W^2",
-                    "default": -1.4957e-5,
+                    "default": -1.4957e-05,
                     "description": "NIR direct-fraction polynomial coefficient b_2 (Oleson Eq. 6.8) — quadratic term in ((1 - alpha_vis) * S_atm); negative"
                 },
                 "b_3": {
                     "type": "parameter",
                     "units": "m^6/W^3",
-                    "default": 1.4881e-8,
+                    "default": 1.4881e-08,
                     "description": "NIR direct-fraction polynomial coefficient b_3 (Oleson Eq. 6.8) — cubic term in ((1 - alpha_vis) * S_atm); positive"
                 },
                 "idso_base": {
@@ -134,7 +134,7 @@
                 "idso_coeff": {
                     "type": "parameter",
                     "units": "Pa^-1",
-                    "default": 5.95e-7,
+                    "default": 5.95e-07,
                     "description": "Idso (1981) vapor-pressure coefficient (Oleson Eq. 6.9) — encodes the upstream pre-multiplied form `5.95e-5 * 0.01 = 5.95e-7` Pa^-1 from the upstream comment, so the equation reads `idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)` without an inline literal 0.01 factor. The 0.01 factor converts e_atm from Pa to a 100-Pa unit equivalent (a hectopascal) so that the dimensionless product idso_coeff * e_atm is at unit order ~0.1 for moist atmospheres"
                 },
                 "idso_T_ref": {
@@ -222,92 +222,92 @@
                     "description": "Total precipitation rate (rain + snow) — upstream `@parameters`. Partitioned into q_rain and q_snow via the temperature-dependent f_P ramp (Eqs. 6.11-6.13). Default 0 (dry conditions) so non-precipitation tests do not need to override this parameter"
                 },
                 "R_vis_raw": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Unclamped visible direct fraction (Oleson Eq. 6.7) — the raw polynomial output `a_0 + a_1*(alpha_vis*S_atm) + a_2*(alpha_vis*S_atm)^2 + a_3*(alpha_vis*S_atm)^3` before the [R_min, R_max] clamp. Exposed so downstream consumers can detect when the clamp activates (the polynomial may exceed 0.99 or fall below 0.01 at extreme S_atm)"
                 },
                 "R_nir_raw": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Unclamped NIR direct fraction (Oleson Eq. 6.8) — the raw polynomial output `b_0 + b_1*((1-alpha_vis)*S_atm) + b_2*((1-alpha_vis)*S_atm)^2 + b_3*((1-alpha_vis)*S_atm)^3` before the [R_min, R_max] clamp"
                 },
                 "R_vis": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Visible direct fraction clamped to [R_min, R_max] (Oleson Eq. 6.7): max(R_min, min(R_max, R_vis_raw)). The fraction of the visible incident flux that is direct beam (rest is diffuse)"
                 },
                 "R_nir": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "NIR direct fraction clamped to [R_min, R_max] (Oleson Eq. 6.8): max(R_min, min(R_max, R_nir_raw))"
                 },
                 "S_atm_dir_vis": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Direct-beam visible solar radiation at the surface (Oleson Eq. 6.2): R_vis * (alpha_vis * S_atm). The shortwave-vis component that hits a horizontal surface from the direct solar beam"
                 },
                 "S_atm_dir_nir": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Direct-beam NIR solar radiation at the surface (Oleson Eq. 6.3): R_nir * ((1 - alpha_vis) * S_atm)"
                 },
                 "S_atm_dif_vis": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Diffuse visible solar radiation at the surface (Oleson Eq. 6.4): (1 - R_vis) * (alpha_vis * S_atm)"
                 },
                 "S_atm_dif_nir": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Diffuse NIR solar radiation at the surface (Oleson Eq. 6.5): (1 - R_nir) * ((1 - alpha_vis) * S_atm)"
                 },
                 "e_atm": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "Pa",
                     "description": "Atmospheric vapor pressure (Oleson Eq. 6.10): P_atm * q_atm / (epsilon_ratio + one_minus_epsilon * q_atm). The partial pressure of water vapor in the atmosphere derived from specific humidity using the molecular-weight-ratio formula. Zero at q_atm = 0; bounded above by P_atm * q_atm / epsilon_ratio at small q_atm"
                 },
                 "L_atm_down": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Atmospheric downwelling longwave radiation at the surface (Oleson Eq. 6.9, after Idso 1981): (idso_base + idso_coeff * e_atm * exp(idso_T_ref / T_atm)) * sigma_SB * T_atm^4. Sum of a clear-sky dry-air contribution and a moisture-amplification term — increases monotonically with both T_atm (Stefan-Boltzmann ^4) and q_atm (through e_atm)"
                 },
                 "f_P_raw": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Unclamped rain fraction (Oleson Eq. 6.13): f_P_slope * (T_atm - T_f). The linear T_atm - T_f ramp before the [0, 1] clamp. Negative below freezing, > 1 above T_f + 2 K"
                 },
                 "f_P": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Rain fraction clamped to [zero_dimless, one_dimless] (Oleson Eq. 6.13): max(zero_dimless, min(one_dimless, f_P_raw)). The fraction of total precipitation that falls as rain; complement (1 - f_P) falls as snow"
                 },
                 "q_rain": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/(m^2*s)",
                     "description": "Rain (liquid precipitation) rate (Oleson Eq. 6.11): P_precip * f_P. Zero below T_f; equals P_precip above T_f + 2 K"
                 },
                 "q_snow": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/(m^2*s)",
                     "description": "Snow (solid precipitation) rate (Oleson Eq. 6.12): P_precip * (one_dimless - f_P). Equals P_precip below T_f; zero above T_f + 2 K. By construction q_rain + q_snow = P_precip for all T_atm"
                 },
                 "u_atm": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "description": "Zonal (east-west) wind component (Oleson CLMU p. 149): sqrt2_inv * W_atm. Equal-split assumption — offline mode lacks wind-direction information, so the wind is decomposed isotropically. By construction u_atm^2 + v_atm^2 = W_atm^2"
                 },
                 "v_atm": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "description": "Meridional (north-south) wind component (Oleson CLMU p. 149): sqrt2_inv * W_atm. Equal-split assumption, see u_atm"
                 },
                 "theta_atm": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "K",
                     "description": "Atmospheric potential temperature (Oleson CLMU p. 149) — upstream `θ_atm`; identified with T_atm in offline mode (no atmospheric layer above z_prime_atm_val, so the potential-temperature reference is the surface). Used by CLMU's Monin-Obukhov surface-layer routine"
                 },
                 "z_prime_atm": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Atmospheric reference height (Oleson CLMU p. 149) — assigned to z_prime_atm_val (default 30 m). Exposed as a state output so a coupled CLMU build can wire it to the surface-layer routine via observed-equation forwarding"
                 }
@@ -319,21 +319,57 @@
                         "op": "+",
                         "args": [
                             "a_0",
-                            {"op": "*", "args": ["a_1", {"op": "*", "args": ["alpha_vis", "S_atm"]}]},
-                            {"op": "*", "args": [
-                                "a_2",
-                                {"op": "^", "args": [
-                                    {"op": "*", "args": ["alpha_vis", "S_atm"]},
-                                    2.0
-                                ]}
-                            ]},
-                            {"op": "*", "args": [
-                                "a_3",
-                                {"op": "^", "args": [
-                                    {"op": "*", "args": ["alpha_vis", "S_atm"]},
-                                    3.0
-                                ]}
-                            ]}
+                            {
+                                "op": "*",
+                                "args": [
+                                    "a_1",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "alpha_vis",
+                                            "S_atm"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "a_2",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "alpha_vis",
+                                                    "S_atm"
+                                                ]
+                                            },
+                                            2.0
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "a_3",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "alpha_vis",
+                                                    "S_atm"
+                                                ]
+                                            },
+                                            3.0
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 },
@@ -343,33 +379,75 @@
                         "op": "+",
                         "args": [
                             "b_0",
-                            {"op": "*", "args": [
-                                "b_1",
-                                {"op": "*", "args": [
-                                    {"op": "-", "args": ["one_dimless", "alpha_vis"]},
-                                    "S_atm"
-                                ]}
-                            ]},
-                            {"op": "*", "args": [
-                                "b_2",
-                                {"op": "^", "args": [
-                                    {"op": "*", "args": [
-                                        {"op": "-", "args": ["one_dimless", "alpha_vis"]},
-                                        "S_atm"
-                                    ]},
-                                    2.0
-                                ]}
-                            ]},
-                            {"op": "*", "args": [
-                                "b_3",
-                                {"op": "^", "args": [
-                                    {"op": "*", "args": [
-                                        {"op": "-", "args": ["one_dimless", "alpha_vis"]},
-                                        "S_atm"
-                                    ]},
-                                    3.0
-                                ]}
-                            ]}
+                            {
+                                "op": "*",
+                                "args": [
+                                    "b_1",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "one_dimless",
+                                                    "alpha_vis"
+                                                ]
+                                            },
+                                            "S_atm"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "b_2",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            "one_dimless",
+                                                            "alpha_vis"
+                                                        ]
+                                                    },
+                                                    "S_atm"
+                                                ]
+                                            },
+                                            2.0
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "b_3",
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            "one_dimless",
+                                                            "alpha_vis"
+                                                        ]
+                                                    },
+                                                    "S_atm"
+                                                ]
+                                            },
+                                            3.0
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 },
@@ -379,7 +457,13 @@
                         "op": "max",
                         "args": [
                             "R_min",
-                            {"op": "min", "args": ["R_max", "R_vis_raw"]}
+                            {
+                                "op": "min",
+                                "args": [
+                                    "R_max",
+                                    "R_vis_raw"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -389,7 +473,13 @@
                         "op": "max",
                         "args": [
                             "R_min",
-                            {"op": "min", "args": ["R_max", "R_nir_raw"]}
+                            {
+                                "op": "min",
+                                "args": [
+                                    "R_max",
+                                    "R_nir_raw"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -399,7 +489,13 @@
                         "op": "*",
                         "args": [
                             "R_vis",
-                            {"op": "*", "args": ["alpha_vis", "S_atm"]}
+                            {
+                                "op": "*",
+                                "args": [
+                                    "alpha_vis",
+                                    "S_atm"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -409,10 +505,19 @@
                         "op": "*",
                         "args": [
                             "R_nir",
-                            {"op": "*", "args": [
-                                {"op": "-", "args": ["one_dimless", "alpha_vis"]},
-                                "S_atm"
-                            ]}
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "one_dimless",
+                                            "alpha_vis"
+                                        ]
+                                    },
+                                    "S_atm"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -421,8 +526,20 @@
                     "rhs": {
                         "op": "*",
                         "args": [
-                            {"op": "-", "args": ["one_dimless", "R_vis"]},
-                            {"op": "*", "args": ["alpha_vis", "S_atm"]}
+                            {
+                                "op": "-",
+                                "args": [
+                                    "one_dimless",
+                                    "R_vis"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    "alpha_vis",
+                                    "S_atm"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -431,11 +548,26 @@
                     "rhs": {
                         "op": "*",
                         "args": [
-                            {"op": "-", "args": ["one_dimless", "R_nir"]},
-                            {"op": "*", "args": [
-                                {"op": "-", "args": ["one_dimless", "alpha_vis"]},
-                                "S_atm"
-                            ]}
+                            {
+                                "op": "-",
+                                "args": [
+                                    "one_dimless",
+                                    "R_nir"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "one_dimless",
+                                            "alpha_vis"
+                                        ]
+                                    },
+                                    "S_atm"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -444,11 +576,26 @@
                     "rhs": {
                         "op": "/",
                         "args": [
-                            {"op": "*", "args": ["P_atm", "q_atm"]},
-                            {"op": "+", "args": [
-                                "epsilon_ratio",
-                                {"op": "*", "args": ["one_minus_epsilon", "q_atm"]}
-                            ]}
+                            {
+                                "op": "*",
+                                "args": [
+                                    "P_atm",
+                                    "q_atm"
+                                ]
+                            },
+                            {
+                                "op": "+",
+                                "args": [
+                                    "epsilon_ratio",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "one_minus_epsilon",
+                                            "q_atm"
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 },
@@ -457,18 +604,39 @@
                     "rhs": {
                         "op": "*",
                         "args": [
-                            {"op": "+", "args": [
-                                "idso_base",
-                                {"op": "*", "args": [
-                                    "idso_coeff",
-                                    "e_atm",
-                                    {"op": "exp", "args": [
-                                        {"op": "/", "args": ["idso_T_ref", "T_atm"]}
-                                    ]}
-                                ]}
-                            ]},
+                            {
+                                "op": "+",
+                                "args": [
+                                    "idso_base",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "idso_coeff",
+                                            "e_atm",
+                                            {
+                                                "op": "exp",
+                                                "args": [
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "idso_T_ref",
+                                                            "T_atm"
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
                             "sigma_SB",
-                            {"op": "^", "args": ["T_atm", 4.0]}
+                            {
+                                "op": "^",
+                                "args": [
+                                    "T_atm",
+                                    4.0
+                                ]
+                            }
                         ]
                     }
                 },
@@ -478,7 +646,13 @@
                         "op": "*",
                         "args": [
                             "f_P_slope",
-                            {"op": "-", "args": ["T_atm", "T_f"]}
+                            {
+                                "op": "-",
+                                "args": [
+                                    "T_atm",
+                                    "T_f"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -488,7 +662,13 @@
                         "op": "max",
                         "args": [
                             "zero_dimless",
-                            {"op": "min", "args": ["one_dimless", "f_P_raw"]}
+                            {
+                                "op": "min",
+                                "args": [
+                                    "one_dimless",
+                                    "f_P_raw"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -496,7 +676,10 @@
                     "lhs": "q_rain",
                     "rhs": {
                         "op": "*",
-                        "args": ["P_precip", "f_P"]
+                        "args": [
+                            "P_precip",
+                            "f_P"
+                        ]
                     }
                 },
                 {
@@ -505,7 +688,13 @@
                         "op": "*",
                         "args": [
                             "P_precip",
-                            {"op": "-", "args": ["one_dimless", "f_P"]}
+                            {
+                                "op": "-",
+                                "args": [
+                                    "one_dimless",
+                                    "f_P"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -513,14 +702,20 @@
                     "lhs": "u_atm",
                     "rhs": {
                         "op": "*",
-                        "args": ["sqrt2_inv", "W_atm"]
+                        "args": [
+                            "sqrt2_inv",
+                            "W_atm"
+                        ]
                     }
                 },
                 {
                     "lhs": "v_atm",
                     "rhs": {
                         "op": "*",
-                        "args": ["sqrt2_inv", "W_atm"]
+                        "args": [
+                            "sqrt2_inv",
+                            "W_atm"
+                        ]
                     }
                 },
                 {
@@ -544,12 +739,43 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "R_vis_raw", "time": 0.0, "expected": 0.6907571875, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_nir_raw", "time": 0.0, "expected": 0.853183125, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_vis", "time": 0.0, "expected": 0.6907571875, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_nir", "time": 0.0, "expected": 0.853183125, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "R_vis_raw",
+                            "time": 0.0,
+                            "expected": 0.6907571875,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_nir_raw",
+                            "time": 0.0,
+                            "expected": 0.853183125,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_vis",
+                            "time": 0.0,
+                            "expected": 0.6907571875,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_nir",
+                            "time": 0.0,
+                            "expected": 0.853183125,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -563,14 +789,59 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "R_vis", "time": 0.0, "expected": 0.7764124, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_nir", "time": 0.0, "expected": 0.870744, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "S_atm_dir_vis", "time": 0.0, "expected": 310.56496, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "S_atm_dif_vis", "time": 0.0, "expected": 89.43504, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "S_atm_dir_nir", "time": 0.0, "expected": 348.2976, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "S_atm_dif_nir", "time": 0.0, "expected": 51.7024, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "R_vis",
+                            "time": 0.0,
+                            "expected": 0.7764124,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_nir",
+                            "time": 0.0,
+                            "expected": 0.870744,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dir_vis",
+                            "time": 0.0,
+                            "expected": 310.56496,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dif_vis",
+                            "time": 0.0,
+                            "expected": 89.43504,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dir_nir",
+                            "time": 0.0,
+                            "expected": 348.2976,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dif_nir",
+                            "time": 0.0,
+                            "expected": 51.7024,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -584,16 +855,75 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "R_vis_raw", "time": 0.0, "expected": 0.17639, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_nir_raw", "time": 0.0, "expected": 0.29548, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_vis", "time": 0.0, "expected": 0.17639, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "R_nir", "time": 0.0, "expected": 0.29548, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "S_atm_dir_vis", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "S_atm_dir_nir", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "S_atm_dif_vis", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "S_atm_dif_nir", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                        {
+                            "variable": "R_vis_raw",
+                            "time": 0.0,
+                            "expected": 0.17639,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_nir_raw",
+                            "time": 0.0,
+                            "expected": 0.29548,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_vis",
+                            "time": 0.0,
+                            "expected": 0.17639,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "R_nir",
+                            "time": 0.0,
+                            "expected": 0.29548,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dir_vis",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dir_nir",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dif_vis",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "S_atm_dif_nir",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -607,11 +937,35 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "R_vis_raw", "time": 0.0, "expected": 3.10759, "tolerance": {"rel": 1.0e-9}},
-                        {"variable": "R_vis", "time": 0.0, "expected": 0.99, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "R_nir", "time": 0.0, "expected": 0.99, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "R_vis_raw",
+                            "time": 0.0,
+                            "expected": 3.10759,
+                            "tolerance": {
+                                "rel": 1e-09
+                            }
+                        },
+                        {
+                            "variable": "R_vis",
+                            "time": 0.0,
+                            "expected": 0.99,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "R_nir",
+                            "time": 0.0,
+                            "expected": 0.99,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -625,9 +979,19 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "e_atm", "time": 0.0, "expected": 1619.2546136658295, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "e_atm",
+                            "time": 0.0,
+                            "expected": 1619.2546136658295,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -641,10 +1005,27 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "e_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "L_atm_down", "time": 0.0, "expected": 293.11678800972106, "tolerance": {"rel": 1.0e-8}}
+                        {
+                            "variable": "e_atm",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "L_atm_down",
+                            "time": 0.0,
+                            "expected": 293.11678800972106,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
                     ]
                 },
                 {
@@ -658,9 +1039,19 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "L_atm_down", "time": 0.0, "expected": 360.41254769304726, "tolerance": {"rel": 1.0e-8}}
+                        {
+                            "variable": "L_atm_down",
+                            "time": 0.0,
+                            "expected": 360.41254769304726,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
                     ]
                 },
                 {
@@ -674,9 +1065,19 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "L_atm_down", "time": 0.0, "expected": 444.8715726457007, "tolerance": {"rel": 1.0e-8}}
+                        {
+                            "variable": "L_atm_down",
+                            "time": 0.0,
+                            "expected": 444.8715726457007,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
                     ]
                 },
                 {
@@ -690,9 +1091,19 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "L_atm_down", "time": 0.0, "expected": 426.9000939751862, "tolerance": {"rel": 1.0e-8}}
+                        {
+                            "variable": "L_atm_down",
+                            "time": 0.0,
+                            "expected": 426.9000939751862,
+                            "tolerance": {
+                                "rel": 1e-08
+                            }
+                        }
                     ]
                 },
                 {
@@ -706,12 +1117,43 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "f_P_raw", "time": 0.0, "expected": 0.5, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "f_P", "time": 0.0, "expected": 0.5, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "q_rain", "time": 0.0, "expected": 5.0e-4, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "q_snow", "time": 0.0, "expected": 5.0e-4, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "f_P_raw",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "f_P",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_rain",
+                            "time": 0.0,
+                            "expected": 0.0005,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_snow",
+                            "time": 0.0,
+                            "expected": 0.0005,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -725,12 +1167,43 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "f_P_raw", "time": 0.0, "expected": -5.0, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "f_P", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "q_snow", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "f_P_raw",
+                            "time": 0.0,
+                            "expected": -5.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "f_P",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_rain",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_snow",
+                            "time": 0.0,
+                            "expected": 0.001,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -744,12 +1217,43 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "f_P_raw", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "f_P", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "q_snow", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "f_P_raw",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "f_P",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_rain",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_snow",
+                            "time": 0.0,
+                            "expected": 0.001,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -763,12 +1267,43 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "f_P_raw", "time": 0.0, "expected": 5.0, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "f_P", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "q_rain", "time": 0.0, "expected": 0.001, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "q_snow", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                        {
+                            "variable": "f_P_raw",
+                            "time": 0.0,
+                            "expected": 5.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "f_P",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_rain",
+                            "time": 0.0,
+                            "expected": 0.001,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_snow",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -782,10 +1317,27 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "f_P_raw", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "f_P", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "f_P_raw",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "f_P",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -799,10 +1351,27 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "q_rain", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "q_snow", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}}
+                        {
+                            "variable": "q_rain",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "q_snow",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -816,12 +1385,43 @@
                         "W_atm": 10.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "u_atm", "time": 0.0, "expected": 7.0710678118654755, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "v_atm", "time": 0.0, "expected": 7.0710678118654755, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "theta_atm", "time": 0.0, "expected": 300.0, "tolerance": {"rel": 1.0e-12}},
-                        {"variable": "z_prime_atm", "time": 0.0, "expected": 30.0, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "u_atm",
+                            "time": 0.0,
+                            "expected": 7.0710678118654755,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "v_atm",
+                            "time": 0.0,
+                            "expected": 7.0710678118654755,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "theta_atm",
+                            "time": 0.0,
+                            "expected": 300.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "z_prime_atm",
+                            "time": 0.0,
+                            "expected": 30.0,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -835,15 +1435,39 @@
                         "W_atm": 0.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "u_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "v_atm", "time": 0.0, "expected": 0.0, "tolerance": {"abs": 1.0e-12}},
-                        {"variable": "theta_atm", "time": 0.0, "expected": 293.15, "tolerance": {"rel": 1.0e-12}}
+                        {
+                            "variable": "u_atm",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "v_atm",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "theta_atm",
+                            "time": 0.0,
+                            "expected": 293.15,
+                            "tolerance": {
+                                "rel": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "L_atm_down_vs_T_atm_idso_curve",
                     "description": "Sweep T_atm from 240 K to 320 K (mid-latitude winter to summer extremes) at fixed q_atm = 0.01 to surface the Stefan-Boltzmann T^4 × Idso (1 + moisture * exp(-1500/T)) coupling. L_atm_down grows monotonically with T_atm — at cold T the dry-air term 0.7 * sigma_SB * T^4 dominates; at warm T the moisture-amplification term 5.95e-7 * e_atm * exp(1500/T) * sigma_SB * T^4 contributes more strongly (in absolute value, even though exp(1500/T) decreases, because the T^4 baseline grows faster). The curve is the foundation of the seasonal cycle of clear-sky urban downwelling longwave forcing in CLMU's offline driver.",
@@ -855,13 +1479,21 @@
                         "W_atm": 5.0,
                         "P_precip": 0.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_atm",
-                                "range": {"start": 240.0, "stop": 320.0, "count": 41, "scale": "linear"}
+                                "range": {
+                                    "start": 240.0,
+                                    "stop": 320.0,
+                                    "count": 41,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -870,8 +1502,14 @@
                             "id": "L_atm_down_curve",
                             "type": "line",
                             "description": "L_atm_down vs T_atm: roughly T^4-shaped curve with an additional moisture-amplification contribution that scales with exp(1500/T) — visibly steeper than pure T^4 because the moisture term adds curvature at warm T.",
-                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
-                            "y": {"variable": "L_atm_down", "label": "L_atm_down (W/m^2)"}
+                            "x": {
+                                "variable": "T_atm",
+                                "label": "T_atm (K)"
+                            },
+                            "y": {
+                                "variable": "L_atm_down",
+                                "label": "L_atm_down (W/m^2)"
+                            }
                         }
                     ]
                 },
@@ -886,13 +1524,21 @@
                         "W_atm": 3.0,
                         "P_precip": 0.001
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_atm",
-                                "range": {"start": 268.15, "stop": 278.15, "count": 41, "scale": "linear"}
+                                "range": {
+                                    "start": 268.15,
+                                    "stop": 278.15,
+                                    "count": 41,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -901,15 +1547,27 @@
                             "id": "f_P_ramp",
                             "type": "line",
                             "description": "f_P vs T_atm: piecewise-linear ramp — 0 below T_f, linear from 0 to 1 across [T_f, T_f + 2], 1 above T_f + 2. The 2 K transition zone produces a smooth rain/snow handoff at the freezing point.",
-                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
-                            "y": {"variable": "f_P", "label": "f_P (dimensionless)"}
+                            "x": {
+                                "variable": "T_atm",
+                                "label": "T_atm (K)"
+                            },
+                            "y": {
+                                "variable": "f_P",
+                                "label": "f_P (dimensionless)"
+                            }
                         },
                         {
                             "id": "q_rain_q_snow_partition",
                             "type": "line",
                             "description": "q_rain and q_snow vs T_atm: mirror-image curves crossing at T_f + 1 K (the 50/50 midpoint of the transition). q_rain + q_snow = P_precip at every T_atm.",
-                            "x": {"variable": "T_atm", "label": "T_atm (K)"},
-                            "y": {"variable": "q_rain", "label": "q_rain (kg/(m^2*s))"}
+                            "x": {
+                                "variable": "T_atm",
+                                "label": "T_atm (K)"
+                            },
+                            "y": {
+                                "variable": "q_rain",
+                                "label": "q_rain (kg/(m^2*s))"
+                            }
                         }
                     ]
                 }

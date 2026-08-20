@@ -1,5 +1,5 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "WetDeposition",
     "description": "EMEP-formulation wet deposition model for PM2.5, SO2, and other gases. Computes three first-order wet deposition rate coefficients (k_particle, k_SO2, k_othergas [1/s]) from cloud fraction (cloudFrac), rain mixing ratio (qrain), air density (rho_air), and the atmospheric level index (lev). Subcloud scavenging rates scale as qrain*rho_air/Dz times a species-specific washout coefficient; in-cloud scavenging additionally scales with cloudFrac; the particle subcloud term uses A_wd*E*qrain*rho_air without the 1/Dz factor. The layer depth Dz is looked up from a 72-entry constant table (GEOS-Chem-derived model-level thicknesses in metres) indexed by lev. The gt-p3ep blocking gap (get_lev_depth is @register_symbolic) is resolved by expressing the lookup as an interp.linear AST composition over the 72-entry integer-axis table — matching the FastJX_interpolation_troposphere precedent. Migrated from AtmosphericDeposition.jl@e4468c79 src/wet_deposition.jl:147 (the WetDeposition builder) and src/wet_deposition.jl:82 (_WetDeposition helper). Purely algebraic: no differential states; k_particle, k_SO2, k_othergas are observed variables.",
@@ -28,7 +28,7 @@
         "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/wet_deposition.jl:147\n\nUpstream `WetDeposition` is an MTK builder — `System(eqs, t, vars, params; name)` — with four @parameters (cloudFrac, qrain, ρ_air, lev) and three @variables (k_particle, k_SO2, k_othergas [1/s]), related by three algebraic equations built from the `_WetDeposition` helper (src/wet_deposition.jl:101). The helper is a plain Julia function computing subcloud and in-cloud scavenging rates using six local constants (E=0.1, wSubSO2=0.15, wSubOther=0.5, wInSO2=0.3, wInParticle=1.0, wInOther=1.4) and three module-level @constants (A_wd=5.2, ρwater=1000.0, Vdr=5.0). These local constants are folded into the inline expression arithmetic as fixed numeric literals; the module @constants become fixed-default parameters per the rig convention.\n\nThe gt-p3ep blocking gap: `get_lev_depth(lev)` (src/wet_deposition.jl:82) is a `@register_symbolic` wrapper around a 72-entry constant Julia array `lev_depth` (src/wet_deposition.jl:7-80) indexed by lev. The registered-symbolic call `get_lev_depth(lev) * Δz_unit` supplies the layer depth Dz to the _WetDeposition helper. Resolution: exactly as done for FastJX_interpolation_troposphere (components/gaschem/fastjx/fastjx_interp_troposphere.esm, esm-09u), the registered function is replaced by an `interp.linear` AST expression over the full 72-entry table on a 1-indexed integer axis. For integer lev in 1..72 the query always lands exactly on an axis knot, so interp.linear returns the exact table entry with zero blend weight, reproducing the upstream direct array indexing. The Δz_unit @constant equals 1 m and folds away, so the looked-up value is already in metres.\n\nThe `_WetDeposition` helper logic verbatim:\n  i = ifelse(qrain > 0, 1, 0)                  -- guard against non-positive qrain\n  AE = A_wd * E = 5.2 * 0.1 = 0.52             -- precombined constant\n  wInParticleVdrPerrhowater = 1.0*5.0/1000.0 = 0.005\n  wSubSO2VdrPerrhowater = 0.15*5.0/1000.0 = 7.5e-4\n  wSubOtherVdrPerrhowater = 0.5*5.0/1000.0 = 2.5e-3\n  k_particle = i * qrain * rho_air * (AE + cloudFrac * (wInParticleVdrPerrhowater / Dz))\n  k_SO2      = i * (wSubSO2VdrPerrhowater + cloudFrac * wSubSO2VdrPerrhowater) * qrain * rho_air / Dz\n  k_othergas = i * (wSubOtherVdrPerrhowater + cloudFrac * wSubOtherVdrPerrhowater) * qrain * rho_air / Dz\nNote: the upstream `wdSO2` formula uses (wSubSO2VdrPerrhowater + cloudFrac * wSubSO2VdrPerrhowater) = wSubSO2VdrPerrhowater * (1 + cloudFrac). The wInSO2VdrPerrhowater constant appears in the precombinations block of _WetDeposition but is not referenced in any of the three output expressions (verified by inspection of src/wet_deposition.jl:123-128); it is therefore omitted from the ESM.\n\nAll three output variables (k_particle, k_SO2, k_othergas) are expressed as `type: observed` with inline expression trees. No time derivative exists anywhere; `system_kind` is left unset (observed-only algebraic, matching dry_aerosol.esm and WetDepositionFlux.esm siblings).\n\nThe `ρ_air` Julia parameter name is migrated as `rho_air` (ASCII) for JSON compatibility. The upstream coupler metadata (WetDepositionCoupler) is informational only and is not carried into the ESM per rig convention.\n\nInputs and defaults: cloudFrac (default 0.5, dimensionless), qrain (default 0.5, dimensionless rain mixing ratio), rho_air (default 1.204 kg/m^3, upstream default), lev (default 1, level index 1-72). Module @constants become fixed-default parameters: A_wd=5.2 m^3/(kg*s), rho_water=1000.0 kg/m^3, Vdr=5.0 m/s.\n\nTolerance rationale (model-level rel=1e-9): a closed-form algebraic system evaluated by topological substitution of the interp.linear lookup and arithmetic on float64 constants. The interp.linear query lands on integer knots, returning exact table entries; subsequent arithmetic (+, *, /, ifelse) accumulates float64 round-off ~1e-15 per op, ~1e-13 for the full cascade. rel=1e-9 gives comfortable headroom."
       },
       "tolerance": {
-        "rel": 1E-9
+        "rel": 1e-09
       },
       "variables": {
         "cloudFrac": {
@@ -74,10 +74,35 @@
           "description": "Raindrop fall speed (upstream module @constant Vdr)."
         },
         "Dz": {
-          "type": "observed",
+          "type": "unknown",
           "units": "m",
-          "description": "Layer depth at level lev, looked up from the 72-entry GEOS-Chem model-level thickness table (lev_depth [m]) via interp.linear on the integer axis 1..72. Resolves the gt-p3ep gap: the upstream @register_symbolic get_lev_depth(lev) is expressed as an AST interp.linear composition, matching the FastJX_interpolation_troposphere precedent (esm-09u). For integer lev the query lands exactly on an axis knot (zero blend weight), reproducing the direct array indexing of the upstream Julia code.",
-          "expression": {
+          "description": "Layer depth at level lev, looked up from the 72-entry GEOS-Chem model-level thickness table (lev_depth [m]) via interp.linear on the integer axis 1..72. Resolves the gt-p3ep gap: the upstream @register_symbolic get_lev_depth(lev) is expressed as an AST interp.linear composition, matching the FastJX_interpolation_troposphere precedent (esm-09u). For integer lev the query lands exactly on an axis knot (zero blend weight), reproducing the direct array indexing of the upstream Julia code."
+        },
+        "i_rain": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Rain presence indicator: 1 if qrain > 0, else 0. Guards against negative qrain (upstream `i = ifelse(qrain > 0, 1, 0)`, src/wet_deposition.jl:109)."
+        },
+        "k_particle": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "First-order wet deposition rate for PM2.5 (aerosol particles). Subcloud term: A_wd*E*qrain*rho_air (no 1/Dz); in-cloud term: wInParticle*(Vdr/rho_water)*cloudFrac*qrain*rho_air/Dz. With E=0.1, wInParticle=1.0 folded in (src/wet_deposition.jl:123): k_particle = i * qrain * rho_air * (A_wd*0.1 + cloudFrac*(1.0*Vdr/rho_water/Dz))."
+        },
+        "k_SO2": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "First-order wet deposition rate for SO2. Both subcloud and in-cloud terms use wSubSO2=0.15; combined: (wSubSO2*Vdr/rho_water)*(1+cloudFrac)*qrain*rho_air/Dz (src/wet_deposition.jl:124)."
+        },
+        "k_othergas": {
+          "type": "unknown",
+          "units": "1/s",
+          "description": "First-order wet deposition rate for other gases (not SO2). Both subcloud and in-cloud terms use wSubOther=0.5; combined: (wSubOther*Vdr/rho_water)*(1+cloudFrac)*qrain*rho_air/Dz (src/wet_deposition.jl:125-126)."
+        }
+      },
+      "equations": [
+        {
+          "lhs": "Dz",
+          "rhs": {
             "op": "fn",
             "name": "interp.linear",
             "args": [
@@ -241,11 +266,9 @@
             ]
           }
         },
-        "i_rain": {
-          "type": "observed",
-          "units": "1",
-          "description": "Rain presence indicator: 1 if qrain > 0, else 0. Guards against negative qrain (upstream `i = ifelse(qrain > 0, 1, 0)`, src/wet_deposition.jl:109).",
-          "expression": {
+        {
+          "lhs": "i_rain",
+          "rhs": {
             "op": "ifelse",
             "args": [
               {
@@ -260,11 +283,9 @@
             ]
           }
         },
-        "k_particle": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "First-order wet deposition rate for PM2.5 (aerosol particles). Subcloud term: A_wd*E*qrain*rho_air (no 1/Dz); in-cloud term: wInParticle*(Vdr/rho_water)*cloudFrac*qrain*rho_air/Dz. With E=0.1, wInParticle=1.0 folded in (src/wet_deposition.jl:123): k_particle = i * qrain * rho_air * (A_wd*0.1 + cloudFrac*(1.0*Vdr/rho_water/Dz)).",
-          "expression": {
+        {
+          "lhs": "k_particle",
+          "rhs": {
             "op": "*",
             "args": [
               "i_rain",
@@ -304,11 +325,9 @@
             ]
           }
         },
-        "k_SO2": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "First-order wet deposition rate for SO2. Both subcloud and in-cloud terms use wSubSO2=0.15; combined: (wSubSO2*Vdr/rho_water)*(1+cloudFrac)*qrain*rho_air/Dz (src/wet_deposition.jl:124).",
-          "expression": {
+        {
+          "lhs": "k_SO2",
+          "rhs": {
             "op": "*",
             "args": [
               "i_rain",
@@ -361,11 +380,9 @@
             ]
           }
         },
-        "k_othergas": {
-          "type": "observed",
-          "units": "1/s",
-          "description": "First-order wet deposition rate for other gases (not SO2). Both subcloud and in-cloud terms use wSubOther=0.5; combined: (wSubOther*Vdr/rho_water)*(1+cloudFrac)*qrain*rho_air/Dz (src/wet_deposition.jl:125-126).",
-          "expression": {
+        {
+          "lhs": "k_othergas",
+          "rhs": {
             "op": "*",
             "args": [
               "i_rain",
@@ -418,8 +435,7 @@
             ]
           }
         }
-      },
-      "equations": [],
+      ],
       "tests": [
         {
           "id": "default_params_lev1",
@@ -456,12 +472,12 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 0.000005476487286338272
+              "expected": 5.476487286338272e-06
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 0.000018254957621127573
+              "expected": 1.8254957621127573e-05
             },
             {
               "variable": "k_particle",
@@ -500,12 +516,12 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 0.00000529855240110913
+              "expected": 5.29855240110913e-06
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 0.000017661841337030432
+              "expected": 1.7661841337030432e-05
             }
           ]
         },
@@ -536,7 +552,7 @@
               "time": 0.0,
               "expected": 0.0,
               "tolerance": {
-                "abs": 1E-15
+                "abs": 1e-15
               }
             },
             {
@@ -544,7 +560,7 @@
               "time": 0.0,
               "expected": 0.0,
               "tolerance": {
-                "abs": 1E-15
+                "abs": 1e-15
               }
             },
             {
@@ -552,7 +568,7 @@
               "time": 0.0,
               "expected": 0.0,
               "tolerance": {
-                "abs": 1E-15
+                "abs": 1e-15
               }
             }
           ]
@@ -582,12 +598,12 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 0.000003650991524225514
+              "expected": 3.650991524225514e-06
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 0.000012169971747418382
+              "expected": 1.2169971747418382e-05
             }
           ]
         },
@@ -616,12 +632,12 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 0.000007301983048451028
+              "expected": 7.301983048451028e-06
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 0.000024339943494836764
+              "expected": 2.4339943494836764e-05
             }
           ]
         },
@@ -650,12 +666,12 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 0.000010952974572676544
+              "expected": 1.0952974572676544e-05
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 0.000036509915242255145
+              "expected": 3.6509915242255145e-05
             }
           ]
         },
@@ -689,17 +705,17 @@
             {
               "variable": "k_SO2",
               "time": 0.0,
-              "expected": 1.5592342505544854E-7
+              "expected": 1.5592342505544854e-07
             },
             {
               "variable": "k_othergas",
               "time": 0.0,
-              "expected": 5.197447501848284E-7
+              "expected": 5.197447501848284e-07
             }
           ]
         }
       ],
-      "examples": [
+      "analyses": [
         {
           "id": "deposition_rates_vs_lev",
           "description": "Wet deposition rates k_particle, k_SO2, and k_othergas as a function of atmospheric level (lev 1-72). Higher levels have greater Dz, reducing the 1/Dz scavenging terms while leaving the subcloud particle term (no 1/Dz) approximately constant.",

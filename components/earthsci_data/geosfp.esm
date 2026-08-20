@@ -1,5 +1,5 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "GEOSFP",
     "description": "GEOS-FP regridding model — the coupler half of the geosfp loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.2, following the esm-3nc.1 era5/wrf pattern). Exposes NASA GMAO GEOS-FP assimilated meteorology (0.25°×0.3125° global, GEOS-Chem 72-level) on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC §6): it declares the six pure-I/O GEOS-FP grid loaders as subsystems under their original names (GEOSFP_A1/A3cld/A3dyn/A3mstC/A3mstE/I3 → ./geosfp_<coll>_loader.esm), so loader fields are referenced as GEOSFP.<coll>.<var> and re-exposed as model observeds (GEOSFP.T, GEOSFP.U, …). Native grids are geographic (longlat/WGS84) → longlat identity reprojection (esd-47z.1). Regridding is per-variable (`regrid`): A3dyn staggered winds U/V/OMEGA → B-spline (esd-47z.3); all other fields → conservative. The hybrid sigma-pressure Ap/Bp tables (former GEOSFP_hybrid_coefs kind:lookup, removed in the 0.6.0 hard break) are now the top-level function_tables geosfp_Ap_pa and geosfp_Bp, consumed by P = Ap(lev)+Bp(lev)·PS.\n\nDerived observeds on the target grid: pressure P, virtual temperature Tv and Tv_sfc, layer-mean virtual temperature Tv_bar, and the lat/lon coordinate metrics δxδlon, δyδlat. MeanWind coupling: GEOSFP.U/V/OMEGA → MeanWind v_lon/v_lat/v_lev.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/geosfp.jl:410 (GEOSFP constructor, esm-1c6s); split into pure loaders + regridding model by esm-3nc.2.",
@@ -86,10 +86,299 @@
           "description": "TIME INTERPOLATION: the I3 cadence step (s) between the two bracketing records — I3 is 3-hourly, so 10800. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so this model's weight phase agrees with which two records the provider actually loaded."
         },
         "w_time_I3": {
-          "type": "observed",
+          "type": "unknown",
           "units": "1",
-          "description": "TIME INTERPOLATION weight in [0,1) for the I3 cadence: the fractional position of the current simulation time t within its bracketing pair of I3 records, w = frac((t - t_interp_ref_I3)/dt_interp_I3). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_I3 for why GEOS-FP needs three of these and ERA5 only one.",
-          "expression": {
+          "description": "TIME INTERPOLATION weight in [0,1) for the I3 cadence: the fractional position of the current simulation time t within its bracketing pair of I3 records, w = frac((t - t_interp_ref_I3)/dt_interp_I3). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_I3 for why GEOS-FP needs three of these and ERA5 only one."
+        },
+        "t_interp_ref_A3": {
+          "type": "parameter",
+          "units": "s",
+          "default": 5400.0,
+          "description": "TIME INTERPOLATION (loader records_per_sample=2), A3 cadence. Simulation-clock time (s) of any cadence anchor of the A3dyn/A3cld/A3mstC/A3mstE (3-hourly time-AVERAGED: U, V, OMEGA, RH, DTRAIN, ...) collection — i.e. a time at which a fresh record lands, so the interpolation weight w_time_A3 is exactly 0 there. Together with dt_interp_A3 it locates the current time within its bracketing record pair WITHOUT the runtime injecting timestamps.\n\nGEOS-FP's collections are NOT co-phased, which is why this model carries THREE independent (ref, dt) pairs rather than era5_single.esm's single one: the native records sit at 01:30, 04:30, ... UTC — the mid-points of the 3 h averaging windows The default assumes the run clock has t=0 at 00:00 UTC of the file's day; a runner whose t=0 is elsewhere must offset it."
+        },
+        "dt_interp_A3": {
+          "type": "parameter",
+          "units": "s",
+          "default": 10800.0,
+          "description": "TIME INTERPOLATION: the A3 cadence step (s) between the two bracketing records — A3dyn/A3cld/A3mstC/A3mstE is 3-hourly, so 10800. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so this model's weight phase agrees with which two records the provider actually loaded."
+        },
+        "w_time_A3": {
+          "type": "unknown",
+          "units": "1",
+          "description": "TIME INTERPOLATION weight in [0,1) for the A3 cadence: the fractional position of the current simulation time t within its bracketing pair of A3dyn/A3cld/A3mstC/A3mstE records, w = frac((t - t_interp_ref_A3)/dt_interp_A3). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_A3 for why GEOS-FP needs three of these and ERA5 only one."
+        },
+        "t_interp_ref_A1": {
+          "type": "parameter",
+          "units": "s",
+          "default": 1800.0,
+          "description": "TIME INTERPOLATION (loader records_per_sample=2), A1 cadence. Simulation-clock time (s) of any cadence anchor of the A1 (hourly time-AVERAGED: PBLH, T2M, U10M, SWGDN, ...) collection — i.e. a time at which a fresh record lands, so the interpolation weight w_time_A1 is exactly 0 there. Together with dt_interp_A1 it locates the current time within its bracketing record pair WITHOUT the runtime injecting timestamps.\n\nGEOS-FP's collections are NOT co-phased, which is why this model carries THREE independent (ref, dt) pairs rather than era5_single.esm's single one: the native records sit at 00:30, 01:30, ... UTC — the mid-points of the 1 h averaging windows The default assumes the run clock has t=0 at 00:00 UTC of the file's day; a runner whose t=0 is elsewhere must offset it."
+        },
+        "dt_interp_A1": {
+          "type": "parameter",
+          "units": "s",
+          "default": 3600.0,
+          "description": "TIME INTERPOLATION: the A1 cadence step (s) between the two bracketing records — A1 is hourly, so 3600. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so this model's weight phase agrees with which two records the provider actually loaded."
+        },
+        "w_time_A1": {
+          "type": "unknown",
+          "units": "1",
+          "description": "TIME INTERPOLATION weight in [0,1) for the A1 cadence: the fractional position of the current simulation time t within its bracketing pair of A1 records, w = frac((t - t_interp_ref_A1)/dt_interp_A1). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_A1 for why GEOS-FP needs three of these and ERA5 only one."
+        },
+        "T": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Air temperature (K). 3-hourly instantaneous 3D field on the GEOS-FP hybrid pressure levels. Sourced from GEOSFP_I3.T. Used in virtual temperature calculation Tv = T * (1 + 0.61*QV)."
+        },
+        "QV": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "description": "Specific humidity of water vapor (kg/kg). 3-hourly instantaneous 3D field. Sourced from GEOSFP_I3.QV. Used in virtual temperature calculation."
+        },
+        "PS": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Surface pressure (Pa). 3-hourly instantaneous 2D field (no lev dimension). Used in hybrid pressure calculation P = Ap[lev] + Bp[lev]*PS. Sourced from GEOSFP_I3.PS."
+        },
+        "T2M": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Air temperature at 2m above the displacement height (K). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc = T2M * (1 + 0.61*QV2M). Sourced from GEOSFP_A1.T2M."
+        },
+        "QV2M": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "description": "Specific humidity at 2m (kg/kg). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc. Sourced from GEOSFP_A1.QV2M."
+        },
+        "U10M": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Eastward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.U10M."
+        },
+        "V10M": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Northward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.V10M."
+        },
+        "PBLH": {
+          "type": "unknown",
+          "units": "m",
+          "description": "Planetary boundary layer height (m). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PBLH."
+        },
+        "PRECTOT": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Total precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field (large-scale plus convective). Sourced from GEOSFP_A1.PRECTOT."
+        },
+        "PRECANV": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Anvil precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PRECANV."
+        },
+        "SLP": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Sea-level pressure (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SLP."
+        },
+        "TS": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Surface skin temperature (K). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TS."
+        },
+        "CLDTOT": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Total cloud fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.CLDTOT."
+        },
+        "SWGDN": {
+          "type": "unknown",
+          "units": "W/m^2",
+          "description": "Incident shortwave flux at the ground (W m⁻²). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SWGDN."
+        },
+        "TROPP_H": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Tropopause pressure using the thermal definition (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TROPP_H."
+        },
+        "FRSEAICE": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Sea ice area fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.FRSEAICE."
+        },
+        "GWETTOP": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Topsoil moisture (volumetric, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.GWETTOP."
+        },
+        "LAI": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Leaf area index (m² leaf per m² ground, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.LAI."
+        },
+        "USTAR": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Surface friction velocity (m/s). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.USTAR."
+        },
+        "Z0M": {
+          "type": "unknown",
+          "units": "m",
+          "description": "Surface roughness length for momentum (m). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.Z0M."
+        },
+        "U": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Eastward wind component (m/s). 3-hourly time-averaged 3D field. Cell-center staggered in y and z; x-edge-staggered (lon-edge aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.U. Coupled to MeanWind.v_lon via GEOSFPCoupler/couple2. Clamp extrapolation."
+        },
+        "V": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Northward wind component (m/s). 3-hourly time-averaged 3D field. y-edge-staggered (lat-edge aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.V. Coupled to MeanWind.v_lat via GEOSFPCoupler/couple2. Clamp extrapolation."
+        },
+        "OMEGA": {
+          "type": "unknown",
+          "units": "Pa/s",
+          "description": "Vertical pressure velocity (Pa/s). 3-hourly time-averaged 3D field. z-edge-staggered (lev-interface aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.OMEGA. Coupled to MeanWind.v_lev via GEOSFPCoupler/couple2. Zero extrapolation (extrapolate_type=0.0) to prevent spurious vertical mass transport."
+        },
+        "RH": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Relative humidity with respect to liquid water (dimensionless, 0–1). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.RH. Clamp extrapolation."
+        },
+        "DTRAIN": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Detrainment of cloud mass (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.DTRAIN. Clamp extrapolation."
+        },
+        "CLOUD": {
+          "type": "unknown",
+          "units": "1",
+          "description": "3D cloud fraction (dimensionless, 0–1). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.CLOUD. Clamp extrapolation."
+        },
+        "QI": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "description": "Mass fraction of cloud ice water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QI. Clamp extrapolation."
+        },
+        "QL": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "description": "Mass fraction of cloud liquid water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QL. Clamp extrapolation."
+        },
+        "OPTDEPTH": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Grid-mean cloud optical depth at visible wavelengths (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.OPTDEPTH. Clamp extrapolation."
+        },
+        "TAUCLI": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Optical thickness of convective ice cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLI. Clamp extrapolation."
+        },
+        "TAUCLW": {
+          "type": "unknown",
+          "units": "1",
+          "description": "Optical thickness of convective liquid cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLW. Clamp extrapolation."
+        },
+        "CMFMC": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Upward moist convective mass flux (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.CMFMC. Clamp extrapolation."
+        },
+        "DQRCU": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "description": "Convective rain production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRCU. Clamp extrapolation."
+        },
+        "DQRLSAN": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "description": "Large-scale rain and snow production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRLSAN. Clamp extrapolation."
+        },
+        "REEEVAP": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "description": "Evaporation of convective precipitation (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEEVAP. Clamp extrapolation."
+        },
+        "CMFMC_OCE": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Downward moist convective mass flux from ocean (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.CMFMC_OCE. Clamp extrapolation."
+        },
+        "PFICU": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Downward flux of ice mass from convection (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFICU. Clamp extrapolation."
+        },
+        "PFILSAN": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Downward flux of ice mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFILSAN. Clamp extrapolation."
+        },
+        "PFLCU": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Downward flux of liquid mass from convection (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFLCU. Clamp extrapolation."
+        },
+        "PFLLSAN": {
+          "type": "unknown",
+          "units": "kg/m^2/s",
+          "description": "Downward flux of liquid mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFLLSAN. Clamp extrapolation."
+        },
+        "P": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (interp.linear over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup."
+        },
+        "Tv": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Virtual temperature at pressure level (K). Tv = T × (1 + 0.61 × QV), where T is air temperature and QV is specific humidity. Used in geopotential height calculation Z_agl (which is omitted due to gt-p3ep(lookup); see reference.notes)."
+        },
+        "Tv_sfc": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Near-surface virtual temperature at 2m (K). Tv_sfc = T2M × (1 + 0.61 × QV2M). Used in layer-mean virtual temperature Tv̄."
+        },
+        "Tv_bar": {
+          "type": "unknown",
+          "units": "K",
+          "description": "Layer-mean virtual temperature (K). Tv̄ = 0.5 × (Tv + Tv_sfc). Used in Z_agl hypsometric height calculation (omitted; see reference.notes)."
+        },
+        "δxδlon": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m × cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134.3 m rad⁻¹. Emitted only in lat/lon coordinate domains."
+        },
+        "δyδlat": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³×(180/π) ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains."
+        }
+      },
+      "subsystems": {
+        "GEOSFP_A1": {
+          "ref": "./geosfp_a1_loader.esm"
+        },
+        "GEOSFP_A3cld": {
+          "ref": "./geosfp_a3cld_loader.esm"
+        },
+        "GEOSFP_A3dyn": {
+          "ref": "./geosfp_a3dyn_loader.esm"
+        },
+        "GEOSFP_A3mstC": {
+          "ref": "./geosfp_a3mstc_loader.esm"
+        },
+        "GEOSFP_A3mstE": {
+          "ref": "./geosfp_a3mste_loader.esm"
+        },
+        "GEOSFP_I3": {
+          "ref": "./geosfp_i3_loader.esm"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "w_time_I3",
+          "rhs": {
             "op": "-",
             "args": [
               {
@@ -126,23 +415,9 @@
             ]
           }
         },
-        "t_interp_ref_A3": {
-          "type": "parameter",
-          "units": "s",
-          "default": 5400.0,
-          "description": "TIME INTERPOLATION (loader records_per_sample=2), A3 cadence. Simulation-clock time (s) of any cadence anchor of the A3dyn/A3cld/A3mstC/A3mstE (3-hourly time-AVERAGED: U, V, OMEGA, RH, DTRAIN, ...) collection — i.e. a time at which a fresh record lands, so the interpolation weight w_time_A3 is exactly 0 there. Together with dt_interp_A3 it locates the current time within its bracketing record pair WITHOUT the runtime injecting timestamps.\n\nGEOS-FP's collections are NOT co-phased, which is why this model carries THREE independent (ref, dt) pairs rather than era5_single.esm's single one: the native records sit at 01:30, 04:30, ... UTC — the mid-points of the 3 h averaging windows The default assumes the run clock has t=0 at 00:00 UTC of the file's day; a runner whose t=0 is elsewhere must offset it."
-        },
-        "dt_interp_A3": {
-          "type": "parameter",
-          "units": "s",
-          "default": 10800.0,
-          "description": "TIME INTERPOLATION: the A3 cadence step (s) between the two bracketing records — A3dyn/A3cld/A3mstC/A3mstE is 3-hourly, so 10800. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so this model's weight phase agrees with which two records the provider actually loaded."
-        },
-        "w_time_A3": {
-          "type": "observed",
-          "units": "1",
-          "description": "TIME INTERPOLATION weight in [0,1) for the A3 cadence: the fractional position of the current simulation time t within its bracketing pair of A3dyn/A3cld/A3mstC/A3mstE records, w = frac((t - t_interp_ref_A3)/dt_interp_A3). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_A3 for why GEOS-FP needs three of these and ERA5 only one.",
-          "expression": {
+        {
+          "lhs": "w_time_A3",
+          "rhs": {
             "op": "-",
             "args": [
               {
@@ -179,23 +454,9 @@
             ]
           }
         },
-        "t_interp_ref_A1": {
-          "type": "parameter",
-          "units": "s",
-          "default": 1800.0,
-          "description": "TIME INTERPOLATION (loader records_per_sample=2), A1 cadence. Simulation-clock time (s) of any cadence anchor of the A1 (hourly time-AVERAGED: PBLH, T2M, U10M, SWGDN, ...) collection — i.e. a time at which a fresh record lands, so the interpolation weight w_time_A1 is exactly 0 there. Together with dt_interp_A1 it locates the current time within its bracketing record pair WITHOUT the runtime injecting timestamps.\n\nGEOS-FP's collections are NOT co-phased, which is why this model carries THREE independent (ref, dt) pairs rather than era5_single.esm's single one: the native records sit at 00:30, 01:30, ... UTC — the mid-points of the 1 h averaging windows The default assumes the run clock has t=0 at 00:00 UTC of the file's day; a runner whose t=0 is elsewhere must offset it."
-        },
-        "dt_interp_A1": {
-          "type": "parameter",
-          "units": "s",
-          "default": 3600.0,
-          "description": "TIME INTERPOLATION: the A1 cadence step (s) between the two bracketing records — A1 is hourly, so 3600. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so this model's weight phase agrees with which two records the provider actually loaded."
-        },
-        "w_time_A1": {
-          "type": "observed",
-          "units": "1",
-          "description": "TIME INTERPOLATION weight in [0,1) for the A1 cadence: the fractional position of the current simulation time t within its bracketing pair of A1 records, w = frac((t - t_interp_ref_A1)/dt_interp_A1). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0->1 across each cadence interval and resets to 0 at the next record, so a consumer blending the two bracketing fields as (1 - w)*F0 + w*F1 varies smoothly between records instead of stepping.\n\nMirrors era5_single.esm's w_time; see t_interp_ref_A1 for why GEOS-FP needs three of these and ERA5 only one.",
-          "expression": {
+        {
+          "lhs": "w_time_A1",
+          "rhs": {
             "op": "-",
             "args": [
               {
@@ -232,251 +493,169 @@
             ]
           }
         },
-        "T": {
-          "type": "observed",
-          "units": "K",
-          "description": "Air temperature (K). 3-hourly instantaneous 3D field on the GEOS-FP hybrid pressure levels. Sourced from GEOSFP_I3.T. Used in virtual temperature calculation Tv = T * (1 + 0.61*QV).",
-          "expression": "GEOSFP_I3.T"
+        {
+          "lhs": "T",
+          "rhs": "GEOSFP_I3.T"
         },
-        "QV": {
-          "type": "observed",
-          "units": "kg/kg",
-          "description": "Specific humidity of water vapor (kg/kg). 3-hourly instantaneous 3D field. Sourced from GEOSFP_I3.QV. Used in virtual temperature calculation.",
-          "expression": "GEOSFP_I3.QV"
+        {
+          "lhs": "QV",
+          "rhs": "GEOSFP_I3.QV"
         },
-        "PS": {
-          "type": "observed",
-          "units": "Pa",
-          "description": "Surface pressure (Pa). 3-hourly instantaneous 2D field (no lev dimension). Used in hybrid pressure calculation P = Ap[lev] + Bp[lev]*PS. Sourced from GEOSFP_I3.PS.",
-          "expression": "GEOSFP_I3.PS"
+        {
+          "lhs": "PS",
+          "rhs": "GEOSFP_I3.PS"
         },
-        "T2M": {
-          "type": "observed",
-          "units": "K",
-          "description": "Air temperature at 2m above the displacement height (K). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc = T2M * (1 + 0.61*QV2M). Sourced from GEOSFP_A1.T2M.",
-          "expression": "GEOSFP_A1.T2M"
+        {
+          "lhs": "T2M",
+          "rhs": "GEOSFP_A1.T2M"
         },
-        "QV2M": {
-          "type": "observed",
-          "units": "kg/kg",
-          "description": "Specific humidity at 2m (kg/kg). 1-hourly time-averaged 2D surface field. Used in near-surface virtual temperature Tv_sfc. Sourced from GEOSFP_A1.QV2M.",
-          "expression": "GEOSFP_A1.QV2M"
+        {
+          "lhs": "QV2M",
+          "rhs": "GEOSFP_A1.QV2M"
         },
-        "U10M": {
-          "type": "observed",
-          "units": "m/s",
-          "description": "Eastward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.U10M.",
-          "expression": "GEOSFP_A1.U10M"
+        {
+          "lhs": "U10M",
+          "rhs": "GEOSFP_A1.U10M"
         },
-        "V10M": {
-          "type": "observed",
-          "units": "m/s",
-          "description": "Northward wind at 10m above the displacement height (m/s). 1-hourly time-averaged 2D surface field. Sourced from GEOSFP_A1.V10M.",
-          "expression": "GEOSFP_A1.V10M"
+        {
+          "lhs": "V10M",
+          "rhs": "GEOSFP_A1.V10M"
         },
-        "PBLH": {
-          "type": "observed",
-          "units": "m",
-          "description": "Planetary boundary layer height (m). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PBLH.",
-          "expression": "GEOSFP_A1.PBLH"
+        {
+          "lhs": "PBLH",
+          "rhs": "GEOSFP_A1.PBLH"
         },
-        "PRECTOT": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Total precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field (large-scale plus convective). Sourced from GEOSFP_A1.PRECTOT.",
-          "expression": "GEOSFP_A1.PRECTOT"
+        {
+          "lhs": "PRECTOT",
+          "rhs": "GEOSFP_A1.PRECTOT"
         },
-        "PRECANV": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Anvil precipitation rate (kg m⁻² s⁻¹). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.PRECANV.",
-          "expression": "GEOSFP_A1.PRECANV"
+        {
+          "lhs": "PRECANV",
+          "rhs": "GEOSFP_A1.PRECANV"
         },
-        "SLP": {
-          "type": "observed",
-          "units": "Pa",
-          "description": "Sea-level pressure (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SLP.",
-          "expression": "GEOSFP_A1.SLP"
+        {
+          "lhs": "SLP",
+          "rhs": "GEOSFP_A1.SLP"
         },
-        "TS": {
-          "type": "observed",
-          "units": "K",
-          "description": "Surface skin temperature (K). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TS.",
-          "expression": "GEOSFP_A1.TS"
+        {
+          "lhs": "TS",
+          "rhs": "GEOSFP_A1.TS"
         },
-        "CLDTOT": {
-          "type": "observed",
-          "units": "1",
-          "description": "Total cloud fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.CLDTOT.",
-          "expression": "GEOSFP_A1.CLDTOT"
+        {
+          "lhs": "CLDTOT",
+          "rhs": "GEOSFP_A1.CLDTOT"
         },
-        "SWGDN": {
-          "type": "observed",
-          "units": "W/m^2",
-          "description": "Incident shortwave flux at the ground (W m⁻²). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.SWGDN.",
-          "expression": "GEOSFP_A1.SWGDN"
+        {
+          "lhs": "SWGDN",
+          "rhs": "GEOSFP_A1.SWGDN"
         },
-        "TROPP_H": {
-          "type": "observed",
-          "units": "Pa",
-          "description": "Tropopause pressure using the thermal definition (Pa). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.TROPP_H.",
-          "expression": "GEOSFP_A1.TROPP_H"
+        {
+          "lhs": "TROPP_H",
+          "rhs": "GEOSFP_A1.TROPP_H"
         },
-        "FRSEAICE": {
-          "type": "observed",
-          "units": "1",
-          "description": "Sea ice area fraction (dimensionless, 0–1). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.FRSEAICE.",
-          "expression": "GEOSFP_A1.FRSEAICE"
+        {
+          "lhs": "FRSEAICE",
+          "rhs": "GEOSFP_A1.FRSEAICE"
         },
-        "GWETTOP": {
-          "type": "observed",
-          "units": "1",
-          "description": "Topsoil moisture (volumetric, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.GWETTOP.",
-          "expression": "GEOSFP_A1.GWETTOP"
+        {
+          "lhs": "GWETTOP",
+          "rhs": "GEOSFP_A1.GWETTOP"
         },
-        "LAI": {
-          "type": "observed",
-          "units": "1",
-          "description": "Leaf area index (m² leaf per m² ground, dimensionless). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.LAI.",
-          "expression": "GEOSFP_A1.LAI"
+        {
+          "lhs": "LAI",
+          "rhs": "GEOSFP_A1.LAI"
         },
-        "USTAR": {
-          "type": "observed",
-          "units": "m/s",
-          "description": "Surface friction velocity (m/s). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.USTAR.",
-          "expression": "GEOSFP_A1.USTAR"
+        {
+          "lhs": "USTAR",
+          "rhs": "GEOSFP_A1.USTAR"
         },
-        "Z0M": {
-          "type": "observed",
-          "units": "m",
-          "description": "Surface roughness length for momentum (m). 1-hourly time-averaged 2D field. Sourced from GEOSFP_A1.Z0M.",
-          "expression": "GEOSFP_A1.Z0M"
+        {
+          "lhs": "Z0M",
+          "rhs": "GEOSFP_A1.Z0M"
         },
-        "U": {
-          "type": "observed",
-          "units": "m/s",
-          "description": "Eastward wind component (m/s). 3-hourly time-averaged 3D field. Cell-center staggered in y and z; x-edge-staggered (lon-edge aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.U. Coupled to MeanWind.v_lon via GEOSFPCoupler/couple2. Clamp extrapolation.",
-          "expression": "GEOSFP_A3dyn.U"
+        {
+          "lhs": "U",
+          "rhs": "GEOSFP_A3dyn.U"
         },
-        "V": {
-          "type": "observed",
-          "units": "m/s",
-          "description": "Northward wind component (m/s). 3-hourly time-averaged 3D field. y-edge-staggered (lat-edge aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.V. Coupled to MeanWind.v_lat via GEOSFPCoupler/couple2. Clamp extrapolation.",
-          "expression": "GEOSFP_A3dyn.V"
+        {
+          "lhs": "V",
+          "rhs": "GEOSFP_A3dyn.V"
         },
-        "OMEGA": {
-          "type": "observed",
-          "units": "Pa/s",
-          "description": "Vertical pressure velocity (Pa/s). 3-hourly time-averaged 3D field. z-edge-staggered (lev-interface aligned, de-staggered by runtime). Sourced from GEOSFP_A3dyn.OMEGA. Coupled to MeanWind.v_lev via GEOSFPCoupler/couple2. Zero extrapolation (extrapolate_type=0.0) to prevent spurious vertical mass transport.",
-          "expression": "GEOSFP_A3dyn.OMEGA"
+        {
+          "lhs": "OMEGA",
+          "rhs": "GEOSFP_A3dyn.OMEGA"
         },
-        "RH": {
-          "type": "observed",
-          "units": "1",
-          "description": "Relative humidity with respect to liquid water (dimensionless, 0–1). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.RH. Clamp extrapolation.",
-          "expression": "GEOSFP_A3dyn.RH"
+        {
+          "lhs": "RH",
+          "rhs": "GEOSFP_A3dyn.RH"
         },
-        "DTRAIN": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Detrainment of cloud mass (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3dyn.DTRAIN. Clamp extrapolation.",
-          "expression": "GEOSFP_A3dyn.DTRAIN"
+        {
+          "lhs": "DTRAIN",
+          "rhs": "GEOSFP_A3dyn.DTRAIN"
         },
-        "CLOUD": {
-          "type": "observed",
-          "units": "1",
-          "description": "3D cloud fraction (dimensionless, 0–1). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.CLOUD. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.CLOUD"
+        {
+          "lhs": "CLOUD",
+          "rhs": "GEOSFP_A3cld.CLOUD"
         },
-        "QI": {
-          "type": "observed",
-          "units": "kg/kg",
-          "description": "Mass fraction of cloud ice water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QI. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.QI"
+        {
+          "lhs": "QI",
+          "rhs": "GEOSFP_A3cld.QI"
         },
-        "QL": {
-          "type": "observed",
-          "units": "kg/kg",
-          "description": "Mass fraction of cloud liquid water (kg/kg). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.QL. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.QL"
+        {
+          "lhs": "QL",
+          "rhs": "GEOSFP_A3cld.QL"
         },
-        "OPTDEPTH": {
-          "type": "observed",
-          "units": "1",
-          "description": "Grid-mean cloud optical depth at visible wavelengths (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.OPTDEPTH. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.OPTDEPTH"
+        {
+          "lhs": "OPTDEPTH",
+          "rhs": "GEOSFP_A3cld.OPTDEPTH"
         },
-        "TAUCLI": {
-          "type": "observed",
-          "units": "1",
-          "description": "Optical thickness of convective ice cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLI. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.TAUCLI"
+        {
+          "lhs": "TAUCLI",
+          "rhs": "GEOSFP_A3cld.TAUCLI"
         },
-        "TAUCLW": {
-          "type": "observed",
-          "units": "1",
-          "description": "Optical thickness of convective liquid cloud (dimensionless). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3cld.TAUCLW. Clamp extrapolation.",
-          "expression": "GEOSFP_A3cld.TAUCLW"
+        {
+          "lhs": "TAUCLW",
+          "rhs": "GEOSFP_A3cld.TAUCLW"
         },
-        "CMFMC": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Upward moist convective mass flux (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.CMFMC. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstC.CMFMC"
+        {
+          "lhs": "CMFMC",
+          "rhs": "GEOSFP_A3mstC.CMFMC"
         },
-        "DQRCU": {
-          "type": "observed",
-          "units": "kg/kg/s",
-          "description": "Convective rain production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRCU. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstC.DQRCU"
+        {
+          "lhs": "DQRCU",
+          "rhs": "GEOSFP_A3mstC.DQRCU"
         },
-        "DQRLSAN": {
-          "type": "observed",
-          "units": "kg/kg/s",
-          "description": "Large-scale rain and snow production (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.DQRLSAN. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstC.DQRLSAN"
+        {
+          "lhs": "DQRLSAN",
+          "rhs": "GEOSFP_A3mstC.DQRLSAN"
         },
-        "REEEVAP": {
-          "type": "observed",
-          "units": "kg/kg/s",
-          "description": "Evaporation of convective precipitation (kg kg⁻¹ s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstC.REEEVAP. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstC.REEEVAP"
+        {
+          "lhs": "REEEVAP",
+          "rhs": "GEOSFP_A3mstC.REEEVAP"
         },
-        "CMFMC_OCE": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Downward moist convective mass flux from ocean (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.CMFMC_OCE. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstE.CMFMC_OCE"
+        {
+          "lhs": "CMFMC_OCE",
+          "rhs": "GEOSFP_A3mstE.CMFMC_OCE"
         },
-        "PFICU": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of ice mass from convection (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFICU. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstE.PFICU"
+        {
+          "lhs": "PFICU",
+          "rhs": "GEOSFP_A3mstE.PFICU"
         },
-        "PFILSAN": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of ice mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFILSAN. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstE.PFILSAN"
+        {
+          "lhs": "PFILSAN",
+          "rhs": "GEOSFP_A3mstE.PFILSAN"
         },
-        "PFLCU": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of liquid mass from convection (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFLCU. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstE.PFLCU"
+        {
+          "lhs": "PFLCU",
+          "rhs": "GEOSFP_A3mstE.PFLCU"
         },
-        "PFLLSAN": {
-          "type": "observed",
-          "units": "kg/m^2/s",
-          "description": "Downward flux of liquid mass from large-scale precipitation and snowfall (kg m⁻² s⁻¹). 3-hourly time-averaged 3D field. Sourced from GEOSFP_A3mstE.PFLLSAN. Clamp extrapolation.",
-          "expression": "GEOSFP_A3mstE.PFLLSAN"
+        {
+          "lhs": "PFLLSAN",
+          "rhs": "GEOSFP_A3mstE.PFLLSAN"
         },
-        "P": {
-          "type": "observed",
-          "units": "Pa",
-          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (interp.linear over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup.",
-          "expression": {
+        {
+          "lhs": "P",
+          "rhs": {
             "op": "+",
             "args": [
               {
@@ -818,11 +997,9 @@
             ]
           }
         },
-        "Tv": {
-          "type": "observed",
-          "units": "K",
-          "description": "Virtual temperature at pressure level (K). Tv = T × (1 + 0.61 × QV), where T is air temperature and QV is specific humidity. Used in geopotential height calculation Z_agl (which is omitted due to gt-p3ep(lookup); see reference.notes).",
-          "expression": {
+        {
+          "lhs": "Tv",
+          "rhs": {
             "op": "*",
             "args": [
               "GEOSFP_I3.T",
@@ -842,11 +1019,9 @@
             ]
           }
         },
-        "Tv_sfc": {
-          "type": "observed",
-          "units": "K",
-          "description": "Near-surface virtual temperature at 2m (K). Tv_sfc = T2M × (1 + 0.61 × QV2M). Used in layer-mean virtual temperature Tv̄.",
-          "expression": {
+        {
+          "lhs": "Tv_sfc",
+          "rhs": {
             "op": "*",
             "args": [
               "GEOSFP_A1.T2M",
@@ -866,11 +1041,9 @@
             ]
           }
         },
-        "Tv_bar": {
-          "type": "observed",
-          "units": "K",
-          "description": "Layer-mean virtual temperature (K). Tv̄ = 0.5 × (Tv + Tv_sfc). Used in Z_agl hypsometric height calculation (omitted; see reference.notes).",
-          "expression": {
+        {
+          "lhs": "Tv_bar",
+          "rhs": {
             "op": "*",
             "args": [
               0.5,
@@ -884,11 +1057,9 @@
             ]
           }
         },
-        "δxδlon": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m × cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134.3 m rad⁻¹. Emitted only in lat/lon coordinate domains.",
-          "expression": {
+        {
+          "lhs": "δxδlon",
+          "rhs": {
             "op": "*",
             "args": [
               6378134.3,
@@ -901,34 +1072,11 @@
             ]
           }
         },
-        "δyδlat": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³×(180/π) ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains.",
-          "expression": 6378166.0
+        {
+          "lhs": "δyδlat",
+          "rhs": 6378166.0
         }
-      },
-      "subsystems": {
-        "GEOSFP_A1": {
-          "ref": "./geosfp_a1_loader.esm"
-        },
-        "GEOSFP_A3cld": {
-          "ref": "./geosfp_a3cld_loader.esm"
-        },
-        "GEOSFP_A3dyn": {
-          "ref": "./geosfp_a3dyn_loader.esm"
-        },
-        "GEOSFP_A3mstC": {
-          "ref": "./geosfp_a3mstc_loader.esm"
-        },
-        "GEOSFP_A3mstE": {
-          "ref": "./geosfp_a3mste_loader.esm"
-        },
-        "GEOSFP_I3": {
-          "ref": "./geosfp_i3_loader.esm"
-        }
-      },
-      "equations": [],
+      ],
       "tests": []
     }
   }

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SoilHydraulicProperties",
         "description": "Soil hydraulic properties for an urban-canopy pervious-road soil column following Section 5.3.1 of Oleson et al. (2010, CLM4 Tech Note). Computes five Clapp-Hornberger / Cosby-style properties from the soil sand and clay fractions and the local volumetric water content: saturated hydraulic conductivity k_sat (Eq. 5.70), porosity θ_sat (Eq. 5.71), Clapp-Hornberger exponent B (Eq. 5.72), saturated matric potential ψ_sat (Eq. 5.74), and matric potential ψ (Eq. 5.73, clamped on both sides). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:322 (`SoilHydraulicProperties` @component). Observed-only: all three inputs are parameters and all five outputs are given by single algebraic equations.",
@@ -35,7 +35,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:322\nUpstream `SoilHydraulicProperties` is an MTK `@component` whose three inputs (pct_sand, pct_clay, θ_i) are `@parameters` and whose five outputs (k_sat, θ_sat, B, ψ_sat, ψ) are time-indexed `@variables` with five algebraic equations (no derivatives). Identical structure preserved here.\n\nUnicode parameter / variable names θ_i, θ_sat, ψ_sat, ψ are preserved from upstream — sibling files in this directory (soil_water_flux.esm, water_table_depth.esm, interface_hydraulic_conductivity.esm, soil_water_content_calc.esm) already established that unicode identifiers are the rig convention for new urban_canopy migrations and the canonical Python runner accepts them.\n\nThe upstream component declares three `@constants` (k_coeff, ψ_coeff, ψ_min); they are encoded here as parameters with the upstream default values, mirroring the convention used by sibling files (groundwater_drainage.esm, surface_runoff_infiltration.esm) for `@constants`-to-parameter promotion. Default values: k_coeff = 7.0556e-6 m/s (paper's 0.0070556 mm/s converted to m/s, Eq. 5.70), ψ_coeff = -0.010 m (paper's -10.0 mm converted to m, Eq. 5.74), ψ_min = -1.0e5 m (paper's -1e8 mm converted to m). The mm-to-m conversions are applied at the @constants declaration site upstream; this file inherits the SI values so its outputs are SI-consistent without further conversion.\n\nEq. 5.73 (matric potential) carries two clamps on the water-content ratio (θ_i / θ_sat) to keep ψ finite: an inner `max(θ_i, 0.01 * θ_sat)` floor on the numerator keeps the ratio ≥ 0.01 (prevents division-by-zero and excessive negative exponents as the soil approaches dryness), and an outer `max(..., ψ_min)` floor on ψ itself keeps it ≥ -1e5 m even when the inner clamp's value still produces an absurdly negative matric potential (e.g. at very high B for clay-rich soils). Both clamps are preserved verbatim from upstream Eq. 5.73 — they are physical regularizers, not numerical hacks, and the canonical Python runner reproduces the upstream Julia results to machine precision when both clamps fire.\n\nObservability classification: this component is functionally observed-only — all five output variables are given by single algebraic equations in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_flux.esm, water_table_depth.esm, groundwater_drainage.esm, interface_hydraulic_conductivity.esm).\n\nDefault parameter values: pct_sand = 50 %, pct_clay = 20 %, θ_i = 0.3 m^3/m^3 — a typical CLMU loam at partial saturation (θ_i ≈ 0.7 × θ_sat). The qualitative-test scenarios in the upstream `SoilHydraulicProperties - Qualitative Behavior` testitem (UrbanCanopy.jl test/hydrology_test.jl:970) use the same pct_clay = 20, θ_i = 0.3 baseline.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the five equations involve O(10) IEEE-754 float64 operations each, with k_sat and ψ_sat carrying one `^` (10.0^x) call (≈1 ULP of relative error) and ψ carrying one `^` plus two `max` calls — worst-case roundoff is ~10*ULP ≈ 1e-15. 1e-9 leaves comfortable headroom and is well below any plausible physical-discrimination scale on soil hydraulic properties (k_sat ∈ [1e-7, 1e-4] m/s across realistic Cosby sand fractions; θ_sat ∈ [0.4, 0.49]; B ∈ [3, 11]; ψ_sat ∈ [-0.8, -0.07] m). Tests that pin upstream test:466's `≈ rtol=1e-6` assertions use the looser `rel: 1e-6` tolerance from the upstream to confirm cross-runner consistency."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "pct_sand": {
@@ -59,43 +59,43 @@
                 "k_coeff": {
                     "type": "parameter",
                     "units": "m/s",
-                    "default": 7.0556e-6,
+                    "default": 7.0556e-06,
                     "description": "Coefficient for saturated hydraulic conductivity (Oleson Eq. 5.70, converted from 0.0070556 mm/s to 7.0556e-6 m/s)"
                 },
                 "ψ_coeff": {
                     "type": "parameter",
                     "units": "m",
-                    "default": -0.010,
+                    "default": -0.01,
                     "description": "Coefficient for saturated matric potential (Oleson Eq. 5.74, converted from -10.0 mm to -0.010 m)"
                 },
                 "ψ_min": {
                     "type": "parameter",
                     "units": "m",
-                    "default": -1.0e5,
+                    "default": -100000.0,
                     "description": "Minimum (most-negative) soil matric potential (Oleson Eq. 5.73 outer clamp, converted from -1e8 mm to -1e5 m)"
                 },
                 "k_sat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "description": "Saturated hydraulic conductivity (Oleson Eq. 5.70)"
                 },
                 "θ_sat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^3/m^3",
                     "description": "Volumetric water content at saturation / porosity (Oleson Eq. 5.71)"
                 },
                 "B": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Clapp-Hornberger exponent (Oleson Eq. 5.72, dimensionless)"
                 },
                 "ψ_sat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Saturated soil matric potential (Oleson Eq. 5.74)"
                 },
                 "ψ": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Soil matric potential (Oleson Eq. 5.73, clamped: inner θ_i/θ_sat ratio ≥ 0.01, outer ψ ≥ ψ_min)"
                 }
@@ -115,7 +115,13 @@
                                         "op": "+",
                                         "args": [
                                             -0.884,
-                                            { "op": "*", "args": [0.0153, "pct_sand"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    0.0153,
+                                                    "pct_sand"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -129,7 +135,13 @@
                         "op": "-",
                         "args": [
                             0.489,
-                            { "op": "*", "args": [0.00126, "pct_sand"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.00126,
+                                    "pct_sand"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -139,7 +151,13 @@
                         "op": "+",
                         "args": [
                             2.91,
-                            { "op": "*", "args": [0.159, "pct_clay"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.159,
+                                    "pct_clay"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -157,7 +175,13 @@
                                         "op": "-",
                                         "args": [
                                             1.88,
-                                            { "op": "*", "args": [0.0131, "pct_sand"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    0.0131,
+                                                    "pct_sand"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -184,13 +208,25 @@
                                                         "op": "max",
                                                         "args": [
                                                             "θ_i",
-                                                            { "op": "*", "args": [0.01, "θ_sat"] }
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    0.01,
+                                                                    "θ_sat"
+                                                                ]
+                                                            }
                                                         ]
                                                     },
                                                     "θ_sat"
                                                 ]
                                             },
-                                            { "op": "*", "args": [-1, "B"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "B"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -209,13 +245,51 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.426
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 5.364558079579147e-06, "tolerance": { "rel": 1.0e-6 } },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.426, "tolerance": { "rel": 1.0e-6 } },
-                        { "variable": "B",     "time": 0.0, "expected": 6.09, "tolerance": { "rel": 1.0e-6 } },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.16788040181225597, "tolerance": { "rel": 1.0e-6 } },
-                        { "variable": "ψ",     "time": 0.0, "expected": -0.16788040181225597, "tolerance": { "rel": 1.0e-4 } }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 5.364558079579147e-06,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.426,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 6.09,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.16788040181225597,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -0.16788040181225597,
+                            "tolerance": {
+                                "rel": 0.0001
+                            }
+                        }
                     ]
                 },
                 {
@@ -226,13 +300,36 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 5.364558079579147e-06 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.426 },
-                        { "variable": "B",     "time": 0.0, "expected": 6.09 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.16788040181225597 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -1.420482923905238 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 5.364558079579147e-06
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.426
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 6.09
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.16788040181225597
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -1.420482923905238
+                        }
                     ]
                 },
                 {
@@ -243,13 +340,36 @@
                         "pct_clay": 10.0,
                         "θ_i": 0.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 1.0852603880122091e-05 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.4008 },
-                        { "variable": "B",     "time": 0.0, "expected": 4.5 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.09183325964835806 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -7.651807612176636 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 1.0852603880122091e-05
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.4008
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 4.5
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.09183325964835806
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -7.651807612176636
+                        }
                     ]
                 },
                 {
@@ -260,13 +380,36 @@
                         "pct_clay": 50.0,
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 1.3107925113344989e-06 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.4764 },
-                        { "variable": "B",     "time": 0.0, "expected": 10.86 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.5610479760324704 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -85.1601483413643 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 1.3107925113344989e-06
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.4764
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 10.86
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.5610479760324704
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -85.1601483413643
+                        }
                     ]
                 },
                 {
@@ -277,13 +420,36 @@
                         "pct_clay": 0.0,
                         "θ_i": 0.001
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 1.5435970913938464e-05 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.3882 },
-                        { "variable": "B",     "time": 0.0, "expected": 2.91 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.06792036326171844 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -44874.53899331323 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 1.5435970913938464e-05
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.3882
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 2.91
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.06792036326171844
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -44874.53899331323
+                        }
                     ]
                 },
                 {
@@ -294,13 +460,39 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.001
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 5.364558079579147e-06 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.426 },
-                        { "variable": "B",     "time": 0.0, "expected": 6.09 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.16788040181225597 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -100000.0, "tolerance": { "abs": 1.0e-10 } }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 5.364558079579147e-06
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.426
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 6.09
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.16788040181225597
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -100000.0,
+                            "tolerance": {
+                                "abs": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -311,13 +503,36 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 1.8643779228160723e-06 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.4638 },
-                        { "variable": "B",     "time": 0.0, "expected": 6.09 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.41495404263436286 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -5.892312769696793 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 1.8643779228160723e-06
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.4638
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 6.09
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.41495404263436286
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -5.892312769696793
+                        }
                     ]
                 },
                 {
@@ -328,17 +543,40 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "k_sat", "time": 0.0, "expected": 1.5435970913938464e-05 },
-                        { "variable": "θ_sat", "time": 0.0, "expected": 0.3882 },
-                        { "variable": "B",     "time": 0.0, "expected": 6.09 },
-                        { "variable": "ψ_sat", "time": 0.0, "expected": -0.06792036326171844 },
-                        { "variable": "ψ",     "time": 0.0, "expected": -0.3263470887762197 }
+                        {
+                            "variable": "k_sat",
+                            "time": 0.0,
+                            "expected": 1.5435970913938464e-05
+                        },
+                        {
+                            "variable": "θ_sat",
+                            "time": 0.0,
+                            "expected": 0.3882
+                        },
+                        {
+                            "variable": "B",
+                            "time": 0.0,
+                            "expected": 6.09
+                        },
+                        {
+                            "variable": "ψ_sat",
+                            "time": 0.0,
+                            "expected": -0.06792036326171844
+                        },
+                        {
+                            "variable": "ψ",
+                            "time": 0.0,
+                            "expected": -0.3263470887762197
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "k_sat_vs_pct_sand",
                     "description": "Saturated hydraulic conductivity k_sat vs. percent sand content (Eq. 5.70). Sweeping pct_sand from 5 % (clay-rich) to 95 % (nearly-pure sand) traces the canonical Cosby-style log-linear relationship — k_sat increases by ~1.5 decades over the realistic 5-95 % sand range. The y-axis is logarithmic because Eq. 5.70 places pct_sand inside a 10^(0.0153 * pct_sand) factor.",
@@ -347,13 +585,21 @@
                         "pct_clay": 20.0,
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "pct_sand",
-                                "range": { "start": 5.0, "stop": 95.0, "count": 19, "scale": "linear" }
+                                "range": {
+                                    "start": 5.0,
+                                    "stop": 95.0,
+                                    "count": 19,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -362,8 +608,14 @@
                             "id": "k_sat_curve",
                             "type": "line",
                             "description": "k_sat vs pct_sand: log-linear increase from Eq. 5.70's 10^(0.0153 * pct_sand) factor.",
-                            "x": { "variable": "pct_sand", "label": "pct_sand (%)" },
-                            "y": { "variable": "k_sat",    "label": "k_sat (m/s)" }
+                            "x": {
+                                "variable": "pct_sand",
+                                "label": "pct_sand (%)"
+                            },
+                            "y": {
+                                "variable": "k_sat",
+                                "label": "k_sat (m/s)"
+                            }
                         }
                     ]
                 },
@@ -375,13 +627,21 @@
                         "pct_sand": 50.0,
                         "pct_clay": 20.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "θ_i",
-                                "range": { "start": 0.05, "stop": 0.426, "count": 30, "scale": "linear" }
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.426,
+                                    "count": 30,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -390,8 +650,14 @@
                             "id": "psi_curve",
                             "type": "line",
                             "description": "ψ vs θ_i (Cosby loam, pct_sand=50, pct_clay=20) — the Clapp-Hornberger retention curve of Eq. 5.73.",
-                            "x": { "variable": "θ_i", "label": "θ_i (m^3/m^3)" },
-                            "y": { "variable": "ψ",   "label": "ψ (m, more negative = drier)" }
+                            "x": {
+                                "variable": "θ_i",
+                                "label": "θ_i (m^3/m^3)"
+                            },
+                            "y": {
+                                "variable": "ψ",
+                                "label": "ψ (m, more negative = drier)"
+                            }
                         }
                     ]
                 },
@@ -402,17 +668,30 @@
                     "parameters": {
                         "θ_i": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "pct_sand",
-                                "range": { "start": 10.0, "stop": 90.0, "count": 9, "scale": "linear" }
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 90.0,
+                                    "count": 9,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "pct_clay",
-                                "range": { "start": 5.0, "stop": 50.0, "count": 10, "scale": "linear" }
+                                "range": {
+                                    "start": 5.0,
+                                    "stop": 50.0,
+                                    "count": 10,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -421,9 +700,18 @@
                             "id": "psi_heatmap",
                             "type": "heatmap",
                             "description": "ψ as a function of sand and clay percentages at θ_i = 0.3 m^3/m^3.",
-                            "x": { "variable": "pct_sand", "label": "pct_sand (%)" },
-                            "y": { "variable": "pct_clay", "label": "pct_clay (%)" },
-                            "value": { "variable": "ψ", "reduce": "final" }
+                            "x": {
+                                "variable": "pct_sand",
+                                "label": "pct_sand (%)"
+                            },
+                            "y": {
+                                "variable": "pct_clay",
+                                "label": "pct_clay (%)"
+                            },
+                            "value": {
+                                "variable": "ψ",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

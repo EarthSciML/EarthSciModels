@@ -1,5 +1,5 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "ERA5",
     "description": "ERA5 regridding model — the coupler half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.1). Exposes ERA5 ECMWF Reanalysis 5th Generation pressure-level fields on the simulation's target grid for coupling into EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/era5_loader.esm) as the subsystem `pl` via {\"ref\": \"./era5_loader.esm\"}. Loader fields are referenced as ERA5.pl.<var> (e.g. ERA5.pl.u).\n  2. Reprojection & regridding are NOT model concerns at esm 0.8.0. ERA5's native grid is geographic (longlat/WGS84); the identity longlat reprojection and the per-variable regridding onto a consuming grid (conservative for centered scalars t/q/r/z/w/…, B-spline for the horizontal winds u/v) are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5) by importing the earthscidiscretizations reprojection/ and regridding/ template libraries — see the wildlandfire.esm assembler. This model no longer carries a `regrid` block.\n\nTop-level derived quantities computed on the target grid: pressure P (from the 37-entry pressure-level lookup table), and the lat/lon coordinate metrics δxδlon and δyδlat (emitted only for lat/lon coordinate domains).\n\nMeanWind coupling (from EarthSciData.jl@830435a coupling.jl): MeanWind.v_lon ~ ERA5.pl.u, MeanWind.v_lat ~ ERA5.pl.v, MeanWind.v_lev ~ ERA5.pl.w.\n\nMigration esm 0.7.0 -> 0.8.0 (this file): v0.8.0 is a clean break that REMOVED `Model.regrid`/`RegridSpec` (esm-spec §8.6). Accordingly the former model `regrid` block (per-variable conservative/bspline methods) has been REMOVED and the regridding is now performed at the coupling edge via imported template libraries. The loader fields are consumed directly as ERA5.pl.<var>.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385 (ERA5 constructor, esm-te2e); split into pure loader + regridding model by esm-3nc.1.",
@@ -35,10 +35,86 @@
       "axes": [
         {
           "name": "lev",
-          "values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+          "values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36,
+            37
+          ]
         }
       ],
-      "data": [100000.0, 97500.0, 95000.0, 92500.0, 90000.0, 87500.0, 85000.0, 82500.0, 80000.0, 77500.0, 75000.0, 70000.0, 65000.0, 60000.0, 55000.0, 50000.0, 45000.0, 40000.0, 35000.0, 30000.0, 25000.0, 22500.0, 20000.0, 17500.0, 15000.0, 12500.0, 10000.0, 7000.0, 5000.0, 3000.0, 2000.0, 1000.0, 700.0, 500.0, 300.0, 200.0, 100.0],
+      "data": [
+        100000.0,
+        97500.0,
+        95000.0,
+        92500.0,
+        90000.0,
+        87500.0,
+        85000.0,
+        82500.0,
+        80000.0,
+        77500.0,
+        75000.0,
+        70000.0,
+        65000.0,
+        60000.0,
+        55000.0,
+        50000.0,
+        45000.0,
+        40000.0,
+        35000.0,
+        30000.0,
+        25000.0,
+        22500.0,
+        20000.0,
+        17500.0,
+        15000.0,
+        12500.0,
+        10000.0,
+        7000.0,
+        5000.0,
+        3000.0,
+        2000.0,
+        1000.0,
+        700.0,
+        500.0,
+        300.0,
+        200.0,
+        100.0
+      ],
       "interpolation": "linear",
       "out_of_bounds": "clamp",
       "description": "ERA5 pressure levels in Pa (= hPa * 100). Index 1 = 1000 hPa (near-surface), index 37 = 1 hPa (top of atmosphere). ERA5_PRESSURE_LEVELS_HPA = [1000, 975, 950, 925, 900, 875, 850, 825, 800, 775, 750, 700, 650, 600, 550, 500, 450, 400, 350, 300, 250, 225, 200, 175, 150, 125, 100, 70, 50, 30, 20, 10, 7, 5, 3, 2, 1] converted to Pa. Used by the observed variable P (table_lookup with lev input), reproducing the upstream era5_P_itp LinearInterpolation of levels 1:37 → hPa values."
@@ -50,7 +126,7 @@
         "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/era5.jl:385\n\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.1). The pre-migration era5.esm carried both the coupler model AND a co-located data_loaders.ERA5_pl block (with the now-removed `spatial` and `regridding` sub-blocks). That loader is now the pure-I/O file components/earthsci_data/era5_loader.esm, referenced here as subsystem `pl`.\n\nUpstream constructor ERA5(domaininfo; name=:ERA5, stream=true, spatial_interp=:linear) created an MTK System with:\n  - @parameters: lon (rad), lat (rad), lev (dimensionless, 1–37 integer index), t_ref (s)\n  - Sub-system 'pl' containing one observed equation per NetCDF variable (16 variables): pl₊t, pl₊u, pl₊v, pl₊w, pl₊q, pl₊r, pl₊z, pl₊d, pl₊vo, pl₊o3, pl₊cc, pl₊ciwc, pl₊clwc, pl₊crwc, pl₊cswc, pl₊pv. These are now provided directly by the loader subsystem `pl` (ERA5.pl.<var>), not by per-variable interp_unsafe observed equations.\n  - Top-level observed variables: P(t) ~ hPa2Pa * era5_P_itp(lev) where hPa2Pa=100.0; δxδlon(t) ~ lon2m * cos(lat) [lat/lon domains only]; δyδlat(t) ~ lat2meters [lat/lon domains only].\n  - couple2 with MeanWindCoupler: MeanWind.v_lon ~ ERA5.pl.u, MeanWind.v_lat ~ ERA5.pl.v, MeanWind.v_lev ~ ERA5.pl.w.\n\nReprojection (RFC §6 step 2): ERA5's native grid.crs.projection is 'longlat' (geographic WGS84), so the reprojection rule selected by convention is ESD reprojection/longlat.esm (esd-47z.1) — the IDENTITY transform (a no-op for an unprojected grid). No reprojection parameters are needed.\n\nRegridding (RFC §6 step 3 / §5.2): declared per variable in the model `regrid` block. ERA5 is stored on a regular non-staggered grid, but per the migration spec the horizontal wind components u and v are regridded by B-spline interpolation (ESD regridding/bspline_regrid.esm, esd-47z.3) and every centered scalar — temperature, humidity, geopotential, cloud water species, ozone, divergence/vorticity, and the vertical-velocity field w (omega, a centered scalar, not a horizontal wind) — by conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm).\n\ngt-6ohw gap — δPδlev omitted:\n  Upstream source (era5.jl:454,516) computes δPδlev(t) ~ hPa2Pa * DataInterpolations.derivative(era5_P_itp, lev). This requires calling the derivative of a LinearInterpolation object with respect to its argument (lev); the ESM expression language does not support DataInterpolations.derivative get_unit (gap gt-6ohw). δPδlev is therefore omitted from this migration. When gt-6ohw is resolved, add a δPδlev observed = 100.0 * derivative(era5_pressure_levels_pa, lev).\n\nCoordinate conventions:\n  - lev: 1-based integer index into ERA5_PRESSURE_LEVELS_HPA, increasing upward (1 = 1000 hPa near-surface, 37 = 1 hPa top-of-atmosphere). Fractional values interpolate between levels.\n  - lon/lat: radians; the runtime regridder converts to degrees for spatial interpolation against the 0.25°×0.25° ERA5 grid.\n  - t_ref: seconds since the Julian date epoch, set from DomainInfo.get_tref(domaininfo) at construction time.\n  - δxδlon and δyδlat: emitted only for lat/lon coordinate domains, not for projected (x/y) domains."
       },
       "tolerance": {
-        "rel": 1e-6
+        "rel": 1e-06
       },
       "variables": {
         "lon": {
@@ -90,16 +166,47 @@
           "description": "TIME INTERPOLATION: the loader's cadence step (s) between the two bracketing records — ERA5 is hourly, so 3600. Set by the runner to match the loader frequency. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so the model's weight phase agrees with which two records the provider loaded."
         },
         "w_time": {
-          "type": "observed",
+          "type": "unknown",
           "units": "1",
-          "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records (replacing the former piecewise-constant hourly step). It stays consistent with WHICH two records the provider loaded because both floor the same cadence grid (t_interp_ref phase, dt_interp step). At the end of the data the provider returns a degenerate bracket (both records equal), so any w yields the held endpoint. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear), so only this cheap blend is per-step; a pointwise consumer blends the two record values directly.",
-          "expression": {
+          "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records (replacing the former piecewise-constant hourly step). It stays consistent with WHICH two records the provider loaded because both floor the same cadence grid (t_interp_ref phase, dt_interp step). At the end of the data the provider returns a degenerate bracket (both records equal), so any w yields the held endpoint. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear), so only this cheap blend is per-step; a pointwise consumer blends the two record values directly."
+        },
+        "P": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Atmospheric pressure at the current level index (Pa). P = hPa2Pa * era5_P_itp(lev) = 100.0 * LinearInterpolation(ERA5_PRESSURE_LEVELS_HPA, 1:37)(lev). Computed from the era5_pressure_levels_pa function table (37 entries, Pa). For integer lev this returns exact ERA5 standard pressure levels; for fractional lev it linearly interpolates between adjacent levels."
+        },
+        "δxδlon": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars."
+        },
+        "δyδlat": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³·(180/π) ≈ 6378166.0 m rad⁻¹. Constant (does not depend on position). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars."
+        }
+      },
+      "subsystems": {
+        "pl": {
+          "ref": "./era5_loader.esm"
+        }
+      },
+      "equations": [
+        {
+          "lhs": "w_time",
+          "rhs": {
             "op": "-",
             "args": [
               {
                 "op": "/",
                 "args": [
-                  {"op": "-", "args": ["t", "t_interp_ref"]},
+                  {
+                    "op": "-",
+                    "args": [
+                      "t",
+                      "t_interp_ref"
+                    ]
+                  },
                   "dt_interp"
                 ]
               },
@@ -109,7 +216,13 @@
                   {
                     "op": "/",
                     "args": [
-                      {"op": "-", "args": ["t", "t_interp_ref"]},
+                      {
+                        "op": "-",
+                        "args": [
+                          "t",
+                          "t_interp_ref"
+                        ]
+                      },
                       "dt_interp"
                     ]
                   }
@@ -118,11 +231,9 @@
             ]
           }
         },
-        "P": {
-          "type": "observed",
-          "units": "Pa",
-          "description": "Atmospheric pressure at the current level index (Pa). P = hPa2Pa * era5_P_itp(lev) = 100.0 * LinearInterpolation(ERA5_PRESSURE_LEVELS_HPA, 1:37)(lev). Computed from the era5_pressure_levels_pa function table (37 entries, Pa). For integer lev this returns exact ERA5 standard pressure levels; for fractional lev it linearly interpolates between adjacent levels.",
-          "expression": {
+        {
+          "lhs": "P",
+          "rhs": {
             "op": "table_lookup",
             "table": "era5_pressure_levels_pa",
             "axes": {
@@ -131,11 +242,9 @@
             "args": []
           }
         },
-        "δxδlon": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m = 40075×10³/(2π) ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars.",
-          "expression": {
+        {
+          "lhs": "δxδlon",
+          "rhs": {
             "op": "*",
             "args": [
               6378134.3,
@@ -148,19 +257,11 @@
             ]
           }
         },
-        "δyδlat": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³·(180/π) ≈ 6378166.0 m rad⁻¹. Constant (does not depend on position). Emitted only in lat/lon coordinate domains; the upstream ERA5 constructor includes this equation only when :lat is in DomainInfo.pvars.",
-          "expression": 6378166.0
+        {
+          "lhs": "δyδlat",
+          "rhs": 6378166.0
         }
-      },
-      "subsystems": {
-        "pl": {
-          "ref": "./era5_loader.esm"
-        }
-      },
-      "equations": [],
+      ],
       "tests": []
     }
   }

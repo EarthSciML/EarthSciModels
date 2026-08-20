@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "LayerPhaseChangeEnergy",
         "description": "Per-layer phase change energy for the urban canopy snow/soil thermodynamics: the energy required to change a single layer's ice mass from w_ice_n at time n to w_ice_np1 at time n+1 over time step Δt (Oleson et al. 2010 Eq. 4.73). Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:1037 (`LayerPhaseChangeEnergy` @component). The column-summed output of this component over all layers is the E_p_layers input of `TotalPhaseChangeEnergy` (Eq. 4.72). Parameterized as observed-only: w_ice_n, w_ice_np1, Δt are inputs (parameters); E_p is the algebraic output.",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:1037\nUpstream `LayerPhaseChangeEnergy` is an MTK `@component` whose three inputs (w_ice_n, w_ice_np1, Δt) are `@parameters` and whose single output (E_p) is a time-indexed `@variable` with one algebraic equation (Eq. 4.73). Identical equation structure preserved here.\n\nThe upstream component declares one `@constant`: L_f (latent heat of fusion, 3.337e5 J/kg, Oleson Table 1.4). It is encoded here as a parameter with the upstream value as default — the same convention used by sibling component snow_melt_no_layers.esm for its `L_f` literal. The output is the latent-heat conversion of the per-step ice mass change scaled by Δt — the simplest single-equation algebraic component in the urban canopy temps suite.\n\nObservability classification: this component is functionally observed-only — the single output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (total_phase_change_energy.esm, snow_melt_no_layers.esm, snow_capping_runoff.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only single-equation algebraic system (no ODE integration); the equation is one subtraction, one product, and one division, so roundoff is at the IEEE-754 ULP level (~1e-16). 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (total_phase_change_energy.esm uses 1e-9 for the analogous additive-identity equation of Eq. 4.72). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "w_ice_n": {
@@ -52,11 +52,11 @@
                 "L_f": {
                     "type": "parameter",
                     "units": "J/kg",
-                    "default": 3.337e5,
+                    "default": 333700.0,
                     "description": "Latent heat of fusion of water (Oleson et al. 2010 Table 1.4 — 3.337e5 J/kg)"
                 },
                 "E_p": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/m^2",
                     "description": "Phase change energy for layer (Oleson Eq. 4.73): L_f * (w_ice_n - w_ice_np1) / Δt"
                 }
@@ -71,7 +71,13 @@
                                 "op": "*",
                                 "args": [
                                     "L_f",
-                                    { "op": "-", "args": ["w_ice_n", "w_ice_np1"] }
+                                    {
+                                        "op": "-",
+                                        "args": [
+                                            "w_ice_n",
+                                            "w_ice_np1"
+                                        ]
+                                    }
                                 ]
                             },
                             "Δt"
@@ -88,9 +94,16 @@
                         "w_ice_np1": 8.0,
                         "Δt": 3600.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 185.38888888888889 }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 185.38888888888889
+                        }
                     ]
                 },
                 {
@@ -101,9 +114,19 @@
                         "w_ice_np1": 10.0,
                         "Δt": 3600.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -114,9 +137,16 @@
                         "w_ice_np1": 12.0,
                         "Δt": 3600.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": -185.38888888888889 }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": -185.38888888888889
+                        }
                     ]
                 },
                 {
@@ -127,22 +157,36 @@
                         "w_ice_np1": 0.0,
                         "Δt": 1800.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 926.9444444444445 }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 926.9444444444445
+                        }
                     ]
                 },
                 {
                     "id": "small_mass_short_dt",
                     "description": "Sub-cycling regime: thin ice film (w_ice_n = 0.001 kg/m^2 ≈ 1 g/m^2) with half melted in a 1-minute substep. w_ice_n = 1.0e-3, w_ice_np1 = 5.0e-4, Δt = 60 s → E_p = 3.337e5 * 5e-4 / 60 ≈ 2.781 W/m^2. Verifies the small-mass / short-Δt regime that arises when the per-layer phase-change calculation is called from a sub-cycling outer loop.",
                     "parameter_overrides": {
-                        "w_ice_n": 1.0e-3,
-                        "w_ice_np1": 5.0e-4,
+                        "w_ice_n": 0.001,
+                        "w_ice_np1": 0.0005,
                         "Δt": 60.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 2.7808333333333333 }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 2.7808333333333333
+                        }
                     ]
                 },
                 {
@@ -153,9 +197,16 @@
                         "w_ice_np1": 30.0,
                         "Δt": 86400.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 77.24537037037037 }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 77.24537037037037
+                        }
                     ]
                 },
                 {
@@ -166,13 +217,23 @@
                         "w_ice_np1": 0.0,
                         "Δt": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "E_p", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "E_p",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "E_p_curve_vs_w_ice_np1",
                     "description": "Sweep w_ice_np1 across the freezing-through-melting range with w_ice_n = 10 kg/m^2 and Δt = 3600 s held fixed. E_p = L_f * (10 - w_ice_np1) / 3600 — a unit-slope (with sign) line crossing zero at w_ice_np1 = 10 (no change), positive (melting) for w_ice_np1 < 10, and negative (freezing) for w_ice_np1 > 10. Surfaces Eq. 4.73 directly.",
@@ -181,13 +242,21 @@
                         "w_ice_n": 10.0,
                         "Δt": 3600.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "w_ice_np1",
-                                "range": { "start": 0.0, "stop": 20.0, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 20.0,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -196,8 +265,14 @@
                             "id": "E_p_curve",
                             "type": "line",
                             "description": "E_p vs w_ice_np1 (w_ice_n = 10, Δt = 3600): linear with negative slope, zero-crossing at w_ice_np1 = w_ice_n.",
-                            "x": { "variable": "w_ice_np1", "label": "w_ice_{n+1} (kg/m^2)" },
-                            "y": { "variable": "E_p",       "label": "E_p (W/m^2)" }
+                            "x": {
+                                "variable": "w_ice_np1",
+                                "label": "w_ice_{n+1} (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "E_p",
+                                "label": "E_p (W/m^2)"
+                            }
                         }
                     ]
                 },
@@ -208,17 +283,30 @@
                     "parameters": {
                         "w_ice_n": 10.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "w_ice_np1",
-                                "range": { "start": 0.0, "stop": 20.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 20.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "Δt",
-                                "range": { "start": 60.0, "stop": 3600.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 60.0,
+                                    "stop": 3600.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -227,9 +315,18 @@
                             "id": "E_p_heatmap",
                             "type": "heatmap",
                             "description": "E_p as a function of w_ice_np1 and Δt: iso-energy contours follow constant L_f * Δw / Δt — hyperbolic in Δt for fixed Δw.",
-                            "x": { "variable": "w_ice_np1", "label": "w_ice_{n+1} (kg/m^2)" },
-                            "y": { "variable": "Δt",        "label": "Δt (s)" },
-                            "value": { "variable": "E_p", "reduce": "final" }
+                            "x": {
+                                "variable": "w_ice_np1",
+                                "label": "w_ice_{n+1} (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "Δt",
+                                "label": "Δt (s)"
+                            },
+                            "value": {
+                                "variable": "E_p",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

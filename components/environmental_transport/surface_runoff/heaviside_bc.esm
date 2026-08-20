@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "HeavisideBoundaryCondition",
         "description": "Smoothed Heaviside surface boundary condition for coupling surface and subsurface water flow, from Wang et al. (2020) (Advances in Water Resources 137, 103499), Eqs. 3 and 5. The component switches a single surface node continuously between a ponded (saturated) boundary and an unsaturated boundary as the pressure head h crosses zero, replacing a hard step with the smooth approximations eta_omega(h) = (1/pi)*atan(h/omega) + 1/2 (smoothed Heaviside, Eq. 5a) and delta_omega(h) = (1/pi)*omega/(omega^2 + h^2) (smoothed Dirac delta, Eq. 5b; delta_omega = d eta_omega/dh). The head obeys the boundary condition d/dt[eta_omega(h)*h] = P - I_infil (Eq. 3), stated as the explicit ODE D(h) = (P - I_infil)/(delta_omega*h + eta_omega). h is the single integrated state; eta_omega and delta_omega are algebraic (observed). Migrated from EnvironmentalTransport.jl@a48559c4 src/surface_runoff.jl:232 (`HeavisideBoundaryCondition` @component). Because the head equation conserves eta_omega(h)*h - (P - I_infil)*t, every ODE-integration test below is checked against the exact conservation law, not merely against a prior solver run.",
@@ -35,18 +35,18 @@
             },
             "variables": {
                 "h": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "default": 0.01,
                     "description": "Soil water pressure head at the surface node [m] (Wang et al. 2020, Eq. 3). h is the single genuine time-dependent unknown of the component: the only variable carrying a D(.) derivative. Its sign is the ponding indicator -- h >= 0 is the ponded (saturated) state where surface water has accumulated, h < 0 is the unsaturated state where the surface can still accept infiltration. The smoothed Heaviside eta_omega(h) and Dirac delta_omega(h) below switch the surface boundary condition continuously across h = 0 instead of with a hard branch. The default 0.01 m (1 cm of ponded water) places the canonical scenario in the ponded regime, matching the upstream test 'Net positive flux increases head' (test/surface_runoff_test.jl:293-309)."
                 },
                 "η_ω": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Smoothed Heaviside step function eta_omega(h) [dimensionless] (Wang et al. 2020, Eq. 5a): eta_omega = (1/pi)*atan(h/omega) + 1/2. A continuous approximation to the unit step H(h) that converges to it as omega -> 0+. eta_omega(0) = 1/2 exactly; eta_omega -> 1 as h/omega -> +inf (fully ponded) and -> 0 as h/omega -> -inf (fully unsaturated). It is the fraction by which the surface behaves as a ponded (Dirichlet-head) boundary. eta_omega has no D(.) derivative -- it is an algebraic function of h, encoded as `type: state` with a defining entry in `equations` (see notes); the ESS runner eliminates it to an observed variable at compile time."
                 },
                 "δ_ω": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-1",
                     "description": "Smoothed Dirac delta function delta_omega(h) [m^-1] (Wang et al. 2020, Eq. 5b): delta_omega = (1/pi)*omega/(omega^2 + h^2). delta_omega is exactly the derivative of the smoothed Heaviside with respect to head, delta_omega = d(eta_omega)/dh -- a Lorentzian that converges to the Dirac delta as omega -> 0+. It peaks at h = 0 with delta_omega(0) = 1/(pi*omega) and decays as 1/h^2 far from the transition. Like eta_omega it is algebraic in h (no D(.) derivative), encoded as `type: state` with a defining `equations` entry and eliminated to observed at compile time."
                 },
@@ -705,7 +705,7 @@
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "ponding_head_rise",
                     "description": "Headline run: the canonical ponding scenario (defaults -- h0 = 0.01 m, P = 2.0e-6 m/s, I_infil = 1.0e-6 m/s, omega = 1.0e-4 m) integrated for 100 s. With a positive net flux the surface ponds and the pressure head rises slowly and almost linearly (the smoothed Heaviside eta_omega is near 1 in the ponded regime, so d/dt[eta_omega*h] = P - I_infil reduces to dh/dt ~ P - I_infil). Plots the head h(t) and the smoothed Heaviside indicator eta_omega(t) over the run.",

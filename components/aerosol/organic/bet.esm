@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "BETAdsorption",
         "description": "BET (Brunauer-Emmett-Teller) adsorption isotherm for multilayer adsorption. Extends the Langmuir model to include formation of additional molecular layers, assuming each adsorbed molecule can serve as an adsorption site for the next layer. From Seinfeld and Pandis (2006), Chapter 14, Section 14.5.3, Equation 14.45.",
@@ -23,10 +23,10 @@
         "BETAdsorption": {
             "reference": {
                 "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.3, Eq. 14.45 — BET multilayer adsorption isotherm. Migrated from Aerosol.jl src/organic_aerosol.jl `BETAdsorption` (esm-1c7).",
-                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:279\nUpstream `BETAdsorption` is an MTK `@component` with two parameters (V_m, c_BET), and two variables (S, V). The equation is:\n  \u2022 V ~ V_m * c_BET * S / ((1 - S) * (1 + (c_BET - 1) * S))  (Eq. 14.45 \u2014 BET isotherm)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only \u2014 the single output V is given by an algebraic equation. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nESM representation note: in the upstream MTK component S is an `@variable` supplied externally as the input; in this .esm it is represented as a `parameter` (not a state) so the system is well-posed under the schema's equation-count rule (one equation per state) and to match the observed-only pattern used elsewhere in this rig (see components/wildland_fire/midflame_wind.esm where all inputs are parameters and only algebraic outputs are states). Tests vary S via `parameter_overrides`, and the `saturation_sweep` example sweeps S as a parameter dimension.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves multiplication, division, and addition. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
+                "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:279\nUpstream `BETAdsorption` is an MTK `@component` with two parameters (V_m, c_BET), and two variables (S, V). The equation is:\n  • V ~ V_m * c_BET * S / ((1 - S) * (1 + (c_BET - 1) * S))  (Eq. 14.45 — BET isotherm)\nThe equation is algebraic (no derivatives), making this an observed-only component.\n\nObservability classification: observed-only — the single output V is given by an algebraic equation. Test scenarios use `time_span: [0, 1]` and sample at t=0.\n\nESM representation note: in the upstream MTK component S is an `@variable` supplied externally as the input; in this .esm it is represented as a `parameter` (not a state) so the system is well-posed under the schema's equation-count rule (one equation per state) and to match the observed-only pattern used elsewhere in this rig (see components/wildland_fire/midflame_wind.esm where all inputs are parameters and only algebraic outputs are states). Tests vary S via `parameter_overrides`, and the `saturation_sweep` example sweeps S as a parameter dimension.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves multiplication, division, and addition. Floating-point round-off is ~1e-15. 1e-9 leaves comfortable headroom."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "V_m": {
@@ -48,7 +48,7 @@
                     "description": "Gas-phase saturation ratio p/p_sat (dimensionless). Input parameter — the observed-only model has one algebraic equation for V given S."
                 },
                 "V": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^3",
                     "description": "Volume of gas adsorbed"
                 }
@@ -59,12 +59,49 @@
                     "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": ["c_BET", "V_m", "S"] },
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "+", "args": [1, { "op": "*", "args": [-1, "S"] }] },
-                                    { "op": "+", "args": [1, { "op": "*", "args": [{ "op": "+", "args": [-1, "c_BET"] }, "S"] }] }
+                                    "c_BET",
+                                    "V_m",
+                                    "S"
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1,
+                                                    "S"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            -1,
+                                                            "c_BET"
+                                                        ]
+                                                    },
+                                                    "S"
+                                                ]
+                                            }
+                                        ]
+                                    }
                                 ]
                             }
                         ]
@@ -75,27 +112,47 @@
                 {
                     "id": "default_conditions",
                     "description": "Default conditions: V_m = 1.0 m^3, c_BET = 10.0, S = 0.5. V = 1.0*10.0*0.5 / ((1-0.5)*(1+9*0.5)) = 5.0/2.75 = 1.8181818181818181 m^3.",
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_overrides": {
                         "S": 0.5
                     },
                     "assertions": [
-                        { "variable": "V", "time": 0.0, "expected": 1.8181818181818181, "tolerance": { "rel": 1.0e-6 } }
+                        {
+                            "variable": "V",
+                            "time": 0.0,
+                            "expected": 1.8181818181818181,
+                            "tolerance": {
+                                "rel": 1e-06
+                            }
+                        }
                     ]
                 },
                 {
                     "id": "low_saturation",
                     "description": "Low saturation regime: S = 0.001, V approaches V_m * c_BET * S = 0.01 m^3 (linear approximation).",
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_overrides": {
                         "S": 0.001
                     },
                     "assertions": [
-                        { "variable": "V", "time": 0.0, "expected": 0.009921, "tolerance": { "rel": 1.0e-4 } }
+                        {
+                            "variable": "V",
+                            "time": 0.0,
+                            "expected": 0.009921,
+                            "tolerance": {
+                                "rel": 0.0001
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "saturation_sweep",
                     "description": "Sweep saturation ratio from 0.01 to 0.99 to show the characteristic BET isotherm shape (multilayer adsorption as S approaches 1).",
@@ -104,13 +161,20 @@
                         "V_m": 1.0,
                         "c_BET": 10.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "S",
-                                "range": { "start": 0.01, "stop": 0.99, "count": 50 }
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.99,
+                                    "count": 50
+                                }
                             }
                         ]
                     },
@@ -118,9 +182,15 @@
                         {
                             "id": "bet_isotherm",
                             "type": "line",
-                            "description": "BET isotherm: V/V_m vs S \u2014 shows monolayer completion at intermediate S and multilayer adsorption as S \u2192 1.",
-                            "x": { "variable": "S", "label": "S (p/p_sat)" },
-                            "y": { "variable": "V", "label": "V (m^3)" }
+                            "description": "BET isotherm: V/V_m vs S — shows monolayer completion at intermediate S and multilayer adsorption as S → 1.",
+                            "x": {
+                                "variable": "S",
+                                "label": "S (p/p_sat)"
+                            },
+                            "y": {
+                                "variable": "V",
+                                "label": "V (m^3)"
+                            }
                         }
                     ]
                 }

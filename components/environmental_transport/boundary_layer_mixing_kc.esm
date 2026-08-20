@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "BoundaryLayerMixingKC",
         "description": "Kantha-Clayson & Garratt boundary-layer turbulence parameterization for Lagrangian particle dispersion, as described in NOAA ARL-224 and the HYSPLIT documentation. Computes turbulent velocity standard deviations (sigmaw, sigma_u, sigma_v), Lagrangian vertical time scale (TL_v), Monin-Obukhov length (Lmo), and convective velocity scale (wstar) from surface-layer similarity theory; integrates stochastic Langevin equations for the turbulent velocity components (wprime, uprime_x, uprime_y) and the resulting Lagrangian particle position (lon, lat, lev). The upstream Julia source uses a single @brownians Bw term on all three velocity ODEs (gt-kuxo gap); this ESM migrates the deterministic drift equations only. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/BoundaryLayerMixingKC.jl:15.",
@@ -195,181 +195,509 @@
                     "description": "Fraction of vertical velocity absorbed on boundary impact (dimensionless). 0.0 = perfect elastic bounce; 1.0 = complete absorption. wprime_ref = (1 - w_damp) * |wprime| at boundaries."
                 },
                 "wprime": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "default": 0.0,
                     "description": "Turbulent vertical velocity fluctuation w' (m/s). ODE state governed by Langevin equation D(wprime)/dt = -wprime/TL_v (deterministic drift; Brownian noise term omitted — see TODO_GAP gt-kuxo)."
                 },
                 "uprime_x": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "default": 0.0,
                     "description": "Turbulent horizontal velocity fluctuation in x (eastward, m/s). ODE state: D(uprime_x)/dt = -uprime_x/TL_h (deterministic drift; Brownian noise omitted)."
                 },
                 "uprime_y": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m/s",
                     "default": 0.0,
                     "description": "Turbulent horizontal velocity fluctuation in y (northward, m/s). ODE state: D(uprime_y)/dt = -uprime_y/TL_h (deterministic drift; Brownian noise omitted)."
                 },
                 "lon": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "default": 0.0,
                     "description": "Lagrangian particle longitude coordinate (radians, dimensionless). ODE state: D(lon)/dt = uprime_x * x_trans."
                 },
                 "lat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "default": 0.0,
                     "description": "Lagrangian particle latitude coordinate (radians, dimensionless). ODE state: D(lat)/dt = uprime_y * y_trans."
                 },
                 "lev": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "default": 1.0,
                     "description": "Lagrangian particle level coordinate (dimensionless level index). ODE state: D(lev)/dt = wprime_ref * z2lev. Boundary conditions applied via wprime_ref reflection."
                 },
                 "zi": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "m",
-                    "description": "Effective planetary boundary layer depth (m). zi = max(PBLH, KMIX0). Provides a minimum mixing depth floor.",
-                    "expression": {
-                        "op": "max",
-                        "args": ["PBLH", "KMIX0"]
-                    }
+                    "description": "Effective planetary boundary layer depth (m). zi = max(PBLH, KMIX0). Provides a minimum mixing depth floor."
                 },
                 "Tv2m": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "K",
-                    "description": "2-metre virtual temperature (K). Tv2m = T2M * (1 + 0.61 * QV2M). Moisture-corrected temperature for density and buoyancy calculations.",
-                    "expression": {
-                        "op": "*",
-                        "args": [
-                            "T2M",
-                            {"op": "+", "args": [1.0, {"op": "*", "args": [0.61, "QV2M"]}]}
-                        ]
-                    }
+                    "description": "2-metre virtual temperature (K). Tv2m = T2M * (1 + 0.61 * QV2M). Moisture-corrected temperature for density and buoyancy calculations."
                 },
                 "rho": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "kg/m^3",
-                    "description": "Surface air density (kg/m^3). rho = PS / (Rd * Tv2m). Used to convert heat and moisture fluxes from energy to kinematic units.",
-                    "expression": {
-                        "op": "/",
-                        "args": [
-                            "PS",
-                            {"op": "*", "args": ["Rd", "Tv2m"]}
-                        ]
-                    }
+                    "description": "Surface air density (kg/m^3). rho = PS / (Rd * Tv2m). Used to convert heat and moisture fluxes from energy to kinematic units."
                 },
                 "wth": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "K*m/s",
-                    "description": "Kinematic sensible heat flux w'theta' (K m/s). wth = HFLUX / (rho * cp). ARL-224 Eq. 27.",
-                    "expression": {
-                        "op": "/",
-                        "args": [
-                            "HFLUX",
-                            {"op": "*", "args": ["rho", "cp"]}
-                        ]
-                    }
+                    "description": "Kinematic sensible heat flux w'theta' (K m/s). wth = HFLUX / (rho * cp). ARL-224 Eq. 27."
                 },
                 "wq": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "m/s",
-                    "description": "Kinematic moisture flux w'q' (m/s). wq = EFLUX / (rho * Lv). Units m/s since q is dimensionless kg/kg.",
-                    "expression": {
-                        "op": "/",
-                        "args": [
-                            "EFLUX",
-                            {"op": "*", "args": ["rho", "Lv"]}
-                        ]
-                    }
+                    "description": "Kinematic moisture flux w'q' (m/s). wq = EFLUX / (rho * Lv). Units m/s since q is dimensionless kg/kg."
                 },
                 "wthv": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "K*m/s",
-                    "description": "Kinematic virtual potential temperature flux w'theta_v' (K m/s). wthv = wth*(1+0.61*QV2M) + 0.61*T2M*wq. Combines sensible and moisture buoyancy contributions.",
-                    "expression": {
-                        "op": "+",
-                        "args": [
-                            {
-                                "op": "*",
-                                "args": [
-                                    "wth",
-                                    {"op": "+", "args": [1.0, {"op": "*", "args": [0.61, "QV2M"]}]}
-                                ]
-                            },
-                            {"op": "*", "args": [0.61, "T2M", "wq"]}
-                        ]
-                    }
+                    "description": "Kinematic virtual potential temperature flux w'theta_v' (K m/s). wthv = wth*(1+0.61*QV2M) + 0.61*T2M*wq. Combines sensible and moisture buoyancy contributions."
                 },
                 "wthv_num": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "K*m/s",
-                    "description": "Sign proxy for wthv: wthv_num = HFLUX*(1+0.61*QV2M)/cp + 0.61*T2M*EFLUX/Lv = rho*wthv. Since rho>0, sign(wthv_num)==sign(wthv), so wthv_num>0 iff Lmo<0 (unstable). Uses only multiplication/addition of parameters — no division by rho — so evaluates to 0 (not NaN) when SymPy substitutes 0 for all free symbols during Piecewise-condition simplification.",
-                    "expression": {
-                        "op": "+",
-                        "args": [
-                            {
-                                "op": "*",
-                                "args": [
-                                    "HFLUX",
-                                    {"op": "+", "args": [1.0, {"op": "*", "args": [0.61, "QV2M"]}]},
-                                    {"op": "/", "args": [1.0, "cp"]}
-                                ]
-                            },
-                            {
-                                "op": "*",
-                                "args": [0.61, "T2M", "EFLUX", {"op": "/", "args": [1.0, "Lv"]}]
-                            }
-                        ]
-                    }
+                    "description": "Sign proxy for wthv: wthv_num = HFLUX*(1+0.61*QV2M)/cp + 0.61*T2M*EFLUX/Lv = rho*wthv. Since rho>0, sign(wthv_num)==sign(wthv), so wthv_num>0 iff Lmo<0 (unstable). Uses only multiplication/addition of parameters — no division by rho — so evaluates to 0 (not NaN) when SymPy substitutes 0 for all free symbols during Piecewise-condition simplification."
                 },
                 "wthv_eff": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "K*m/s",
-                    "description": "Effective virtual temperature flux (K m/s), bounded away from zero to prevent singular Lmo. wthv_eff = ifelse(wthv>=0, max(wthv,1e-8), min(wthv,-1e-8)). Stability branch uses wthv_num>=0 (sign proxy without rho division) to avoid NaN when SymPy substitutes 0 for all free symbols.",
-                    "expression": {
-                        "op": "ifelse",
-                        "args": [
-                            {"op": ">=", "args": ["wthv_num", 0.0]},
-                            {"op": "max", "args": ["wthv", 1.0e-8]},
-                            {"op": "min", "args": ["wthv", -1.0e-8]}
-                        ]
-                    }
+                    "description": "Effective virtual temperature flux (K m/s), bounded away from zero to prevent singular Lmo. wthv_eff = ifelse(wthv>=0, max(wthv,1e-8), min(wthv,-1e-8)). Stability branch uses wthv_num>=0 (sign proxy without rho division) to avoid NaN when SymPy substitutes 0 for all free symbols."
                 },
                 "Lmo": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "m",
-                    "description": "Monin-Obukhov length L (m). Lmo = -USTAR^3 * Tv2m / (kappa * g * wthv_eff). Negative in unstable conditions (upward heat flux), positive in stable conditions. ARL-224 Eq. 27.",
-                    "expression": {
+                    "description": "Monin-Obukhov length L (m). Lmo = -USTAR^3 * Tv2m / (kappa * g * wthv_eff). Negative in unstable conditions (upward heat flux), positive in stable conditions. ARL-224 Eq. 27."
+                },
+                "wstar": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Deardorff convective velocity scale w* (m/s). wstar = (g/Tv2m * wthv * zi)^(1/3) when wthv > 0, else 0. ARL-224 Eq. 28. Stability condition uses wthv_num>0 (sign proxy, no rho division)."
+                },
+                "zeta_clip": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Normalized height within the PBL: zeta_clip = clamp(z_agl / max(zi, 1.0), 0, 1). Dimensionless stability coordinate (0 at surface, 1 at PBL top). Corresponds to Julia local variable zeta_clip."
+                },
+                "sigma_w2": {
+                    "type": "unknown",
+                    "units": "m^2/s^2",
+                    "description": "Vertical turbulent velocity variance sigma_w^2 (m^2/s^2). Unstable surface layer (Lmo<0, zeta_clip<0.1): 1.74*USTAR^2*(1-3*z_agl/L_eff)^(2/3) (Hanna 1982, ARL-224 Eq.92). Unstable mixed layer: wstar^2*zeta^(2/3)*(1-zeta)^(2/3)*(1+0.5*R_inv^(2/3)) (ARL-224 Eq.90). Stable/neutral: 1.7*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq.71). Corresponds to Julia sigma_w2_expr."
+                },
+                "sigmaw": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Standard deviation of turbulent vertical velocity sigma_w (m/s). sigmaw = sqrt(max(sigma_w2, (2/3)*TKEMIN)). Enters the Lagrangian time scale TL_v computation."
+                },
+                "sigma_u2": {
+                    "type": "unknown",
+                    "units": "m^2/s^2",
+                    "description": "Horizontal x-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (Kantha-Clayson, ARL-224 Eq. 91). Stable/neutral: 4.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 72-73). Corresponds to Julia sigma_u2_expr."
+                },
+                "sigma_u": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Standard deviation of turbulent horizontal x-velocity sigma_u (m/s). sigma_u = sqrt(sigma_u2). Consumed by GaussianKC as sigma_u_x when coupled."
+                },
+                "sigma_v2": {
+                    "type": "unknown",
+                    "units": "m^2/s^2",
+                    "description": "Horizontal y-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (ARL-224 Eq. 93, same as sigma_u2). Stable/neutral: 5.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 75-76, coefficient 5.0 vs 4.0 for x). Corresponds to Julia sigma_v2_expr."
+                },
+                "sigma_v": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Standard deviation of turbulent horizontal y-velocity sigma_v (m/s). sigma_v = sqrt(sigma_v2). Consumed by GaussianKC as sigma_u_y when coupled."
+                },
+                "TL_v": {
+                    "type": "unknown",
+                    "units": "s",
+                    "description": "Lagrangian time scale for vertical velocity (s), clamped to [TL_v_min, TL_v_max]. Unstable: 0.15*zi/sigmaw*(1-exp(-5*zeta_clip)); Stable: 0.1*zi/sigmaw*zeta_clip^0.8. Hanna (1982), ARL-224 Eqs. 63, 66."
+                },
+                "wprime_ref": {
+                    "type": "unknown",
+                    "units": "m/s",
+                    "description": "Reflected turbulent vertical velocity near boundaries (m/s). At ground (lev <= lev_gnd+0.05): wprime_ref = (1-w_damp)*|wprime|. At lid (lev >= lev_top-0.05): wprime_ref = -(1-w_damp)*|wprime|. Elsewhere: wprime_ref = wprime."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "wprime"
+                        ]
+                    },
+                    "rhs": {
                         "op": "*",
                         "args": [
                             -1.0,
                             {
                                 "op": "/",
                                 "args": [
-                                    {"op": "*", "args": [{"op": "^", "args": ["USTAR", 3]}, "Tv2m"]},
-                                    {"op": "*", "args": ["kappa", "g", "wthv_eff"]}
+                                    "wprime",
+                                    "TL_v"
                                 ]
                             }
                         ]
                     }
                 },
-                "wstar": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Deardorff convective velocity scale w* (m/s). wstar = (g/Tv2m * wthv * zi)^(1/3) when wthv > 0, else 0. ARL-224 Eq. 28. Stability condition uses wthv_num>0 (sign proxy, no rho division).",
-                    "expression": {
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "uprime_x"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            {
+                                "op": "/",
+                                "args": [
+                                    "uprime_x",
+                                    "TL_h"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "uprime_y"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            {
+                                "op": "/",
+                                "args": [
+                                    "uprime_y",
+                                    "TL_h"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "lon"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "uprime_x",
+                            "x_trans"
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "lat"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "uprime_y",
+                            "y_trans"
+                        ]
+                    }
+                },
+                {
+                    "lhs": {
+                        "op": "D",
+                        "wrt": "t",
+                        "args": [
+                            "lev"
+                        ]
+                    },
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "wprime_ref",
+                            "z2lev"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "zi",
+                    "rhs": {
+                        "op": "max",
+                        "args": [
+                            "PBLH",
+                            "KMIX0"
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Tv2m",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            "T2M",
+                            {
+                                "op": "+",
+                                "args": [
+                                    1.0,
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            0.61,
+                                            "QV2M"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "rho",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "PS",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "Rd",
+                                    "Tv2m"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wth",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "HFLUX",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho",
+                                    "cp"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wq",
+                    "rhs": {
+                        "op": "/",
+                        "args": [
+                            "EFLUX",
+                            {
+                                "op": "*",
+                                "args": [
+                                    "rho",
+                                    "Lv"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wthv",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "wth",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    0.61,
+                                                    "QV2M"
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.61,
+                                    "T2M",
+                                    "wq"
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wthv_num",
+                    "rhs": {
+                        "op": "+",
+                        "args": [
+                            {
+                                "op": "*",
+                                "args": [
+                                    "HFLUX",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    0.61,
+                                                    "QV2M"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1.0,
+                                            "cp"
+                                        ]
+                                    }
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.61,
+                                    "T2M",
+                                    "EFLUX",
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            1.0,
+                                            "Lv"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wthv_eff",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            {"op": ">", "args": ["wthv_num", 0.0]},
+                            {
+                                "op": ">=",
+                                "args": [
+                                    "wthv_num",
+                                    0.0
+                                ]
+                            },
+                            {
+                                "op": "max",
+                                "args": [
+                                    "wthv",
+                                    1e-08
+                                ]
+                            },
+                            {
+                                "op": "min",
+                                "args": [
+                                    "wthv",
+                                    -1e-08
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "Lmo",
+                    "rhs": {
+                        "op": "*",
+                        "args": [
+                            -1.0,
+                            {
+                                "op": "/",
+                                "args": [
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "USTAR",
+                                                    3
+                                                ]
+                                            },
+                                            "Tv2m"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "kappa",
+                                            "g",
+                                            "wthv_eff"
+                                        ]
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                },
+                {
+                    "lhs": "wstar",
+                    "rhs": {
+                        "op": "ifelse",
+                        "args": [
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wthv_num",
+                                    0.0
+                                ]
+                            },
                             {
                                 "op": "^",
                                 "args": [
-                                    {"op": "*", "args": [{"op": "/", "args": ["g", "Tv2m"]}, "wthv", "zi"]},
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "g",
+                                                    "Tv2m"
+                                                ]
+                                            },
+                                            "wthv",
+                                            "zi"
+                                        ]
+                                    },
                                     0.3333333333333333
                                 ]
                             },
@@ -377,17 +705,27 @@
                         ]
                     }
                 },
-                "zeta_clip": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Normalized height within the PBL: zeta_clip = clamp(z_agl / max(zi, 1.0), 0, 1). Dimensionless stability coordinate (0 at surface, 1 at PBL top). Corresponds to Julia local variable zeta_clip.",
-                    "expression": {
+                {
+                    "lhs": "zeta_clip",
+                    "rhs": {
                         "op": "max",
                         "args": [
                             {
                                 "op": "min",
                                 "args": [
-                                    {"op": "/", "args": ["z_agl", {"op": "max", "args": ["zi", 1.0]}]},
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "z_agl",
+                                            {
+                                                "op": "max",
+                                                "args": [
+                                                    "zi",
+                                                    1.0
+                                                ]
+                                            }
+                                        ]
+                                    },
                                     1.0
                                 ]
                             },
@@ -395,23 +733,39 @@
                         ]
                     }
                 },
-                "sigma_w2": {
-                    "type": "observed",
-                    "units": "m^2/s^2",
-                    "description": "Vertical turbulent velocity variance sigma_w^2 (m^2/s^2). Unstable surface layer (Lmo<0, zeta_clip<0.1): 1.74*USTAR^2*(1-3*z_agl/L_eff)^(2/3) (Hanna 1982, ARL-224 Eq.92). Unstable mixed layer: wstar^2*zeta^(2/3)*(1-zeta)^(2/3)*(1+0.5*R_inv^(2/3)) (ARL-224 Eq.90). Stable/neutral: 1.7*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq.71). Corresponds to Julia sigma_w2_expr.",
-                    "expression": {
+                {
+                    "lhs": "sigma_w2",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            {"op": ">", "args": ["wthv_num", 0.0]},
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wthv_num",
+                                    0.0
+                                ]
+                            },
                             {
                                 "op": "ifelse",
                                 "args": [
-                                    {"op": "<", "args": ["zeta_clip", 0.1]},
+                                    {
+                                        "op": "<",
+                                        "args": [
+                                            "zeta_clip",
+                                            0.1
+                                        ]
+                                    },
                                     {
                                         "op": "*",
                                         "args": [
                                             1.74,
-                                            {"op": "^", "args": ["USTAR", 2]},
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    "USTAR",
+                                                    2
+                                                ]
+                                            },
                                             {
                                                 "op": "^",
                                                 "args": [
@@ -433,8 +787,32 @@
                                                                                     {
                                                                                         "op": "*",
                                                                                         "args": [
-                                                                                            {"op": "ifelse", "args": [{"op": ">", "args": ["wthv_num", 0.0]}, -1.0, 1.0]},
-                                                                                            {"op": "max", "args": [{"op": "abs", "args": ["Lmo"]}, 1.0]}
+                                                                                            {
+                                                                                                "op": "ifelse",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": ">",
+                                                                                                        "args": [
+                                                                                                            "wthv_num",
+                                                                                                            0.0
+                                                                                                        ]
+                                                                                                    },
+                                                                                                    -1.0,
+                                                                                                    1.0
+                                                                                                ]
+                                                                                            },
+                                                                                            {
+                                                                                                "op": "max",
+                                                                                                "args": [
+                                                                                                    {
+                                                                                                        "op": "abs",
+                                                                                                        "args": [
+                                                                                                            "Lmo"
+                                                                                                        ]
+                                                                                                    },
+                                                                                                    1.0
+                                                                                                ]
+                                                                                            }
                                                                                         ]
                                                                                     }
                                                                                 ]
@@ -443,7 +821,7 @@
                                                                     }
                                                                 ]
                                                             },
-                                                            1.0e-6
+                                                            1e-06
                                                         ]
                                                     },
                                                     0.6666666666666666
@@ -454,18 +832,69 @@
                                     {
                                         "op": "*",
                                         "args": [
-                                            {"op": "^", "args": ["wstar", 2]},
-                                            {"op": "^", "args": [{"op": "max", "args": ["zeta_clip", 1.0e-6]}, 0.6666666666666666]},
                                             {
                                                 "op": "^",
                                                 "args": [
-                                                    {"op": "max", "args": [{"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "zeta_clip"]}]}, 1.0e-6]},
+                                                    "wstar",
+                                                    2
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "max",
+                                                        "args": [
+                                                            "zeta_clip",
+                                                            1e-06
+                                                        ]
+                                                    },
+                                                    0.6666666666666666
+                                                ]
+                                            },
+                                            {
+                                                "op": "^",
+                                                "args": [
+                                                    {
+                                                        "op": "max",
+                                                        "args": [
+                                                            {
+                                                                "op": "+",
+                                                                "args": [
+                                                                    1.0,
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            -1.0,
+                                                                            "zeta_clip"
+                                                                        ]
+                                                                    }
+                                                                ]
+                                                            },
+                                                            1e-06
+                                                        ]
+                                                    },
                                                     0.6666666666666666
                                                 ]
                                             },
                                             {
                                                 "op": "+",
-                                                "args": [1.0, {"op": "*", "args": [0.5, {"op": "^", "args": ["R_inv", 0.6666666666666666]}]}]
+                                                "args": [
+                                                    1.0,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            0.5,
+                                                            {
+                                                                "op": "^",
+                                                                "args": [
+                                                                    "R_inv",
+                                                                    0.6666666666666666
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
                                             }
                                         ]
                                     }
@@ -475,11 +904,35 @@
                                 "op": "*",
                                 "args": [
                                     1.7,
-                                    {"op": "^", "args": ["USTAR", 2]},
                                     {
                                         "op": "^",
                                         "args": [
-                                            {"op": "max", "args": [{"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "zeta_clip"]}]}, 0.0]},
+                                            "USTAR",
+                                            2
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "max",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1.0,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -1.0,
+                                                                    "zeta_clip"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    0.0
+                                                ]
+                                            },
                                             1.5
                                         ]
                                     }
@@ -488,35 +941,85 @@
                         ]
                     }
                 },
-                "sigmaw": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Standard deviation of turbulent vertical velocity sigma_w (m/s). sigmaw = sqrt(max(sigma_w2, (2/3)*TKEMIN)). Enters the Lagrangian time scale TL_v computation.",
-                    "expression": {
+                {
+                    "lhs": "sigmaw",
+                    "rhs": {
                         "op": "sqrt",
                         "args": [
-                            {"op": "max", "args": ["sigma_w2", {"op": "*", "args": [0.6666666666666666, "TKEMIN"]}]}
+                            {
+                                "op": "max",
+                                "args": [
+                                    "sigma_w2",
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            0.6666666666666666,
+                                            "TKEMIN"
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 },
-                "sigma_u2": {
-                    "type": "observed",
-                    "units": "m^2/s^2",
-                    "description": "Horizontal x-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (Kantha-Clayson, ARL-224 Eq. 91). Stable/neutral: 4.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 72-73). Corresponds to Julia sigma_u2_expr.",
-                    "expression": {
+                {
+                    "lhs": "sigma_u2",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            {"op": ">", "args": ["wthv_num", 0.0]},
-                            {"op": "*", "args": [0.36, {"op": "^", "args": ["wstar", 2]}]},
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wthv_num",
+                                    0.0
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.36,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "wstar",
+                                            2
+                                        ]
+                                    }
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
                                     4.0,
-                                    {"op": "^", "args": ["USTAR", 2]},
                                     {
                                         "op": "^",
                                         "args": [
-                                            {"op": "max", "args": [{"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "zeta_clip"]}]}, 0.0]},
+                                            "USTAR",
+                                            2
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "max",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1.0,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -1.0,
+                                                                    "zeta_clip"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    0.0
+                                                ]
+                                            },
                                             1.5
                                         ]
                                     }
@@ -525,33 +1028,73 @@
                         ]
                     }
                 },
-                "sigma_u": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Standard deviation of turbulent horizontal x-velocity sigma_u (m/s). sigma_u = sqrt(sigma_u2). Consumed by GaussianKC as sigma_u_x when coupled.",
-                    "expression": {
+                {
+                    "lhs": "sigma_u",
+                    "rhs": {
                         "op": "sqrt",
-                        "args": ["sigma_u2"]
+                        "args": [
+                            "sigma_u2"
+                        ]
                     }
                 },
-                "sigma_v2": {
-                    "type": "observed",
-                    "units": "m^2/s^2",
-                    "description": "Horizontal y-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (ARL-224 Eq. 93, same as sigma_u2). Stable/neutral: 5.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 75-76, coefficient 5.0 vs 4.0 for x). Corresponds to Julia sigma_v2_expr.",
-                    "expression": {
+                {
+                    "lhs": "sigma_v2",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            {"op": ">", "args": ["wthv_num", 0.0]},
-                            {"op": "*", "args": [0.36, {"op": "^", "args": ["wstar", 2]}]},
+                            {
+                                "op": ">",
+                                "args": [
+                                    "wthv_num",
+                                    0.0
+                                ]
+                            },
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.36,
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            "wstar",
+                                            2
+                                        ]
+                                    }
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
                                     5.0,
-                                    {"op": "^", "args": ["USTAR", 2]},
                                     {
                                         "op": "^",
                                         "args": [
-                                            {"op": "max", "args": [{"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "zeta_clip"]}]}, 0.0]},
+                                            "USTAR",
+                                            2
+                                        ]
+                                    },
+                                    {
+                                        "op": "^",
+                                        "args": [
+                                            {
+                                                "op": "max",
+                                                "args": [
+                                                    {
+                                                        "op": "+",
+                                                        "args": [
+                                                            1.0,
+                                                            {
+                                                                "op": "*",
+                                                                "args": [
+                                                                    -1.0,
+                                                                    "zeta_clip"
+                                                                ]
+                                                            }
+                                                        ]
+                                                    },
+                                                    0.0
+                                                ]
+                                            },
                                             1.5
                                         ]
                                     }
@@ -560,20 +1103,18 @@
                         ]
                     }
                 },
-                "sigma_v": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Standard deviation of turbulent horizontal y-velocity sigma_v (m/s). sigma_v = sqrt(sigma_v2). Consumed by GaussianKC as sigma_u_y when coupled.",
-                    "expression": {
+                {
+                    "lhs": "sigma_v",
+                    "rhs": {
                         "op": "sqrt",
-                        "args": ["sigma_v2"]
+                        "args": [
+                            "sigma_v2"
+                        ]
                     }
                 },
-                "TL_v": {
-                    "type": "observed",
-                    "units": "s",
-                    "description": "Lagrangian time scale for vertical velocity (s), clamped to [TL_v_min, TL_v_max]. Unstable: 0.15*zi/sigmaw*(1-exp(-5*zeta_clip)); Stable: 0.1*zi/sigmaw*zeta_clip^0.8. Hanna (1982), ARL-224 Eqs. 63, 66.",
-                    "expression": {
+                {
+                    "lhs": "TL_v",
+                    "rhs": {
                         "op": "max",
                         "args": [
                             "TL_v_min",
@@ -584,12 +1125,24 @@
                                     {
                                         "op": "ifelse",
                                         "args": [
-                                            {"op": ">", "args": ["wthv_num", 0.0]},
+                                            {
+                                                "op": ">",
+                                                "args": [
+                                                    "wthv_num",
+                                                    0.0
+                                                ]
+                                            },
                                             {
                                                 "op": "*",
                                                 "args": [
                                                     0.15,
-                                                    {"op": "/", "args": ["zi", "sigmaw"]},
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "zi",
+                                                            "sigmaw"
+                                                        ]
+                                                    },
                                                     {
                                                         "op": "+",
                                                         "args": [
@@ -598,7 +1151,18 @@
                                                                 "op": "*",
                                                                 "args": [
                                                                     -1.0,
-                                                                    {"op": "exp", "args": [{"op": "*", "args": [-5.0, "zeta_clip"]}]}
+                                                                    {
+                                                                        "op": "exp",
+                                                                        "args": [
+                                                                            {
+                                                                                "op": "*",
+                                                                                "args": [
+                                                                                    -5.0,
+                                                                                    "zeta_clip"
+                                                                                ]
+                                                                            }
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             }
                                                         ]
@@ -609,8 +1173,20 @@
                                                 "op": "*",
                                                 "args": [
                                                     0.1,
-                                                    {"op": "/", "args": ["zi", "sigmaw"]},
-                                                    {"op": "^", "args": ["zeta_clip", 0.8]}
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "zi",
+                                                            "sigmaw"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "^",
+                                                        "args": [
+                                                            "zeta_clip",
+                                                            0.8
+                                                        ]
+                                                    }
                                                 ]
                                             }
                                         ]
@@ -620,31 +1196,87 @@
                         ]
                     }
                 },
-                "wprime_ref": {
-                    "type": "observed",
-                    "units": "m/s",
-                    "description": "Reflected turbulent vertical velocity near boundaries (m/s). At ground (lev <= lev_gnd+0.05): wprime_ref = (1-w_damp)*|wprime|. At lid (lev >= lev_top-0.05): wprime_ref = -(1-w_damp)*|wprime|. Elsewhere: wprime_ref = wprime.",
-                    "expression": {
+                {
+                    "lhs": "wprime_ref",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
-                            {"op": "<=", "args": ["lev", {"op": "+", "args": ["lev_gnd", 0.05]}]},
+                            {
+                                "op": "<=",
+                                "args": [
+                                    "lev",
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "lev_gnd",
+                                            0.05
+                                        ]
+                                    }
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
-                                    {"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "w_damp"]}]},
-                                    {"op": "abs", "args": ["wprime"]}
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            1.0,
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    -1.0,
+                                                    "w_damp"
+                                                ]
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "op": "abs",
+                                        "args": [
+                                            "wprime"
+                                        ]
+                                    }
                                 ]
                             },
                             {
                                 "op": "ifelse",
                                 "args": [
-                                    {"op": ">=", "args": ["lev", {"op": "+", "args": ["lev_top", -0.05]}]},
+                                    {
+                                        "op": ">=",
+                                        "args": [
+                                            "lev",
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "lev_top",
+                                                    -0.05
+                                                ]
+                                            }
+                                        ]
+                                    },
                                     {
                                         "op": "*",
                                         "args": [
                                             -1.0,
-                                            {"op": "+", "args": [1.0, {"op": "*", "args": [-1.0, "w_damp"]}]},
-                                            {"op": "abs", "args": ["wprime"]}
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    1.0,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1.0,
+                                                            "w_damp"
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "abs",
+                                                "args": [
+                                                    "wprime"
+                                                ]
+                                            }
                                         ]
                                     },
                                     "wprime"
@@ -652,41 +1284,6 @@
                             }
                         ]
                     }
-                }
-            },
-            "equations": [
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["wprime"]},
-                    "rhs": {
-                        "op": "*",
-                        "args": [-1.0, {"op": "/", "args": ["wprime", "TL_v"]}]
-                    }
-                },
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["uprime_x"]},
-                    "rhs": {
-                        "op": "*",
-                        "args": [-1.0, {"op": "/", "args": ["uprime_x", "TL_h"]}]
-                    }
-                },
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["uprime_y"]},
-                    "rhs": {
-                        "op": "*",
-                        "args": [-1.0, {"op": "/", "args": ["uprime_y", "TL_h"]}]
-                    }
-                },
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["lon"]},
-                    "rhs": {"op": "*", "args": ["uprime_x", "x_trans"]}
-                },
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["lat"]},
-                    "rhs": {"op": "*", "args": ["uprime_y", "y_trans"]}
-                },
-                {
-                    "lhs": {"op": "D", "wrt": "t", "args": ["lev"]},
-                    "rhs": {"op": "*", "args": ["wprime_ref", "z2lev"]}
                 }
             ],
             "tests": [
@@ -705,68 +1302,90 @@
                         {
                             "variable": "Tv2m",
                             "time": 0,
-                            "expected": 294.760,
-                            "tolerance": {"rel": 0.001}
+                            "expected": 294.76,
+                            "tolerance": {
+                                "rel": 0.001
+                            }
                         },
                         {
                             "variable": "rho",
                             "time": 0,
                             "expected": 1.1976,
-                            "tolerance": {"rel": 0.001}
+                            "tolerance": {
+                                "rel": 0.001
+                            }
                         },
                         {
                             "variable": "wthv",
                             "time": 0,
                             "expected": 0.08363,
-                            "tolerance": {"rel": 0.01}
+                            "tolerance": {
+                                "rel": 0.01
+                            }
                         },
                         {
                             "variable": "Lmo",
                             "time": 0,
                             "expected": -24.27,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "wstar",
                             "time": 0,
                             "expected": 1.406,
-                            "tolerance": {"rel": 0.01}
+                            "tolerance": {
+                                "rel": 0.01
+                            }
                         },
                         {
                             "variable": "zi",
                             "time": 0,
                             "expected": 1000.0,
-                            "tolerance": {"abs": 1e-10}
+                            "tolerance": {
+                                "abs": 1e-10
+                            }
                         },
                         {
                             "variable": "zeta_clip",
                             "time": 0,
                             "expected": 0.05,
-                            "tolerance": {"abs": 1e-10}
+                            "tolerance": {
+                                "abs": 1e-10
+                            }
                         },
                         {
                             "variable": "sigmaw",
                             "time": 0,
                             "expected": 0.7635,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "sigma_u",
                             "time": 0,
                             "expected": 0.8437,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "sigma_v",
                             "time": 0,
                             "expected": 0.8437,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "TL_v",
                             "time": 0,
                             "expected": 43.46,
-                            "tolerance": {"rel": 0.03}
+                            "tolerance": {
+                                "rel": 0.03
+                            }
                         }
                     ]
                 },
@@ -786,31 +1405,41 @@
                             "variable": "Lmo",
                             "time": 0,
                             "expected": 48.51,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "sigmaw",
                             "time": 0,
                             "expected": 0.3764,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "sigma_u",
                             "time": 0,
                             "expected": 0.5774,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "sigma_v",
                             "time": 0,
                             "expected": 0.6455,
-                            "tolerance": {"rel": 0.02}
+                            "tolerance": {
+                                "rel": 0.02
+                            }
                         },
                         {
                             "variable": "TL_v",
                             "time": 0,
                             "expected": 24.15,
-                            "tolerance": {"rel": 0.03}
+                            "tolerance": {
+                                "rel": 0.03
+                            }
                         }
                     ]
                 },
@@ -834,7 +1463,9 @@
                             "variable": "wprime",
                             "time": 43.5,
                             "expected": 0.3676,
-                            "tolerance": {"rel": 0.03}
+                            "tolerance": {
+                                "rel": 0.03
+                            }
                         }
                     ]
                 },
@@ -858,18 +1489,22 @@
                             "variable": "uprime_x",
                             "time": 100.0,
                             "expected": 0.9908,
-                            "tolerance": {"rel": 0.005}
+                            "tolerance": {
+                                "rel": 0.005
+                            }
                         },
                         {
                             "variable": "lon",
                             "time": 100.0,
                             "expected": 0.9958,
-                            "tolerance": {"rel": 0.01}
+                            "tolerance": {
+                                "rel": 0.01
+                            }
                         }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "stability_regime_sweep",
                     "description": "Boundary-layer turbulence parameters (sigmaw, sigma_u, wstar, TL_v) as a function of surface sensible heat flux HFLUX over -100 to 300 W/m^2. Illustrates the transition from stable (HFLUX < 0, Lmo > 0) to neutral (HFLUX ~ 0) to convective (HFLUX > 0, Lmo < 0) regimes. USTAR=0.3 m/s, PBLH=1000 m, z_agl=50 m.",
@@ -896,29 +1531,53 @@
                             "id": "sigmaw_vs_hflux",
                             "type": "line",
                             "description": "Vertical velocity std dev sigmaw vs surface heat flux.",
-                            "x": {"variable": "HFLUX", "label": "HFLUX (W/m^2)"},
-                            "y": {"variable": "sigmaw", "label": "sigmaw (m/s)"}
+                            "x": {
+                                "variable": "HFLUX",
+                                "label": "HFLUX (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "sigmaw",
+                                "label": "sigmaw (m/s)"
+                            }
                         },
                         {
                             "id": "sigma_u_vs_hflux",
                             "type": "line",
                             "description": "Horizontal velocity std dev sigma_u vs surface heat flux.",
-                            "x": {"variable": "HFLUX", "label": "HFLUX (W/m^2)"},
-                            "y": {"variable": "sigma_u", "label": "sigma_u (m/s)"}
+                            "x": {
+                                "variable": "HFLUX",
+                                "label": "HFLUX (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "sigma_u",
+                                "label": "sigma_u (m/s)"
+                            }
                         },
                         {
                             "id": "wstar_vs_hflux",
                             "type": "line",
                             "description": "Convective velocity scale wstar vs surface heat flux. Zero for stable/neutral (HFLUX <= 0), grows as (HFLUX)^(1/3) for unstable.",
-                            "x": {"variable": "HFLUX", "label": "HFLUX (W/m^2)"},
-                            "y": {"variable": "wstar", "label": "wstar (m/s)"}
+                            "x": {
+                                "variable": "HFLUX",
+                                "label": "HFLUX (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "wstar",
+                                "label": "wstar (m/s)"
+                            }
                         },
                         {
                             "id": "TL_v_vs_hflux",
                             "type": "line",
                             "description": "Vertical Lagrangian time scale TL_v vs surface heat flux.",
-                            "x": {"variable": "HFLUX", "label": "HFLUX (W/m^2)"},
-                            "y": {"variable": "TL_v", "label": "TL_v (s)"}
+                            "x": {
+                                "variable": "HFLUX",
+                                "label": "HFLUX (W/m^2)"
+                            },
+                            "y": {
+                                "variable": "TL_v",
+                                "label": "TL_v (s)"
+                            }
                         }
                     ]
                 },
@@ -944,22 +1603,40 @@
                             "id": "wprime_decay",
                             "type": "line",
                             "description": "Turbulent vertical velocity wprime decaying from 1 m/s with time scale TL_v ~ 43 s.",
-                            "x": {"variable": "t", "label": "t (s)"},
-                            "y": {"variable": "wprime", "label": "wprime (m/s)"}
+                            "x": {
+                                "variable": "t",
+                                "label": "t (s)"
+                            },
+                            "y": {
+                                "variable": "wprime",
+                                "label": "wprime (m/s)"
+                            }
                         },
                         {
                             "id": "uprime_x_decay",
                             "type": "line",
                             "description": "Zonal turbulent velocity uprime_x decaying from 0.5 m/s with time scale TL_h = 10800 s (very slow over this 200 s window).",
-                            "x": {"variable": "t", "label": "t (s)"},
-                            "y": {"variable": "uprime_x", "label": "uprime_x (m/s)"}
+                            "x": {
+                                "variable": "t",
+                                "label": "t (s)"
+                            },
+                            "y": {
+                                "variable": "uprime_x",
+                                "label": "uprime_x (m/s)"
+                            }
                         },
                         {
                             "id": "lev_trajectory",
                             "type": "line",
                             "description": "Particle level coordinate lev(t) drifting upward from level 36 as wprime drives D(lev)/dt = wprime_ref * z2lev.",
-                            "x": {"variable": "t", "label": "t (s)"},
-                            "y": {"variable": "lev", "label": "lev (-)"}
+                            "x": {
+                                "variable": "t",
+                                "label": "t (s)"
+                            },
+                            "y": {
+                                "variable": "lev",
+                                "label": "lev (-)"
+                            }
                         }
                     ]
                 }

@@ -1,5 +1,5 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "LANDFIRE",
     "description": "LANDFIRE regridding model — the coupler half of the landfire loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes the LANDFIRE fire-behavior fuel-model code (Anderson 13 / Scott & Burgan 40) on the simulation's target grid for wildland-fire coupling in EarthSciML systems.\n\nStructure (RFC pure-io-data-loaders §6):\n  1. It declares the pure-I/O loader (components/earthsci_data/landfire_loader.esm) as the subsystem `raw` via {\"ref\": \"./landfire_loader.esm\"}. The loader field is referenced as raw.fuel_model and re-exposed as the model-level observed variable LANDFIRE.fuel_model (Pattern B), preserving the public symbol path for downstream consumers (e.g. the wildland_fire fuel-model lookup family).\n  2. Reprojection & regridding are NOT model concerns at esm 0.8.0. LANDFIRE's native grid is geographic (longlat/WGS84); the identity longlat reprojection and the conservative overlap-area regridding of the fuel_model field onto a consuming grid are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5), by importing the earthscidiscretizations reprojection/longlat.esm and regridding/conservative_overlap.esm — see the wildlandfire.esm assembler. This model no longer carries a `regrid` block. NOTE: fuel_model is CATEGORICAL; conservative area-weighting of integer fuel-model codes can produce non-integer codes between categories (the upstream loader used nearest-neighbour). Downstream consumers (FuelModelLookup, fuel_* functions) ifelse/clamp to integer codes and tolerate non-integer inputs; a nearest/mode regrid kernel is the future fix. See reference.notes (gt-categorical).\n\nThis is a STATIC (time-invariant) dataset: the loader carries no `temporal` block (CONST cadence). The fuel-model code is fetched once per simulation domain.\n\nMigration esm 0.7.0 -> 0.8.0 (this file): v0.8.0 is a clean break that REMOVED `Model.regrid`/`RegridSpec` (esm-spec §8.6). Accordingly the former model `regrid` block (fuel_model -> conservative) has been REMOVED and the regridding is now performed at the coupling edge via imported template libraries. `fuel_model` (= raw.fuel_model) is the model's sole physics output.\n\nMigrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/landfire.jl:246 (LANDFIRE constructor, esm-19u5); split into pure loader + regridding model by esm-3nc.4.",
@@ -40,7 +40,7 @@
         "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/landfire.jl:246\n\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.4). The pre-migration landfire.esm carried both the coupler model AND a co-located data_loaders.LANDFIRE block (with the now-removed `spatial` and `regridding` sub-blocks). That loader is now the pure-I/O file components/earthsci_data/landfire_loader.esm, referenced here as subsystem `raw`.\n\nUpstream constructor LANDFIRE(domaininfo; name=:LANDFIRE, product=\"FBFM13\", version=\"LF2022\", resolution=1.0, stream=true, spatial_interp=:linear) created an MTK System with:\n  - @parameters: lon (rad), lat (rad) from domaininfo pvars (via pvdict)\n  - One observed equation via create_interp_equation(itp, \"\", t, t_ref, [lon, lat]; spatial_interp)\n    where itp = DataSetInterpolator{dt}(FileSetWithRegridder(fs, regrid_f), \"fuel_model\", ...)\n    and fs = LANDFIREFileSet(domaininfo; product, version, resolution)\n    and regrid_f uses _nearest_interpolate_from! (BSpline(Constant())) for categorical data\n  - discrete_events: build_interp_event fires at simulation start (static dataset)\n  - metadata: Dict(CoupleType => LANDFIRECoupler, SysDomainInfo => domaininfo)\nThese loader fields are now provided by the loader subsystem `raw` (raw.fuel_model) and re-exposed as the model observed variable fuel_model.\n\nReprojection (RFC §6 step 2): LANDFIRE's native grid.crs.projection is 'longlat', so the reprojection rule selected by convention is the identity ESD reprojection/longlat.esm (esd-47z.1). The model does not name the ESD file; it only requires the loader's crs to be correct.\n\nRegridding (RFC §6 step 3 / §5.2): declared per variable in the model `regrid` block. The cell-centered fuel_model field → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), per the esm-3nc.4 migration spec (cell-centered → conservative).\n\nCATEGORICAL REGRID GAP (gt-categorical, carried forward per gotcha §8): the upstream loader used NEAREST-NEIGHBOUR interpolation (_nearest_interpolate_from!, BSpline(Constant())) precisely because fuel_model is categorical — area-weighted averaging of integer fuel-model codes is not physically meaningful (the average of code 1 and code 13 is code 7, an unrelated category). The new ESS RegridSpec.method enum offers only {conservative, bspline, cell_average}; there is no nearest/mode kernel. Per the migration spec this model declares conservative. Downstream consumers (components/wildland_fire/fuel_model_lookup.esm; the fuel_* registered functions) ifelse/clamp to integer codes and tolerate non-integer inputs, but the categorical semantics are best served by a future nearest/mode regrid kernel in ESS. When such a kernel lands, switch regrid.fuel_model.method to it.\n\nStaticness: no `temporal` block on the loader → CONST cadence. The GeoTIFF is fetched once per simulation domain; upstream DataFrequencyInfo uses a single interval spanning [starttime, endtime + 1 day] and build_interp_event fires once at starttime.\n\nNote on projections: the upstream _domain_bbox_wgs84 handles both longlat and projected (e.g. LCC) domains by transforming all edge points to WGS84 to compute the bounding envelope. The loader's native grid is geographic regardless of the target domain's projection; the runtime computes the request bbox from the target domain envelope."
       },
       "tolerance": {
-        "rel": 1e-6
+        "rel": 1e-06
       },
       "variables": {
         "lon": {
@@ -56,10 +56,9 @@
           "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem."
         },
         "fuel_model": {
-          "type": "observed",
+          "type": "unknown",
           "units": "1",
-          "description": "LANDFIRE fire behavior fuel model code at the model grid point. Sourced from the loader field raw.fuel_model and regridded onto the target grid. Valid FBFM13 values: 0 (no fuel), 1–13 (Anderson 13 burnable models), 91=urban/developed, 92=snow/ice, 93=agriculture, 98=water, 99=barren. FBFM40 adds codes 101–204. CATEGORICAL: non-integer values may appear after conservative regridding (see regrid.fuel_model); downstream consumers (FuelModelLookup, fuel_* functions) round/clamp to integer codes via ifelse + interp.linear. Static (time-invariant): the same value is returned for all simulation times.",
-          "expression": "raw.fuel_model"
+          "description": "LANDFIRE fire behavior fuel model code at the model grid point. Sourced from the loader field raw.fuel_model and regridded onto the target grid. Valid FBFM13 values: 0 (no fuel), 1–13 (Anderson 13 burnable models), 91=urban/developed, 92=snow/ice, 93=agriculture, 98=water, 99=barren. FBFM40 adds codes 101–204. CATEGORICAL: non-integer values may appear after conservative regridding (see regrid.fuel_model); downstream consumers (FuelModelLookup, fuel_* functions) round/clamp to integer codes via ifelse + interp.linear. Static (time-invariant): the same value is returned for all simulation times."
         }
       },
       "subsystems": {
@@ -67,7 +66,12 @@
           "ref": "./landfire_loader.esm"
         }
       },
-      "equations": [],
+      "equations": [
+        {
+          "lhs": "fuel_model",
+          "rhs": "raw.fuel_model"
+        }
+      ],
       "tests": []
     }
   }

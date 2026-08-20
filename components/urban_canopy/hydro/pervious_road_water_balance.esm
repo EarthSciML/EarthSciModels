@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "PerviousRoadWaterBalance",
         "description": "Net water-input rate for the pervious-road column (Oleson et al. 2010, CLM Tech Note Ch. 5, Eq. 5.1, p. 110). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:900 (`PerviousRoadWaterBalance` @component). Algebraic single-equation balance: water_input = (precipitation gains) − (evaporation + surface runoff + sub-surface drainage + groundwater liquid runoff + snow-capping solid runoff).",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:900\nUpstream `PerviousRoadWaterBalance` is an MTK `@component` whose seven inputs (q_rain, q_sno, E_prvrd, q_over, q_drai, q_rgwl, q_snwcp_ice) are `@parameters` in kg/(m^2*s) and whose single output (water_input) is a time-indexed `@variable` defined by one algebraic equation (no derivative). Identical structure preserved here.\n\nThe upstream component declares no parameter defaults — each `@parameters` line is bare. ESM requires concrete defaults for the canonical Python runner to instantiate the system, so defaults are seeded from the values used in the upstream `PerviousRoadWaterBalance - Equation Verification` testitem (UrbanCanopy.jl test/hydrology_test.jl:765-783): q_rain=0.01, q_sno=0.005, E_prvrd=0.002, q_over=0.003, q_drai=0.001, q_rgwl=0.0005, q_snwcp_ice=0.0001 kg/(m^2*s). These are representative CLMU pervious-road flux magnitudes during a precipitation/runoff event.\n\nEquation 5.1 in Oleson 2010 expresses ΔW_sno + Σ(Δw_liq,i + Δw_ice,i) + ΔW_a = (q_rain + q_sno − E_prvrd − q_over − q_drai − q_rgwl − q_snwcp_ice)Δt; this component encodes the right-hand-side rate (water_input). The AST is grouped as (q_rain + q_sno) − (E_prvrd + q_over + q_drai + q_rgwl + q_snwcp_ice) — algebraically identical to the upstream left-to-right chain, but exposes the gains-vs-losses partition that motivates the equation.\n\nObservability classification: this component is functionally observed-only — water_input is given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_content_calc.esm, snow_layer_combination.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation is six additions and one subtraction — seven IEEE-754 float64 operations on quantities of magnitude ≤ 1e-2 — so roundoff is ~1e-17. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on a kg/(m^2*s) flux (typical CLMU water-balance fluxes are O(1e-4–1e-2) and known to ~1e-6 in coupled runs). Tests that target an algebraic-zero result (gains exactly cancel losses) override with `abs: 1e-15` to bypass the relative-tolerance singularity at zero."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "q_rain": {
@@ -74,7 +74,7 @@
                     "description": "Solid runoff from snow capping"
                 },
                 "water_input": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/(m^2*s)",
                     "description": "Net water input rate (Oleson Eq. 5.1): (q_rain + q_sno) − (E_prvrd + q_over + q_drai + q_rgwl + q_snwcp_ice)"
                 }
@@ -87,7 +87,10 @@
                         "args": [
                             {
                                 "op": "+",
-                                "args": ["q_rain", "q_sno"]
+                                "args": [
+                                    "q_rain",
+                                    "q_sno"
+                                ]
                             },
                             {
                                 "op": "+",
@@ -100,7 +103,10 @@
                                                 "args": [
                                                     {
                                                         "op": "+",
-                                                        "args": ["E_prvrd", "q_over"]
+                                                        "args": [
+                                                            "E_prvrd",
+                                                            "q_over"
+                                                        ]
                                                     },
                                                     "q_drai"
                                                 ]
@@ -128,9 +134,16 @@
                         "q_rgwl": 0.0005,
                         "q_snwcp_ice": 0.0001
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.0084 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.0084
+                        }
                     ]
                 },
                 {
@@ -145,9 +158,19 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -162,9 +185,16 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.02 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.02
+                        }
                     ]
                 },
                 {
@@ -179,9 +209,16 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.015 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.015
+                        }
                     ]
                 },
                 {
@@ -196,9 +233,16 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": -0.004 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": -0.004
+                        }
                     ]
                 },
                 {
@@ -213,9 +257,16 @@
                         "q_rgwl": 0.001,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": -0.009 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": -0.009
+                        }
                     ]
                 },
                 {
@@ -230,9 +281,16 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0008
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": -0.0008 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": -0.0008
+                        }
                     ]
                 },
                 {
@@ -247,9 +305,19 @@
                         "q_rgwl": 0.002,
                         "q_snwcp_ice": 0.002
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -264,9 +332,16 @@
                         "q_rgwl": 0.0,
                         "q_snwcp_ice": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.07 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.07
+                        }
                     ]
                 },
                 {
@@ -281,9 +356,16 @@
                         "q_rgwl": 0.0008,
                         "q_snwcp_ice": 0.0002
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": -0.008 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": -0.008
+                        }
                     ]
                 },
                 {
@@ -296,15 +378,22 @@
                         "q_over": 0.003,
                         "q_drai": 0.0015,
                         "q_rgwl": 0.0003,
-                        "q_snwcp_ice": 0.00005
+                        "q_snwcp_ice": 5e-05
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "water_input", "time": 0.0, "expected": 0.00465 }
+                        {
+                            "variable": "water_input",
+                            "time": 0.0,
+                            "expected": 0.00465
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "water_input_vs_rain_rate",
                     "description": "Sweep q_rain across the typical CLMU precipitation range (0 to 0.05 kg/(m^2*s) ≈ 0–180 mm/h liquid-equivalent) at fixed loss terms (E_prvrd=0.001, q_over=0.003, q_drai=0.001, q_rgwl=0.0005, q_snwcp_ice=0.0001) and zero solid precipitation. The straight line water_input = q_rain − 0.0056 has slope 1 and y-intercept −0.0056 — visualizes that each unit of additional rain adds one unit to water_input until the precipitation overcomes the fixed loss budget.",
@@ -317,13 +406,21 @@
                         "q_rgwl": 0.0005,
                         "q_snwcp_ice": 0.0001
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "q_rain",
-                                "range": { "start": 0.0, "stop": 0.05, "count": 26, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 0.05,
+                                    "count": 26,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -332,8 +429,14 @@
                             "id": "water_input_vs_qrain",
                             "type": "line",
                             "description": "water_input as a function of q_rain at fixed loss budget — shows the linear gain-vs-precipitation response of Eq. 5.1.",
-                            "x": { "variable": "q_rain", "label": "Liquid precipitation rate q_rain (kg/(m^2*s))" },
-                            "y": { "variable": "water_input", "label": "Net water input (kg/(m^2*s))" }
+                            "x": {
+                                "variable": "q_rain",
+                                "label": "Liquid precipitation rate q_rain (kg/(m^2*s))"
+                            },
+                            "y": {
+                                "variable": "water_input",
+                                "label": "Net water input (kg/(m^2*s))"
+                            }
                         }
                     ]
                 },
@@ -348,17 +451,30 @@
                         "q_rgwl": 0.0005,
                         "q_snwcp_ice": 0.0001
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "q_rain",
-                                "range": { "start": 0.0, "stop": 0.05, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 0.05,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "q_over",
-                                "range": { "start": 0.0, "stop": 0.02, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 0.02,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -367,9 +483,18 @@
                             "id": "water_input_heatmap",
                             "type": "heatmap",
                             "description": "Net water input as a function of liquid precipitation and surface runoff — linear-affine surface with iso-contours at slope 1.",
-                            "x": { "variable": "q_rain", "label": "q_rain (kg/(m^2*s))" },
-                            "y": { "variable": "q_over", "label": "q_over (kg/(m^2*s))" },
-                            "value": { "variable": "water_input", "reduce": "final" }
+                            "x": {
+                                "variable": "q_rain",
+                                "label": "q_rain (kg/(m^2*s))"
+                            },
+                            "y": {
+                                "variable": "q_over",
+                                "label": "q_over (kg/(m^2*s))"
+                            },
+                            "value": {
+                                "variable": "water_input",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }
