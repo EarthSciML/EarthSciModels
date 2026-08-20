@@ -8,6 +8,18 @@ top-level entry becomes one page under `docs/content/components/<path>/<name>/`.
 The generator also writes `docs/data/components-index.json` for faceted search
 feeds and other downstream consumers (SSG-agnostic).
 
+Variable classification (esm 1.0.0)
+-----------------------------------
+From esm 1.0.0 a `.esm` declares exactly TWO variable types, `unknown` and
+`parameter`. Whether an unknown is an ODE state, an observed quantity or an
+algebraic one is DERIVED from the model's `equations`, and whether a parameter
+is Brownian / discrete / sampled / constant is derived from its `distribution`
+and `update` (esm-spec §6.3.1). This generator therefore asks the binding —
+`earthsci_ast.classification` — rather than reading a declared type. That module
+is the single sanctioned home for the derivation across all five language
+bindings; re-deriving it here from the equations would be shadow logic that can
+drift from the spec (AGENTS.md §"No shadow logic").
+
 Entry points:
     python tools/esm_to_docs.py                         # from repo root
     python tools/esm_to_docs.py --repo-root <path> --out <docs_content_dir>
@@ -21,6 +33,13 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+from earthsci_ast.classification import (
+    algebraic_unknowns,
+    observed_definitions,
+    ode_states,
+    parameters as declared_parameters,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -205,12 +224,21 @@ def ast_to_latex(node: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-# Top-level schema sections that describe a single component we render a page for.
+# Top-level schema sections we render a page for.
+#
+# `data_sources` is the esm 1.0.0 spelling of what 0.x called `data_loaders`.
+# It is NOT a component in 1.0.0 (a source cannot be a coupling endpoint, a
+# subsystem, or a scoped-name path root — esm-spec §8); it is a document-scoped
+# ingest registry. We still emit a page per entry because the dataset behind it
+# is what a reader is looking for, but the page carries the source's I/O
+# descriptor rather than a variables table: from 1.0.0 a source exposes no
+# variables, and each former loader variable lives on the CONSUMING model as a
+# parameter with `update: {kind: "data", source: ...}`.
 _COMPONENT_SECTIONS = (
     "models",
     "reaction_systems",
     "operators",
-    "data_loaders",
+    "data_sources",
     "coupling",
     "interfaces",
 )
@@ -263,7 +291,7 @@ class ComponentEntry:
             "models": "model",
             "reaction_systems": "reaction_system",
             "operators": "operator",
-            "data_loaders": "data_loader",
+            "data_sources": "data_source",
             "coupling": "coupling",
             "interfaces": "interface",
         }.get(self.section, self.section)
@@ -455,14 +483,20 @@ def _render_reference_section(entry: ComponentEntry) -> str:
     return _section("Reference", "\n".join(parts))
 
 
-def _render_variable_table(title: str, variables: dict, include_kinds: Iterable[str]) -> str:
+def _render_variable_table(title: str, variables: dict, include_names: Iterable[str]) -> str:
+    """Render the named subset of `variables` as a table.
+
+    The subset is chosen by the CALLER from `earthsci_ast.classification`, not
+    by reading a declared type here: from esm 1.0.0 the only declared types are
+    `unknown` and `parameter` (esm-spec §6.3.1). Declaration order is preserved
+    so a table reads the way the author wrote the file.
+    """
     rows = []
-    include = set(include_kinds)
+    include = set(include_names)
     for name, spec in variables.items():
         if not isinstance(spec, dict):
             continue
-        kind = spec.get("type", "variable")
-        if kind not in include:
+        if name not in include:
             continue
         units = spec.get("units", "")
         default = spec.get("default", "")
@@ -477,14 +511,23 @@ def _render_variable_table(title: str, variables: dict, include_kinds: Iterable[
     return _section(title, header + "\n".join(rows))
 
 
-def _render_expression_list(title: str, variables: dict) -> str:
+def _render_expression_list(title: str, variables: dict, definitions: dict) -> str:
+    """Render each observed unknown as `name = <its defining RHS>`.
+
+    Before 1.0.0 the defining expression sat on the variable itself
+    (`variables[v].expression`); it now lives in the model's `equations` as a
+    bare-variable-LHS row, and `classification.observed_definitions` is what
+    recovers the map. `definitions` is that map (name → RHS AST); we walk the
+    `variables` dict so the page keeps declaration order and can pick up each
+    variable's `description`.
+    """
     lines = []
     for name, spec in variables.items():
         if not isinstance(spec, dict):
             continue
-        if spec.get("type") != "observed":
+        if name not in definitions:
             continue
-        expr = spec.get("expression")
+        expr = definitions[name]
         if expr is None:
             continue
         latex = ast_to_latex(expr)
@@ -500,16 +543,39 @@ def _render_expression_list(title: str, variables: dict) -> str:
 
 
 def _render_variables_sections(entry: ComponentEntry) -> str:
+    """Variables / Parameters / Observed tables for one model node.
+
+    The split is DERIVED, per esm-spec §6.3.1, by `earthsci_ast.classification`:
+
+    - **Variables** — the unknowns the solver actually solves for: the ODE
+      states plus the algebraic unknowns. (Those two together are exactly what
+      0.x spelled `type: "state"`.)
+    - **Parameters** — everything declared `type: "parameter"`.
+    - **Observed** — the unknowns some equation defines with a bare-variable
+      LHS, listed with their defining right-hand sides.
+
+    A model with no `equations` (a pure interface declaration) classifies every
+    unknown as algebraic, so its unknowns all land in **Variables** and none is
+    silently dropped.
+
+    The 0.x "Constants" table is gone: `constant` was never a member of any
+    version's variable-type enum, so that table could only ever be empty. A
+    constant is now DERIVED — a parameter with neither `distribution` nor
+    `update` (`classification.constant_parameters`) — and every such parameter
+    is already in the Parameters table.
+    """
     variables = entry.body.get("variables") or {}
     if not isinstance(variables, dict) or not variables:
         return ""
+    model = entry.body
+    solved = set(ode_states(model)) | set(algebraic_unknowns(model))
+    definitions = observed_definitions(model)
     out = []
-    vars_tbl = _render_variable_table("Variables", variables, include_kinds={"variable", "state"})
-    params_tbl = _render_variable_table("Parameters", variables, include_kinds={"parameter"})
-    const_tbl = _render_variable_table("Constants", variables, include_kinds={"constant"})
-    observed_tbl = _render_variable_table("Observed", variables, include_kinds={"observed"})
-    observed_exprs = _render_expression_list("Observed expressions", variables)
-    for s in (vars_tbl, params_tbl, const_tbl, observed_tbl, observed_exprs):
+    vars_tbl = _render_variable_table("Variables", variables, solved)
+    params_tbl = _render_variable_table("Parameters", variables, declared_parameters(model))
+    observed_tbl = _render_variable_table("Observed", variables, set(definitions))
+    observed_exprs = _render_expression_list("Observed expressions", variables, definitions)
+    for s in (vars_tbl, params_tbl, observed_tbl, observed_exprs):
         if s:
             out.append(s)
     return "".join(out)
@@ -562,9 +628,20 @@ def _render_species_section(entry: ComponentEntry) -> str:
 
 
 def _render_equations_section(entry: ComponentEntry) -> str:
+    """Render the model's equations, minus the observed definitions.
+
+    From 1.0.0 an observed unknown is defined by a bare-variable-LHS EQUATION
+    rather than by a `variables[v].expression` field, so `equations` now carries
+    rows that the "Observed expressions" section already renders. Rendering both
+    would print every observed quantity twice. We drop exactly one row per name
+    in `classification.observed_definitions` — the FIRST bare-LHS row, which is
+    the one the classifier credits — so a variable defined twice still shows its
+    remaining rows here rather than having them silently disappear.
+    """
     equations = entry.body.get("equations")
     if not isinstance(equations, list) or not equations:
         return ""
+    pending_definitions = set(observed_definitions(entry.body))
     blocks = []
     for i, eq in enumerate(equations):
         if not isinstance(eq, dict):
@@ -572,6 +649,9 @@ def _render_equations_section(entry: ComponentEntry) -> str:
         lhs = eq.get("lhs")
         rhs = eq.get("rhs")
         if lhs is None and rhs is None:
+            continue
+        if isinstance(lhs, str) and lhs in pending_definitions:
+            pending_definitions.discard(lhs)
             continue
         lhs_tex = ast_to_latex(lhs) if lhs is not None else ""
         rhs_tex = ast_to_latex(rhs) if rhs is not None else ""
@@ -647,25 +727,63 @@ def _format_reaction_side(side: list) -> str:
     return " + ".join(parts)
 
 
+def _render_data_source_section(entry: ComponentEntry) -> str:
+    """Render a `data_sources` entry's I/O descriptor (esm-spec §8).
+
+    A source is pure I/O from 1.0.0: it locates, reads, decodes, slices and
+    filters bytes, and exposes NO variables. What the model gets out of it is
+    documented on the CONSUMING model, as a parameter whose
+    `update: {kind: "data", source: "<this key>", from: {...}}` names it — so
+    there is deliberately no variables table here.
+    """
+    if entry.section != "data_sources":
+        return ""
+    body = entry.body
+    rows = []
+
+    def add(label: str, value: Any) -> None:
+        if value in (None, "", [], {}):
+            return
+        rows.append(f"| {label} | {value} |")
+
+    add("Kind", f"`{body.get('kind')}`" if body.get("kind") else "")
+    source = body.get("source")
+    if isinstance(source, dict):
+        add("URL template", f"`{source.get('url_template')}`" if source.get("url_template") else "")
+        mirrors = source.get("mirrors") or []
+        if isinstance(mirrors, list) and mirrors:
+            add("Mirrors", ", ".join(f"`{m}`" for m in mirrors))
+    temporal = body.get("temporal")
+    if isinstance(temporal, dict):
+        add("Coverage", " → ".join(str(temporal[k]) for k in ("start", "end") if temporal.get(k)))
+        add("File period", f"`{temporal.get('file_period')}`" if temporal.get("file_period") else "")
+        add("Sample frequency", f"`{temporal.get('frequency')}`" if temporal.get("frequency") else "")
+        add("Records per file", temporal.get("records_per_file"))
+    if not rows:
+        return ""
+    header = "| | |\n| --- | --- |\n"
+    return _section("Data source", header + "\n".join(rows))
+
+
 _PLOT_IMG_EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp")
 
 
-def _find_plot_artifacts(entry: ComponentEntry, example: dict, repo_root: Path) -> list[tuple[str, str]]:
+def _find_plot_artifacts(entry: ComponentEntry, analysis: dict, repo_root: Path) -> list[tuple[str, str]]:
     """Return [(image_relpath, caption)] for any plot artifacts shipped alongside
-    the .esm for the given example.
+    the .esm for the given analysis.
 
-    Convention: an artifact for plot `<plot_id>` under example `<example_id>` of
-    `foo.esm` lives at `<esm_dir>/foo.plots/<example_id>-<plot_id>.<ext>` where
-    `<ext>` is png / svg / jpg / jpeg / webp. Artifacts get copied into the
-    Hugo `static/plots/<slug>/` tree and linked below the example prose.
+    Convention: an artifact for plot `<plot_id>` under analysis `<analysis_id>`
+    of `foo.esm` lives at `<esm_dir>/foo.plots/<analysis_id>-<plot_id>.<ext>`
+    where `<ext>` is png / svg / jpg / jpeg / webp. Artifacts get copied into
+    the Hugo `static/plots/<slug>/` tree and linked below the analysis prose.
 
     Returns an empty list if no artifacts are present — today every .esm hits
-    this path (see docs/README.md "Example plots — path forward").
+    this path (see docs/README.md "Analysis plots — path forward").
     """
-    example_id = example.get("id") or ""
-    if not example_id:
+    analysis_id = analysis.get("id") or ""
+    if not analysis_id:
         return []
-    plots_meta = example.get("plots") or []
+    plots_meta = analysis.get("plots") or []
     if not isinstance(plots_meta, list) or not plots_meta:
         return []
     esm_abs = (repo_root / entry.esm_path).resolve()
@@ -681,7 +799,7 @@ def _find_plot_artifacts(entry: ComponentEntry, example: dict, repo_root: Path) 
             continue
         caption = plot.get("description") or plot_id
         for ext in _PLOT_IMG_EXTS:
-            candidate = plots_dir / f"{example_id}-{plot_id}{ext}"
+            candidate = plots_dir / f"{analysis_id}-{plot_id}{ext}"
             if candidate.is_file():
                 found.append((str(candidate), caption))
                 break
@@ -690,13 +808,13 @@ def _find_plot_artifacts(entry: ComponentEntry, example: dict, repo_root: Path) 
 
 def _copy_and_link_plots(
     entry: ComponentEntry,
-    example: dict,
+    analysis: dict,
     repo_root: Path,
     static_dir: Path,
 ) -> list[str]:
     """Copy plot artifacts into the Hugo static tree and return markdown image
-    lines. Empty list when no artifacts exist for this example."""
-    artifacts = _find_plot_artifacts(entry, example, repo_root)
+    lines. Empty list when no artifacts exist for this analysis."""
+    artifacts = _find_plot_artifacts(entry, analysis, repo_root)
     if not artifacts:
         return []
     dest_rel = Path("plots") / entry.slug
@@ -714,32 +832,55 @@ def _copy_and_link_plots(
     return lines
 
 
-def _render_examples_section(
+def _render_analysis_body(analysis: dict) -> list[str]:
+    """The prose parts of one analysis: heading, description, run window.
+
+    esm-spec §6.7 fixes the Analysis object to `id`, `description`,
+    `initial_state`, `parameters`, `time_span`, `parameter_sweep`, `plots` and
+    `expression_template_imports` — the `$def` is `additionalProperties: false`.
+    The 0.4-era `title` / `code` / `language` keys the 0.x `examples` block
+    carried are therefore unrepresentable and no longer read here; the `id` is
+    the heading and the run configuration below it is what a reader needs to
+    reproduce the figure.
+    """
+    parts = [f"### {analysis.get('id') or 'Analysis'}"]
+    desc = analysis.get("description") or ""
+    if desc:
+        parts.append(desc)
+    span = analysis.get("time_span")
+    if isinstance(span, dict):
+        # TimeSpan is {start, end} in the component's own time units — the
+        # schema carries no units field of its own.
+        start, end = span.get("start"), span.get("end")
+        if start is not None and end is not None:
+            parts.append(f"**Time span:** {start} → {end}")
+    sweep = analysis.get("parameter_sweep")
+    if isinstance(sweep, dict):
+        dims = sweep.get("dimensions") or []
+        swept = [d.get("parameter") for d in dims if isinstance(d, dict) and d.get("parameter")]
+        if swept:
+            parts.append("**Swept over:** " + ", ".join(f"`{p}`" for p in swept))
+    return parts
+
+
+def _render_analyses_section(
     entry: ComponentEntry,
     repo_root: Path,
     static_dir: Path,
 ) -> str:
-    examples = entry.body.get("examples")
-    if not isinstance(examples, list) or not examples:
+    analyses = entry.body.get("analyses")
+    if not isinstance(analyses, list) or not analyses:
         return ""
     blocks = []
-    for ex in examples:
-        if not isinstance(ex, dict):
+    for analysis in analyses:
+        if not isinstance(analysis, dict):
             continue
-        title = ex.get("title") or ex.get("id") or "Example"
-        desc = ex.get("description") or ""
-        code = ex.get("code") or ""
-        lang = ex.get("language") or "julia"
-        parts = [f"### {title}"]
-        if desc:
-            parts.append(desc)
-        if code:
-            parts.append(f"```{lang}\n{code}\n```")
-        plot_lines = _copy_and_link_plots(entry, ex, repo_root, static_dir)
+        parts = _render_analysis_body(analysis)
+        plot_lines = _copy_and_link_plots(entry, analysis, repo_root, static_dir)
         if plot_lines:
             parts.append("\n\n".join(plot_lines))
         blocks.append("\n\n".join(parts))
-    return _section("Examples", "\n\n".join(blocks))
+    return _section("Analyses", "\n\n".join(blocks))
 
 
 def _render_raw_section(entry: ComponentEntry) -> str:
@@ -760,7 +901,7 @@ def render_markdown(
 ) -> str:
     """Render one component entry as a Hugo markdown page (frontmatter + body).
 
-    `repo_root` and `static_dir` control where example plot artifacts are
+    `repo_root` and `static_dir` control where analysis plot artifacts are
     looked up and copied; when omitted, no plots are emitted (useful for
     pure-render unit tests).
     """
@@ -774,35 +915,27 @@ def render_markdown(
     parts.append(_render_equations_section(entry))
     parts.append(_render_expression_templates_section(entry))
     parts.append(_render_reactions_section(entry))
+    parts.append(_render_data_source_section(entry))
     if repo_root is not None and static_dir is not None:
-        parts.append(_render_examples_section(entry, repo_root, static_dir))
+        parts.append(_render_analyses_section(entry, repo_root, static_dir))
     else:
-        parts.append(_render_examples_section_no_plots(entry))
+        parts.append(_render_analyses_section_no_plots(entry))
     parts.append(_render_raw_section(entry))
     return "".join(parts)
 
 
-def _render_examples_section_no_plots(entry: ComponentEntry) -> str:
-    """Variant of the examples renderer that skips plot-artifact lookup —
+def _render_analyses_section_no_plots(entry: ComponentEntry) -> str:
+    """Variant of the analyses renderer that skips plot-artifact lookup —
     used by tests that don't need filesystem access to the components tree."""
-    examples = entry.body.get("examples")
-    if not isinstance(examples, list) or not examples:
+    analyses = entry.body.get("analyses")
+    if not isinstance(analyses, list) or not analyses:
         return ""
     blocks = []
-    for ex in examples:
-        if not isinstance(ex, dict):
+    for analysis in analyses:
+        if not isinstance(analysis, dict):
             continue
-        title = ex.get("title") or ex.get("id") or "Example"
-        desc = ex.get("description") or ""
-        code = ex.get("code") or ""
-        lang = ex.get("language") or "julia"
-        parts = [f"### {title}"]
-        if desc:
-            parts.append(desc)
-        if code:
-            parts.append(f"```{lang}\n{code}\n```")
-        blocks.append("\n\n".join(parts))
-    return _section("Examples", "\n\n".join(blocks))
+        blocks.append("\n\n".join(_render_analysis_body(analysis)))
+    return _section("Analyses", "\n\n".join(blocks))
 
 
 # ---------------------------------------------------------------------------
