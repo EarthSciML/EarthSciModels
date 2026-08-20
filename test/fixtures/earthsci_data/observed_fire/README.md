@@ -24,3 +24,26 @@ python test/observed_fire_loaders_feasibility.py   # exit 0 = green
 
 See [`docs/observed-fire-loaders-framework-gaps.md`](../../../../docs/observed-fire-loaders-framework-gaps.md)
 for the F-data-4 verdict and the declarative-or-fail framework findings.
+
+## esm 1.0.0 (2026-08-20)
+
+The three loader files are now `data_sources` catalogs, not `data_loaders`.
+They are the only data sources in the corpus with **no consuming `.esm`**, so
+they stay standalone rather than being merged into a consumer the way the other
+26 sources were. Two consequences for the driver:
+
+- `EsmFile.data_loaders` and `DataSource.variables` are gone. A data source is
+  no longer a component and carries no variable map; each former loader
+  variable becomes a **parameter on the consuming model** with
+  `update: {kind: "data", source: "<registry key>", from: {file_variable, …}}`,
+  and `earthsci_ast.load_data` / `load_grid` / `load_points` / `load_static`
+  take `bindings = {consuming parameter name -> DataSourceBinding}`.
+- These catalogs have no consumer, so they cannot supply those bindings. Their
+  six `file_variable` / `units` / `description` declarations are parked
+  verbatim in each source's `metadata.unconsumed_file_variables`, with the
+  reasoning in `metadata.unconsumed_file_variables_note`. A shared catalog is
+  not self-describing at 1.0.0 — that is an open format gap, recorded, not
+  worked around.
+
+`test/observed_fire_loaders_feasibility.py` still uses the 0.x
+`m.data_loaders[...]` / `dl.variables` API and has not been ported.
