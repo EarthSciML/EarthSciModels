@@ -2,7 +2,7 @@
   "esm": "1.0.0",
   "metadata": {
     "name": "CEDS_N2O_loader",
-    "description": "Pure-I/O data loader for CEDS (Community Emissions Data System) monthly anthropogenic N2O emissions. Supplies the sector-summed surface emission flux N2O_em_anthro (kg m⁻² s⁻¹) on the native 0.5°×0.5° global longitude/latitude grid, monthly, 2000–2023 chunk (CEDS-CMIP-2025-04-18, v20250421).\n\nThis is one of the ten loader halves of the ceds loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.3) — CEDS sources each species from a separate NetCDF FileSet, so each becomes its own single-component loader file (a {\"ref\"} target must contain exactly one component, RFC §4.7). It is PURE I/O: it declares its source (url_template), the file variable it reads (N2O_em_anthro, sector-summed at load time, with units), its temporal cadence, and its NATIVE grid expressed as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/ceds.esm), which references this file as the subsystem `CEDS_N2O` via {\"ref\": \"./ceds_n2o_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (proj4 crs string / grid_type / staggering / resolution / extent) is replaced by the GDD `grid` (family + crs + dimensions + extents); the old per-loader `regridding` block (fill_value / extrapolation) is gone — regridding is declared per-variable on the model (ceds.esm `regrid`). Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5).\n\nMigrated from EarthSciData.jl@830435a src/ceds.jl:1-378 (CEDSFileSet). Split out of the pre-migration components/earthsci_data/ceds.esm (esm-4ega).",
+    "description": "Pure-I/O data loader for CEDS (Community Emissions Data System) monthly anthropogenic N2O emissions. Supplies the sector-summed surface emission flux N2O_em_anthro (kg m⁻² s⁻¹) on the native 0.5°×0.5° global longitude/latitude grid, monthly, 2000–2023 chunk (CEDS-CMIP-2025-04-18, v20250421).\n\nThis is one of the ten loader halves of the ceds loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.3) — CEDS sources each species from a separate NetCDF FileSet, so each becomes its own single-component loader file (a {\"ref\"} target must contain exactly one component, RFC §4.7). It is PURE I/O: it declares its source (url_template), the file variable it reads (N2O_em_anthro, sector-summed at load time, with units), and its temporal cadence. It declares NO grid: esm 0.8.0 removed the loader `grid`/GDD-Grid descriptor outright, so the native 0.5°×0.5° longlat/WGS84 lattice is recorded as documentation in the data source's metadata (native_grid_family / native_crs_epsg / native_crs_descriptor / native_dimensions / native_dimension_extents / native_staggering / native_grid_description) and is materialized downstream by `aggregate` coupling expressions. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/ceds.esm), which references this file as the subsystem `CEDS_N2O` via {\"ref\": \"./ceds_n2o_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (proj4 crs string / grid_type / staggering / resolution / extent) became the GDD `grid` at 0.7.0 and, at 0.8.0, metadata documentation (see metadata.migration_note on the data source); the old per-loader `regridding` block (fill_value / extrapolation) is gone, and so is the model-level `regrid` map that briefly replaced it — at 0.8.0 the regridding kernel is a coupling expression, and ceds.esm keeps the per-variable kernel choice verbatim in Model.reference.notes. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5).\n\nMigrated from EarthSciData.jl@830435a src/ceds.jl:1-378 (CEDSFileSet). Split out of the pre-migration components/earthsci_data/ceds.esm (esm-4ega).",
     "tags": [
       "earthsci_data",
       "emissions",
@@ -48,28 +48,6 @@
         "records_per_file": 12,
         "time_variable": "time"
       },
-      "grid": {
-        "family": "cartesian",
-        "crs": {
-          "projection": "longlat",
-          "datum": "WGS84"
-        },
-        "description": "Native CEDS grid: regular global 0.5°×0.5° longitude/latitude lattice (720×360), cell-centered. Geographic (unprojected) crs — the regridding model applies the longlat identity reprojection (ESD reprojection/longlat.esm, esd-47z.1). Migrated from the loader's former DataLoaderSpatial block (proj4 +proj=longlat +datum=WGS84). Longitude is reordered from the raw NC [0, 360) to [-180°, 180°] by the upstream CEDSFileSet.loadslice! permutation; the loader describes this reordered grid but performs no reprojection or regridding. Documented native geometry: lon ∈ [-180°, 180°] (720 cells), lat ∈ [-90°, 90°] (360 cells).",
-        "dimensions": [
-          "lon",
-          "lat"
-        ],
-        "extents": {
-          "lon": {
-            "n": 720,
-            "spacing": "uniform"
-          },
-          "lat": {
-            "n": 360,
-            "spacing": "uniform"
-          }
-        }
-      },
       "reference": {
         "citation": "Hoesly et al. (2018). Historical (1750–2014) anthropogenic emissions from CEDS. GMD 11, 369–408.",
         "url": "https://doi.org/10.5194/gmd-11-369-2018"
@@ -108,7 +86,30 @@
           ]
         },
         "proj4_string": "+proj=longlat +datum=WGS84 +no_defs",
-        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (ceds.esm `regrid`)."
+        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; at 0.7.0 regridding became a per-variable model `regrid` map; 0.8.0 removed that too \u2014 the kernel is now a coupling expression (esm-spec \u00a78.6), and ceds.esm keeps the per-variable choice verbatim in Model.reference.notes.",
+        "native_grid_family": "cartesian",
+        "native_crs_epsg": "EPSG:4326 (geographic longlat / WGS84). At esm 0.8.0 the crs is documentation only — a data source no longer carries a `grid`/crs descriptor; the longlat identity reprojection is applied at the coupling edge via ESD reprojection/longlat.esm (esd-47z.1).",
+        "native_crs_descriptor": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "native_dimensions": [
+          "lon",
+          "lat"
+        ],
+        "native_dimension_extents": {
+          "lon": {
+            "n": 720,
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": 360,
+            "spacing": "uniform"
+          }
+        },
+        "native_staggering": "Cell-centered (lon 'center', lat 'center') — the native CEDS 0.5°×0.5° lattice is a regular non-staggered raster (the former `grid.description`, preserved verbatim in native_grid_description, said 'cell-centered'). At esm 0.8.0 the regridding kernel that carries this field onto a consuming grid is a coupling expression, not a model `regrid` block; the per-variable kernel choice is recorded verbatim in ceds.esm's Model.reference.notes until a consuming coupling edge exists to carry it.",
+        "native_grid_description": "Native CEDS grid: regular global 0.5°×0.5° longitude/latitude lattice (720×360), cell-centered. Geographic (unprojected) crs — the regridding model applies the longlat identity reprojection (ESD reprojection/longlat.esm, esd-47z.1). Migrated from the loader's former DataLoaderSpatial block (proj4 +proj=longlat +datum=WGS84). Longitude is reordered from the raw NC [0, 360) to [-180°, 180°] by the upstream CEDSFileSet.loadslice! permutation; the loader describes this reordered grid but performs no reprojection or regridding. Documented native geometry: lon ∈ [-180°, 180°] (720 cells), lat ∈ [-90°, 90°] (360 cells).",
+        "migration_note": "esm 0.7.0 -> 0.8.0: removed the `grid` block (family/crs/dimensions/extents/description), which no schema at or after 0.8.0 permits — 0.8.0 deleted the native-grid descriptor outright (esm-spec §8.4; the 1.0.0 DataSource is additionalProperties:false over {kind, source, temporal, determinism, reader_options, select, record_filter, extent, reference, metadata}, with no `grid` key). Nothing was dropped: `family` → native_grid_family; `crs` → native_crs_epsg + native_crs_descriptor (verbatim); `dimensions` → native_dimensions; `extents` (per-dimension cell count + spacing) → native_dimension_extents; `description` → native_grid_description (verbatim). Native grid geometry is now ordinary data — a source exposes its coordinates/connectivity/metric arrays as ordinary `file_variable`s bound to consuming parameters, and reprojection/regridding are ordinary `aggregate` coupling expressions (esm-spec §8.6), not a loader `grid` or a model `regrid` block. No other field changed."
       }
     }
   }
