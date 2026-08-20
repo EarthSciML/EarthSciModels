@@ -18,7 +18,7 @@ and `update` (esm-spec §6.3.1). This generator therefore asks the binding —
 `earthsci_ast.classification` — rather than reading a declared type. That module
 is the single sanctioned home for the derivation across all five language
 bindings; re-deriving it here from the equations would be shadow logic that can
-drift from the spec (AGENTS.md §"No shadow logic").
+drift from the spec and from the other four bindings (AGENTS.md §1).
 
 Entry points:
     python tools/esm_to_docs.py                         # from repo root
