@@ -570,9 +570,28 @@ def _render_variables_sections(entry: ComponentEntry) -> str:
     model = entry.body
     solved = set(ode_states(model)) | set(algebraic_unknowns(model))
     definitions = observed_definitions(model)
+    parameter_names = set(declared_parameters(model))
+    # Classification only accounts for variables declared `unknown` or
+    # `parameter` — the two types 1.0.0 defines. A variable declared anything
+    # else (a stale `state` / `observed`, or a spelling like `"variable"` that
+    # is in no version's enum) belongs to no set, and filtering the tables by
+    # those sets alone would drop it from the page without a word. Show it
+    # under Variables and say so on stderr: a page that quietly omits a
+    # declared quantity is worse than one that shows an unclassifiable one.
+    unclassified = set(variables) - solved - parameter_names - set(definitions)
+    if unclassified:
+        for name in sorted(unclassified):
+            declared = variables[name].get("type") if isinstance(variables[name], dict) else None
+            print(
+                f"warning: {entry.esm_path}:{entry.section}.{entry.name}: variable "
+                f"{name!r} declares type {declared!r}, which esm 1.0.0 does not "
+                f"define (only 'unknown' and 'parameter'); rendering it under "
+                f"Variables",
+                file=sys.stderr,
+            )
     out = []
-    vars_tbl = _render_variable_table("Variables", variables, solved)
-    params_tbl = _render_variable_table("Parameters", variables, declared_parameters(model))
+    vars_tbl = _render_variable_table("Variables", variables, solved | unclassified)
+    params_tbl = _render_variable_table("Parameters", variables, parameter_names)
     observed_tbl = _render_variable_table("Observed", variables, set(definitions))
     observed_exprs = _render_expression_list("Observed expressions", variables, definitions)
     for s in (vars_tbl, params_tbl, observed_tbl, observed_exprs):

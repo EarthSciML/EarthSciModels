@@ -424,6 +424,16 @@ class RenderMarkdownTest(unittest.TestCase):
         self.assertNotIn(r"2 \cdot x", equations)
         self.assertIn(r"y = 2 \cdot x", md.split("## Observed expressions", 1)[1])
 
+    def test_variable_with_an_undefined_type_is_still_rendered(self):
+        # `"type": "variable"` is in no version's enum, so classification
+        # accounts for it nowhere. Filtering the tables by the classified sets
+        # alone would drop it from the page silently.
+        entry = self._make_entry()
+        entry.body["variables"]["w"] = {"type": "variable", "description": "stray"}
+        md = mod.render_markdown(entry)
+        variables_tbl = md.split("## Variables", 1)[1].split("## Parameters", 1)[0]
+        self.assertIn("`w`", variables_tbl)
+
     def test_analysis_renders_id_and_time_span(self):
         md = mod.render_markdown(self._make_entry())
         analyses = md.split("## Analyses", 1)[1].split("\n## ", 1)[0]
