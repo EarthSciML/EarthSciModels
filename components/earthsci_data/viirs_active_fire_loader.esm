@@ -2,7 +2,7 @@
   "esm": "1.0.0",
   "metadata": {
     "name": "VIIRS_active_fire_loader",
-    "description": "Pure-I/O data loader for NASA FIRMS VIIRS active-fire detections. Provides per-overpass point detections (one row per fire pixel per satellite pass): fire radiative power, brightness temperature, and detection confidence at irregular (lon,lat) detection locations resolved at runtime. This is the SUB-DAILY fire-front timing reference for fire-model validation (campfire-e2e Phase E1/E2) — the best progression signal between daily perimeters.\n\nThis is a `kind: points` loader: detections are NOT a fixed lattice — they are points discovered at runtime from the FIRMS area API (bbox + day filtered). Like the openaq_loader, a points loader whose native point set is resolved at runtime carries NO GDD `grid` block (DataLoader schema: 'any loader whose native grid is resolved at runtime may omit it'); the detections' geographic (longlat/WGS84) coordinate reference is recorded in this loader's metadata for provenance and to drive the owning model's identity reprojection by convention.\n\nThis is a pure-IO loader in the 0.7.0 split shape (RFC pure-io-data-loaders §4.1/§7): it declares its source (url_template), the file variables it reads (with units), and its temporal cadence. It performs NO point-to-grid aggregation and NO regridding — those are the per-variable concern of an owning regridding model, if one is added (the openaq.esm cell-average pattern). Observed-fire loaders are VALIDATION refs — they do NOT feed the model RHS, so this loader has no companion forcing wrapper; the E2 harness compares detection timing/location to the simulated fire front. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5): the runtime refreshes the per-overpass detections on schedule.\n\nUSER-ACTION (campfire-e2e plan §User-action): a free FIRMS MAP_KEY is required for the area API. The url_template carries a {map_key} substitution; set it at runtime (do NOT commit a key). See metadata.access_note. Per the plan, if the points-loader kind proves immature for this use, the fallback is to rasterize detections to a detection_count(lon,lat,time) grid (the same offline trick as the NIFC loader); the framework-gaps report records the feasibility verdict.",
+    "description": "Pure-I/O data loader for NASA FIRMS VIIRS active-fire detections. Provides per-overpass point detections (one row per fire pixel per satellite pass): fire radiative power, brightness temperature, and detection confidence at irregular (lon,lat) detection locations resolved at runtime. This is the SUB-DAILY fire-front timing reference for fire-model validation (campfire-e2e Phase E1/E2) — the best progression signal between daily perimeters.\n\nThis is a `kind: points` loader: detections are NOT a fixed lattice — they are points discovered at runtime from the FIRMS area API (bbox + day filtered). Like the openaq_loader, this points source carries NO grid block — at 0.7.0 because 'any loader whose native grid is resolved at runtime may omit it', and since 0.8.0 because no data source may carry one at all; the detections' geographic (longlat/WGS84) coordinate reference is recorded in this file's metadata for provenance and to drive the owning model's identity reprojection by convention.\n\nThis is a pure-I/O data-source CATALOG: it declares its source (url_template) and its temporal cadence. It declares NO variables: esm 1.0.0 moved every former loader variable onto the model parameter that consumes it, and this catalog has no consumer, so its three file_variable declarations are parked verbatim in metadata.unconsumed_file_variables (see metadata.unconsumed_file_variables_note; a shared catalog is not self-describing at 1.0.0). It performs NO point-to-grid aggregation and NO regridding — those are the per-variable concern of an owning regridding model, if one is added (the openaq.esm cell-average pattern). Observed-fire loaders are VALIDATION refs — they do NOT feed the model RHS, so this loader has no companion forcing wrapper; the E2 harness compares detection timing/location to the simulated fire front. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5): the runtime refreshes the per-overpass detections on schedule.\n\nUSER-ACTION (campfire-e2e plan §User-action): a free FIRMS MAP_KEY is required for the area API. The url_template carries a {map_key} substitution; set it at runtime (do NOT commit a key). See metadata.access_note. Per the plan, if the points-loader kind proves immature for this use, the fallback is to rasterize detections to a detection_count(lon,lat,time) grid (the same offline trick as the NIFC loader); the framework-gaps report records the feasibility verdict.",
     "tags": [
       "earthsci_data",
       "wildfire",
@@ -35,7 +35,7 @@
       }
     ]
   },
-  "data_loaders": {
+  "data_sources": {
     "VIIRS_active_fire": {
       "kind": "points",
       "source": {
@@ -48,23 +48,6 @@
         "frequency": "PT12H",
         "records_per_file": "auto",
         "time_variable": "acq_date"
-      },
-      "variables": {
-        "frp": {
-          "file_variable": "frp",
-          "units": "MW",
-          "description": "Fire Radiative Power (megawatts) of the detected fire pixel — proxy for combustion/energy-release rate. FIRMS VIIRS CSV column 'frp', already in MW (no unit conversion applied: the points loader's column mapping does not coerce string CSV cells, so numeric scaling is deferred to the consumer/parser — see the framework-gaps report)."
-        },
-        "brightness": {
-          "file_variable": "bright_ti4",
-          "units": "K",
-          "description": "Brightness temperature (kelvin) of the fire pixel in VIIRS I-4 channel (~3.74 µm). FIRMS VIIRS CSV column 'bright_ti4', already in K. (MODIS equivalent is column 'brightness'; set file_variable accordingly when firms_source is a MODIS product.) The companion 'bright_ti5' (I-5, ~11.45 µm) is available in the raw records for the day/night and saturation tests."
-        },
-        "confidence": {
-          "file_variable": "confidence",
-          "units": "1",
-          "description": "Detection confidence (dimensionless class). For VIIRS this is a CATEGORICAL flag in {'l' low, 'n' nominal, 'h' high} (FIRMS CSV column 'confidence'); for MODIS it is an integer 0-100. units '1' marks it dimensionless; the value is a category/string, NOT a measured quantity — consumers should map l/n/h → ordinal or filter on it. No unit_conversion (categorical)."
-        }
       },
       "reference": {
         "citation": "Schroeder, W. et al. (2014). The New VIIRS 375 m active fire detection data product. Remote Sensing of Environment, 143, 85-96. NASA FIRMS: https://firms.modaps.eosdis.nasa.gov/",
@@ -97,7 +80,26 @@
         "fallback_note": "campfire-e2e plan: if the kind:points loader proves immature for fire-front validation, rasterize detections to detection_count(lon,lat,time) on the analysis grid (same offline trick as nifc_perimeters_loader) and read as kind:grid. The framework-gaps report records the F-data-4 feasibility verdict for the points path.",
         "use": "Sub-daily fire-front timing — finer than the daily NIFC perimeters; complements MTBS (final extent) and NIFC (daily progression).",
         "access_note": "NASA FIRMS active-fire data is free/open (cite Schroeder et al. 2014 and the FIRMS program); the area API REQUIRES a free MAP_KEY from https://firms.modaps.eosdis.nasa.gov/api/area/. USER-ACTION: obtain a MAP_KEY and supply it at runtime via the {map_key} substitution (e.g. an env var) — do NOT commit a key. Like the era5/openaq loaders, the toolkit does not yet resolve a local data cache (EARTHSCIDATADIR) at the URL layer (see the observed-fire framework-gaps report); cache responses or use a file:// path until that C2 mechanism lands.",
-        "user_action": "Obtain a free FIRMS MAP_KEY (campfire-e2e plan §User-action) and supply it at runtime; do not commit it."
+        "user_action": "Obtain a free FIRMS MAP_KEY (campfire-e2e plan §User-action) and supply it at runtime; do not commit it.",
+        "unconsumed_file_variables": {
+          "frp": {
+            "file_variable": "frp",
+            "units": "MW",
+            "description": "Fire Radiative Power (megawatts) of the detected fire pixel — proxy for combustion/energy-release rate. FIRMS VIIRS CSV column 'frp', already in MW (no unit conversion applied: the points loader's column mapping does not coerce string CSV cells, so numeric scaling is deferred to the consumer/parser — see the framework-gaps report)."
+          },
+          "brightness": {
+            "file_variable": "bright_ti4",
+            "units": "K",
+            "description": "Brightness temperature (kelvin) of the fire pixel in VIIRS I-4 channel (~3.74 µm). FIRMS VIIRS CSV column 'bright_ti4', already in K. (MODIS equivalent is column 'brightness'; set file_variable accordingly when firms_source is a MODIS product.) The companion 'bright_ti5' (I-5, ~11.45 µm) is available in the raw records for the day/night and saturation tests."
+          },
+          "confidence": {
+            "file_variable": "confidence",
+            "units": "1",
+            "description": "Detection confidence (dimensionless class). For VIIRS this is a CATEGORICAL flag in {'l' low, 'n' nominal, 'h' high} (FIRMS CSV column 'confidence'); for MODIS it is an integer 0-100. units '1' marks it dimensionless; the value is a category/string, NOT a measured quantity — consumers should map l/n/h → ordinal or filter on it. No unit_conversion (categorical)."
+          }
+        },
+        "unconsumed_file_variables_note": "esm 1.0.0 removed the loader `variables` map: a data source is no longer a component, and every former loader variable becomes a PARAMETER on the model that CONSUMES it, carrying `update: {kind: \"data\", source: \"<registry key>\", from: {file_variable, unit_conversion?, codes?, select?}}` with `units` and `shape` declared once on that parameter (esm-spec §8). This file is a SHARED CATALOG with NO consuming .esm — nothing in the corpus mounts it; it is read only by tools/leaves/nifc_perimeters_rasterize.py and test/observed_fire_loaders_feasibility.py — so there is no consuming parameter to carry these declarations, and the 1.0.0 DataSource (additionalProperties:false over {kind, source, temporal, determinism, reader_options, select, record_filter, extent, reference, metadata}) has no `variables` key. The map is therefore parked VERBATIM in `unconsumed_file_variables` above so that not one file_variable, unit or description is lost. This is a demotion from a structured field to metadata, NOT an equivalent: a 1.0.0 consumer still has to re-declare each entry as a parameter `update.from.file_variable` + `units` before the runtime can read this source (earthsci_ast.load_data takes `bindings` = {consuming parameter name -> DataSourceBinding}, which a catalog with no consumer cannot supply). Recorded as the 'a shared catalog is not self-describing' reversion.",
+        "migration_note": "esm 0.x -> 1.0.0: renamed the top-level `data_loaders` key to `data_sources` and removed this source's `variables` map — see unconsumed_file_variables_note. A data_sources-only catalog (no `models`) is a valid 1.0.0 document and loads through earthsci_ast.load; it is simply not mountable as a subsystem, which is correct — a data source is not a component, not a coupling endpoint and not a scoped-name path root."
       }
     }
   }

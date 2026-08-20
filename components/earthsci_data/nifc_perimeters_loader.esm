@@ -2,7 +2,7 @@
   "esm": "1.0.0",
   "metadata": {
     "name": "NIFC_perimeters_loader",
-    "description": "Pure-I/O data loader for NIFC / GeoMAC daily wildfire perimeters, RASTERIZED OFFLINE to a burned-fraction grid. Provides a daily burned_fraction(lon,lat) field in [0,1] — the per-cell fraction of area inside the cumulative (or daily) fire perimeter — read as an ordinary gridded time series (one NetCDF per day). This is the day-by-day fire PROGRESSION reference for fire-model validation (campfire-e2e Phase E1/E2).\n\n⭐ Key design constraint (campfire-e2e plan, 2026-06-26): the DataLoader `kind` enum is grid/points/static/mesh — there is NO vector/polygon kind. Fire perimeters are time-varying POLYGONS. Rather than add a new vector loader primitive (against the no-new-primitives principle), the daily perimeters are RASTERIZED OFFLINE by a documented preprocessing leaf (tools/leaves/nifc_perimeters_rasterize.py) to burned_fraction NetCDFs on a chosen analysis grid, and this loader is a plain `kind:grid` reader. This keeps every loader pure-IO and reuses the existing grid machinery; rasterization is a one-time preprocessing step, not an engine capability.\n\nThis is a pure-IO loader in the 0.7.0 split shape (RFC pure-io-data-loaders §4.1/§7): it declares its source (url_template), the file variable it reads (with units), its temporal cadence, and its NATIVE grid as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are model concerns. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5): daily files, one per day. The file layout mirrors the era5_loader period-file model (era5: monthly files × hourly records; here: daily files × one daily record), so a fire's burned_fraction(lon,lat,time) series is the stack of its daily files.\n\nObserved-fire loaders are VALIDATION refs — they do NOT feed the model RHS, so this loader has no companion forcing wrapper; the E2 validation harness aligns the burned-fraction grid to the comparison grid using the same ESD regridding rules.\n\nUSER-ACTION (campfire-e2e plan §User-action): choose the analysis/comparison grid + resolution for rasterization (default: the fire model's domain grid — for the 2018 Camp Fire, the model's Camp Fire domain). The rasterizer leaf and this loader share that grid choice; see metadata.access_note and the leaf docstring.",
+    "description": "Pure-I/O data loader for NIFC / GeoMAC daily wildfire perimeters, RASTERIZED OFFLINE to a burned-fraction grid. Provides a daily burned_fraction(lon,lat) field in [0,1] — the per-cell fraction of area inside the cumulative (or daily) fire perimeter — read as an ordinary gridded time series (one NetCDF per day). This is the day-by-day fire PROGRESSION reference for fire-model validation (campfire-e2e Phase E1/E2).\n\n⭐ Key design constraint (campfire-e2e plan, 2026-06-26): the data-source `kind` enum is grid/points/static (it was grid/points/static/mesh before 1.0.0) — there is NO vector/polygon kind. Fire perimeters are time-varying POLYGONS. Rather than add a new vector loader primitive (against the no-new-primitives principle), the daily perimeters are RASTERIZED OFFLINE by a documented preprocessing leaf (tools/leaves/nifc_perimeters_rasterize.py) to burned_fraction NetCDFs on a chosen analysis grid, and this loader is a plain `kind:grid` reader. This keeps every loader pure-IO and reuses the existing grid machinery; rasterization is a one-time preprocessing step, not an engine capability.\n\nThis is a pure-I/O data-source CATALOG: it declares its source (url_template) and its temporal cadence. It declares NO grid — esm 0.8.0 removed the loader `grid`/GDD-Grid descriptor outright, so the analysis-grid geometry is documentation in the data source's metadata — and NO variables: esm 1.0.0 moved every former loader variable onto the model parameter that consumes it, and this catalog has no consumer, so the burned_fraction file_variable declaration is parked verbatim in metadata.unconsumed_file_variables (see metadata.unconsumed_file_variables_note). It performs NO reprojection and NO regridding — those are model concerns. Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5): daily files, one per day. The file layout mirrors the era5_loader period-file model (era5: monthly files × hourly records; here: daily files × one daily record), so a fire's burned_fraction(lon,lat,time) series is the stack of its daily files.\n\nObserved-fire loaders are VALIDATION refs — they do NOT feed the model RHS, so this loader has no companion forcing wrapper; the E2 validation harness aligns the burned-fraction grid to the comparison grid using the same ESD regridding rules.\n\nUSER-ACTION (campfire-e2e plan §User-action): choose the analysis/comparison grid + resolution for rasterization (default: the fire model's domain grid — for the 2018 Camp Fire, the model's Camp Fire domain). The rasterizer leaf and this loader share that grid choice; see metadata.access_note and the leaf docstring.",
     "tags": [
       "earthsci_data",
       "wildfire",
@@ -33,7 +33,7 @@
       }
     ]
   },
-  "data_loaders": {
+  "data_sources": {
     "NIFC_burned_fraction": {
       "kind": "grid",
       "source": {
@@ -46,45 +46,6 @@
         "frequency": "P1D",
         "records_per_file": 1,
         "time_variable": "time"
-      },
-      "grid": {
-        "family": "cartesian",
-        "crs": {
-          "projection": "longlat",
-          "datum": "WGS84"
-        },
-        "description": "Analysis grid the daily perimeters are rasterized onto: a regular geographic (longlat/WGS84) lattice covering the fire domain. The default is the fire model's own domain grid + resolution (campfire-e2e plan §User-action) — for the 2018 Camp Fire, the model's Camp Fire domain (≈0.01° ~1 km cells over lon ∈ [-122.0, -121.2], lat ∈ [39.6, 40.1]). Cell counts (n_lon, n_lat) are resolved from the rasterized NetCDF at load time and are set by the rasterizer leaf to match the chosen grid; the loader describes the grid but performs no reprojection or regridding. burned_fraction is cell-centered (lon/lat 'center'); the E2 harness regrids it conservatively (area-weighted) onto the comparison grid.",
-        "dimensions": [
-          "lon",
-          "lat"
-        ],
-        "extents": {
-          "lon": {
-            "n": "n_lon",
-            "spacing": "uniform"
-          },
-          "lat": {
-            "n": "n_lat",
-            "spacing": "uniform"
-          }
-        },
-        "parameters": {
-          "n_lon": {
-            "units": "1",
-            "description": "Longitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
-          },
-          "n_lat": {
-            "units": "1",
-            "description": "Latitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
-          }
-        }
-      },
-      "variables": {
-        "burned_fraction": {
-          "file_variable": "burned_fraction",
-          "units": "1",
-          "description": "Per-cell burned fraction in [0,1]: the fraction of the grid cell's area covered by the day's fire perimeter (the union of NIFC/GeoMAC perimeter polygons valid on that day, rasterized by cell-coverage fraction). 0 = unburned, 1 = fully inside the perimeter. A continuous fraction (not a hard 0/1 mask) so the validation metric tolerates partial cells at the fire front. By convention the rasterizer emits the CUMULATIVE burned area through each day (monotonic non-decreasing), so the daily series is the modeled fire's growth curve; see the leaf docstring for the daily-vs-cumulative option."
-        }
       },
       "reference": {
         "citation": "National Interagency Fire Center (NIFC) Open Data — Wildland Fire Perimeters / GeoMAC daily archive. https://data-nifc.opendata.arcgis.com/",
@@ -108,7 +69,48 @@
         "burned_fraction_convention": "cumulative-through-day by default (monotonic; the modeled growth curve). The leaf can also emit per-day (new area only) — see its --mode flag. units '1' (dimensionless fraction in [0,1]).",
         "use": "Day-by-day fire PROGRESSION — the primary burned-area-vs-day validation signal, complementary to MTBS (final extent/severity) and VIIRS (sub-daily front timing).",
         "access_note": "NIFC/GeoMAC perimeters are public/open (no key); cite NIFC per their terms. This loader reads the RASTERIZED product, not the raw polygons — run tools/leaves/nifc_perimeters_rasterize.py first to produce burned_fraction_{YYYYMMDD}.nc on your chosen analysis grid. The url_template uses a placeholder earthsci.dev mirror with a {fire_id} substitution; like the era5 loader, the toolkit does not yet resolve a local data cache (EARTHSCIDATADIR) at the URL layer (see the observed-fire framework-gaps report) — populate a local cache or use a file:// path until that C2 mechanism lands.",
-        "user_action": "Choose the analysis/comparison grid + resolution (campfire-e2e plan §User-action). Default: the fire model's domain grid (2018 Camp Fire domain)."
+        "user_action": "Choose the analysis/comparison grid + resolution (campfire-e2e plan §User-action). Default: the fire model's domain grid (2018 Camp Fire domain).",
+        "native_grid_family": "cartesian",
+        "native_crs_epsg": "EPSG:4326 (geographic longlat / WGS84). At esm 0.8.0 the crs is documentation only — a data source no longer carries a `grid`/crs descriptor; the longlat identity reprojection is applied at the coupling edge.",
+        "native_crs_descriptor": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "native_dimensions": [
+          "lon",
+          "lat"
+        ],
+        "native_dimension_extents": {
+          "lon": {
+            "n": "n_lon",
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": "n_lat",
+            "spacing": "uniform"
+          }
+        },
+        "native_grid_parameters": {
+          "n_lon": {
+            "units": "1",
+            "description": "Longitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
+          },
+          "n_lat": {
+            "units": "1",
+            "description": "Latitude cell count of the analysis grid, resolved from the rasterized NetCDF at load time (set by the rasterizer leaf to the chosen grid; default = the fire model's Camp Fire domain)."
+          }
+        },
+        "native_staggering": "Cell-centered (lon 'center', lat 'center') — the former `grid.description`, preserved verbatim in native_grid_description, states that burned_fraction is cell-centered and that the E2 harness regrids it conservatively (area-weighted) onto the comparison grid. At esm 0.8.0 that kernel choice is an `aggregate` coupling expression, not a loader or model block.",
+        "native_grid_description": "Analysis grid the daily perimeters are rasterized onto: a regular geographic (longlat/WGS84) lattice covering the fire domain. The default is the fire model's own domain grid + resolution (campfire-e2e plan §User-action) — for the 2018 Camp Fire, the model's Camp Fire domain (≈0.01° ~1 km cells over lon ∈ [-122.0, -121.2], lat ∈ [39.6, 40.1]). Cell counts (n_lon, n_lat) are resolved from the rasterized NetCDF at load time and are set by the rasterizer leaf to match the chosen grid; the loader describes the grid but performs no reprojection or regridding. burned_fraction is cell-centered (lon/lat 'center'); the E2 harness regrids it conservatively (area-weighted) onto the comparison grid.",
+        "unconsumed_file_variables": {
+          "burned_fraction": {
+            "file_variable": "burned_fraction",
+            "units": "1",
+            "description": "Per-cell burned fraction in [0,1]: the fraction of the grid cell's area covered by the day's fire perimeter (the union of NIFC/GeoMAC perimeter polygons valid on that day, rasterized by cell-coverage fraction). 0 = unburned, 1 = fully inside the perimeter. A continuous fraction (not a hard 0/1 mask) so the validation metric tolerates partial cells at the fire front. By convention the rasterizer emits the CUMULATIVE burned area through each day (monotonic non-decreasing), so the daily series is the modeled fire's growth curve; see the leaf docstring for the daily-vs-cumulative option."
+          }
+        },
+        "unconsumed_file_variables_note": "esm 1.0.0 removed the loader `variables` map: a data source is no longer a component, and every former loader variable becomes a PARAMETER on the model that CONSUMES it, carrying `update: {kind: \"data\", source: \"<registry key>\", from: {file_variable, unit_conversion?, codes?, select?}}` with `units` and `shape` declared once on that parameter (esm-spec §8). This file is a SHARED CATALOG with NO consuming .esm — nothing in the corpus mounts it; it is read only by tools/leaves/nifc_perimeters_rasterize.py and test/observed_fire_loaders_feasibility.py — so there is no consuming parameter to carry these declarations, and the 1.0.0 DataSource (additionalProperties:false over {kind, source, temporal, determinism, reader_options, select, record_filter, extent, reference, metadata}) has no `variables` key. The map is therefore parked VERBATIM in `unconsumed_file_variables` above so that not one file_variable, unit or description is lost. This is a demotion from a structured field to metadata, NOT an equivalent: a 1.0.0 consumer still has to re-declare each entry as a parameter `update.from.file_variable` + `units` before the runtime can read this source (earthsci_ast.load_data takes `bindings` = {consuming parameter name -> DataSourceBinding}, which a catalog with no consumer cannot supply). Recorded as the 'a shared catalog is not self-describing' reversion.",
+        "migration_note": "esm 0.7.0 -> 0.8.0: removed the `grid` block (family/crs/dimensions/extents/parameters/description), which no schema at or after 0.8.0 permits — 0.8.0 deleted the native-grid descriptor outright (esm-spec §8.4). Nothing was dropped: `family` → native_grid_family; `crs` → native_crs_epsg + native_crs_descriptor (verbatim); `dimensions` → native_dimensions; `extents` (per-dimension cell count + spacing) → native_dimension_extents; `parameters` (the runtime-resolved n_lon/n_lat cell-count parameters, with their units and descriptions) → native_grid_parameters; `description` → native_grid_description (verbatim). Native grid geometry is now ordinary data — a source exposes its coordinates/connectivity/metric arrays as ordinary `file_variable`s bound to consuming parameters, and reprojection/regridding are ordinary `aggregate` coupling expressions (esm-spec §8.6). No other field changed. esm 0.x -> 1.0.0: renamed the top-level `data_loaders` key to `data_sources` and removed this source's `variables` map — see unconsumed_file_variables_note. A data_sources-only catalog (no `models`) is a valid 1.0.0 document and loads through earthsci_ast.load; it is simply not mountable as a subsystem, which is correct — a data source is not a component, not a coupling endpoint and not a scoped-name path root."
       }
     }
   }
