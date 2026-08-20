@@ -7,14 +7,14 @@ to a ``burned_fraction(lon, lat)`` grid, ONE NetCDF per day, feeding the pure-IO
 
 WHY THIS LEAF EXISTS
 --------------------
-The ESM ``DataLoader`` ``kind`` enum is ``grid`` / ``points`` / ``static`` /
-``mesh`` — there is NO vector/polygon kind. Fire perimeters are time-varying
-POLYGONS. Rather than add a new vector/feature loader primitive (against the
-no-new-primitives principle, campfire-e2e plan §"Key design constraint"), we
-rasterize the daily perimeters OFFLINE here — a one-time preprocessing step,
-not an engine capability — to a burned-fraction grid that an ordinary
-``kind: grid`` loader reads. This keeps every loader pure-IO and reuses the
-existing grid machinery.
+The esm 1.0.0 ``DataSource`` ``kind`` enum is ``grid`` / ``points`` /
+``static`` — there is NO vector/polygon kind (and no longer a ``mesh`` one).
+Fire perimeters are time-varying POLYGONS. Rather than add a new
+vector/feature ingest primitive (against the no-new-primitives principle,
+campfire-e2e plan §"Key design constraint"), we rasterize the daily perimeters
+OFFLINE here — a one-time preprocessing step, not an engine capability — to a
+burned-fraction grid that an ordinary ``kind: grid`` source reads. This keeps
+every source pure-IO and reuses the existing grid machinery.
 
 OUTPUT CONTRACT (what nifc_perimeters_loader.esm reads)
 -------------------------------------------------------
