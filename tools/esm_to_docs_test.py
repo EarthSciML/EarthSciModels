@@ -540,6 +540,38 @@ class BuildIndexTest(unittest.TestCase):
         self.assertEqual(rec["reference"], "10.1/x")
 
 
+class SlugCollisionTest(unittest.TestCase):
+    """Two components on one slug means one page is silently overwritten."""
+
+    def _entry(self, section: str, name: str, path: str) -> mod.ComponentEntry:
+        return mod.ComponentEntry(
+            section=section,
+            name=name,
+            body={},
+            esm_path=Path(path),
+            esm_version="1.0.0",
+            file_metadata={},
+        )
+
+    def test_no_collision_reports_nothing(self):
+        entries = [
+            self._entry("models", "CEDS", "components/earthsci_data/ceds.esm"),
+            self._entry("data_sources", "CEDS_BC", "components/earthsci_data/ceds.esm"),
+        ]
+        self.assertEqual(mod._warn_slug_collisions(entries), [])
+
+    def test_same_registry_key_in_two_files_is_reported(self):
+        entries = [
+            self._entry("data_sources", "CEDS_BC", "components/earthsci_data/ceds.esm"),
+            self._entry(
+                "data_sources", "CEDS_BC", "components/earthsci_data/ceds_bc_loader.esm"
+            ),
+        ]
+        self.assertEqual(
+            mod._warn_slug_collisions(entries), ["earthsci_data/ceds_bc"]
+        )
+
+
 class IntegrationRunTest(unittest.TestCase):
     """Runs the full pipeline against a tiny synthetic repo."""
 

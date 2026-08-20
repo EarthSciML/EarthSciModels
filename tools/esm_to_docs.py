@@ -974,6 +974,37 @@ def build_index(entries: list[ComponentEntry]) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _warn_slug_collisions(entries: list[ComponentEntry]) -> list[str]:
+    """Report every slug two or more components share, and return those slugs.
+
+    A slug is `domain/[subdomain/]name`, and it is the page's URL. When two
+    components land on the same one, the second `index.md` overwrites the
+    first, so a page disappears from the site while `components-index.json`
+    goes on advertising both — a silent hole rather than a build failure. The
+    usual cause is the SAME registry key declared in two `.esm` files (e.g. a
+    `data_sources` entry inlined in a model file and also left behind in a
+    standalone `*_loader.esm`), which is a corpus problem, not a docs one.
+
+    This is a warning, not an error: the fix belongs in `components/`, and
+    failing the docs build would gate the whole catalog on it. But it must be
+    visible in the CI log rather than swallowed.
+    """
+    by_slug: dict[str, list[ComponentEntry]] = {}
+    for e in entries:
+        by_slug.setdefault(e.slug, []).append(e)
+    collisions = sorted(slug for slug, group in by_slug.items() if len(group) > 1)
+    for slug in collisions:
+        sources = ", ".join(
+            f"{e.section}.{e.name} in {e.esm_path}" for e in by_slug[slug]
+        )
+        print(
+            f"warning: slug {slug!r} is claimed by {len(by_slug[slug])} components "
+            f"({sources}); all but the last will be overwritten",
+            file=sys.stderr,
+        )
+    return collisions
+
+
 def run(repo_root: Path, content_dir: Path, data_dir: Path, static_dir: Path | None = None) -> int:
     components_root = repo_root / "components"
     if not components_root.exists():
@@ -1000,6 +1031,8 @@ def run(repo_root: Path, content_dir: Path, data_dir: Path, static_dir: Path | N
 
     if static_dir is None:
         static_dir = (content_dir.parent / "static").resolve()
+
+    _warn_slug_collisions(entries)
 
     for e in entries:
         target_dir = components_out / e.slug
