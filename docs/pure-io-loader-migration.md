@@ -1,5 +1,34 @@
 # Pure-I/O Data-Loader Migration — the loader + regridding-model split
 
+> ## ⚠️ SUPERSEDED by esm 1.0.0 — historical record only
+>
+> This guide describes the 0.5.0 → 0.6.0 loader split and the 0.7.0 → 0.8.0
+> grid-descriptor removal that followed it. **esm 1.0.0 retired the concept it
+> is built on.** Do not follow its instructions for new work; read it only to
+> understand how the existing `components/earthsci_data/*.esm` files got their
+> present shape.
+>
+> What 1.0.0 changed (esm-spec §8):
+>
+> - The top-level key is **`data_sources`**, not `data_loaders`.
+> - A source is **not a component**. It cannot be a coupling endpoint, a
+>   subsystem, or a scoped-name path root, so the "declare the loader as the
+>   subsystem `raw` via `{"ref": "./X_loader.esm"}`" pattern below no longer
+>   exists.
+> - A source **exposes no variables**. The `variables` map is gone from the
+>   entry; each former loader variable becomes a **parameter on the model that
+>   consumes it**, carrying
+>   `update: {kind: "data", source: "<registry key>", from: {file_variable,
+>   unit_conversion?, codes?, select?}}`. Units are declared once, on that
+>   parameter, and a parameter with a `data` update MUST declare a `shape`.
+> - `DataSource` is `additionalProperties: false` over `{kind, source,
+>   temporal, determinism, reader_options, select, record_filter, extent,
+>   reference, metadata}` — no `grid`, no `spatial`, no `regridding`.
+>
+> The version numbers in the tables below (`esm 0.5.0`, `0.6.0`, `0.7.0`,
+> `0.8.0`) are the historical ones and are **not** what the corpus carries; the
+> loader rejects every major-0 document outright.
+
 This guide documents the **repeatable split pattern** for migrating the ten
 `components/earthsci_data/*.esm` files from the old **co-located** format (one
 file holding both a `models.X` coupler *and* a `data_loaders.X` block) into the

@@ -30,8 +30,7 @@ domains.
 ## Why one flat `components/` tree (not per-schema-section dirs)
 
 A `.esm` file can carry any mix of schema sections (`models:`,
-`reaction_systems:`, `operators:`, `data_loaders:`, `coupling:`,
-`interfaces:`) — see the ESM spec. Splitting the tree by schema section
+`reaction_systems:`, `coupling:`, `data_sources:`) — see the ESM spec. Splitting the tree by schema section
 (`models/`, `reaction_systems/`, ...) would force coupled components from one
 upstream repo to scatter across directories and would make multi-section files
 ambiguous to file. Organizing by **science domain** instead keeps related
@@ -78,7 +77,8 @@ the picture clarifies.
 
 **Rule (from `README.md`):** each `.esm` file holds approximately one paper or
 chapter of content — a self-contained set of components that together describe
-one scientific mechanism, with inline tests and examples. This is *finer* than
+one scientific mechanism, with inline `tests` and `analyses`. This is *finer*
+than
 "one file per `src/<name>.jl`" in the upstream repo.
 
 For example, `Aerosol.jl/src/aqueous_equilibria.jl` contains 9 `@component`
@@ -95,7 +95,7 @@ and should be split into several `.esm` files within `components/aerosol/`.
   github.com/EarthSciML).
 - The ESM parser / schema / MTK-conversion code (lives in
   `EarthSciAST.jl`).
-- Runtime simulation drivers (each model's inline tests + examples are
+- Runtime simulation drivers (each model's inline `tests` + `analyses` are
   self-contained; end-to-end drivers go in the consumer's code).
 
 ## Empty-directory policy

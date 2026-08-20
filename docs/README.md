@@ -24,10 +24,19 @@ site is a view over them.
    discovers the file and generates the page.
 
 The generator reads each top-level component (`models.*`, `reaction_systems.*`,
-etc.) and emits sections for: description, reference, variables, parameters,
-constants, observed expressions, equations, reactions (if any), examples,
-and a collapsed raw JSON block. (Tests live in the `.esm` source for CI
-validation but are intentionally not rendered on user-facing pages.)
+`data_sources.*`) and emits sections for: description, reference, variables,
+parameters, observed + observed expressions, equations, reactions (if any),
+the data-source I/O descriptor (if any), analyses, and a collapsed raw JSON
+block. (Tests live in the `.esm` source for CI validation but are
+intentionally not rendered on user-facing pages.)
+
+The Variables / Observed split is **derived**, not declared: from esm 1.0.0
+the only declared variable types are `unknown` and `parameter`, and
+`earthsci_ast.classification` (esm-spec §6.3.1) is what tells the generator
+which unknowns are ODE states, which are observed, and which are algebraic.
+"Variables" is the ODE states plus the algebraic unknowns; "Observed" is the
+unknowns some equation defines with a bare-variable LHS, and "Observed
+expressions" renders those defining right-hand sides.
 
 Frontmatter fields set from the `.esm`:
 
@@ -91,38 +100,40 @@ docs/
     └── components-index.json              # GENERATED — faceted search feed
 ```
 
-## Example plots
+## Analysis plots
 
-Examples in the `.esm` schema carry declarative plot specs (`type: line` /
+Analyses in the `.esm` schema (esm-spec §6.7 — the 1.0.0 spelling of what 0.x
+called `examples`) carry declarative plot specs (`type: line` /
 `heatmap`, axis labels, variable bindings — see
 [ESS §5.4.11](https://github.com/EarthSciML/EarthSciAST)). At
 build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
-walks `components/**/*.esm`, evaluates each example (cartesian
+walks `components/**/*.esm`, evaluates each analysis (cartesian
 `parameter_sweep` for algebraic models, or via the canonical Python ESS
 runner (`earthsci_ast.simulation.simulate`) of `time_span` +
 `initial_state` for ODE models), and writes a PNG per declared plot under
 
 ```
-components/<domain>/[<subdomain>/]<name>.plots/<example_id>-<plot_id>.png
+components/<domain>/[<subdomain>/]<name>.plots/<analysis_id>-<plot_id>.png
 ```
 
 `tools/esm_to_docs.py` then copies the artifact into `docs/static/plots/<slug>/`
 and inlines it on the rendered page. The `.plots/` tree is gitignored — CI
 regenerates it on every run. Custom hand-shipped artifacts for a specific
-example are still supported by simply checking them into the same path
+analysis are still supported by simply checking them into the same path
 (but you'll need to remove the gitignore rule if you do).
 
 ### Coverage
 
-The renderer handles two example shapes:
+The renderer handles two analysis shapes:
 
 - **Algebraic models** (no `D` op in `equations`) drive the cartesian
   `parameter_sweep` path: each grid point is evaluated through ESS and
   fed to one PNG per declared plot. Covers `CloudAlbedo`,
   `WaterEquilibrium`, `DropletGrowth`, `AerosolScavenging`, etc.
 - **ODE models** (one or more `D(state)/dt = rhs` equations) drive the
-  time-series path when the example carries `time_span` + `initial_state`
-  (`per_variable` form). Each example integrates via the canonical Python
+  time-series path when the analysis carries `time_span` + `initial_state`
+  (either the flat scalar map or the esm-spec §11.4 `{type, values}` union).
+  Each analysis integrates via the canonical Python
   ESS runner (`earthsci_ast.simulation.simulate`) and emits one PNG
   per plot of state/algebraic trajectories vs `t`. A
   1-D `parameter_sweep` is allowed and produces a family of curves on
@@ -130,23 +141,23 @@ The renderer handles two example shapes:
   `DiameterGrowthRate`'s Fig. 13.2 reproductions (mdl-hxx).
 
 Reaction systems (`reaction_systems`), DAE-only models (algebraics that
-won't reduce to forward-defined targets), and examples missing both
+won't reduce to forward-defined targets), and analyses missing both
 `parameter_sweep` and `initial_state` are skipped with a diagnostic
 line. Both supported paths run in pure Python (`matplotlib`, `numpy`,
 `scipy`) and add ~1 s per .esm to the docs build.
 
 ### Build-time impact
 
-For the current 6 components × ~25 example plots:
+For the current 6 components × ~25 analysis plots:
 
 | Stage | Local time | Notes |
 | --- | --- | --- |
 | `pip install matplotlib numpy scipy` | ~10–15 s | Cached across CI runs once the wheels are in place. |
-| `python tools/render_example_plots.py` | <20 s | Algebraic examples scale with sweep grid size; ODE examples scale with the canonical-runner integration cost. |
+| `python tools/render_example_plots.py` | <20 s | Algebraic analyses scale with sweep grid size; ODE analyses scale with the canonical-runner integration cost. |
 | `python tools/esm_to_docs.py` | <0.5 s | Unchanged. |
 
 The `Render example plots` step grows roughly proportional to the total
-sweep grid count plus the integration time of any ODE examples, but
+sweep grid count plus the integration time of any ODE analyses, but
 stays well under 30 s in practice for the current component set.
 
 ### Follow-up — interactive embeds
@@ -167,6 +178,6 @@ Tracked separately:
 - Connectors (not yet a distinct `.esm` section)
 - Discretization rules (lives in ESD, not ESM)
 - Versioned docs (history of a component across `.esm` versions)
-- `reaction_systems` and DAE-only plot rendering (see "Example plots → Follow-up" above)
+- `reaction_systems` and DAE-only plot rendering (see "Analysis plots → Follow-up" above)
 - Algolia DocSearch swap (revisit only if we outgrow Pagefind at >10k pages)
 - PDF export

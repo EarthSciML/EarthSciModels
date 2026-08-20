@@ -48,7 +48,7 @@ function load_esm(path::AbstractString)
     esm_file = EarthSciAST.load(String(path))
     models = esm_file.models
     if models === nothing || isempty(models)
-        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciAST.load() for non-Model entries (reaction_systems, operators, data_loaders)."))
+        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciAST.load() for non-Model entries (reaction_systems, operators). A `data_sources` entry is not a component from esm 1.0.0 — a model consumes one through a parameter whose `update` names it, so a data-source-only file has no system to materialize."))
     elseif length(models) == 1
         return _to_system(first(values(models)))
     else
