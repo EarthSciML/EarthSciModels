@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-render_example_plots — evaluate `.esm` examples and emit PNG plots.
+render_example_plots — evaluate `.esm` analyses and emit PNG plots.
 
-Walks `components/**/*.esm`, and for each top-level component with examples
+Walks `components/**/*.esm`, and for each top-level component with analyses
 carrying a `parameter_sweep` + `plots`, evaluates the sweep and writes one
 PNG per plot under
 
-    <esm_dir>/<esm_stem>.plots/<example_id>-<plot_id>.png
+    <esm_dir>/<esm_stem>.plots/<analysis_id>-<plot_id>.png
+
+`analyses` is the esm 1.0.0 spelling (esm-spec §6.7) of the block the 0.x
+corpus spelled `examples`; the module keeps its own name so the CI job, the
+docs generator's artifact convention and this repo's docs keep resolving.
 
 `tools/esm_to_docs.py` already understands this convention and will inline
 the artifacts on the rendered Hugo page (mdl-f42).
@@ -18,17 +22,25 @@ walking each sweep grid point through the ESS evaluator. That keeps op
 semantics single-sourced with the rest of the toolchain (Rust ndarray
 runtime, Julia SymbolicUtils path, conformance fixtures).
 
+Variable classification is delegated the same way. esm 1.0.0 declares only
+`unknown` and `parameter`; which unknowns are ODE states, which are observed
+and which are algebraic is DERIVED from the equations by
+`earthsci_ast.classification` (esm-spec §6.3.1), and this renderer asks that
+module rather than re-deriving it — an observed quantity in particular no
+longer carries an `expression` field, it is defined by a bare-variable-LHS
+equation like any other row.
+
 Renderable components:
 - Algebraic models (no `D` op in equations) drive the cartesian-sweep path:
   WaterEquilibrium, CloudAlbedo, etc. evaluate at every grid point and
   produce one PNG per plot spec.
 - ODE models (one or more `D(state)/dt = rhs` equations) drive the
-  time-series path when the example carries `initial_state` (per_variable
-  form). Each example integrates via the canonical Python runner
+  time-series path when the analysis carries `initial_state` (per_variable
+  form). Each analysis integrates via the canonical Python runner
   (`earthsci_ast.simulation.simulate`) and plots state/algebraic
   trajectories vs `t`. A 1-D `parameter_sweep` is allowed and produces a
   family of curves on one axes (one integration per grid point).
-  DiameterGrowthRate's Fig. 13.2 examples drive this path.
+  DiameterGrowthRate's Fig. 13.2 analyses drive this path.
 
 Components with `D` ops but no `initial_state` are skipped — there's
 nothing to integrate.
@@ -70,10 +82,14 @@ from earthsci_ast import (  # noqa: E402
     load,
     to_sympy,
 )
+from earthsci_ast.classification import (  # noqa: E402
+    algebraic_unknowns,
+    ode_states,
+    parameters as declared_parameters,
+)
 from earthsci_ast.esm_types import (  # noqa: E402
+    Analysis,
     Equation,
-    Example,
-    InitialConditionType,
     Metadata,
     ModelVariable,
     ParameterSweep,
@@ -91,7 +107,7 @@ from earthsci_ast.simulation import simulate  # noqa: E402
 
 
 class UnsupportedExpression(Exception):
-    """Raised when an example or expression cannot be rendered here.
+    """Raised when an analysis or expression cannot be rendered here.
 
     Wraps both renderer-side problems (missing variable bindings, unsupported
     plot types, sweep shapes) and ESS-side errors propagated from
@@ -128,13 +144,21 @@ def _component_has_dynamics(model: Model) -> bool:
     return False
 
 
-def _baseline_bindings(model: Model, example: Example) -> dict[str, float]:
-    """Initial bindings: parameter / constant defaults, then example overrides."""
+def _baseline_bindings(model: Model, analysis: Analysis) -> dict[str, float]:
+    """Initial bindings: parameter defaults, then the analysis's overrides.
+
+    `parameter` is one of the two declared types in esm 1.0.0; the 0.x
+    `constant` spelling was never in any version's enum, and a constant is now
+    derived (a parameter with neither `distribution` nor `update`), so it is
+    already covered here.
+    """
     bindings: dict[str, float] = {}
-    for name, mv in model.variables.items():
-        if mv.type in ("parameter", "constant") and mv.default is not None:
+    variables = model.variables
+    for name in declared_parameters(model):
+        mv = variables[name]
+        if mv.default is not None:
             bindings[name] = float(mv.default)
-    for name, val in (example.parameters or {}).items():
+    for name, val in (analysis.parameters or {}).items():
         bindings[name] = float(val)
     return bindings
 
@@ -211,10 +235,14 @@ def _build_resolution_plan(
     Each step in the plan defines one variable from a closed-form expression
     over previously-bound symbols (parameters + sweep axes + earlier targets).
 
-    Three sources contribute targets:
-    - Observed variables with `.expression` (always forward).
+    Two sources contribute targets:
     - Equations where `lhs` is a bare name not yet bound: forward as
-      `(lhs, rhs)`.
+      `(lhs, rhs)`. From esm 1.0.0 this is also where OBSERVED quantities
+      come from — an observed unknown is exactly an unknown some equation
+      defines with a bare-variable LHS (esm-spec §6.3.1), and there is no
+      longer a `variables[v].expression` field to read separately. Because
+      they arrive through the same fixpoint loop as everything else, they are
+      now ordered by their real dependencies rather than assumed forward.
     - Equations where `lhs` is bound (constraint): symbolically solve for
       the single unbound variable in `rhs` and add as a target.
 
@@ -228,11 +256,6 @@ def _build_resolution_plan(
     """
     bound: set[str] = set(base_bound_names)
     plan: list[tuple[str, Any]] = []
-
-    for vname, mv in model.variables.items():
-        if mv.type == "observed" and mv.expression is not None:
-            plan.append((vname, mv.expression))
-            bound.add(vname)
 
     eq_source = equations if equations is not None else (model.equations or [])
     pending = list(eq_source)
@@ -314,23 +337,26 @@ def _evaluate_grid(
             env[name] = float(fg[i])
         for name, expr in plan:
             try:
-                env[name] = float(fold_constant_expr(expr, env))
+                value = float(fold_constant_expr(expr, env))
             except (ValueError, TypeError, NumpyInterpreterError) as exc:
                 raise UnsupportedExpression(
                     f"could not evaluate {name!r} at grid point {i}: {exc}"
                 ) from exc
             except ZeroDivisionError:
-                # Sweep crossed a denominator-is-zero point. Substitute NaN
-                # so subsequent expressions in the plan NaN-propagate (no
-                # further raise) and matplotlib draws a gap in the rendered
-                # plot at this grid point — better than skipping the whole
-                # example for one degenerate point. ESS's ifelse() doesn't
-                # short-circuit (both branches are eagerly evaluated), so
-                # a `ifelse(W > 0, A/W, 0)` guard in the .esm still trips
-                # the division at W=0; this catch is the renderer-side
-                # defense (numpy_interpreter raises Python's native
-                # ZeroDivisionError because env is a dict[str, float]).
-                env[name] = math.nan
+                # Retained as a belt-and-braces guard; see the non-finite
+                # normalisation below for why it no longer fires.
+                value = math.nan
+            # A sweep that crosses a denominator-is-zero point yields a
+            # non-finite value rather than an exception: CONFORMANCE_SPEC §5.7
+            # rule 6 makes division IEEE in every binding ("x/0 is ±Inf, 0/0 is
+            # NaN, never an exception"), and ESS's `ifelse` is EAGER, so a
+            # `ifelse(W > 0, A/W, 0)` guard in the .esm still evaluates the
+            # division at W=0. Normalise every non-finite result to NaN so it
+            # propagates through the rest of the plan and matplotlib draws a
+            # gap at that grid point — better than losing the whole analysis to
+            # one degenerate point (the snow_melt_no_layers.esm failure mode,
+            # W_sno_np1 / W_sno_n at the W_sno_n=0 endpoint).
+            env[name] = value if math.isfinite(value) else math.nan
         for name in target_names:
             point_results[name][i] = env[name]
 
@@ -391,7 +417,6 @@ def _wrap_model_as_esm(model: Any) -> EsmFile:
                 type=v.type,  # type: ignore[arg-type]
                 default=v.default,
                 units=v.units,
-                expression=v.expression,
             )
             for name, v in model.variables.items()
         }
@@ -401,9 +426,8 @@ def _wrap_model_as_esm(model: Any) -> EsmFile:
             equations=list(model.equations),
             metadata={},
             subsystems={},
-            boundary_conditions={},
             tests=[],
-            examples=[],
+            analyses=[],
             initialization_equations=[],
             guesses={},
         )
@@ -411,7 +435,7 @@ def _wrap_model_as_esm(model: Any) -> EsmFile:
         wrapped = model
     title = getattr(model, "name", None) or "Renderer"
     return EsmFile(
-        version="0.1.0",
+        version="1.0.0",
         metadata=Metadata(
             title=title,
             authors=[],
@@ -422,16 +446,14 @@ def _wrap_model_as_esm(model: Any) -> EsmFile:
         models={wrapped.name: wrapped},
         reaction_systems={},
         events=[],
-        data_loaders={},
+        # esm 1.0.0: `data_sources` is a document-scoped ingest registry, not a
+        # component list. The synthetic wrapper consumes no external data.
+        data_sources={},
         operators=[],
         registered_functions={},
         coupling=[],
         enums={},
         function_tables={},
-        domains={},
-        grids={},
-        staggering_rules={},
-        discretizations={},
     )
 
 
@@ -771,9 +793,9 @@ def _render_time_series_line_plot(
 
 
 def _initial_state_values(
-    example: Example,
+    analysis: Analysis,
 ) -> tuple[dict[str, float] | None, list[str]]:
-    """Extract IC values from ``example.initial_state``.
+    """Extract IC values from ``analysis.initial_state``.
 
     Returns ``(scalar_values, expression_vars)`` where:
 
@@ -782,44 +804,47 @@ def _initial_state_values(
     - ``expression_vars``: names of variables whose ICs are expression-typed
       (PDE spatial fields the renderer cannot collapse to a scalar).
 
-    Per the esm-spec §11.4 discriminated-union contract, ``type:
-    "per_variable"`` carries only scalars; ``type: "expression"`` carries only
-    AST-valued fields. The Python binding maps the unknown "expression" type
-    string to ``CONSTANT`` as a fallback, so we also inspect each ``values``
-    entry for non-scalar shapes rather than relying solely on the enum.
+    The schema admits two spellings (esm-spec §11.4): a flat scalar-override
+    map ``{name: number}``, and the discriminated union ``{type:
+    "per_variable"|"expression", values: {...}}``. Both are live in this
+    corpus. The 1.0.0 binding no longer wraps either in a dataclass — the
+    former ``InitialCondition`` / ``InitialConditionType`` types were removed
+    along with domain-level initial conditions, and `earthsci_ast.parse` hands
+    back the JSON object verbatim — so we discriminate on the object here.
+
+    We never rely on the ``type`` tag alone: whichever spelling is used, a
+    value that is not a number is an expression-typed field the renderer
+    cannot collapse to a scalar, and it is reported as such.
     """
-    ic = example.initial_state
-    if ic is None:
+    ic = analysis.initial_state
+    if not ic:
         return None, []
-    if ic.type == InitialConditionType.PER_VARIABLE:
-        scalar: dict[str, float] = {}
-        for name, v in (ic.values or {}).items():
-            if isinstance(v, (int, float)):
-                scalar[name] = float(v)
-        return scalar or None, []
-    # For non-per_variable types check whether values carries expression ASTs.
-    # The binding maps type:"expression" → CONSTANT (fallback), so we inspect
-    # the values dict instead of relying on the enum alone.
-    if ic.values:
-        expr_vars = [
-            name for name, v in ic.values.items()
-            if not isinstance(v, (int, float))
-        ]
-        if expr_vars:
-            return None, expr_vars
-    return None, []
+    values = ic["values"] if set(ic) == {"type", "values"} else ic
+    if not isinstance(values, dict) or not values:
+        return None, []
+    expr_vars = [name for name, v in values.items() if not isinstance(v, (int, float))]
+    if expr_vars:
+        return None, expr_vars
+    return {name: float(v) for name, v in values.items()} or None, []
 
 
 def _state_defaults(model: Any) -> dict[str, float]:
-    """Initial-condition fallback: every state variable that declares a default.
+    """Initial-condition fallback: every solved-for unknown that declares a default.
 
-    Used when an example has no `initial_state` but the model carries enough
-    species/state defaults to seed an integration. Non-state variables are
-    skipped (parameters / constants are picked up by `_baseline_bindings`).
+    Used when an analysis has no `initial_state` but the model carries enough
+    species/state defaults to seed an integration.
+
+    "Solved for" is the ODE states plus the algebraic unknowns — exactly the
+    complement of the observed unknowns within `unknowns`, by the esm-spec
+    §6.3.1 partition, and exactly what 0.x spelled `type: "state"`. Observed
+    unknowns are deliberately excluded: their values follow from their defining
+    equations, so seeding them would over-determine the system. Parameters are
+    picked up by `_baseline_bindings` instead.
     """
+    seedable = set(ode_states(model)) | set(algebraic_unknowns(model))
     out: dict[str, float] = {}
     for name, mv in model.variables.items():
-        if mv.type == "state" and mv.default is not None:
+        if name in seedable and mv.default is not None:
             out[name] = float(mv.default)
     return out
 
@@ -828,24 +853,24 @@ def _render_expression_ic_placeholder(
     esm_path: Path,
     component_name: str,
     model: Any,
-    example: Example,
+    analysis: Analysis,
     expression_vars: list[str],
     plots_dir: Path,
     stats: _RenderStats,
 ) -> None:
-    """Emit a placeholder PNG for each plot in an example with expression-typed ICs.
+    """Emit a placeholder PNG for each plot in an analysis with expression-typed ICs.
 
     Per esm-spec §11.4, a renderer that cannot evaluate spatial-field ICs MUST
     NOT crash and MUST visibly distinguish the output from a scalar-IC plot.
     Each placeholder PNG contains a text annotation naming the expression-typed
     variables instead of integration output that would require a PDE solver.
     """
-    stats.examples_seen += 1
-    example_id = example.id or "example"
+    stats.analyses_seen += 1
+    analysis_id = analysis.id or "analysis"
     var_label = ", ".join(expression_vars)
-    for plot in (example.plots or []):
+    for plot in (analysis.plots or []):
         plot_id = plot.id or "plot"
-        out_path = plots_dir / f"{example_id}-{plot_id}.png"
+        out_path = plots_dir / f"{analysis_id}-{plot_id}.png"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         fig, ax = plt.subplots(figsize=(6.0, 4.0))
         ax.set_axis_off()
@@ -883,7 +908,7 @@ def _render_final_state_vs_sweep_plot(
 ) -> None:
     """Plot the final-time value of `plot.y.variable` against the swept parameter.
 
-    Used for examples that combine `time_span` with a 1D `parameter_sweep`
+    Used for analyses that combine `time_span` with a 1D `parameter_sweep`
     and whose plot's x-axis is the swept parameter (not `t`) — e.g. an
     "O3 vs jNO2" steady-state-style sweep where each grid point drives an
     independent integration and only the endpoint matters.
@@ -938,14 +963,15 @@ class _AdapterVariable:
     """Lightweight stand-in for ModelVariable when rendering reaction_systems.
 
     The rendering helpers query a small subset of ModelVariable's surface:
-    `.type`, `.default`, `.units`, `.expression`. This dataclass mirrors that
-    surface so the existing baseline-bindings / axis-labeling / resolution-plan
-    code paths run unchanged on a ReactionSystem.
+    `.type`, `.default`, `.units`. This dataclass mirrors that surface so the
+    existing baseline-bindings / axis-labeling / resolution-plan code paths run
+    unchanged on a ReactionSystem. There is no `.expression`: esm 1.0.0 removed
+    that field, and `earthsci_ast.classification` reads `.type` off this
+    dataclass exactly as it does off a real ModelVariable.
     """
     type: str
     default: Any | None = None
     units: str | None = None
-    expression: Any | None = None
 
 
 @dataclass
@@ -960,7 +986,7 @@ class _AdapterModel:
     name: str
     variables: dict[str, _AdapterVariable]
     equations: list[Any]
-    examples: list[Any]
+    analyses: list[Any]
 
 
 def _build_rate_expression(rate_constant: Any, reactants: dict[str, float]) -> Any:
@@ -1035,9 +1061,12 @@ def _reaction_system_to_model(rs: Any) -> _AdapterModel:
     Mapping:
     - Parameters and constant species (`constant=True`) become `parameter`
       variables seeded with their declared defaults.
-    - Non-constant species become `state` variables; their declared defaults
-      are surfaced as initial-state fallback when an example omits
-      `initial_state` (a common shape for reaction_system examples).
+    - Non-constant species become `unknown` variables. The synthesized
+      `D(species, wrt=t)` equation below is what makes each of them an ODE
+      STATE under esm-spec §6.3.1 — the classification is derived from the
+      equations here exactly as it is for a real model. Their declared defaults
+      are surfaced as initial-state fallback when an analysis omits
+      `initial_state` (a common shape for reaction_system analyses).
     - One `D(species, wrt=t) = rhs` equation is synthesized per non-constant
       species, with rhs summing net-stoichiometry-weighted rate terms over
       the reactions list.
@@ -1058,7 +1087,7 @@ def _reaction_system_to_model(rs: Any) -> _AdapterModel:
             )
         else:
             variables[sp.name] = _AdapterVariable(
-                type="state",
+                type="unknown",
                 default=sp.default,
                 units=sp.units,
             )
@@ -1080,7 +1109,7 @@ def _reaction_system_to_model(rs: Any) -> _AdapterModel:
         name=rs.name,
         variables=variables,
         equations=equations,
-        examples=list(rs.examples or []),
+        analyses=list(rs.analyses or []),
     )
 
 
@@ -1092,13 +1121,13 @@ def _reaction_system_to_model(rs: Any) -> _AdapterModel:
 @dataclass
 class _RenderStats:
     files_seen: int = 0
-    examples_seen: int = 0
+    analyses_seen: int = 0
     plots_rendered: int = 0
     plots_skipped: int = 0
     elapsed_s: float = 0.0
 
 
-def render_examples_for_file(esm_path: Path, stats: _RenderStats) -> None:
+def render_analyses_for_file(esm_path: Path, stats: _RenderStats) -> None:
     try:
         esm: EsmFile = load(str(esm_path))
     except Exception as exc:
@@ -1108,52 +1137,52 @@ def render_examples_for_file(esm_path: Path, stats: _RenderStats) -> None:
     plots_dir = esm_path.parent / (esm_path.stem + ".plots")
 
     # Build the FlattenedSystem once per top-level component and pass it to
-    # every example on that component. simulate caches its compiled rhs on
+    # every analysis on that component. simulate caches its compiled rhs on
     # the FlattenedSystem (`_simulate_compile_cache`); reusing the same flat
-    # across all examples on geoschem_fullchem cuts ~30 s of sympy.lambdify
-    # work per extra example after the first (3 examples × ~30 s saved).
+    # across all analyses on geoschem_fullchem cuts ~30 s of sympy.lambdify
+    # work per extra analysis after the first (3 analyses × ~30 s saved).
     for cname, model in (esm.models or {}).items():
-        if not model.examples:
+        if not model.analyses:
             continue
         flat = flatten(_wrap_model_as_esm(model)) if _component_has_dynamics(model) else None
-        for example in model.examples:
-            _render_one_example(
-                esm_path, cname, model, example, plots_dir, stats, flat=flat
+        for analysis in model.analyses:
+            _render_one_analysis(
+                esm_path, cname, model, analysis, plots_dir, stats, flat=flat
             )
 
     for cname, rs in (esm.reaction_systems or {}).items():
-        if not getattr(rs, "examples", None):
+        if not getattr(rs, "analyses", None):
             continue
         adapter = _reaction_system_to_model(rs)
         flat = flatten(_wrap_model_as_esm(adapter)) if _component_has_dynamics(adapter) else None
-        for example in adapter.examples:
-            _render_one_example(
-                esm_path, cname, adapter, example, plots_dir, stats, flat=flat
+        for analysis in adapter.analyses:
+            _render_one_analysis(
+                esm_path, cname, adapter, analysis, plots_dir, stats, flat=flat
             )
 
 
-def _render_one_example(
+def _render_one_analysis(
     esm_path: Path,
     component_name: str,
     model: Model,
-    example: Example,
+    analysis: Analysis,
     plots_dir: Path,
     stats: _RenderStats,
     flat: FlattenedSystem | None = None,
 ) -> None:
-    plots = example.plots or []
+    plots = analysis.plots or []
     if not plots:
         return
 
     has_dynamics = _component_has_dynamics(model)
-    explicit_ic, expression_vars = _initial_state_values(example)
+    explicit_ic, expression_vars = _initial_state_values(analysis)
 
     # Expression-typed ICs (PDE spatial fields) cannot be reduced to scalars
     # for ODE integration. Emit a placeholder plot per esm-spec §11.4 instead
     # of silently falling through to state defaults.
     if has_dynamics and expression_vars:
         _render_expression_ic_placeholder(
-            esm_path, component_name, model, example, expression_vars,
+            esm_path, component_name, model, analysis, expression_vars,
             plots_dir, stats,
         )
         return
@@ -1162,9 +1191,9 @@ def _render_one_example(
     if has_dynamics:
         # Reaction-system species typically declare reservoir defaults that
         # serve as plausible t=0 initial conditions; merge any explicit
-        # `initial_state.values` over the defaults so an example only has to
+        # `initial_state.values` over the defaults so an analysis only has to
         # name the species it actually cares about (the GEOS-Chem fullchem
-        # mechanism has 272 states — listing them all per example is not
+        # mechanism has 272 states — listing them all per analysis is not
         # workable).
         defaults = _state_defaults(model)
         if defaults or explicit_ic:
@@ -1173,15 +1202,15 @@ def _render_one_example(
                 merged.update(explicit_ic)
             initial_values = merged
 
-    # Route ODE/time-series examples (`time_span` + `initial_state`) through
+    # Route ODE/time-series analyses (`time_span` + `initial_state`) through
     # the integration path. Falls back to the algebraic skip below if the
     # component has dynamics but no initial state was supplied.
     if has_dynamics and initial_values is not None:
-        _render_time_series_example(
+        _render_time_series_analysis(
             esm_path,
             component_name,
             model,
-            example,
+            analysis,
             plots_dir,
             stats,
             initial_values,
@@ -1189,12 +1218,12 @@ def _render_one_example(
         )
         return
 
-    if example.parameter_sweep is None:
+    if analysis.parameter_sweep is None:
         for _ in plots:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.id!r}: no parameter_sweep and no initial_state "
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis.id!r}: no parameter_sweep and no initial_state "
                 f"(nothing to evaluate)"
             )
         return
@@ -1203,48 +1232,48 @@ def _render_one_example(
         for _ in plots:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.id!r}: component has time-derivative dynamics "
-                f"but example has no initial_state for ODE integration"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis.id!r}: component has time-derivative dynamics "
+                f"but analysis has no initial_state for ODE integration"
             )
         return
 
-    stats.examples_seen += 1
-    base_bindings = _baseline_bindings(model, example)
+    stats.analyses_seen += 1
+    base_bindings = _baseline_bindings(model, analysis)
 
     try:
         sweep_names, sweep_values, sweep_scales = _build_sweep_grid(
-            example.parameter_sweep
+            analysis.parameter_sweep
         )
         env = _evaluate_grid(model, base_bindings, sweep_names, sweep_values)
     except UnsupportedExpression as exc:
         for _ in plots:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.id!r}: {exc}"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis.id!r}: {exc}"
             )
         return
 
-    example_id = example.id or "example"
+    analysis_id = analysis.id or "analysis"
     for plot in plots:
         plot_id = plot.id or "plot"
         renderer = _PLOT_RENDERERS.get(plot.type)
         if renderer is None:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example_id} plot {plot_id}: unsupported plot type {plot.type!r}"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis_id} plot {plot_id}: unsupported plot type {plot.type!r}"
             )
             continue
-        out_path = plots_dir / f"{example_id}-{plot_id}.png"
+        out_path = plots_dir / f"{analysis_id}-{plot_id}.png"
         try:
             renderer(plot, sweep_names, sweep_values, sweep_scales, env, model, out_path)
         except UnsupportedExpression as exc:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example_id} plot {plot_id}: {exc}"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis_id} plot {plot_id}: {exc}"
             )
             continue
         stats.plots_rendered += 1
@@ -1254,17 +1283,17 @@ def _render_one_example(
         print(f"[ok]   {rel}")
 
 
-def _render_time_series_example(
+def _render_time_series_analysis(
     esm_path: Path,
     component_name: str,
     model: Model,
-    example: Example,
+    analysis: Analysis,
     plots_dir: Path,
     stats: _RenderStats,
     initial_values: dict[str, float],
     flat: FlattenedSystem | None = None,
 ) -> None:
-    """Render plots for a `time_span` + `initial_state` example via ODE integration.
+    """Render plots for a `time_span` + `initial_state` analysis via ODE integration.
 
     No sweep: integrate once, plot one curve per plot spec (y vs t).
     With sweep: each grid point overrides parameters in `base_bindings`,
@@ -1272,42 +1301,42 @@ def _render_time_series_example(
     by the sweep value.
 
     `flat` is the per-component :class:`FlattenedSystem` materialised by the
-    file driver (`render_examples_for_file`). Passing it through lets every
+    file driver (`render_analyses_for_file`). Passing it through lets every
     sweep-point integration share simulate's `_simulate_compile_cache`,
     avoiding a ~30 s lambdify per sweep step on large mechanisms. When None
-    (e.g. test entry points exercising `_render_time_series_example` in
+    (e.g. test entry points exercising `_render_time_series_analysis` in
     isolation), `_solve_time_series` falls back to wrapping the model into a
     fresh EsmFile per call.
     """
-    plots = example.plots or []
-    stats.examples_seen += 1
-    base_bindings = _baseline_bindings(model, example)
+    plots = analysis.plots or []
+    stats.analyses_seen += 1
+    base_bindings = _baseline_bindings(model, analysis)
 
     sweep_name: str | None = None
     sweep_axis_values: np.ndarray | None = None
     sweep_axis_scale: str = "linear"
     sweep_runs: list[tuple[str | None, dict[str, float]]]
-    if example.parameter_sweep is None:
+    if analysis.parameter_sweep is None:
         sweep_runs = [(None, base_bindings)]
     else:
         try:
             sweep_names, sweep_values, sweep_scales = _build_sweep_grid(
-                example.parameter_sweep
+                analysis.parameter_sweep
             )
         except UnsupportedExpression as exc:
             for _ in plots:
                 stats.plots_skipped += 1
                 print(
-                    f"[skip] {esm_path.name}::{component_name} example "
-                    f"{example.id!r}: {exc}"
+                    f"[skip] {esm_path.name}::{component_name} analysis "
+                    f"{analysis.id!r}: {exc}"
                 )
             return
         if len(sweep_values) != 1:
             for _ in plots:
                 stats.plots_skipped += 1
                 print(
-                    f"[skip] {esm_path.name}::{component_name} example "
-                    f"{example.id!r}: time-series + sweep needs 1D sweep, "
+                    f"[skip] {esm_path.name}::{component_name} analysis "
+                    f"{analysis.id!r}: time-series + sweep needs 1D sweep, "
                     f"got {len(sweep_values)}D"
                 )
             return
@@ -1325,22 +1354,22 @@ def _render_time_series_example(
     try:
         for label, bindings in sweep_runs:
             env = _solve_time_series(
-                model, bindings, initial_values, example.time_span, flat=flat
+                model, bindings, initial_values, analysis.time_span, flat=flat
             )
             trajectories.append((label, env))
     except UnsupportedExpression as exc:
         for _ in plots:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example.id!r}: {exc}"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis.id!r}: {exc}"
             )
         return
 
-    example_id = example.id or "example"
+    analysis_id = analysis.id or "analysis"
     for plot in plots:
         plot_id = plot.id or "plot"
-        out_path = plots_dir / f"{example_id}-{plot_id}.png"
+        out_path = plots_dir / f"{analysis_id}-{plot_id}.png"
         try:
             # Dispatch on plot.x.variable: `t` ⇒ classic time-series; the
             # swept parameter ⇒ collapse each trajectory to its endpoint and
@@ -1364,8 +1393,8 @@ def _render_time_series_example(
         except UnsupportedExpression as exc:
             stats.plots_skipped += 1
             print(
-                f"[skip] {esm_path.name}::{component_name} example "
-                f"{example_id} plot {plot_id}: {exc}"
+                f"[skip] {esm_path.name}::{component_name} analysis "
+                f"{analysis_id} plot {plot_id}: {exc}"
             )
             continue
         stats.plots_rendered += 1
@@ -1434,7 +1463,7 @@ def run(components_root: Path) -> int:
 
 
 def run_files(files: list[Path]) -> int:
-    """Render examples for an explicit list of .esm files. Used by --files."""
+    """Render analyses for an explicit list of .esm files. Used by --files."""
     if not files:
         print("warning: no .esm files to render", file=sys.stderr)
         return 0
@@ -1442,20 +1471,20 @@ def run_files(files: list[Path]) -> int:
     t0 = time.time()
     for f in files:
         stats.files_seen += 1
-        render_examples_for_file(f, stats)
+        render_analyses_for_file(f, stats)
         _check_rss_budget(f.name)
     stats.elapsed_s = time.time() - t0
     print()
     print(
         f"render_example_plots: {stats.plots_rendered} plot(s) rendered, "
-        f"{stats.plots_skipped} skipped, {stats.examples_seen} examples seen "
+        f"{stats.plots_skipped} skipped, {stats.analyses_seen} analyses seen "
         f"across {stats.files_seen} .esm file(s) in {stats.elapsed_s:.2f}s"
     )
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Render example plots from .esm files.")
+    parser = argparse.ArgumentParser(description="Render analysis plots from .esm files.")
     parser.add_argument(
         "--components-dir",
         type=Path,
@@ -1465,7 +1494,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--files", nargs="+", default=None,
-        help="Explicit list of .esm files to render examples for (instead "
+        help="Explicit list of .esm files to render analyses for (instead "
              "of walking --components-dir). Useful for pre-merge gates that "
              "only want to validate files changed in the diff. Mutually "
              "exclusive with --components-dir.",

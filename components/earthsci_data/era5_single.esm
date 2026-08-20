@@ -1,8 +1,8 @@
 {
-  "esm": "0.8.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "ERA5",
-    "description": "ERA5 SINGLE-LEVEL (surface) regridding model — the coupler half of the era5 single-level loader+regridding-model split. Exposes ERA5 near-surface fields — 10 m wind (u10, v10), 2 m temperature (t2m), 2 m dewpoint (d2m) — on the simulation's target grid for coupling into EarthSciML systems. This is the single-level counterpart of era5.esm (pressure-level); it is preferred where genuine near-surface met is needed over terrain, because a 1000 hPa pressure level is at/below ground over elevated terrain.\n\nStructure: it declares the pure-I/O loader (components/earthsci_data/era5_single_loader.esm) as the subsystem `sl` via {\"ref\": \"./era5_single_loader.esm\"}. Loader fields are referenced as ERA5.sl.<var> (e.g. ERA5.sl.u10). Reprojection (longlat identity) and regridding onto a consuming grid are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5) via the earthscidiscretizations reprojection/ and regridding/ template libraries — see the wildlandfire.esm assembler.\n\nRelative humidity is NOT a single-level ERA5 variable; consumers DERIVE RH from t2m + d2m via the Magnus/Tetens formula (see the wildlandfire Era5Regrid model).\n\nUnlike the pressure-level model this file carries NO `lev` parameter, NO pressure `P` observed, and NO pressure-level lookup table — single-level surface fields have no vertical dimension. The time-interpolation machinery (t_interp_ref, dt_interp, w_time) and the lat/lon coordinate metrics (δxδlon, δyδlat) are unchanged.",
+    "description": "ERA5 SINGLE-LEVEL (surface) regridding model — the coupler half of the era5 single-level loader+regridding-model split. Exposes ERA5 near-surface fields — 10 m wind (u10, v10), 2 m temperature (t2m), 2 m dewpoint (d2m) — on the simulation's target grid for coupling into EarthSciML systems. This is the single-level counterpart of era5.esm (pressure-level); it is preferred where genuine near-surface met is needed over terrain, because a 1000 hPa pressure level is at/below ground over elevated terrain.\n\nStructure: it declares the pure-I/O source inline: at 0.7.0 the loader was the separate file components/earthsci_data/era5_single_loader.esm, mounted as the subsystem `sl`; at esm 1.0.0 it is the `ERA5_sl` entry in this file's own `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Loader fields are referenced as ERA5.sl.<var> (e.g. ERA5.sl.u10). Reprojection (longlat identity) and regridding onto a consuming grid are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5) via the earthscidiscretizations reprojection/ and regridding/ template libraries — see the wildlandfire.esm assembler.\n\nRelative humidity is NOT a single-level ERA5 variable; consumers DERIVE RH from t2m + d2m via the Magnus/Tetens formula (see the wildlandfire Era5Regrid model).\n\nUnlike the pressure-level model this file carries NO `lev` parameter, NO pressure `P` observed, and NO pressure-level lookup table — single-level surface fields have no vertical dimension. The time-interpolation machinery (t_interp_ref, dt_interp, w_time) and the lat/lon coordinate metrics (δxδlon, δyδlat) are unchanged.",
     "tags": [
       "earthsci_data",
       "meteorology",
@@ -28,13 +28,107 @@
       }
     ]
   },
+  "data_sources": {
+    "ERA5_sl": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://data.earthsci.dev/era5/era5_sl_{date:%Y}_{date:%m}.nc"
+      },
+      "temporal": {
+        "start": "1940-01-01T00:00:00Z",
+        "end": "2025-12-31T23:59:59Z",
+        "file_period": "P1M",
+        "frequency": "PT1H",
+        "records_per_file": 744,
+        "time_variable": "valid_time",
+        "records_per_sample": 2
+      },
+      "reference": {
+        "citation": "Hersbach, H. et al. (2020). The ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society, 146(730), 1999–2049.",
+        "url": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5",
+        "doi": "10.1002/qj.3803"
+      },
+      "metadata": {
+        "tags": [
+          "era5",
+          "ecmwf",
+          "meteorology",
+          "reanalysis",
+          "global",
+          "single-level",
+          "surface",
+          "hourly",
+          "0.25deg"
+        ],
+        "native_resolution_deg": {
+          "longitude": 0.25,
+          "latitude": 0.25
+        },
+        "native_extent": {
+          "longitude": [
+            -180.0,
+            180.0
+          ],
+          "latitude": [
+            -90.0,
+            90.0
+          ]
+        },
+        "native_staggering": "All variables are cell-centered (longitude/latitude 'center') — ERA5 is stored on a regular non-staggered grid. Single-level surface fields (2 m T/Td, 10 m u/v) have no vertical dimension.",
+        "netcdf_dimensions": [
+          "longitude",
+          "latitude",
+          "valid_time"
+        ],
+        "file_naming": "era5_sl_{YYYY}_{MM:02d}.nc (monthly, one file per calendar month, the four single-level variables; NO pressure_level dimension)",
+        "access_note": "ERA5 data is available from the Copernicus Climate Data Store (CDS) at https://cds.climate.copernicus.eu/. The url_template above uses a placeholder earthsci.dev mirror; in production, set EARTHSCIDATADIR to a local cache directory populated via the CDS API.",
+        "cds": {
+          "dataset": "reanalysis-era5-single-levels",
+          "format": "netcdf",
+          "description": "Opt-in CDS request descriptor. When the loader seam is routed through the EarthSciIO provider adapter, this block makes the loader resolve to the real Copernicus CDS API: the adapter builds a per-month `cds://reanalysis-era5-single-levels?<request>` URL whose `area` is the simulation domain's WGS84 bounding box and whose `variable` list maps this loader's short names (t2m, u10, v10, d2m) to the CDS single-level long names (2m_temperature, 10m_u_component_of_wind, 10m_v_component_of_wind, 2m_dewpoint_temperature). There is NO `pressure_level` key — the single-levels dataset rejects it. EarthSciIO's registered `cds` transport submits/polls/downloads the NetCDF asset, authenticating with the PRIVATE-TOKEN from ~/.cdsapirc or $CDSAPI_KEY."
+        },
+        "temporal_note": "ERA5 monthly files are released with a ~2-month lag. The temporal.end above is approximate; update as new months are released. ERA5 Back Extension covers 1940–1978; the main ERA5 record begins January 1979.",
+        "merged_from": "components/earthsci_data/era5_single_loader.esm",
+        "merge_note": "Merged from the standalone pure-I/O file components/earthsci_data/era5_single_loader.esm, which is deleted by the same commit. The 0.x `X.esm` + `X_loader.esm` split existed only because a loader was a COMPONENT and a {\"ref\"} target had to contain exactly one component. At esm 1.0.0 a data source is NOT a component, not a coupling endpoint and not a scoped-name path root, and `data_sources` no longer counts toward a file's top-level system count — so one file may hold a model AND the data_sources that model consumes and still be mountable by {\"ref\"}. This registry entry is byte-identical to the one the deleted file declared (it was already mirrored here so this document would validate), and the deleted file's own top-level metadata — name, description, tags, created, authors, references — is preserved verbatim in `merged_file_metadata` so no provenance, citation or migration note is lost.",
+        "merged_file_metadata": {
+          "name": "ERA5_sl_loader",
+          "description": "Pure-I/O data loader for ERA5 ECMWF Reanalysis 5th Generation SINGLE-LEVEL (surface) fields. Provides hourly near-surface atmospheric variables — 10 m wind (u10, v10), 2 m temperature (t2m) and 2 m dewpoint temperature (d2m) — on the native 0.25°×0.25° global longitude/latitude grid, 1940–present, sourced from monthly NetCDF files. This is the single-level counterpart of era5_loader.esm (which reads pressure-level fields); it is used where genuine near-surface met is needed over terrain, because a 1000 hPa pressure level is at or below ground over elevated terrain and its fields are extrapolated there.\n\nThis is the loader half of the era5 loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7). It is PURE I/O: it declares its source (url_template), the file variables it reads (with units), and its temporal cadence. It performs NO reprojection and NO regridding — those are per-variable concerns of the regridding model (components/earthsci_data/era5_single.esm), which references this file as a subsystem via {\"ref\": \"./era5_single_loader.esm\"}.\n\nBecause a `temporal` block is present, this loader seeds DISCRETE cadence for its variables: the runtime refreshes the file buffers hourly. (A consumer that needs a single time slice as a static field — e.g. the wildlandfire.esm surface-met coupling — binds one resolved hour as a CONST provider.)\n\nRelative humidity is NOT a single-level ERA5 variable; downstream consumers DERIVE RH from t2m + d2m via the Magnus/Tetens formula (see era5_single.esm / the wildlandfire Era5Regrid model).\n\nCDS dataset: reanalysis-era5-single-levels (no pressure_level key). Migrated from EarthSciData.jl ERA5FileSet conventions; the single-level variable set follows the CDS single-level short names t2m/u10/v10/d2m.",
+          "tags": [
+            "earthsci_data",
+            "meteorology",
+            "reanalysis",
+            "era5",
+            "ecmwf",
+            "single_levels",
+            "surface",
+            "global",
+            "data_loader",
+            "pure-io",
+            "longlat"
+          ],
+          "created": "2026-07-12T00:00:00Z",
+          "authors": [
+            "ECMWF",
+            "EarthSciModels"
+          ],
+          "references": [
+            {
+              "citation": "Hersbach, H., Bell, B., Berrisford, P., Hirahara, S., Horanyi, A., Munoz-Sabater, J., Nicolas, J., Peubey, C., Radu, R., Schepers, D., Simmons, A., Soci, C., et al. (2020). The ERA5 global reanalysis. Quarterly Journal of the Royal Meteorological Society, 146(730), 1999–2049.",
+              "url": "https://www.ecmwf.int/en/forecasts/dataset/ecmwf-reanalysis-v5",
+              "doi": "10.1002/qj.3803"
+            }
+          ]
+        }
+      }
+    }
+  },
   "models": {
     "ERA5": {
       "reference": {
-        "notes": "Single-level ERA5 regridding model. It declares the pure-I/O loader components/earthsci_data/era5_single_loader.esm as the subsystem `sl`; loader fields are ERA5.sl.{t2m,u10,v10,d2m}.\n\nKept from the pressure-level model: lon/lat (grid-point coordinates, radians), t_ref (file-time epoch), the time-interpolation parameters t_interp_ref/dt_interp and the continuous weight w_time (records_per_sample=2 bracketing blend), and the lat/lon coordinate metrics δxδlon/δyδlat.\n\nRemoved (no vertical dimension in single-level data): the `lev` pressure-level index parameter, the `P` pressure observed, and the era5_pressure_levels_pa function table.\n\nReprojection is the longlat identity; regridding onto the consuming grid is a coupling expression (esm-spec §8.6). RH is derived downstream from t2m + d2m via the Magnus formula."
+        "notes": "Single-level ERA5 regridding model. At 0.7.0 it declared the pure-I/O loader components/earthsci_data/era5_single_loader.esm as the subsystem `sl`; at esm 1.0.0 that source is the `ERA5_sl` entry in THIS file's `data_sources` and the standalone file is gone. Fields are ERA5.sl.{t2m,u10,v10,d2m}.\n\nKept from the pressure-level model: lon/lat (grid-point coordinates, radians), t_ref (file-time epoch), the time-interpolation parameters t_interp_ref/dt_interp and the continuous weight w_time (records_per_sample=2 bracketing blend), and the lat/lon coordinate metrics δxδlon/δyδlat.\n\nRemoved (no vertical dimension in single-level data): the `lev` pressure-level index parameter, the `P` pressure observed, and the era5_pressure_levels_pa function table.\n\nReprojection is the longlat identity; regridding onto the consuming grid is a coupling expression (esm-spec §8.6). RH is derived downstream from t2m + d2m via the Magnus formula."
       },
       "tolerance": {
-        "rel": 1e-6
+        "rel": 1e-06
       },
       "variables": {
         "lon": {
@@ -68,16 +162,93 @@
           "description": "TIME INTERPOLATION: the loader's cadence step (s) between the two bracketing records — ERA5 is hourly, so 3600. Set by the runner to match the loader frequency. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so the model's weight phase agrees with which two records the provider loaded."
         },
         "w_time": {
-          "type": "observed",
+          "type": "unknown",
           "units": "1",
-          "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear).",
-          "expression": {
+          "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear)."
+        },
+        "δxδlon": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains."
+        },
+        "δyδlat": {
+          "type": "unknown",
+          "units": "m/rad",
+          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains."
+        },
+        "t2m": {
+          "type": "parameter",
+          "units": "K",
+          "shape": [],
+          "description": "2 m air temperature (K). ERA5 single-level short name 't2m'.",
+          "update": {
+            "kind": "data",
+            "source": "ERA5_sl",
+            "from": {
+              "file_variable": "t2m",
+              "description": "2 m air temperature (K). ERA5 single-level short name 't2m'."
+            }
+          }
+        },
+        "u10": {
+          "type": "parameter",
+          "units": "m/s",
+          "shape": [],
+          "description": "10 m U wind component — zonal wind (m/s). ERA5 single-level short name 'u10'.",
+          "update": {
+            "kind": "data",
+            "source": "ERA5_sl",
+            "from": {
+              "file_variable": "u10",
+              "description": "10 m U wind component — zonal wind (m/s). ERA5 single-level short name 'u10'."
+            }
+          }
+        },
+        "v10": {
+          "type": "parameter",
+          "units": "m/s",
+          "shape": [],
+          "description": "10 m V wind component — meridional wind (m/s). ERA5 single-level short name 'v10'.",
+          "update": {
+            "kind": "data",
+            "source": "ERA5_sl",
+            "from": {
+              "file_variable": "v10",
+              "description": "10 m V wind component — meridional wind (m/s). ERA5 single-level short name 'v10'."
+            }
+          }
+        },
+        "d2m": {
+          "type": "parameter",
+          "units": "K",
+          "shape": [],
+          "description": "2 m dewpoint temperature (K). ERA5 single-level short name 'd2m'. Relative humidity is DERIVED downstream via the Magnus formula from t2m + d2m (there is no 'r'/relative-humidity variable in the single-level product).",
+          "update": {
+            "kind": "data",
+            "source": "ERA5_sl",
+            "from": {
+              "file_variable": "d2m",
+              "description": "2 m dewpoint temperature (K). ERA5 single-level short name 'd2m'. Relative humidity is DERIVED downstream via the Magnus formula from t2m + d2m (there is no 'r'/relative-humidity variable in the single-level product)."
+            }
+          }
+        }
+      },
+      "equations": [
+        {
+          "lhs": "w_time",
+          "rhs": {
             "op": "-",
             "args": [
               {
                 "op": "/",
                 "args": [
-                  {"op": "-", "args": ["t", "t_interp_ref"]},
+                  {
+                    "op": "-",
+                    "args": [
+                      "t",
+                      "t_interp_ref"
+                    ]
+                  },
                   "dt_interp"
                 ]
               },
@@ -87,7 +258,13 @@
                   {
                     "op": "/",
                     "args": [
-                      {"op": "-", "args": ["t", "t_interp_ref"]},
+                      {
+                        "op": "-",
+                        "args": [
+                          "t",
+                          "t_interp_ref"
+                        ]
+                      },
                       "dt_interp"
                     ]
                   }
@@ -96,11 +273,9 @@
             ]
           }
         },
-        "δxδlon": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains.",
-          "expression": {
+        {
+          "lhs": "δxδlon",
+          "rhs": {
             "op": "*",
             "args": [
               6378134.3,
@@ -113,19 +288,11 @@
             ]
           }
         },
-        "δyδlat": {
-          "type": "observed",
-          "units": "m/rad",
-          "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains.",
-          "expression": 6378166.0
+        {
+          "lhs": "δyδlat",
+          "rhs": 6378166.0
         }
-      },
-      "subsystems": {
-        "sl": {
-          "ref": "./era5_single_loader.esm"
-        }
-      },
-      "equations": [],
+      ],
       "tests": []
     }
   }

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SoilWaterEquilibrium",
         "description": "Layer-averaged equilibrium volumetric water content (θ_E, Eq. 5.101) and equilibrium matric potential at the layer node (ψ_E, Eq. 5.106) for a single soil layer, following Oleson et al. (2010, CLM4 Tech Note Ch. 5, §5.3.2.1, Eqs. 5.98–5.106). θ_E is fully saturated (θ_sat) when the water table is above the layer (z_v < z_h_upper), otherwise is computed by integrating the hydrostatic-equilibrium Clapp-Hornberger profile across the layer, clamped to [0, θ_sat]. ψ_E is derived from the Brooks-Corey inverse relation with a 1% saturation floor and a hard lower bound at ψ_min = −10⁵ m to prevent numerical underflow. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:509 (`SoilWaterEquilibrium` @component). Note: the migration-tracker row for this component carried the blocking_gap `other:discretization-plan` because the row description mentioned an in-file Richards-equation PDE at src/hydrology.jl:674. Inspection shows that PDESystem lives in a separate non-`@component` helper function (`RichardsEquation`) and is not part of `SoilWaterEquilibrium`, which is a plain two-equation algebraic `@component`. No discretization plan is needed.",
@@ -29,7 +29,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:509\nUpstream `SoilWaterEquilibrium` is an MTK `@component` with six `@parameters` (θ_sat, ψ_sat, B, z_h_upper, z_h_lower, z_v) and two time-indexed `@variables` (θ_E, ψ_E) given by two algebraic equations with no derivatives. Identical structure preserved here.\n\nThe upstream component declares one `@constants` block: `ψ_min = -1.0e5 m` (minimum matric potential, converted from the CLM4 value −10⁸ mm). Per the convention of sibling files in this directory (groundwater_drainage.esm, surface_runoff_infiltration.esm), `@constants` are promoted to parameters with fixed defaults so MTK's unit checker is satisfied and the equation AST references them by name.\n\nTracker blocking_gap clarification: the migration-tracker row for this bead read `blocking_gap: other:discretization-plan` because the row description mentioned `internally builds Richards-eq PDE (:674) via MOLFiniteDifference`. Inspecting the source shows that `RichardsEquation` (the PDESystem builder, lines 597–683) is a separate non-`@component` helper function that is never called by `SoilWaterEquilibrium`. `SoilWaterEquilibrium` itself (lines 509–558) is a plain algebraic `@component` — two equations, no PDESystem, no MOLFiniteDifference. No discretization plan is needed.\n\nEquation 1 (θ_E, Eqs. 5.101–5.102 simplified): The upstream docstring notes that the code uses `z_v < z_h_upper` as the only branch point (fully-saturated guard), then applies Eq. 5.101 with Eq. 5.105 clamping for all other cases including the water-table-within-layer zone (z_h_upper ≤ z_v ≤ z_h_lower). The Clapp-Hornberger integral term uses the ratio `(ψ_sat − z_v + z_h_x)/ψ_sat` raised to the exponent `(1 − 1/B)`. When z_v is in the transition zone near z_h_upper, this ratio can become negative (since ψ_sat is small and negative), making the power non-real; the outer `max(0·θ_sat, …)` clamp absorbs any NaN result that symbolic evaluators may produce in that region. All inline tests deliberately target the two well-defined branches: z_v < z_h_upper (saturated) and z_v > z_h_lower + |ψ_sat| (fully below the layer, valid real domain).\n\nEquation 2 (ψ_E, Eq. 5.106): `ψ_E = max(ψ_sat · (max(θ_E, 0.01·θ_sat)/θ_sat)^(−B), ψ_min)`. The `max(θ_E, 0.01·θ_sat)` inner floor prevents division-by-zero or extreme negative potentials when θ_E → 0. The outer `max(·, ψ_min)` with ψ_min = −10⁵ m clamps ψ_E at the physically plausible floor (the clamping activates when the Brooks-Corey formula would give ψ_raw < −10⁵ m, which occurs when the effective saturation ratio (θ_E/θ_sat) < approximately (|ψ_sat|/|ψ_min|)^(1/B); for typical CLM4 sandy-loam params that threshold is ~0.011).\n\nUnicode parameter and variable names (θ_sat, ψ_sat, ψ_min, θ_E, ψ_E) are preserved verbatim from upstream — sibling files in this directory and the temps/ subdirectory already established unicode identifiers as the rig convention (soil_water_flux.esm, freezing_point_depression.esm, interface_hydraulic_conductivity.esm, water_table_depth.esm).\n\nDefault parameter values: θ_sat = 0.434, ψ_sat = −0.036 m, B = 4.05 are CLM4 Table 5.1 sandy-loam soil-texture values. z_h_upper = 0.05 m, z_h_lower = 0.25 m are typical top-of-column layer interfaces; z_v = 1.0 m is a mid-range water-table depth that places the layer in the well-defined unsaturated domain and yields a non-trivial θ_E. The `ψ_min` constant default matches the upstream `@constants` value exactly.\n\nObservability classification: this component is functionally observed-only — both outputs are given by algebraic equations in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 following the convention of sibling observed-only ESM files in this directory.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration). The longest evaluation chain involves one power (`^`) call per bracketed term (≈1–2 ULP relative error), one subtraction, one multiplication, and one max/min clamp — worst-case roundoff ~10×ULP ≈ 1e-15. 1e-9 leaves six orders of headroom. Saturated-branch assertions (θ_E = θ_sat, ψ_E = ψ_sat by exact arithmetic) use `abs: 1e-15` to gate stuck-at-zero/stuck-at-constant regressions."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "θ_sat": {
@@ -75,12 +75,12 @@
                     "description": "Minimum matric potential floor (converted from −10⁸ mm; upstream @constants, Eq. 5.106 hard lower bound)"
                 },
                 "θ_E": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^3/m^3",
                     "description": "Layer-averaged equilibrium volumetric water content (Oleson Eq. 5.101)"
                 },
                 "ψ_E": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Equilibrium matric potential at the layer node (Oleson Eq. 5.106)"
                 }
@@ -93,7 +93,10 @@
                         "args": [
                             {
                                 "op": "<",
-                                "args": ["z_v", "z_h_upper"]
+                                "args": [
+                                    "z_v",
+                                    "z_h_upper"
+                                ]
                             },
                             "θ_sat",
                             {
@@ -101,7 +104,10 @@
                                 "args": [
                                     {
                                         "op": "*",
-                                        "args": [0.0, "θ_sat"]
+                                        "args": [
+                                            0.0,
+                                            "θ_sat"
+                                        ]
                                     },
                                     {
                                         "op": "min",
@@ -115,14 +121,20 @@
                                                         "args": [
                                                             {
                                                                 "op": "*",
-                                                                "args": ["θ_sat", "ψ_sat"]
+                                                                "args": [
+                                                                    "θ_sat",
+                                                                    "ψ_sat"
+                                                                ]
                                                             },
                                                             {
                                                                 "op": "*",
                                                                 "args": [
                                                                     {
                                                                         "op": "-",
-                                                                        "args": ["z_h_lower", "z_h_upper"]
+                                                                        "args": [
+                                                                            "z_h_lower",
+                                                                            "z_h_upper"
+                                                                        ]
                                                                     },
                                                                     {
                                                                         "op": "-",
@@ -130,7 +142,10 @@
                                                                             1.0,
                                                                             {
                                                                                 "op": "/",
-                                                                                "args": [1.0, "B"]
+                                                                                "args": [
+                                                                                    1.0,
+                                                                                    "B"
+                                                                                ]
                                                                             }
                                                                         ]
                                                                     }
@@ -152,7 +167,10 @@
                                                                                 "args": [
                                                                                     {
                                                                                         "op": "-",
-                                                                                        "args": ["ψ_sat", "z_v"]
+                                                                                        "args": [
+                                                                                            "ψ_sat",
+                                                                                            "z_v"
+                                                                                        ]
                                                                                     },
                                                                                     "z_h_lower"
                                                                                 ]
@@ -166,7 +184,10 @@
                                                                             1.0,
                                                                             {
                                                                                 "op": "/",
-                                                                                "args": [1.0, "B"]
+                                                                                "args": [
+                                                                                    1.0,
+                                                                                    "B"
+                                                                                ]
                                                                             }
                                                                         ]
                                                                     }
@@ -183,7 +204,10 @@
                                                                                 "args": [
                                                                                     {
                                                                                         "op": "-",
-                                                                                        "args": ["ψ_sat", "z_v"]
+                                                                                        "args": [
+                                                                                            "ψ_sat",
+                                                                                            "z_v"
+                                                                                        ]
                                                                                     },
                                                                                     "z_h_upper"
                                                                                 ]
@@ -197,7 +221,10 @@
                                                                             1.0,
                                                                             {
                                                                                 "op": "/",
-                                                                                "args": [1.0, "B"]
+                                                                                "args": [
+                                                                                    1.0,
+                                                                                    "B"
+                                                                                ]
                                                                             }
                                                                         ]
                                                                     }
@@ -235,7 +262,10 @@
                                                             "θ_E",
                                                             {
                                                                 "op": "*",
-                                                                "args": [0.01, "θ_sat"]
+                                                                "args": [
+                                                                    0.01,
+                                                                    "θ_sat"
+                                                                ]
                                                             }
                                                         ]
                                                     },
@@ -244,7 +274,10 @@
                                             },
                                             {
                                                 "op": "-",
-                                                "args": [0.0, "B"]
+                                                "args": [
+                                                    0.0,
+                                                    "B"
+                                                ]
                                             }
                                         ]
                                     }
@@ -268,10 +301,27 @@
                         "z_v": 0.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.434, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.036, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.434,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.036,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -286,10 +336,27 @@
                         "z_v": 0.03,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.434, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.036, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.434,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.036,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -304,10 +371,21 @@
                         "z_v": 1.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.19691811127446465 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.8836473426142424 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.19691811127446465
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.8836473426142424
+                        }
                     ]
                 },
                 {
@@ -322,10 +400,21 @@
                         "z_v": 5.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.12909772268637975 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -4.885574622575478 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.12909772268637976
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -4.885574622575478
+                        }
                     ]
                 },
                 {
@@ -340,10 +429,21 @@
                         "z_v": 10.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.10847743091340305 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -9.885789779555024 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.10847743091340305
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -9.885789779555024
+                        }
                     ]
                 },
                 {
@@ -358,10 +458,27 @@
                         "z_v": 0.05,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.434, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.036, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.434,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.036,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -376,10 +493,21 @@
                         "z_v": 0.8,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.22446824732627826 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.5199463062590982 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.22446824732627826
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.5199463062590982
+                        }
                     ]
                 },
                 {
@@ -394,10 +522,21 @@
                         "z_v": 3.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.14900835112048255 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -2.732957883081626 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.14900835112048255
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -2.732957883081626
+                        }
                     ]
                 },
                 {
@@ -412,10 +551,27 @@
                         "z_v": 0.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.395, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -0.012, "tolerance": { "abs": 1.0e-15 } }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.395,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -0.012,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        }
                     ]
                 },
                 {
@@ -430,10 +586,21 @@
                         "z_v": 2.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.07762061602879547 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -1.860815343925314 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.07762061602879547
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -1.860815343925314
+                        }
                     ]
                 },
                 {
@@ -448,14 +615,25 @@
                         "z_v": 2.0,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "θ_E", "time": 0.0, "expected": 0.39678912198644493 },
-                        { "variable": "ψ_E", "time": 0.0, "expected": -2.254189476753937 }
+                        {
+                            "variable": "θ_E",
+                            "time": 0.0,
+                            "expected": 0.39678912198644495
+                        },
+                        {
+                            "variable": "ψ_E",
+                            "time": 0.0,
+                            "expected": -2.254189476753937
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "theta_E_and_psi_E_vs_z_v",
                     "description": "Drying curves: θ_E and ψ_E vs. water table depth z_v for the standard sandy-loam layer (z_h_upper = 0.05 m, z_h_lower = 0.25 m). Sweep covers z_v ∈ [0.3, 10] m, staying in the real-valued domain of Eq. 5.101 (z_v > z_h_lower − |ψ_sat| ≈ 0.214 m). The saturated plateau (θ_E = θ_sat, z_v < z_h_upper) is not shown because the plot renderer uses eager evaluation of the ifelse else-branch which produces complex-valued intermediate results for z_v < z_h_lower − |ψ_sat|.",
@@ -468,13 +646,21 @@
                         "z_h_lower": 0.25,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "z_v",
-                                "range": { "start": 0.3, "stop": 10.0, "count": 50, "scale": "linear" }
+                                "range": {
+                                    "start": 0.3,
+                                    "stop": 10.0,
+                                    "count": 50,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -483,15 +669,27 @@
                             "id": "theta_E_vs_z_v_line",
                             "type": "line",
                             "description": "θ_E vs z_v unsaturated drying curve — power-law decay as the water table deepens.",
-                            "x": { "variable": "z_v", "label": "z_v (m, water table depth)" },
-                            "y": { "variable": "θ_E", "label": "θ_E (m³/m³)" }
+                            "x": {
+                                "variable": "z_v",
+                                "label": "z_v (m, water table depth)"
+                            },
+                            "y": {
+                                "variable": "θ_E",
+                                "label": "θ_E (m³/m³)"
+                            }
                         },
                         {
                             "id": "psi_E_vs_z_v_line",
                             "type": "line",
                             "description": "ψ_E vs z_v — equilibrium matric potential deepening as the water table drops.",
-                            "x": { "variable": "z_v",  "label": "z_v (m, water table depth)" },
-                            "y": { "variable": "ψ_E", "label": "ψ_E (m)" }
+                            "x": {
+                                "variable": "z_v",
+                                "label": "z_v (m, water table depth)"
+                            },
+                            "y": {
+                                "variable": "ψ_E",
+                                "label": "ψ_E (m)"
+                            }
                         }
                     ]
                 },
@@ -506,17 +704,30 @@
                         "z_h_lower": 0.25,
                         "ψ_min": -100000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "z_v",
-                                "range": { "start": 0.3, "stop": 10.0, "count": 20, "scale": "linear" }
+                                "range": {
+                                    "start": 0.3,
+                                    "stop": 10.0,
+                                    "count": 20,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "B",
-                                "range": { "start": 3.0, "stop": 12.0, "count": 15, "scale": "linear" }
+                                "range": {
+                                    "start": 3.0,
+                                    "stop": 12.0,
+                                    "count": 15,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -525,9 +736,18 @@
                             "id": "theta_E_heatmap",
                             "type": "heatmap",
                             "description": "θ_E as a function of (z_v, B) — shows the strong soil-texture control on equilibrium water content.",
-                            "x": { "variable": "z_v", "label": "z_v (m, water table depth)" },
-                            "y": { "variable": "B",   "label": "B (Clapp-Hornberger exponent)" },
-                            "value": { "variable": "θ_E", "reduce": "final" }
+                            "x": {
+                                "variable": "z_v",
+                                "label": "z_v (m, water table depth)"
+                            },
+                            "y": {
+                                "variable": "B",
+                                "label": "B (Clapp-Hornberger exponent)"
+                            },
+                            "value": {
+                                "variable": "θ_E",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SoilThermalProperties",
         "description": "Thermal conductivity and volumetric heat capacity for soil layers in the pervious-road column of the urban canopy thermal solver. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:75 (`SoilThermalProperties` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4 §4.3): thermal conductivity follows Farouki (1981) using the Kersten-number method (Eqs. 4.77-4.82); volumetric heat capacity follows de Vries (1963) (Eqs. 4.85-4.86). Parameterized as observed-only: pct_sand, pct_clay, θ_sat, θ_liq, T_i, w_ice, w_liq, Δz are inputs (parameters); λ_s, λ_sat, λ_dry, ρ_d, S_r, K_e, λ_soil, c_s, c_soil are algebraic outputs. The component carries two temperature-conditioned `ifelse` branches: λ_sat and K_e switch between frozen (T_i < T_f) and unfrozen (T_i ≥ T_f) regimes, while λ_soil falls back to λ_dry whenever S_r drops below a small numerical threshold.",
@@ -35,7 +35,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:75\nUpstream `SoilThermalProperties` is an MTK `@component` whose eight inputs (pct_sand, pct_clay, θ_sat, θ_liq, T_i, w_ice, w_liq, Δz) are `@parameters` and whose nine outputs (λ_s, λ_sat, λ_dry, ρ_d, S_r, K_e, λ_soil, c_s, c_soil) are time-indexed `@variables` with nine algebraic equations (no derivatives). Identical equation structure preserved here. Upstream structural test (test/roof_wall_road_snow_temperatures_test.jl:46-54) asserts `length(equations(sys)) == 9` and `length(unknowns(sys)) == 9` — matched here.\n\nThe upstream component declares three `@constants` blocks. (i) Physical constants from Oleson Table 1.4: T_f = 273.15 K (freezing temperature), ρ_liq = 1000.0 kg/m^3, ρ_ice = 917.0 kg/m^3, C_liq = 4188.0 J/(kg*K), C_ice = 2117.27 J/(kg*K), λ_liq_const = 0.6 W/(m*K), λ_ice_const = 2.29 W/(m*K). (ii) Unit-balancing references one_Wm⁻¹K⁻¹ = 1.0 W/(m*K), one_kgm⁻³ = 1.0 kg/m^3 used for non-dimensionalization of bases before the fractional-power exponents in Eq. 4.78 and the dimensionless denominator term in Eq. 4.80 (the upstream block also declares one_Jm⁻³K⁻¹ but it is never used in any equation — omitted from this ESM as the migration captures only what enters the algebraic system). (iii) Empirical-formula constants: λ_s_sand_coeff = 8.8 W/(m*K) and λ_s_clay_coeff = 2.92 W/(m*K) (Eq. 4.79); ρ_mineral = 2700.0 kg/m^3 (Section 4.3 bulk density); λ_dry_numerator_coeff = 0.135 W·m^2/(kg·K), λ_dry_numerator_offset = 64.7 W/(m*K), λ_dry_denom_offset = 2700.0 (dimensionless), λ_dry_denom_coeff = 0.947 (dimensionless) (Eq. 4.80); c_s_sand_coeff = 2.128e6 J/(m^3*K) and c_s_clay_coeff = 2.385e6 J/(m^3*K) (Eq. 4.86). All `@constants` are encoded here as parameters carrying the upstream default values, matching the convention used by sibling observed-only ESM files (freezing_point_depression.esm encodes T_f/L_f/g/one_ref the same way; snow_soil_blended_heat_capacity.esm encodes C_ice the same way).\n\nName-mapping: unicode identifiers from upstream (λ_*, ρ_*, θ_*, Δz, S_r, K_e) are preserved here — peer ESM components in this rig (freezing_point_depression.esm uses Δz/θ_sat/ψ_sat/ρ_liq; snow_soil_blended_heat_capacity.esm uses Δz; heat_flux.esm uses λ_interface) already use unicode in identifiers and the schema's identifier strings allow it. Two upstream constant names that carry Unicode superscript characters (`one_Wm⁻¹K⁻¹`, `one_kgm⁻³`) are renamed `one_W_per_mK` and `one_kg_per_m3` for ASCII-safe JSON keys — the superscript combining characters interact poorly with JSON tooling without changing the semantics. The third upstream unit-balancing constant `one_Jm⁻³K⁻¹` is declared but never used in any equation, so it is omitted from the ESM rather than carried as a dead parameter.\n\nObservability classification: this component is functionally observed-only — every output state is given by a single algebraic equation in terms of the parameters and other state outputs (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only files in this rig (freezing_point_depression.esm, heating_cooling_flux.esm, snow_soil_blended_heat_capacity.esm).\n\nEquation semantics — `ifelse` branches: Eq. 4.78 (λ_sat) and Eq. 4.81 (K_e) both branch on `T_i ≥ T_f` (frozen/unfrozen split, encoded as `>=` per the schema's relational operator set). Equality at T_i = T_f goes to the unfrozen branch — this matches the upstream Julia `≥` semantics. Eq. 4.77 (λ_soil) branches on `S_r > 1.0e-7` to avoid evaluating `log(S_r)` at very small or zero S_r in the unfrozen K_e branch — when S_r drops below 1e-7 the component falls back to λ_dry. (The unfrozen Kersten formula itself further guards `log(max(S_r, 1.0e-10))` to keep `log` finite at S_r = 0, and the outer max(·, 0) clamps the resulting K_e to be non-negative.)\n\nSign and unit conventions: pct_sand and pct_clay are percent-by-mass (treated as dimensionless in the algebra — the ratio (sand+clay)/(sand+clay) cancels their units); ψ_sat / matric potential does not appear in this component (it is the FreezingPointDepression model); θ_liq is the unfrozen volumetric water content and is bounded by θ_sat from above (the test scenarios respect this). The expression `(w_liq / (ρ_liq · Δz) + w_ice / (ρ_ice · Δz)) / θ_sat` in Eq. 4.82 maps to the degree of saturation S_r — pore volume is θ_sat·Δz; w/(ρ·Δz) is the volume fraction of each phase; their sum divided by θ_sat is the fraction of the pore space that is occupied.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations chain multiplies, divides, additions, and three fractional-power calls (Eq. 4.78). Roundoff is at the IEEE-754 ULP level (~1e-16) for the multiplicative parts and ~1e-15 for `pow`. 1e-9 leaves comfortable headroom above ULP roundoff and matches the convention used by sibling observed-only files (heating_cooling_flux.esm, freezing_point_depression.esm). Tighter `abs: 1e-12` is asserted on outputs that are exactly zero by construction (S_r = 0 in the dry-soil-limit test, K_e = 0 when the unfrozen log-formula clamps to zero) so the assertion does not silently accept a stuck-at-1e-3 regression. Reference values for `λ_sat` (fractional-power) and `c_s` (large 10^6 magnitudes) are computed in IEEE-754 double precision matching the upstream MTK system's evaluation order.\n\nUpstream tolerance reproduction: the upstream `Equation Verification` test (test/roof_wall_road_snow_temperatures_test.jl:56-98) uses rtol = 1e-6 on λ_s, c_s, ρ_d, λ_dry, S_r; we anchor the same fixture and the additional state outputs (λ_sat, K_e, λ_soil, c_soil) that the upstream test does not check by value (it only checks λ_soil ≥ λ_dry - 1e-10 and c_soil > 0) — the additional anchors here defend against silent regressions in the fractional-power and ifelse paths that the upstream coverage allows through."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "pct_sand": {
@@ -195,47 +195,47 @@
                     "description": "Empirical coefficient for clay in Eq. 4.86"
                 },
                 "λ_s": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/(m*K)",
                     "description": "Thermal conductivity of soil solids (Eq. 4.79): mass-weighted blend of sand and clay coefficients"
                 },
                 "λ_sat": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/(m*K)",
                     "description": "Saturated thermal conductivity (Eq. 4.78): geometric mean of solid, liquid, and (when frozen) ice phases weighted by their pore-volume fractions"
                 },
                 "λ_dry": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/(m*K)",
                     "description": "Dry (zero-water-content) thermal conductivity (Eq. 4.80): empirical fit in ρ_d"
                 },
                 "ρ_d": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/m^3",
                     "description": "Bulk density of dry soil = ρ_mineral · (1 - θ_sat) (Section 4.3)"
                 },
                 "S_r": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Degree of saturation (Eq. 4.82): fraction of pore volume occupied by liquid water plus ice"
                 },
                 "K_e": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Kersten number (Eq. 4.81): interpolation weight between λ_sat and λ_dry. Unfrozen branch: max(log(max(S_r, 1e-10)) + 1, 0) — the inner `max` keeps log finite at S_r = 0; the outer `max` clamps the result to be non-negative. Frozen branch: K_e = S_r."
                 },
                 "λ_soil": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/(m*K)",
                     "description": "Soil thermal conductivity (Eq. 4.77): K_e · λ_sat + (1 - K_e) · λ_dry for S_r > 1e-7; falls back to λ_dry below that threshold"
                 },
                 "c_s": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "J/(m^3*K)",
                     "description": "Heat capacity of soil solids (Eq. 4.86): mass-weighted blend of sand and clay coefficients"
                 },
                 "c_soil": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "J/(m^3*K)",
                     "description": "Volumetric heat capacity of soil (Eq. 4.85): solid contribution + ice + liquid water contributions per unit volume"
                 }
@@ -249,11 +249,29 @@
                             {
                                 "op": "+",
                                 "args": [
-                                    { "op": "*", "args": ["λ_s_sand_coeff", "pct_sand"] },
-                                    { "op": "*", "args": ["λ_s_clay_coeff", "pct_clay"] }
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "λ_s_sand_coeff",
+                                            "pct_sand"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "λ_s_clay_coeff",
+                                            "pct_clay"
+                                        ]
+                                    }
                                 ]
                             },
-                            { "op": "+", "args": ["pct_sand", "pct_clay"] }
+                            {
+                                "op": "+",
+                                "args": [
+                                    "pct_sand",
+                                    "pct_clay"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -262,7 +280,13 @@
                     "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": ">=", "args": ["T_i", "T_f"] },
+                            {
+                                "op": ">=",
+                                "args": [
+                                    "T_i",
+                                    "T_f"
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
@@ -272,14 +296,32 @@
                                             {
                                                 "op": "^",
                                                 "args": [
-                                                    { "op": "/", "args": ["λ_s", "one_W_per_mK"] },
-                                                    { "op": "-", "args": [1, "θ_sat"] }
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "λ_s",
+                                                            "one_W_per_mK"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            1,
+                                                            "θ_sat"
+                                                        ]
+                                                    }
                                                 ]
                                             },
                                             {
                                                 "op": "^",
                                                 "args": [
-                                                    { "op": "/", "args": ["λ_liq_const", "one_W_per_mK"] },
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "λ_liq_const",
+                                                            "one_W_per_mK"
+                                                        ]
+                                                    },
                                                     "θ_sat"
                                                 ]
                                             }
@@ -300,14 +342,32 @@
                                                     {
                                                         "op": "^",
                                                         "args": [
-                                                            { "op": "/", "args": ["λ_s", "one_W_per_mK"] },
-                                                            { "op": "-", "args": [1, "θ_sat"] }
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "λ_s",
+                                                                    "one_W_per_mK"
+                                                                ]
+                                                            },
+                                                            {
+                                                                "op": "-",
+                                                                "args": [
+                                                                    1,
+                                                                    "θ_sat"
+                                                                ]
+                                                            }
                                                         ]
                                                     },
                                                     {
                                                         "op": "^",
                                                         "args": [
-                                                            { "op": "/", "args": ["λ_liq_const", "one_W_per_mK"] },
+                                                            {
+                                                                "op": "/",
+                                                                "args": [
+                                                                    "λ_liq_const",
+                                                                    "one_W_per_mK"
+                                                                ]
+                                                            },
                                                             "θ_liq"
                                                         ]
                                                     }
@@ -316,8 +376,20 @@
                                             {
                                                 "op": "^",
                                                 "args": [
-                                                    { "op": "/", "args": ["λ_ice_const", "one_W_per_mK"] },
-                                                    { "op": "-", "args": ["θ_sat", "θ_liq"] }
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "λ_ice_const",
+                                                            "one_W_per_mK"
+                                                        ]
+                                                    },
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            "θ_sat",
+                                                            "θ_liq"
+                                                        ]
+                                                    }
                                                 ]
                                             }
                                         ]
@@ -334,7 +406,13 @@
                         "op": "*",
                         "args": [
                             "ρ_mineral",
-                            { "op": "-", "args": [1, "θ_sat"] }
+                            {
+                                "op": "-",
+                                "args": [
+                                    1,
+                                    "θ_sat"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -346,7 +424,13 @@
                             {
                                 "op": "+",
                                 "args": [
-                                    { "op": "*", "args": ["λ_dry_numerator_coeff", "ρ_d"] },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "λ_dry_numerator_coeff",
+                                            "ρ_d"
+                                        ]
+                                    },
                                     "λ_dry_numerator_offset"
                                 ]
                             },
@@ -358,7 +442,13 @@
                                         "op": "*",
                                         "args": [
                                             "λ_dry_denom_coeff",
-                                            { "op": "/", "args": ["ρ_d", "one_kg_per_m3"] }
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "ρ_d",
+                                                    "one_kg_per_m3"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -378,14 +468,26 @@
                                         "op": "/",
                                         "args": [
                                             "w_liq",
-                                            { "op": "*", "args": ["ρ_liq", "Δz"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "ρ_liq",
+                                                    "Δz"
+                                                ]
+                                            }
                                         ]
                                     },
                                     {
                                         "op": "/",
                                         "args": [
                                             "w_ice",
-                                            { "op": "*", "args": ["ρ_ice", "Δz"] }
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "ρ_ice",
+                                                    "Δz"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -399,7 +501,13 @@
                     "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": ">=", "args": ["T_i", "T_f"] },
+                            {
+                                "op": ">=",
+                                "args": [
+                                    "T_i",
+                                    "T_f"
+                                ]
+                            },
                             {
                                 "op": "max",
                                 "args": [
@@ -409,7 +517,13 @@
                                             {
                                                 "op": "log",
                                                 "args": [
-                                                    { "op": "max", "args": ["S_r", 1.0e-10] }
+                                                    {
+                                                        "op": "max",
+                                                        "args": [
+                                                            "S_r",
+                                                            1e-10
+                                                        ]
+                                                    }
                                                 ]
                                             },
                                             1.0
@@ -427,15 +541,33 @@
                     "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": ">", "args": ["S_r", 1.0e-7] },
+                            {
+                                "op": ">",
+                                "args": [
+                                    "S_r",
+                                    1e-07
+                                ]
+                            },
                             {
                                 "op": "+",
                                 "args": [
-                                    { "op": "*", "args": ["K_e", "λ_sat"] },
                                     {
                                         "op": "*",
                                         "args": [
-                                            { "op": "-", "args": [1, "K_e"] },
+                                            "K_e",
+                                            "λ_sat"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    1,
+                                                    "K_e"
+                                                ]
+                                            },
                                             "λ_dry"
                                         ]
                                     }
@@ -453,11 +585,29 @@
                             {
                                 "op": "+",
                                 "args": [
-                                    { "op": "*", "args": ["c_s_sand_coeff", "pct_sand"] },
-                                    { "op": "*", "args": ["c_s_clay_coeff", "pct_clay"] }
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "c_s_sand_coeff",
+                                            "pct_sand"
+                                        ]
+                                    },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "c_s_clay_coeff",
+                                            "pct_clay"
+                                        ]
+                                    }
                                 ]
                             },
-                            { "op": "+", "args": ["pct_sand", "pct_clay"] }
+                            {
+                                "op": "+",
+                                "args": [
+                                    "pct_sand",
+                                    "pct_clay"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -473,13 +623,25 @@
                                         "op": "*",
                                         "args": [
                                             "c_s",
-                                            { "op": "-", "args": [1, "θ_sat"] }
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    1,
+                                                    "θ_sat"
+                                                ]
+                                            }
                                         ]
                                     },
                                     {
                                         "op": "*",
                                         "args": [
-                                            { "op": "/", "args": ["w_ice", "Δz"] },
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    "w_ice",
+                                                    "Δz"
+                                                ]
+                                            },
                                             "C_ice"
                                         ]
                                     }
@@ -488,7 +650,13 @@
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "/", "args": ["w_liq", "Δz"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_liq",
+                                            "Δz"
+                                        ]
+                                    },
                                     "C_liq"
                                 ]
                             }
@@ -510,17 +678,59 @@
                         "w_liq": 50.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_s",   "time": 0.0, "expected": 7.33 },
-                        { "variable": "λ_sat", "time": 0.0, "expected": 2.693536623483748 },
-                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.25 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "c_s",   "time": 0.0, "expected": 2192250.0 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1734150.0 }
+                        {
+                            "variable": "λ_s",
+                            "time": 0.0,
+                            "expected": 7.33
+                        },
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 2.693536623483748
+                        },
+                        {
+                            "variable": "λ_dry",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "ρ_d",
+                            "time": 0.0,
+                            "expected": 1620.0
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.25
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "c_s",
+                            "time": 0.0,
+                            "expected": 2192250.0
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1734150.0
+                        }
                     ]
                 },
                 {
@@ -536,17 +746,62 @@
                         "w_liq": 0.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_s",   "time": 0.0, "expected": 6.595000000000001 },
-                        { "variable": "λ_sat", "time": 0.0, "expected": 2.5280716594775163 },
-                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-15 } },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "c_s",   "time": 0.0, "expected": 2224375.0 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1334625.0 }
+                        {
+                            "variable": "λ_s",
+                            "time": 0.0,
+                            "expected": 6.595000000000001
+                        },
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 2.5280716594775163
+                        },
+                        {
+                            "variable": "λ_dry",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "ρ_d",
+                            "time": 0.0,
+                            "expected": 1620.0
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-15
+                            }
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "c_s",
+                            "time": 0.0,
+                            "expected": 2224375.0
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1334625.0
+                        }
                     ]
                 },
                 {
@@ -562,17 +817,56 @@
                         "w_liq": 0.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_s",   "time": 0.0, "expected": 7.33 },
-                        { "variable": "λ_sat", "time": 0.0, "expected": 4.60252946732673 },
-                        { "variable": "λ_dry", "time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "ρ_d",   "time": 0.0, "expected": 1620.0 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.5452562704471101 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.5452562704471101 },
-                        { "variable": "λ_soil","time": 0.0, "expected": 2.62009823086286 },
-                        { "variable": "c_s",   "time": 0.0, "expected": 2192250.0 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1738804.0 }
+                        {
+                            "variable": "λ_s",
+                            "time": 0.0,
+                            "expected": 7.33
+                        },
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 4.60252946732673
+                        },
+                        {
+                            "variable": "λ_dry",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "ρ_d",
+                            "time": 0.0,
+                            "expected": 1620.0
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.5452562704471101
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.5452562704471101
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 2.62009823086286
+                        },
+                        {
+                            "variable": "c_s",
+                            "time": 0.0,
+                            "expected": 2192250.0
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1738804.0
+                        }
                     ]
                 },
                 {
@@ -588,13 +882,36 @@
                         "w_liq": 200.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "S_r",   "time": 0.0, "expected": 1.0 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 1.0 },
-                        { "variable": "λ_sat", "time": 0.0, "expected": 2.3550442395110673 },
-                        { "variable": "λ_soil","time": 0.0, "expected": 2.3550442395110673 },
-                        { "variable": "c_soil","time": 0.0, "expected": 3029100.0 }
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 2.3550442395110673
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 2.3550442395110673
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 3029100.0
+                        }
                     ]
                 },
                 {
@@ -610,13 +927,36 @@
                         "w_liq": 0.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "S_r",   "time": 0.0, "expected": 1.0 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 1.0 },
-                        { "variable": "λ_sat", "time": 0.0, "expected": 4.024137045216292 },
-                        { "variable": "λ_soil","time": 0.0, "expected": 4.024137045216292 },
-                        { "variable": "c_soil","time": 0.0, "expected": 2130514.636 }
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 4.024137045216292
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 4.024137045216292
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 2130514.636
+                        }
                     ]
                 },
                 {
@@ -632,13 +972,36 @@
                         "w_liq": 25.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_sat", "time": 0.0, "expected": 4.304397456767052 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.39762813522355506 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.39762813522355506 },
-                        { "variable": "λ_soil","time": 0.0, "expected": 1.8579755083641263 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1736477.0 }
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 4.304397456767052
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.39762813522355506
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.39762813522355506
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 1.8579755083641263
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1736477.0
+                        }
                     ]
                 },
                 {
@@ -654,13 +1017,39 @@
                         "w_liq": 17.5,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_s",   "time": 0.0, "expected": 8.490526315789475 },
-                        { "variable": "ρ_d",   "time": 0.0, "expected": 1755.0 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "λ_soil","time": 0.0, "expected": 0.2905786525242891 },
-                        { "variable": "c_s",   "time": 0.0, "expected": 2141526.3157894737 }
+                        {
+                            "variable": "λ_s",
+                            "time": 0.0,
+                            "expected": 8.490526315789475
+                        },
+                        {
+                            "variable": "ρ_d",
+                            "time": 0.0,
+                            "expected": 1755.0
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 0.2905786525242891
+                        },
+                        {
+                            "variable": "c_s",
+                            "time": 0.0,
+                            "expected": 2141526.3157894737
+                        }
                     ]
                 },
                 {
@@ -676,13 +1065,36 @@
                         "w_liq": 100.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_s",   "time": 0.0, "expected": 3.5733333333333337 },
-                        { "variable": "ρ_d",   "time": 0.0, "expected": 1214.9999999999998 },
-                        { "variable": "λ_dry", "time": 0.0, "expected": 0.1476221363822653 },
-                        { "variable": "c_s",   "time": 0.0, "expected": 2356444.4444444445 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1898000.0 }
+                        {
+                            "variable": "λ_s",
+                            "time": 0.0,
+                            "expected": 3.5733333333333337
+                        },
+                        {
+                            "variable": "ρ_d",
+                            "time": 0.0,
+                            "expected": 1214.9999999999998
+                        },
+                        {
+                            "variable": "λ_dry",
+                            "time": 0.0,
+                            "expected": 0.1476221363822653
+                        },
+                        {
+                            "variable": "c_s",
+                            "time": 0.0,
+                            "expected": 2356444.4444444445
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1898000.0
+                        }
                     ]
                 },
                 {
@@ -698,12 +1110,31 @@
                         "w_liq": 25.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_sat", "time": 0.0, "expected": 4.304397456767052 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.23405125408942204 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.23405125408942204 },
-                        { "variable": "λ_soil","time": 0.0, "expected": 1.1936382514997879 }
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 4.304397456767052
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.23405125408942204
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.23405125408942204
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 1.1936382514997879
+                        }
                     ]
                 },
                 {
@@ -719,17 +1150,43 @@
                         "w_liq": 25.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_sat", "time": 0.0, "expected": 2.693536623483748 },
-                        { "variable": "S_r",   "time": 0.0, "expected": 0.23405125408942204 },
-                        { "variable": "K_e",   "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "λ_soil","time": 0.0, "expected": 0.24308235980306384 },
-                        { "variable": "c_soil","time": 0.0, "expected": 1609440.8 }
+                        {
+                            "variable": "λ_sat",
+                            "time": 0.0,
+                            "expected": 2.693536623483748
+                        },
+                        {
+                            "variable": "S_r",
+                            "time": 0.0,
+                            "expected": 0.23405125408942204
+                        },
+                        {
+                            "variable": "K_e",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "λ_soil",
+                            "time": 0.0,
+                            "expected": 0.24308235980306384
+                        },
+                        {
+                            "variable": "c_soil",
+                            "time": 0.0,
+                            "expected": 1609440.8
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "lambda_soil_vs_saturation_unfrozen",
                     "description": "Sweep w_liq (liquid water mass) across the full range from 0 (dry) to θ_sat·ρ_liq·Δz = 200 kg/m^2 (saturated) at fixed unfrozen T_i = 293.15 K. Surfaces the Farouki (1981) thermal-conductivity curve: λ_soil rises from λ_dry at low saturation, transitions through the log-Kersten-clamp regime, and approaches λ_sat at S_r = 1. Reproduces the canonical low-saturation plateau visible in Oleson Fig. 4.5-style plots — the Kersten-number log clamp keeps λ_soil = λ_dry until S_r ≈ 0.37 (where log(S_r)+1 = 0), then ramps up as K_e rises toward 1.",
@@ -743,13 +1200,21 @@
                         "w_ice": 0.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "w_liq",
-                                "range": { "start": 0.0, "stop": 200.0, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 200.0,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -758,15 +1223,27 @@
                             "id": "lambda_soil_curve",
                             "type": "line",
                             "description": "λ_soil vs w_liq at fixed unfrozen T_i = 293.15 K. Flat at λ_dry below the Kersten-log threshold (S_r ≈ 0.37), then ramps up as K_e rises toward 1 at S_r = 1.",
-                            "x": { "variable": "w_liq",  "label": "w_liq (kg/m^2)" },
-                            "y": { "variable": "λ_soil", "label": "λ_soil (W/(m·K))" }
+                            "x": {
+                                "variable": "w_liq",
+                                "label": "w_liq (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "λ_soil",
+                                "label": "λ_soil (W/(m·K))"
+                            }
                         },
                         {
                             "id": "kersten_curve",
                             "type": "line",
                             "description": "K_e vs w_liq at fixed unfrozen T_i. Stays clamped at 0 below the log-threshold, then rises monotonically toward 1.",
-                            "x": { "variable": "w_liq", "label": "w_liq (kg/m^2)" },
-                            "y": { "variable": "K_e",   "label": "K_e (dimensionless)" }
+                            "x": {
+                                "variable": "w_liq",
+                                "label": "w_liq (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "K_e",
+                                "label": "K_e (dimensionless)"
+                            }
                         }
                     ]
                 },
@@ -783,13 +1260,21 @@
                         "w_liq": 25.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_i",
-                                "range": { "start": 253.15, "stop": 293.15, "count": 41, "scale": "linear" }
+                                "range": {
+                                    "start": 253.15,
+                                    "stop": 293.15,
+                                    "count": 41,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -798,15 +1283,27 @@
                             "id": "lambda_soil_vs_T_curve",
                             "type": "line",
                             "description": "λ_soil vs T_i at fixed partial-frozen mix. Step at T_i = T_f = 273.15 K from the ifelse branches of Eqs. 4.78 and 4.81 — the frozen side carries the λ_ice contribution and the linear K_e=S_r, the unfrozen side switches to log-Kersten which clamps to 0 at this S_r.",
-                            "x": { "variable": "T_i",    "label": "T_i (K)" },
-                            "y": { "variable": "λ_soil","label": "λ_soil (W/(m·K))" }
+                            "x": {
+                                "variable": "T_i",
+                                "label": "T_i (K)"
+                            },
+                            "y": {
+                                "variable": "λ_soil",
+                                "label": "λ_soil (W/(m·K))"
+                            }
                         },
                         {
                             "id": "K_e_vs_T_curve",
                             "type": "line",
                             "description": "K_e vs T_i at the same fixture. Frozen side: K_e = S_r ≈ 0.234. Unfrozen side: max(log(S_r)+1, 0) = 0. Step discontinuity at T_f from the strict `≥` branch boundary.",
-                            "x": { "variable": "T_i", "label": "T_i (K)" },
-                            "y": { "variable": "K_e", "label": "K_e (dimensionless)" }
+                            "x": {
+                                "variable": "T_i",
+                                "label": "T_i (K)"
+                            },
+                            "y": {
+                                "variable": "K_e",
+                                "label": "K_e (dimensionless)"
+                            }
                         }
                     ]
                 },
@@ -821,17 +1318,30 @@
                         "w_liq": 50.0,
                         "Δz": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "pct_sand",
-                                "range": { "start": 10.0, "stop": 90.0, "count": 9, "scale": "linear" }
+                                "range": {
+                                    "start": 10.0,
+                                    "stop": 90.0,
+                                    "count": 9,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "θ_sat",
-                                "range": { "start": 0.3, "stop": 0.6, "count": 7, "scale": "linear" }
+                                "range": {
+                                    "start": 0.3,
+                                    "stop": 0.6,
+                                    "count": 7,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -840,17 +1350,35 @@
                             "id": "lambda_dry_heatmap",
                             "type": "heatmap",
                             "description": "λ_dry as a function of pct_sand and θ_sat. λ_dry is a function of ρ_d = ρ_mineral·(1-θ_sat) only (no texture dependence in Eq. 4.80), so the surface is constant along the pct_sand axis and monotone-decreasing along θ_sat — surfaces the Eq. 4.80 ρ_d-only structure.",
-                            "x": { "variable": "pct_sand", "label": "Percent sand" },
-                            "y": { "variable": "θ_sat",    "label": "θ_sat (dimensionless)" },
-                            "value": { "variable": "λ_dry", "reduce": "final" }
+                            "x": {
+                                "variable": "pct_sand",
+                                "label": "Percent sand"
+                            },
+                            "y": {
+                                "variable": "θ_sat",
+                                "label": "θ_sat (dimensionless)"
+                            },
+                            "value": {
+                                "variable": "λ_dry",
+                                "reduce": "final"
+                            }
                         },
                         {
                             "id": "c_s_heatmap",
                             "type": "heatmap",
                             "description": "c_s as a function of pct_sand and θ_sat. c_s depends on the sand/clay blend per Eq. 4.86 — varies along pct_sand, constant along θ_sat. Surfaces the orthogonal sensitivity structure of c_s vs λ_dry.",
-                            "x": { "variable": "pct_sand", "label": "Percent sand" },
-                            "y": { "variable": "θ_sat",    "label": "θ_sat (dimensionless)" },
-                            "value": { "variable": "c_s", "reduce": "final" }
+                            "x": {
+                                "variable": "pct_sand",
+                                "label": "Percent sand"
+                            },
+                            "y": {
+                                "variable": "θ_sat",
+                                "label": "θ_sat (dimensionless)"
+                            },
+                            "value": {
+                                "variable": "c_s",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

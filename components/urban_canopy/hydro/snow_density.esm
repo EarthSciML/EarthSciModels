@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SnowDensity",
         "description": "Bulk density of newly fallen snow as a piecewise function of atmospheric temperature, following Anderson (1976) as parameterized in Eq. 5.10 of Oleson et al. (2010, CLM Tech Note Ch. 5). Three regimes: (1) warm snow (T_atm > T_f + 2 K) → rho_sno = 50 + 1.7*17^1.5 (saturated warm-side value); (2) intermediate (T_f - 15 K < T_atm <= T_f + 2 K) → rho_sno = 50 + 1.7*((T_atm - T_f + 15)/1K)^1.5; (3) cold (T_atm <= T_f - 15 K) → rho_sno = 50 (saturated cold-side floor). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:25 (`SnowDensity` @component). Parameterized as observed-only: T_atm is the input parameter; rho_sno is an algebraic output.",
@@ -31,7 +31,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:25\nUpstream `SnowDensity` is an MTK `@component` whose single input T_atm is a `@parameters` and whose single output rho_sno is a time-indexed `@variables` with one algebraic equation (no derivative). Identical equation structure preserved here.\n\nThe upstream component declares eight `@constants`, all encoded here as parameters with the upstream default values: T_f = 273.15 K (freezing temperature, Oleson 2010 Table 1.4), one_K = 1.0 K (unit-balancing literal — the upstream MTK component divides (T_atm - T_f + T_offset) by `one_K` so the dimensional algebra of `(...)^1.5` works out without introducing a fractional exponent on a unit-bearing quantity), rho_base = 50.0 kg/m^3 (cold-side saturated density floor and the additive base of the intermediate-regime formula), rho_coeff = 1.7 kg/m^3 (Anderson coefficient for the intermediate regime), rho_warm = 169.15775258035036 kg/m^3 (precomputed warm-side saturated value: 50.0 + 1.7 * 17.0^1.5 — upstream stores this as a symbolic constant evaluated to a numeric default at component construction), T_offset = 15.0 K (Anderson temperature offset inside the (...)^1.5 term), T_thresh_high = 2.0 K (upper threshold above the freezing point — 2 K above freezing the warm-side saturation engages), T_thresh_low = -15.0 K (lower threshold below the freezing point — at 15 K below freezing the cold-side floor engages). Greek `ρ` is renamed `rho` for ASCII parameter names per the rig convention (matches snow_compaction.esm).\n\nThe two thresholds are compared with strict `>` per the upstream `ifelse` semantics: at the upper boundary T_atm = T_f + 2 = 275.15 K, the first condition `T_atm > T_f + T_thresh_high` is FALSE (strict greater-than), so the second (intermediate) branch is taken; at the lower boundary T_atm = T_f - 15 = 258.15 K, the second condition `T_atm > T_f + T_thresh_low` is FALSE, so the cold-side floor branch is taken. This matches the upstream test fixture (`SnowDensity - Equation Verification`, hydrology_test.jl:351) which asserts both boundary cases.\n\nObservability classification: this component is functionally observed-only — the single output is given by one algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig (snow_capping_runoff.esm, impervious_runoff.esm, etc.).\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); the equation involves a fractional exponent (^1.5) and an `ifelse`, both of which are at IEEE-754 ULP precision. 1e-6 matches the rtol used by the upstream Julia test (hydrology_test.jl:361) and leaves comfortable headroom above ULP roundoff. Tighter `abs: 1e-12` is asserted on the cold-side branch outputs that are exactly rho_base = 50.0 by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
             },
             "tolerance": {
-                "rel": 1.0e-6
+                "rel": 1e-06
             },
             "variables": {
                 "T_atm": {
@@ -67,7 +67,7 @@
                 "rho_warm": {
                     "type": "parameter",
                     "units": "kg/m^3",
-                    "default": 169.15775258035036,
+                    "default": 169.15775258035035,
                     "description": "Warm-side saturated snow density (= 50.0 + 1.7 * 17.0^1.5): the value the intermediate-regime formula attains at T_atm = T_f + 2 K"
                 },
                 "T_offset": {
@@ -89,7 +89,7 @@
                     "description": "Lower temperature threshold (below T_f): cold-side floor engages when T_atm <= T_f + T_thresh_low"
                 },
                 "rho_sno": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/m^3",
                     "description": "Bulk density of newly fallen snow (Oleson Eq. 5.10): rho_warm if T_atm > T_f+2; rho_base + rho_coeff*((T_atm - T_f + T_offset)/one_K)^1.5 if T_f-15 < T_atm <= T_f+2; rho_base otherwise"
                 }
@@ -104,7 +104,13 @@
                                 "op": ">",
                                 "args": [
                                     "T_atm",
-                                    { "op": "+", "args": ["T_f", "T_thresh_high"] }
+                                    {
+                                        "op": "+",
+                                        "args": [
+                                            "T_f",
+                                            "T_thresh_high"
+                                        ]
+                                    }
                                 ]
                             },
                             "rho_warm",
@@ -115,7 +121,13 @@
                                         "op": ">",
                                         "args": [
                                             "T_atm",
-                                            { "op": "+", "args": ["T_f", "T_thresh_low"] }
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "T_f",
+                                                    "T_thresh_low"
+                                                ]
+                                            }
                                         ]
                                     },
                                     {
@@ -135,7 +147,13 @@
                                                                     {
                                                                         "op": "+",
                                                                         "args": [
-                                                                            { "op": "-", "args": ["T_atm", "T_f"] },
+                                                                            {
+                                                                                "op": "-",
+                                                                                "args": [
+                                                                                    "T_atm",
+                                                                                    "T_f"
+                                                                                ]
+                                                                            },
                                                                             "T_offset"
                                                                         ]
                                                                     },
@@ -163,9 +181,16 @@
                     "parameter_overrides": {
                         "T_atm": 275.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 169.15775258035035
+                        }
                     ]
                 },
                 {
@@ -174,9 +199,19 @@
                     "parameter_overrides": {
                         "T_atm": 250.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 50.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -185,9 +220,16 @@
                     "parameter_overrides": {
                         "T_atm": 268.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 103.75872022286241 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 103.75872022286241
+                        }
                     ]
                 },
                 {
@@ -196,9 +238,19 @@
                     "parameter_overrides": {
                         "T_atm": 258.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 50.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -207,9 +259,16 @@
                     "parameter_overrides": {
                         "T_atm": 276.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 169.15775258035035
+                        }
                     ]
                 },
                 {
@@ -218,9 +277,16 @@
                     "parameter_overrides": {
                         "T_atm": 273.15
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 148.76107532828913 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 148.76107532828914
+                        }
                     ]
                 },
                 {
@@ -229,9 +295,16 @@
                     "parameter_overrides": {
                         "T_atm": 258.16
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0017 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 50.0017
+                        }
                     ]
                 },
                 {
@@ -240,9 +313,16 @@
                     "parameter_overrides": {
                         "T_atm": 310.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 169.15775258035036 }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 169.15775258035035
+                        }
                     ]
                 },
                 {
@@ -251,25 +331,43 @@
                     "parameter_overrides": {
                         "T_atm": 200.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "rho_sno", "time": 0.0, "expected": 50.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "rho_sno",
+                            "time": 0.0,
+                            "expected": 50.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "rho_sno_vs_T_atm_full_curve",
                     "description": "Sweep T_atm across the full piecewise-defined regime (240-280 K, 41 points, 1 K spacing). Surfaces the three-regime structure of CLM Eq. 5.10: a cold-side floor at rho_base = 50 kg/m^3 for T_atm <= T_f - 15 = 258.15 K, the (...)^1.5 ramp from rho_base up to rho_warm in the intermediate band, and the warm-side plateau at rho_warm = 169.158 kg/m^3 for T_atm > T_f + 2 = 275.15 K. The two saturation plateaus and the connecting Anderson-1976 ramp are the canonical visualization of new-snow density.",
                     "initial_state": {},
                     "parameters": {},
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_atm",
-                                "range": { "start": 240.0, "stop": 280.0, "count": 41, "scale": "linear" }
+                                "range": {
+                                    "start": 240.0,
+                                    "stop": 280.0,
+                                    "count": 41,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -278,8 +376,14 @@
                             "id": "rho_sno_curve",
                             "type": "line",
                             "description": "rho_sno vs T_atm: cold-side plateau at 50 kg/m^3, Anderson-1976 (...)^1.5 ramp from T_f - 15 to T_f + 2, warm-side plateau at 169.158 kg/m^3.",
-                            "x": { "variable": "T_atm",   "label": "T_atm (K)" },
-                            "y": { "variable": "rho_sno", "label": "rho_sno (kg/m^3)" }
+                            "x": {
+                                "variable": "T_atm",
+                                "label": "T_atm (K)"
+                            },
+                            "y": {
+                                "variable": "rho_sno",
+                                "label": "rho_sno (kg/m^3)"
+                            }
                         }
                     ]
                 }

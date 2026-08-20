@@ -5,7 +5,7 @@
 Authoritative `.esm` files for Earth-science model components expressed in the
 [EarthSciML Serialization Format](https://github.com/EarthSciML/EarthSciAST)
 (`esm-schema.json`, `esm-spec.md`). Each file is a portable, runtime-agnostic
-snapshot of an MTK-derived component with inline tests and examples.
+snapshot of an MTK-derived component with inline `tests` and `analyses`.
 
 This repo is a *data* repo with a thin Julia shim for loading. The
 authoritative content is the `.esm` files; the shim exists only so Julia users
@@ -53,9 +53,12 @@ inline-test machinery.
 
 Within `components/`, each science-domain subdir holds the `.esm` files for
 that domain (e.g. `components/gaschem/superfast.esm`). A single `.esm` file can
-contain any mix of models, reaction_systems, operators, data_loaders, coupling,
-and interfaces — see the ESM spec. One `.esm` file per paper/chapter of
-content, not one per source `.jl` file — see `docs/REPO_LAYOUT.md`.
+contain any mix of models, reaction_systems, coupling and `data_sources` — see
+the ESM spec. (`data_sources` is the esm 1.0.0 ingest registry, §8: it is pure
+I/O and is *not* a component, so a model consumes one through a parameter whose
+`update` names it rather than by mounting it.) One `.esm` file per
+paper/chapter of content, not one per source `.jl` file — see
+`docs/REPO_LAYOUT.md`.
 
 ## Julia shim usage
 
@@ -67,8 +70,8 @@ using ModelingToolkit
 sys = load_esm(EarthSciModels.esm_path("components", "gaschem", "superfast.esm"))
 ```
 
-For files with multiple models (or non-`Model` entries like `ReactionSystem` or
-`DataLoader`), use the underlying parser directly:
+For files with multiple models (or non-`Model` entries like `ReactionSystem`),
+use the underlying parser directly:
 
 ```julia
 using EarthSciAST
@@ -78,9 +81,15 @@ esm_file = EarthSciAST.load(path)   # returns an EsmFile
 
 ## Versioning
 
-Each component starts at `version 0.1.0` in its `.esm` file and bumps to
-`1.0.0` only when a human maintainer is confident it is scientifically correct
-(see each component's `description` / `reference` / inline tests).
+The top-level `"esm"` field is the **format** version, not a per-component
+maturity marker: it says which revision of `esm-schema.json` the file conforms
+to, and every file in this repo carries the same value. The corpus is on
+**1.0.0**, a clean break with no deprecation path — `earthsci_ast` rejects any
+major-0 document outright, so a file cannot be left behind on an older
+spelling. Bumping it is a whole-corpus migration, never a per-file edit.
+
+Scientific maturity is judged from a component's `description`, `reference`
+and its inline `tests` block, which is what CI actually checks.
 
 ## Contributing / migration workflow
 

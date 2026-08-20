@@ -1,8 +1,8 @@
 {
-  "esm": "0.7.0",
+  "esm": "1.0.0",
   "metadata": {
     "name": "MTBS_severity_loader",
-    "description": "Pure-I/O data loader for MTBS (Monitoring Trends in Burn Severity) post-fire burn-severity products. Provides the time-invariant final burn-severity raster for a single fire: a thematic severity class layer (1=unburned/low … 6=non-processing-area mask) and the continuous dNBR (differenced Normalized Burn Ratio) layer, on the native Albers/geographic raster the MTBS product ships. Sourced as GeoTIFF bands of the per-fire MTBS bundle (one final product per fire — there is no temporal progression).\n\nThis is a pure-IO loader in the 0.7.0 split shape (RFC pure-io-data-loaders §4.1/§7): it declares its source (url_template), the file variables it reads (with units), and its NATIVE grid as a GDD Grid with a geographic (longlat/WGS84) crs descriptor. It performs NO reprojection and NO regridding — those are per-variable concerns of an owning regridding model, if one is ever added. MTBS is a VALIDATION reference for fire-model burned-area/extent comparison (campfire-e2e Phase E1/E2); it does NOT feed the model RHS, so it has no companion forcing wrapper — the validation harness (E2) aligns it to the comparison grid using the same ESD regridding rules.\n\nThis is a STATIC (time-invariant) dataset: there is NO `temporal` block, so the loader seeds CONST cadence (ess-v9a.5) — the runtime fetches the final burn-severity product once per fire and never refreshes it (kind: static). Cadence derives from the absence of `temporal`, orthogonal to the `kind` enum. Mirrors the usgs3dep_loader static-raster pattern (two variables read from one fetched product, distinguished by file_variable).\n\nUSER-ACTION (campfire-e2e plan, 2026-06-26): confirm the exact per-fire bundle URL / fire id and the MTBS citation per the program's data-use terms (public domain, US Government work). The url_template uses the documented MTBS bundle path with a {fire_id} substitution; see metadata.access_note.",
+    "description": "Pure-I/O data loader for MTBS (Monitoring Trends in Burn Severity) post-fire burn-severity products. Provides the time-invariant final burn-severity raster for a single fire: a thematic severity class layer (1=unburned/low … 6=non-processing-area mask) and the continuous dNBR (differenced Normalized Burn Ratio) layer, on the native Albers/geographic raster the MTBS product ships. Sourced as GeoTIFF bands of the per-fire MTBS bundle (one final product per fire — there is no temporal progression).\n\nThis is a pure-I/O data-source CATALOG: it declares its source (url_template) and nothing else the 1.0.0 schema defines. It declares NO grid — esm 0.8.0 removed the loader `grid`/GDD-Grid descriptor outright, so the native raster geometry is documentation in the data source's metadata — and NO variables: esm 1.0.0 moved every former loader variable onto the model parameter that consumes it, and this catalog has no consumer, so its two file_variable declarations are parked verbatim in metadata.unconsumed_file_variables (see metadata.unconsumed_file_variables_note; a shared catalog is not self-describing at 1.0.0). It performs NO reprojection and NO regridding — those are per-variable concerns of an owning regridding model, if one is ever added. MTBS is a VALIDATION reference for fire-model burned-area/extent comparison (campfire-e2e Phase E1/E2); it does NOT feed the model RHS, so it has no companion forcing wrapper — the validation harness (E2) aligns it to the comparison grid using the same ESD regridding rules.\n\nThis is a STATIC (time-invariant) dataset: there is NO `temporal` block, so the loader seeds CONST cadence (ess-v9a.5) — the runtime fetches the final burn-severity product once per fire and never refreshes it (kind: static). Cadence derives from the absence of `temporal`, orthogonal to the `kind` enum. Mirrors the usgs3dep_loader static-raster pattern (two variables read from one fetched product, distinguished by file_variable).\n\nUSER-ACTION (campfire-e2e plan, 2026-06-26): confirm the exact per-fire bundle URL / fire id and the MTBS citation per the program's data-use terms (public domain, US Government work). The url_template uses the documented MTBS bundle path with a {fire_id} substitution; see metadata.access_note.",
     "tags": [
       "earthsci_data",
       "wildfire",
@@ -32,7 +32,7 @@
       }
     ]
   },
-  "data_loaders": {
+  "data_sources": {
     "MTBS_severity": {
       "kind": "static",
       "source": {
@@ -40,50 +40,6 @@
         "mirrors": [
           "https://apps.fs.usda.gov/arcx/rest/services/RDW_Wildfire/MTBS_CONUS/ImageServer/exportImage?bbox={bbox_west},{bbox_south},{bbox_east},{bbox_north}&size={width},{height}&format=tiff&bboxSR=4326&imageSR=4326&pixelType=U8&f=image"
         ]
-      },
-      "grid": {
-        "family": "cartesian",
-        "crs": {
-          "projection": "longlat",
-          "datum": "WGS84"
-        },
-        "description": "Native MTBS raster expressed as a geographic (longlat/WGS84) lattice. The shipped MTBS product is a 30 m raster on an Albers Equal-Area (CONUS) projection; this loader declares the geographic envelope of the requested fire/domain and leaves any reprojection from Albers to the owning regridding model (ESD reprojection rule), consistent with the pure-IO no-reprojection rule (RFC §4.1-§4.2). Cell counts (n_lon, n_lat) are resolved from the source raster at load time; the 30 m native cell size is ~0.00027° at CONUS latitudes. Cells outside the fire's mapped extent carry the non-processing-area / no-data class.",
-        "dimensions": [
-          "lon",
-          "lat"
-        ],
-        "extents": {
-          "lon": {
-            "n": "n_lon",
-            "spacing": "uniform"
-          },
-          "lat": {
-            "n": "n_lat",
-            "spacing": "uniform"
-          }
-        },
-        "parameters": {
-          "n_lon": {
-            "units": "1",
-            "description": "Longitude cell count, resolved from the source MTBS raster at load time (domain/fire-extent derived)."
-          },
-          "n_lat": {
-            "units": "1",
-            "description": "Latitude cell count, resolved from the source MTBS raster at load time (domain/fire-extent derived)."
-          }
-        }
-      },
-      "variables": {
-        "burn_severity_class": {
-          "file_variable": "burn_severity",
-          "units": "1",
-          "description": "Thematic MTBS burn-severity class (dimensionless integer code): 1 = unburned to low, 2 = low, 3 = moderate, 4 = high, 5 = increased greenness / regrowth, 6 = non-processing area mask. Read from the thematic severity band of the per-fire MTBS bundle (the *_dnbr6.tif / severity GeoTIFF). Used to validate the simulated final burned footprint and severity gradient, not the fire's day-by-day progression."
-        },
-        "dnbr": {
-          "file_variable": "dnbr",
-          "units": "1",
-          "description": "Continuous differenced Normalized Burn Ratio (dNBR = NBR_prefire − NBR_postfire), scaled per the MTBS product (dimensionless index, conventionally ×1000 integer in the shipped GeoTIFF). Read from the continuous dNBR band of the same per-fire MTBS bundle (the *_dnbr.tif GeoTIFF). Shares the fetched bundle with burn_severity_class — the two variables are distinguished by file_variable, mirroring the usgs3dep_loader 'two variables from one fetched product' pattern."
-        }
       },
       "reference": {
         "citation": "Eidenshink, J. et al. (2007). A project for monitoring trends in burn severity. Fire Ecology, 3(1), 3-21. MTBS: https://www.mtbs.gov/",
@@ -100,7 +56,7 @@
           "raster",
           "dnbr"
         ],
-        "native_crs_epsg": "EPSG:5070 (NAD83 / CONUS Albers Equal-Area) in the shipped product — declared here as geographic (longlat/WGS84) per the GDD crs descriptor; the regridding model applies the Albers→target reprojection.",
+        "native_crs_epsg": "EPSG:5070 (NAD83 / CONUS Albers Equal-Area) in the shipped product — declared here as geographic (longlat/WGS84) per the former GDD crs descriptor; the consuming coupling edge applies the Albers→target reprojection. The 0.7.0 `grid.crs` carried only {projection: longlat, datum: WGS84} (EPSG:4326), the envelope this loader REQUESTS, not the product's own Albers crs; that descriptor is preserved verbatim in native_crs_descriptor. At esm 0.8.0 the crs is documentation only — a data source no longer carries a `grid`/crs descriptor.",
         "native_resolution_m": 30,
         "severity_class_codes": {
           "1": "Unburned to Low",
@@ -114,7 +70,52 @@
         "static_note": "No temporal block: kind='static' and the absence of `temporal` seed CONST cadence (ess-v9a.5). MTBS ships ONE final post-fire product per fire (no progression). The runtime fetches it once per simulation domain.",
         "use": "Validates TOTAL burned area + final extent + severity gradient (the end-state footprint), complementary to the daily NIFC perimeters (progression) and VIIRS active fire (sub-daily front timing).",
         "access_note": "MTBS distributes per-fire bundles and annual CONUS burn-severity mosaics (thematic class + dNBR) from https://www.mtbs.gov/direct-download (public domain, US Government work; cite Eidenshink et al. 2007 and the MTBS program). The url_template above uses the documented per-fire individual-fire-data path with a {fire_id} substitution (e.g. the MTBS fire id such as 'ca3995712175620181108' for the 2018 Camp Fire); the mirror is the USFS RDW_Wildfire ImageServer exportImage endpoint for a bbox-cropped CONUS mosaic. USER-ACTION: confirm the exact fire id / endpoint for the target fire and the program citation. Like the era5 loader, the toolkit does not yet resolve a local data cache (EARTHSCIDATADIR) at the URL layer (see the observed-fire framework-gaps report); populate a local cache or a file:// path until that C2 mechanism lands.",
-        "user_action": "Confirm per-fire bundle URL / fire id (campfire-e2e plan §User-action). Default target: 2018 Camp Fire (MTBS id ca3995712175620181108)."
+        "user_action": "Confirm per-fire bundle URL / fire id (campfire-e2e plan §User-action). Default target: 2018 Camp Fire (MTBS id ca3995712175620181108).",
+        "native_grid_family": "cartesian",
+        "native_crs_descriptor": {
+          "projection": "longlat",
+          "datum": "WGS84"
+        },
+        "native_dimensions": [
+          "lon",
+          "lat"
+        ],
+        "native_dimension_extents": {
+          "lon": {
+            "n": "n_lon",
+            "spacing": "uniform"
+          },
+          "lat": {
+            "n": "n_lat",
+            "spacing": "uniform"
+          }
+        },
+        "native_grid_parameters": {
+          "n_lon": {
+            "units": "1",
+            "description": "Longitude cell count, resolved from the source MTBS raster at load time (domain/fire-extent derived)."
+          },
+          "n_lat": {
+            "units": "1",
+            "description": "Latitude cell count, resolved from the source MTBS raster at load time (domain/fire-extent derived)."
+          }
+        },
+        "native_staggering": "Not stated by the former `grid` block, which recorded family/crs/dimensions/extents/parameters only; none is asserted here. The former `grid.description` (verbatim in native_grid_description) records the ~30 m native cell size (~0.00027° at CONUS latitudes) and that cells outside the fire's mapped extent carry the non-processing-area/no-data class.",
+        "native_grid_description": "Native MTBS raster expressed as a geographic (longlat/WGS84) lattice. The shipped MTBS product is a 30 m raster on an Albers Equal-Area (CONUS) projection; this loader declares the geographic envelope of the requested fire/domain and leaves any reprojection from Albers to the owning regridding model (ESD reprojection rule), consistent with the pure-IO no-reprojection rule (RFC §4.1-§4.2). Cell counts (n_lon, n_lat) are resolved from the source raster at load time; the 30 m native cell size is ~0.00027° at CONUS latitudes. Cells outside the fire's mapped extent carry the non-processing-area / no-data class.",
+        "unconsumed_file_variables": {
+          "burn_severity_class": {
+            "file_variable": "burn_severity",
+            "units": "1",
+            "description": "Thematic MTBS burn-severity class (dimensionless integer code): 1 = unburned to low, 2 = low, 3 = moderate, 4 = high, 5 = increased greenness / regrowth, 6 = non-processing area mask. Read from the thematic severity band of the per-fire MTBS bundle (the *_dnbr6.tif / severity GeoTIFF). Used to validate the simulated final burned footprint and severity gradient, not the fire's day-by-day progression."
+          },
+          "dnbr": {
+            "file_variable": "dnbr",
+            "units": "1",
+            "description": "Continuous differenced Normalized Burn Ratio (dNBR = NBR_prefire − NBR_postfire), scaled per the MTBS product (dimensionless index, conventionally ×1000 integer in the shipped GeoTIFF). Read from the continuous dNBR band of the same per-fire MTBS bundle (the *_dnbr.tif GeoTIFF). Shares the fetched bundle with burn_severity_class — the two variables are distinguished by file_variable, mirroring the usgs3dep_loader 'two variables from one fetched product' pattern."
+          }
+        },
+        "unconsumed_file_variables_note": "esm 1.0.0 removed the loader `variables` map: a data source is no longer a component, and every former loader variable becomes a PARAMETER on the model that CONSUMES it, carrying `update: {kind: \"data\", source: \"<registry key>\", from: {file_variable, unit_conversion?, codes?, select?}}` with `units` and `shape` declared once on that parameter (esm-spec §8). This file is a SHARED CATALOG with NO consuming .esm — nothing in the corpus mounts it; it is read only by tools/leaves/nifc_perimeters_rasterize.py and test/observed_fire_loaders_feasibility.py — so there is no consuming parameter to carry these declarations, and the 1.0.0 DataSource (additionalProperties:false over {kind, source, temporal, determinism, reader_options, select, record_filter, extent, reference, metadata}) has no `variables` key. The map is therefore parked VERBATIM in `unconsumed_file_variables` above so that not one file_variable, unit or description is lost. This is a demotion from a structured field to metadata, NOT an equivalent: a 1.0.0 consumer still has to re-declare each entry as a parameter `update.from.file_variable` + `units` before the runtime can read this source (earthsci_ast.load_data takes `bindings` = {consuming parameter name -> DataSourceBinding}, which a catalog with no consumer cannot supply). Recorded as the 'a shared catalog is not self-describing' reversion.",
+        "migration_note": "esm 0.7.0 -> 0.8.0: removed the `grid` block (family/crs/dimensions/extents/parameters/description), which no schema at or after 0.8.0 permits — 0.8.0 deleted the native-grid descriptor outright (esm-spec §8.4). Nothing was dropped: `family` → native_grid_family; `crs` → native_crs_epsg + native_crs_descriptor (verbatim); `dimensions` → native_dimensions; `extents` (per-dimension cell count + spacing) → native_dimension_extents; `parameters` (the runtime-resolved n_lon/n_lat cell-count parameters, with their units and descriptions) → native_grid_parameters; `description` → native_grid_description (verbatim). Native grid geometry is now ordinary data — a source exposes its coordinates/connectivity/metric arrays as ordinary `file_variable`s bound to consuming parameters, and reprojection/regridding are ordinary `aggregate` coupling expressions (esm-spec §8.6). No other field changed. esm 0.x -> 1.0.0: renamed the top-level `data_loaders` key to `data_sources` and removed this source's `variables` map — see unconsumed_file_variables_note. A data_sources-only catalog (no `models`) is a valid 1.0.0 document and loads through earthsci_ast.load; it is simply not mountable as a subsystem, which is correct — a data source is not a component, not a coupling endpoint and not a scoped-name path root."
       }
     }
   }

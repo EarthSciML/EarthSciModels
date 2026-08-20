@@ -10,7 +10,7 @@ pre-migration inline pipeline.*
 
 | File | Role |
 |------|------|
-| `consumer_openaq.esm` | A downstream **consumer** model that `{"ref"}`-includes the migrated single-component model `components/earthsci_data/openaq.esm` as the subsystem `aq`, re-exposing the regridded field as `pm25_consumed ~ aq.pm25`. Exercises a two-level pure-IO loader ref chain (consumer → model → `openaq_loader.esm`). |
+| `consumer_openaq.esm` | A downstream **consumer** model that `{"ref"}`-includes the migrated single-component model `components/earthsci_data/openaq.esm` as the subsystem `aq`, re-exposing the regridded field as `pm25_consumed ~ aq.pm25`. Exercises a `{"ref"}` into a file that holds a model **and** the `data_sources` that model consumes (see the esm 1.0.0 note below). |
 | `openaq_pre_migration_reference.json` | Frozen snapshot of the **pre-migration** OpenAQ (`esm 0.5.0`, co-located `data_loaders.OpenAQ_obs` with `regridding.fill_value = 0.0` + legacy `spatial`), captured from `origin/main` before the split. Stored as `.json` (not `.esm`) so no live `.esm` gate ever loads the legacy shape. The reference interface the migration must preserve. |
 
 Driver: [`test/e2e_consumer_regrid_check.py`](../../e2e_consumer_regrid_check.py).
@@ -66,3 +66,21 @@ blocks), while legacy files are rejected with the named diagnostic.
 > `0.7.0`. Loads stay green (the matrix results above are unchanged); under
 > the bumped ESS the declared version is now an exact match rather than a
 > lenient-downward accept.
+
+> **esm 1.0.0 (2026-08-20).** The matrix above is a frozen record of the
+> 0.7.0 hard break; it is not a description of the tree today. Two things
+> changed under it. (1) `data_loaders` became `data_sources`: a data source
+> is no longer a component, so it is not a subsystem, not a coupling
+> endpoint and not a scoped-name path root, and each former loader variable
+> is now a **parameter on the consuming model** carrying
+> `update: {kind: "data", source: "<registry key>", from: {file_variable, …}}`.
+> `aq.pm25` therefore resolves to a parameter, not to a subsystem observed.
+> (2) The `X.esm` / `X_loader.esm` split is gone. It existed only because a
+> loader was a component and a `{"ref"}` target had to contain exactly one
+> component; `data_sources` no longer counts toward a file's top-level
+> system count, so `openaq.esm` now holds the OpenAQ model **and** the
+> `OpenAQ_obs` source it consumes, and is still mountable by `{"ref"}` —
+> which is exactly what `consumer_openaq.esm` proves. The 26 standalone
+> `*_loader.esm` files are deleted; each one's own metadata is preserved
+> verbatim under its registry entry's `metadata.merged_file_metadata`.
+> `components/earthsci_data` is 14 files, not 35 or 40.

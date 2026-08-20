@@ -263,14 +263,21 @@ it gets picked up automatically — no workflow changes needed.
 
 ---
 
-## 6. Fleshing out `tests` and `examples`
+## 6. Fleshing out `tests` and `analyses`
 
 `mtk2esm` scaffolds the structural parts of the `.esm` (variables,
-equations, events) but leaves the `tests` and `examples` blocks thin
+equations, events) but leaves the `tests` and `analyses` blocks thin
 or empty. Those blocks are how downstream users and conformance
 harnesses verify the migrated component behaves correctly — they are
-**not optional**, and a migration with a thin `tests`/`examples` block
+**not optional**, and a migration with a thin `tests`/`analyses` block
 is an incomplete migration even if the round-trip validator passes.
+
+(`analyses` is the esm 1.0.0 name — esm-spec §6.7 — for the illustrative-run
+block that 0.x called `examples`. The `Analysis` `$def` is
+`additionalProperties: false` over `{id, description, initial_state,
+parameters, time_span, parameter_sweep, plots,
+expression_template_imports}`: there is no `title`, `code` or `language`
+key.)
 
 ### 6.1 `tests` — thorough behavioral coverage
 
@@ -308,9 +315,9 @@ Practical workflow:
 you the *trajectory* matches; dense `tests` tells a reviewer the
 migration actually captures the model's scientific behavior.
 
-### 6.2 `examples` — reproduce the paper's figures
+### 6.2 `analyses` — reproduce the paper's figures
 
-The `examples` block should surface the **scientific behavior** of
+The `analyses` block should surface the **scientific behavior** of
 the component the way a paper or documentation page would. For any
 component migrated from a published model, the target is to include
 versions of **as many of the figures from the original paper as
@@ -320,24 +327,24 @@ Draw from two upstream sources:
 
 - **The original paper** (cited in `reference`): each figure showing
   a canonical run, parameter sweep, regime comparison, or sensitivity
-  analysis is a candidate example. Reproduce it via an `examples`
+  analysis is a candidate. Reproduce it via an `analyses`
   entry with the appropriate `initial_state`, `time_span`, parameter
   overrides, and `Plot` block(s).
 - **The upstream Julia package's documentation pages** (typically
   under `docs/src/` in the §1.2 source checkout, or the rendered
   Documenter.jl site). Doc pages are already distilled, often with
-  runnable scripts that map almost one-to-one to `.esm` examples.
+  runnable scripts that map almost one-to-one to `.esm` analyses.
   They may also cover runs the paper did not include (updated
   parameters, extended time horizons, etc.).
 
 Practical workflow:
 
 1. Catalog figures from the paper and the doc pages. Each one is a
-   candidate `examples[*]` entry.
+   candidate `analyses[*]` entry.
 2. For plots run at specific conditions, reproduce those conditions
    as `initial_state` + parameter overrides.
-3. For plots showing a parameter sweep, use `sweep` in the example
-   spec rather than producing one entry per sweep point.
+3. For plots showing a parameter sweep, use `parameter_sweep` in the
+   analysis spec rather than producing one entry per sweep point.
 4. Pick plot types that match the data: `line` for trajectories,
    `heatmap` for 2-param sweeps, `field_slice` / `field_snapshot`
    for PDE components (see esm-spec.md §6.7).
@@ -347,7 +354,7 @@ Practical workflow:
 
 The bar: someone reading the `.esm` should be able to reproduce the
 headline visualizations of the upstream publication without
-touching the Julia source. An `examples` block that only runs the
+touching the Julia source. An `analyses` block that only runs the
 model once with defaults is a migration gap even if everything else
 about the file is correct.
 
@@ -357,14 +364,14 @@ about the file is correct.
 
 Before you run `gt done`, you **must** locally verify every one of the
 following. A round-trip-only pass is **not** sufficient — `tests` and
-`examples` are part of the behavioral contract, not optional decoration.
+`analyses` are part of the behavioral contract, not optional decoration.
 The merge queue will re-run the same gates, but the point of this
 checklist is to catch failures at the polecat, not at the refinery.
 
 > **The walker is the gate.** The `mdl-08t` inline-test walker
 > (`run_esm_tests`) is the only code path that determines whether a
 > migration lands. Round-trip passing is *necessary* but not
-> *sufficient*; "all examples simulated" claims via `scripts/roundtrip.jl`
+> *sufficient*; "all analyses simulated" claims via `scripts/roundtrip.jl`
 > or ad-hoc Julia scripts do **not** clear the gate. The walker uses a
 > distinct compile + solve path — see §7.3 — and CI runs the walker, not
 > roundtrip. If the walker fails, the migration fails, regardless of
@@ -438,15 +445,15 @@ A roundtrip pass tells you the scaffolder didn't drift the trajectory.
 The walker tells you the assertions a reviewer actually reads pass on
 the committed file with the solver tolerances CI enforces. **Never
 substitute one for the other.** Past incident: `mdl-drx` reported "all
-4 examples simulate cleanly" via `roundtrip.jl` and was contradicted
+4 analyses simulate cleanly" via `roundtrip.jl` and was contradicted
 by 4 walker assertion failures on CI.
 
-### 7.4 Every `examples:` entry actually runs
+### 7.4 Every `analyses:` entry actually runs
 
-Load the `.esm` and simulate each example with its declared
+Load the `.esm` and simulate each analysis with its declared
 `initial_state`, parameter overrides, and `time_span`. Confirm no
-simulation errors. If an example has `expected` markers, they must
-satisfy. A syntactically valid `examples` block whose entries fail
+simulation errors. If an analysis has `expected` markers, they must
+satisfy. A syntactically valid `analyses` block whose entries fail
 to simulate is a regression, not a migration.
 
 ### 7.5 No `TODO_GAP` markers remain

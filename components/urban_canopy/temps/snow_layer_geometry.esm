@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SnowLayerGeometry",
         "description": "Single-layer snow-pack geometry for the CLMU urban canopy thermal stack: given the total snow depth z_sno, computes the bottom-layer thickness, node depth, and top interface depth used by the snow conduction column. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:33 (`SnowLayerGeometry` @component). Implements Oleson et al. (2010, CLM Tech Note Ch. 4) §4.1 Eqs. 4.9-4.10 in the simplest snl = -1 (single snow layer) regime, where Δz_0 = z_sno (pp. 92-93). Parameterized as observed-only: z_sno is the input (parameter); Δz_snow_0, z_node_snow_0, z_interface_snow_neg1 are the algebraic outputs of three identity/linear equations.",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:33\nUpstream `SnowLayerGeometry` is an MTK `@component` with one `@parameters` input (z_sno), three time-indexed `@variables` outputs (Δz_snow_0, z_node_snow_0, z_interface_snow_neg1), and one `@constants` declaration (zero_m = 0.0 m). Three algebraic equations close the system: Δz_snow_0 ~ z_sno, z_node_snow_0 ~ zero_m - 0.5*Δz_snow_0, z_interface_snow_neg1 ~ zero_m - Δz_snow_0.\n\nThe upstream `@constants begin zero_m = 0.0, [unit = u\"m\"] end` is encoded here as a zero-default parameter (units m). This mirrors the convention used by sibling observed-only ESM files in this rig that translate `@constants` to fixed-default parameters so the units flow through MTK's unit checker: snow_soil_blended_heat_capacity.esm encodes C_ice the same way, and snow_melt_no_layers.esm uses zero_kgm2 / zero_m for the same reason.\n\nThe component represents the snl = -1 single-snow-layer case from Oleson pp. 92-93: when z_sno spans the single-layer regime (0.01 ≤ z_sno ≤ 0.03), all snow lives in layer 0, so Δz_0 = z_sno, node z_0 sits at the layer midpoint, and the top interface z_{h,-1} sits at the surface offset by Δz_0. Multi-layer snow (snl < -1, requiring procedural branching on snow depth) is not exposed here — the upstream component's docstring notes that multi-layer packing logic is procedural and typically handled outside the equation system.\n\nUnicode `Δz_snow_0` is preserved from upstream — the schema's identifier pattern allows it and other temps/ ESM components already use unicode delta in identifiers (snow_melt_no_layers.esm uses `Δt`, snow_soil_blended_heat_capacity.esm uses `Δz`).\n\nObservability classification: this component is functionally observed-only — each output variable is given by a single algebraic equation in terms of parameters and the other outputs (no derivatives, no time-dependent dynamics). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files (snow_soil_blended_heat_capacity.esm, snow_melt_no_layers.esm, total_phase_change_energy.esm).\n\nTolerance rationale (model-level rel=1.0e-10): three algebraic identity/linear equations (no ODE integration). Δz_snow_0 ~ z_sno is exact assignment; z_node_snow_0 and z_interface_snow_neg1 involve one subtraction (and one halving) of the parameter, so roundoff is at the IEEE-754 ULP level (~1e-16). The upstream test uses `rtol = 1.0e-10` (test/roof_wall_road_snow_temperatures_test.jl:33-36) and we mirror that for fidelity. Tighter `abs: 1e-12` is asserted on outputs that take their full magnitude from z_sno in the zero-input regime so the assertion does not silently accept a stuck-at-zero regression."
             },
             "tolerance": {
-                "rel": 1.0e-10
+                "rel": 1e-10
             },
             "variables": {
                 "z_sno": {
@@ -44,17 +44,17 @@
                     "description": "Zero depth reference for the snow column (upstream @constants zero_m = 0.0 m; encoded as a fixed-default parameter so the units flow through MTK's unit checker)"
                 },
                 "Δz_snow_0": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Thickness of bottom snow layer (layer 0); Eq. 4.9 single-layer case: Δz_0 = z_sno"
                 },
                 "z_node_snow_0": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Node depth of bottom snow layer (Oleson Eq. 4.9): z_0 = z_{h,0} - 0.5·Δz_0 with z_{h,0} = 0 (surface), so z_0 = -0.5·Δz_0 (negative = above ground)"
                 },
                 "z_interface_snow_neg1": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Interface depth above bottom snow layer (Oleson Eq. 4.10): z_{h,-1} = z_{h,0} - Δz_0 with z_{h,0} = 0, so z_{h,-1} = -Δz_0 (negative = above ground)"
                 }
@@ -70,7 +70,13 @@
                         "op": "-",
                         "args": [
                             "zero_m",
-                            { "op": "*", "args": [0.5, "Δz_snow_0"] }
+                            {
+                                "op": "*",
+                                "args": [
+                                    0.5,
+                                    "Δz_snow_0"
+                                ]
+                            }
                         ]
                     }
                 },
@@ -78,7 +84,10 @@
                     "lhs": "z_interface_snow_neg1",
                     "rhs": {
                         "op": "-",
-                        "args": ["zero_m", "Δz_snow_0"]
+                        "args": [
+                            "zero_m",
+                            "Δz_snow_0"
+                        ]
                     }
                 }
             ],
@@ -89,11 +98,26 @@
                     "parameter_overrides": {
                         "z_sno": 0.02
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Δz_snow_0",            "time": 0.0, "expected":  0.02 },
-                        { "variable": "z_node_snow_0",        "time": 0.0, "expected": -0.01 },
-                        { "variable": "z_interface_snow_neg1","time": 0.0, "expected": -0.02 }
+                        {
+                            "variable": "Δz_snow_0",
+                            "time": 0.0,
+                            "expected": 0.02
+                        },
+                        {
+                            "variable": "z_node_snow_0",
+                            "time": 0.0,
+                            "expected": -0.01
+                        },
+                        {
+                            "variable": "z_interface_snow_neg1",
+                            "time": 0.0,
+                            "expected": -0.02
+                        }
                     ]
                 },
                 {
@@ -102,11 +126,35 @@
                     "parameter_overrides": {
                         "z_sno": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Δz_snow_0",            "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "z_node_snow_0",        "time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } },
-                        { "variable": "z_interface_snow_neg1","time": 0.0, "expected": 0.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "Δz_snow_0",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "z_node_snow_0",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        },
+                        {
+                            "variable": "z_interface_snow_neg1",
+                            "time": 0.0,
+                            "expected": 0.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -115,11 +163,26 @@
                     "parameter_overrides": {
                         "z_sno": 0.01
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Δz_snow_0",            "time": 0.0, "expected":  0.01 },
-                        { "variable": "z_node_snow_0",        "time": 0.0, "expected": -0.005 },
-                        { "variable": "z_interface_snow_neg1","time": 0.0, "expected": -0.01 }
+                        {
+                            "variable": "Δz_snow_0",
+                            "time": 0.0,
+                            "expected": 0.01
+                        },
+                        {
+                            "variable": "z_node_snow_0",
+                            "time": 0.0,
+                            "expected": -0.005
+                        },
+                        {
+                            "variable": "z_interface_snow_neg1",
+                            "time": 0.0,
+                            "expected": -0.01
+                        }
                     ]
                 },
                 {
@@ -128,11 +191,26 @@
                     "parameter_overrides": {
                         "z_sno": 0.03
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Δz_snow_0",            "time": 0.0, "expected":  0.03 },
-                        { "variable": "z_node_snow_0",        "time": 0.0, "expected": -0.015 },
-                        { "variable": "z_interface_snow_neg1","time": 0.0, "expected": -0.03 }
+                        {
+                            "variable": "Δz_snow_0",
+                            "time": 0.0,
+                            "expected": 0.03
+                        },
+                        {
+                            "variable": "z_node_snow_0",
+                            "time": 0.0,
+                            "expected": -0.015
+                        },
+                        {
+                            "variable": "z_interface_snow_neg1",
+                            "time": 0.0,
+                            "expected": -0.03
+                        }
                     ]
                 },
                 {
@@ -141,27 +219,50 @@
                     "parameter_overrides": {
                         "z_sno": 0.025
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "Δz_snow_0",            "time": 0.0, "expected":  0.025 },
-                        { "variable": "z_node_snow_0",        "time": 0.0, "expected": -0.0125 },
-                        { "variable": "z_interface_snow_neg1","time": 0.0, "expected": -0.025 }
+                        {
+                            "variable": "Δz_snow_0",
+                            "time": 0.0,
+                            "expected": 0.025
+                        },
+                        {
+                            "variable": "z_node_snow_0",
+                            "time": 0.0,
+                            "expected": -0.0125
+                        },
+                        {
+                            "variable": "z_interface_snow_neg1",
+                            "time": 0.0,
+                            "expected": -0.025
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "single_layer_geometry_sweep",
                     "description": "Sweep snow depth z_sno across the single-layer band (0.01-0.03 m per Oleson pp. 92-93) at 11 evenly spaced points. Surfaces the three linear/identity outputs as functions of z_sno: Δz_snow_0 traces the 1:1 identity line, z_node_snow_0 traces a slope -1/2 line through the origin, and z_interface_snow_neg1 traces a slope -1 line. The three lines fan out from the origin and confirm the layer-midpoint placement geometrically.",
                     "initial_state": {},
                     "parameters": {},
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "z_sno",
-                                "range": { "start": 0.01, "stop": 0.03, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.01,
+                                    "stop": 0.03,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -170,22 +271,40 @@
                             "id": "layer_thickness",
                             "type": "line",
                             "description": "Δz_snow_0 vs z_sno: 1:1 identity line over the single-layer band per Eq. 4.9 (single-layer case).",
-                            "x": { "variable": "z_sno",     "label": "z_sno (m)" },
-                            "y": { "variable": "Δz_snow_0", "label": "Δz_snow_0 (m)" }
+                            "x": {
+                                "variable": "z_sno",
+                                "label": "z_sno (m)"
+                            },
+                            "y": {
+                                "variable": "Δz_snow_0",
+                                "label": "Δz_snow_0 (m)"
+                            }
                         },
                         {
                             "id": "node_depth",
                             "type": "line",
                             "description": "z_node_snow_0 vs z_sno: slope -1/2 line per Eq. 4.9 (layer-midpoint node placement).",
-                            "x": { "variable": "z_sno",         "label": "z_sno (m)" },
-                            "y": { "variable": "z_node_snow_0", "label": "z_node_snow_0 (m)" }
+                            "x": {
+                                "variable": "z_sno",
+                                "label": "z_sno (m)"
+                            },
+                            "y": {
+                                "variable": "z_node_snow_0",
+                                "label": "z_node_snow_0 (m)"
+                            }
                         },
                         {
                             "id": "top_interface_depth",
                             "type": "line",
                             "description": "z_interface_snow_neg1 vs z_sno: slope -1 line per Eq. 4.10 (top interface at z_{h,0} - Δz_0 with z_{h,0} = 0).",
-                            "x": { "variable": "z_sno",                "label": "z_sno (m)" },
-                            "y": { "variable": "z_interface_snow_neg1","label": "z_interface_snow_neg1 (m)" }
+                            "x": {
+                                "variable": "z_sno",
+                                "label": "z_sno (m)"
+                            },
+                            "y": {
+                                "variable": "z_interface_snow_neg1",
+                                "label": "z_interface_snow_neg1 (m)"
+                            }
                         }
                     ]
                 }

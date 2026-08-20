@@ -1,8 +1,8 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "StratosphericOzoneSystem",
-        "description": "Comprehensive stratospheric ozone chemistry (Seinfeld & Pandis 2006, Chapter 5) \u2014 a monolithic 15-state ODE plus 5 algebraic family sums combining the Chapman mechanism, O(1D) photochemistry, the N2O NOx source, and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles. Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:497. SI units throughout.",
+        "description": "Comprehensive stratospheric ozone chemistry (Seinfeld & Pandis 2006, Chapter 5) — a monolithic 15-state ODE plus 5 algebraic family sums combining the Chapman mechanism, O(1D) photochemistry, the N2O NOx source, and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles. Migrated from GasChem.jl@8c12c048 src/StratosphericChemistry.jl:497. SI units throughout.",
         "tags": [
             "gaschem",
             "stratospheric",
@@ -19,14 +19,14 @@
         ],
         "references": [
             {
-                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 5 (Chemistry of the Stratosphere), pp. 138-203 \u2014 Chapman mechanism (5.2), NOx cycles (5.3), HOx cycles (5.4), ClOx and BrOx cycles (5.5), reservoir species (5.6)."
+                "citation": "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 5 (Chemistry of the Stratosphere), pp. 138-203 — Chapman mechanism (5.2), NOx cycles (5.3), HOx cycles (5.4), ClOx and BrOx cycles (5.5), reservoir species (5.6)."
             }
         ]
     },
     "models": {
         "StratosphericOzoneSystem": {
             "reference": {
-                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:497\n\nUpstream `StratosphericOzoneSystem` is the comprehensive stratospheric ozone-chemistry component from Seinfeld & Pandis (2006) Chapter 5 \u2014 it combines the Chapman mechanism, O(1D) photochemistry, the N2O NOx source (Section 5.3.1), and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles into one model. Despite the upstream docstring phrase 'combining all cycles', the `@component` is a *monolithic* MTK `System`: it re-declares every constant, parameter and variable and writes all 20 equations inline, then returns `System(eqs, t; name)` \u2014 there is no `couple()` call and no sub-system composition. It therefore migrates as a single `models.StratosphericOzoneSystem` entry, the same file shape as the sibling single-cycle migrations (chapman.esm, nox_cycle.esm, hox_cycle.esm, clox_cycle.esm, brox_cycle.esm).\n\nStructure: 40 upstream `@constants` and 14 upstream `@parameters` are all encoded as `type: parameter` with their upstream defaults (the rig-wide convention for `@constants` migration, matching the sibling stratospheric files). 15 ODE state variables (O, O1D, O3, N2O, NO, NO2, OH, HO2, Cl, ClO, HCl, ClONO2, Br, BrO, HOBr) and 5 algebraic family variables (Ox, NOx, HOx, ClOx, BrOx) are encoded as `type: state`. The 20 `equations` (15 ODEs + 5 algebraic family sums) reproduce the upstream structural invariant `length(equations(sys)) == 20` asserted by the upstream 'Comprehensive System Structure' test (StratosphericChemistry_test.jl:94-130).\n\nRate-coefficient handling: the upstream rate coefficients (k2 power-law (T_ref/T)^2.4, k4 and the Arrhenius coefficients k_NO_O3 ... k_Br_O3, the termolecular k_ClO_NO2_M power-law (T_ref/T)^3.4, the weighted O(1D) quenching k_O1D_M, and the temperature-independent rate constants k_O1D_H2O_c / k_O1D_CH4_c / k_N2O_O1D_NO_c / k_N2O_O1D_N2_c / k_BrO_O_c / k_BrO_ClO_c / k_BrO_HO2_c) and the derived concentrations O2_conc = O2_mix*M, CH4_conc = CH4_mix*M, H2O_conc = H2O_mix*M are local Julia bindings, not MTK state. They are inlined verbatim into each equation right-hand side \u2014 bit-equivalent to writing the equations with the helper bindings, and keeping them out of the symbolic state preserves the upstream `length(unknowns(sys))` count. This is the same inlining convention used by chapman.esm.\n\nThe parameter `N2O_mix` (3.0e-7) is declared in the upstream `@parameters` block but is not referenced by any equation or rate coefficient \u2014 it is vestigial (the N2O state default 9.3e16 m^-3, which equals N2O_mix*M at the default M=3.1e23, is set directly on the state rather than derived from this parameter). It is preserved here as a `type: parameter` for fidelity to the upstream parameter block.\n\nChemistry: odd oxygen (Ox = O + O3) is produced by O2 photolysis and destroyed by the O + O3 reaction and by the four catalytic cycles (NO/NO2, OH/HO2, Cl/ClO, Br/BrO), each of which cycles a radical pair without net consumption of the catalyst. O(1D), produced by the O3 -> O(1D) photolysis sub-channel and by N2O photolysis, is quenched by air (M) back to O(3P) and reacts with H2O and CH4 to make the OH that seeds HOx. N2O is the sole NOx source via N2O + O(1D) -> 2 NO (Section 5.3.1) and has no source term, so it decays monotonically. The HCl and ClONO2 reservoirs sequester reactive chlorine; HOBr buffers reactive bromine.\n\nUnits: SI throughout (number densities in m^-3, rate coefficients in m^3/s or m^6/s, photolysis rates in s^-1, temperature in K), converted from the Seinfeld & Pandis CGS values via cm^3/molec/s x 1e-6 -> m^3/s for bimolecular coefficients and cm^6/molec^2/s x 1e-12 -> m^6/s for the three-body coefficients. No CGS<->SI conversion at parse or runtime.\n\nTolerance rationale (model-level rel=1e-6): the expected values pinned in the tests below are references from the canonical ESS Python runner `earthsci_ast.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` \u2014 the exact settings the inline-test gate uses \u2014 so reference/gate cross-integrator drift is zero by construction; rel=1e-6 is the spec section 6.6.4 default and matches the sibling stratospheric files. The `initial_conditions_t0` test overrides to rel=1e-10 / abs=1e-14 (t=0 has no integration drift). The `nighttime_photolysis_off` test adds an abs=1e-6 floor for radical species that decay below the integrator's atol=1e-12 floor once their photochemical sources are switched off.\n\nUpstream test reproduction: the upstream comprehensive-system tests are 'Comprehensive System Structure' (20-equation / state-name structural check, reproduced by the shape of the variables and equations blocks), 'Comprehensive System Integration' (1-hour positivity, reproduced and tightened by `comprehensive_integration_1hour`), 'N2O Destruction in Comprehensive System' (reproduced and tightened by `n2o_destruction_1day`), and 'N2O as NOx Source' (reproduced and tightened by `n2o_as_nox_source`). The remaining tests (short-term transients, chemical-family tracking, temperature and density perturbations, dark chemistry) extend coverage beyond the upstream suite."
+                "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/StratosphericChemistry.jl:497\n\nUpstream `StratosphericOzoneSystem` is the comprehensive stratospheric ozone-chemistry component from Seinfeld & Pandis (2006) Chapter 5 — it combines the Chapman mechanism, O(1D) photochemistry, the N2O NOx source (Section 5.3.1), and the NOx / HOx / ClOx / BrOx catalytic ozone-destruction cycles into one model. Despite the upstream docstring phrase 'combining all cycles', the `@component` is a *monolithic* MTK `System`: it re-declares every constant, parameter and variable and writes all 20 equations inline, then returns `System(eqs, t; name)` — there is no `couple()` call and no sub-system composition. It therefore migrates as a single `models.StratosphericOzoneSystem` entry, the same file shape as the sibling single-cycle migrations (chapman.esm, nox_cycle.esm, hox_cycle.esm, clox_cycle.esm, brox_cycle.esm).\n\nStructure: 40 upstream `@constants` and 14 upstream `@parameters` are all encoded as `type: parameter` with their upstream defaults (the rig-wide convention for `@constants` migration, matching the sibling stratospheric files). 15 ODE state variables (O, O1D, O3, N2O, NO, NO2, OH, HO2, Cl, ClO, HCl, ClONO2, Br, BrO, HOBr) and 5 algebraic family variables (Ox, NOx, HOx, ClOx, BrOx) are encoded as `type: state`. The 20 `equations` (15 ODEs + 5 algebraic family sums) reproduce the upstream structural invariant `length(equations(sys)) == 20` asserted by the upstream 'Comprehensive System Structure' test (StratosphericChemistry_test.jl:94-130).\n\nRate-coefficient handling: the upstream rate coefficients (k2 power-law (T_ref/T)^2.4, k4 and the Arrhenius coefficients k_NO_O3 ... k_Br_O3, the termolecular k_ClO_NO2_M power-law (T_ref/T)^3.4, the weighted O(1D) quenching k_O1D_M, and the temperature-independent rate constants k_O1D_H2O_c / k_O1D_CH4_c / k_N2O_O1D_NO_c / k_N2O_O1D_N2_c / k_BrO_O_c / k_BrO_ClO_c / k_BrO_HO2_c) and the derived concentrations O2_conc = O2_mix*M, CH4_conc = CH4_mix*M, H2O_conc = H2O_mix*M are local Julia bindings, not MTK state. They are inlined verbatim into each equation right-hand side — bit-equivalent to writing the equations with the helper bindings, and keeping them out of the symbolic state preserves the upstream `length(unknowns(sys))` count. This is the same inlining convention used by chapman.esm.\n\nThe parameter `N2O_mix` (3.0e-7) is declared in the upstream `@parameters` block but is not referenced by any equation or rate coefficient — it is vestigial (the N2O state default 9.3e16 m^-3, which equals N2O_mix*M at the default M=3.1e23, is set directly on the state rather than derived from this parameter). It is preserved here as a `type: parameter` for fidelity to the upstream parameter block.\n\nChemistry: odd oxygen (Ox = O + O3) is produced by O2 photolysis and destroyed by the O + O3 reaction and by the four catalytic cycles (NO/NO2, OH/HO2, Cl/ClO, Br/BrO), each of which cycles a radical pair without net consumption of the catalyst. O(1D), produced by the O3 -> O(1D) photolysis sub-channel and by N2O photolysis, is quenched by air (M) back to O(3P) and reacts with H2O and CH4 to make the OH that seeds HOx. N2O is the sole NOx source via N2O + O(1D) -> 2 NO (Section 5.3.1) and has no source term, so it decays monotonically. The HCl and ClONO2 reservoirs sequester reactive chlorine; HOBr buffers reactive bromine.\n\nUnits: SI throughout (number densities in m^-3, rate coefficients in m^3/s or m^6/s, photolysis rates in s^-1, temperature in K), converted from the Seinfeld & Pandis CGS values via cm^3/molec/s x 1e-6 -> m^3/s for bimolecular coefficients and cm^6/molec^2/s x 1e-12 -> m^6/s for the three-body coefficients. No CGS<->SI conversion at parse or runtime.\n\nTolerance rationale (model-level rel=1e-6): the expected values pinned in the tests below are references from the canonical ESS Python runner `earthsci_ast.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` — the exact settings the inline-test gate uses — so reference/gate cross-integrator drift is zero by construction; rel=1e-6 is the spec section 6.6.4 default and matches the sibling stratospheric files. The `initial_conditions_t0` test overrides to rel=1e-10 / abs=1e-14 (t=0 has no integration drift). The `nighttime_photolysis_off` test adds an abs=1e-6 floor for radical species that decay below the integrator's atol=1e-12 floor once their photochemical sources are switched off.\n\nUpstream test reproduction: the upstream comprehensive-system tests are 'Comprehensive System Structure' (20-equation / state-name structural check, reproduced by the shape of the variables and equations blocks), 'Comprehensive System Integration' (1-hour positivity, reproduced and tightened by `comprehensive_integration_1hour`), 'N2O Destruction in Comprehensive System' (reproduced and tightened by `n2o_destruction_1day`), and 'N2O as NOx Source' (reproduced and tightened by `n2o_as_nox_source`). The remaining tests (short-term transients, chemical-family tracking, temperature and density perturbations, dark chemistry) extend coverage beyond the upstream suite."
             },
             "tolerance": {
                 "rel": 1e-06
@@ -354,120 +354,120 @@
                     "type": "parameter",
                     "units": "1",
                     "default": 3e-07,
-                    "description": "N2O mixing ratio (~300 ppb, Section 5.3.1, dimensionless). Declared upstream; vestigial \u2014 the N2O state default 9.3e16 m^-3 (= N2O_mix x M) is set directly rather than derived from this parameter at runtime."
+                    "description": "N2O mixing ratio (~300 ppb, Section 5.3.1, dimensionless). Declared upstream; vestigial — the N2O state default 9.3e16 m^-3 (= N2O_mix x M) is set directly rather than derived from this parameter at runtime."
                 },
                 "O": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 10000000000000.0,
                     "description": "Atomic oxygen O(3P) number density (1e7 molec/cm^3 x 1e6)."
                 },
                 "O1D": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 50000000.0,
                     "description": "Excited oxygen O(1D) number density (50 molec/cm^3 x 1e6)."
                 },
                 "O3": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 3e+18,
                     "description": "Ozone number density (3e12 molec/cm^3 x 1e6)."
                 },
                 "NO": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000000.0,
                     "description": "Nitric oxide number density (1e9 molec/cm^3 x 1e6)."
                 },
                 "NO2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000000.0,
                     "description": "Nitrogen dioxide number density (1e9 molec/cm^3 x 1e6)."
                 },
                 "OH": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000.0,
                     "description": "Hydroxyl radical number density (1e6 molec/cm^3 x 1e6)."
                 },
                 "HO2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 10000000000000.0,
                     "description": "Hydroperoxyl radical number density (1e7 molec/cm^3 x 1e6)."
                 },
                 "Cl": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 10000000000.0,
                     "description": "Chlorine atom number density (1e4 molec/cm^3 x 1e6)."
                 },
                 "ClO": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 10000000000000.0,
                     "description": "Chlorine monoxide number density (1e7 molec/cm^3 x 1e6)."
                 },
                 "HCl": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000000.0,
                     "description": "Hydrogen chloride reservoir number density (1e9 molec/cm^3 x 1e6)."
                 },
                 "ClONO2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000000.0,
                     "description": "Chlorine nitrate reservoir number density (1e9 molec/cm^3 x 1e6)."
                 },
                 "Br": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 100000000000.0,
                     "description": "Bromine atom number density (1e5 molec/cm^3 x 1e6)."
                 },
                 "BrO": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000.0,
                     "description": "Bromine monoxide number density (1e6 molec/cm^3 x 1e6)."
                 },
                 "HOBr": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 1000000000000.0,
                     "description": "Hypobromous acid number density (1e6 molec/cm^3 x 1e6)."
                 },
                 "N2O": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "default": 9.3e+16,
                     "description": "Nitrous oxide number density (~300 ppb at 30 km)."
                 },
                 "Ox": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "description": "Odd oxygen family: algebraic sum Ox ~ O + O3."
                 },
                 "NOx": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "description": "Reactive nitrogen family: algebraic sum NOx ~ NO + NO2."
                 },
                 "HOx": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "description": "Hydrogen radical family: algebraic sum HOx ~ OH + HO2."
                 },
                 "ClOx": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "description": "Reactive chlorine family: algebraic sum ClOx ~ Cl + ClO."
                 },
                 "BrOx": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m^-3",
                     "description": "Reactive bromine family: algebraic sum BrOx ~ Br + BrO."
                 }
@@ -2161,7 +2161,7 @@
                 },
                 {
                     "id": "comprehensive_integration_1hour",
-                    "description": "Headline 1-hour integration under the S&P Chapter 5 mid-stratosphere defaults (T=227 K, M=3.1e23 m^-3, ~30 km). Reproduces and tightens the upstream 'Comprehensive System Integration' test (StratosphericChemistry_test.jl:529-544) \u2014 that test asserts only retcode=Success and positivity of O/O3/NO/NO2/N2O, this one pins the full multi-species trajectory at three times across the window.",
+                    "description": "Headline 1-hour integration under the S&P Chapter 5 mid-stratosphere defaults (T=227 K, M=3.1e23 m^-3, ~30 km). Reproduces and tightens the upstream 'Comprehensive System Integration' test (StratosphericChemistry_test.jl:529-544) — that test asserts only retcode=Success and positivity of O/O3/NO/NO2/N2O, this one pins the full multi-species trajectory at three times across the window.",
                     "time_span": {
                         "start": 0.0,
                         "end": 3600.0
@@ -2586,7 +2586,7 @@
                 },
                 {
                     "id": "n2o_destruction_1day",
-                    "description": "24-hour integration tracking N2O loss. Reproduces and tightens the upstream 'N2O Destruction in Comprehensive System' test (StratosphericChemistry_test.jl:550-563) \u2014 that test asserts only N2O[end] <= N2O[1], this one pins the monotone N2O decay (photolysis j_N2O plus the two O(1D) channels, with no replenishment source) at four times spanning the day, alongside the co-evolving O3 and NOx.",
+                    "description": "24-hour integration tracking N2O loss. Reproduces and tightens the upstream 'N2O Destruction in Comprehensive System' test (StratosphericChemistry_test.jl:550-563) — that test asserts only N2O[end] <= N2O[1], this one pins the monotone N2O decay (photolysis j_N2O plus the two O(1D) channels, with no replenishment source) at four times spanning the day, alongside the co-evolving O3 and NOx.",
                     "time_span": {
                         "start": 0.0,
                         "end": 86400.0
@@ -2641,7 +2641,7 @@
                 },
                 {
                     "id": "n2o_as_nox_source",
-                    "description": "NOx-source test: start with NO=0 and NO2=0 but nonzero N2O and O(1D). Reproduces and tightens the upstream 'N2O as NOx Source (Section 5.3.1)' test (StratosphericChemistry_test.jl:565-588) \u2014 that test asserts only NO[end] > 0, this one pins the NO and NO2 produced from the N2O + O(1D) -> 2 NO channel over the first 100 s.",
+                    "description": "NOx-source test: start with NO=0 and NO2=0 but nonzero N2O and O(1D). Reproduces and tightens the upstream 'N2O as NOx Source (Section 5.3.1)' test (StratosphericChemistry_test.jl:565-588) — that test asserts only NO[end] > 0, this one pins the NO and NO2 produced from the N2O + O(1D) -> 2 NO channel over the first 100 s.",
                     "time_span": {
                         "start": 0.0,
                         "end": 100.0
@@ -3058,7 +3058,7 @@
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "default_run_1hour",
                     "description": "One-hour integration under the S&P Chapter 5 mid-stratosphere defaults (T=227 K, M=3.1e23 m^-3, ~30 km). Shows the coupled evolution of the ozone reservoir and the NOx / HOx / ClOx / BrOx catalytic radical pools that destroy it.",

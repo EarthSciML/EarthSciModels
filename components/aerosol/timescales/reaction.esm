@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "ReactionTimescale",
         "description": "ModelingToolkit implementation of the characteristic timescale for aqueous-phase chemical reaction within a cloud droplet or wetted aerosol particle, from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12, Eqs. 12.76-12.78. The component reports two diagnostics for a first-order aqueous reaction: the aqueous-phase reaction timescale τ_ra = 1/k_rxn (Eq. 12.76), the e-folding time of a dissolved species consumed by a first-order reaction of rate constant k_rxn; and the gas-phase reference reaction timescale τ_rg = τ_ra/(H*·R·T) (Eq. 12.78), the same timescale referenced to the gas phase through the dimensionless effective Henry's law solubility H*·R·T. Migrated from Aerosol.jl ReactionTimescale. Purely algebraic: no differential states, two observed outputs and an empty equations array.",
@@ -17,7 +17,7 @@
                 "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:110\n\nUpstream `ReactionTimescale` is an MTK `@component` with one `@constants` entry (R, the universal gas constant), three `@parameters` (k_rxn, H_star, T), two time-indexed `@variables` (τ_ra, τ_rg), and two equations:\n  • Eq. 12.76: τ_ra ~ 1 / k_rxn — aqueous-phase reaction timescale of a first-order reaction\n  • Eq. 12.78: τ_rg ~ τ_ra / (H_star * R * T) — gas-phase reference reaction timescale\nBoth equations are algebraic (a plain `lhs ~ rhs` with no `D(·)` time derivative); the component has no differential state anywhere.\n\nObservability classification: observed-only. With no differential state, MTK `mtkcompile`/`structural_simplify` reduces the raw 2-unknown / 2-equation `System(eqs, t)` to zero ODE states plus two observed quantities recovered algebraically. τ_ra and τ_rg are therefore encoded as `type: observed`, each carrying its defining relation in its `expression` field, and the `equations` array is empty — the post-`mtkcompile` representation, matching the migration-tracker `features: ...observed` classification and sibling observed-only components critical_ssa.esm and mean_free_path.esm. τ_rg's expression references the observed variable τ_ra by name, preserving the upstream equation symbol-for-symbol; the canonical ESS runner resolves the observed-to-observed dependency, as it does in sibling tropospheric_budget.esm (observed tau_total referencing observed k_total).\n\nConstant handling: the upstream `@constants R = 8.314` migrates as a `type: parameter` with a fixed default — the ESS schema has no constant variable type, so every `@constant` becomes a fixed-default parameter (the convention sibling mean_free_path.esm applies to its R/M_air/π_val constants). `R` is one of the three reserved physical-constant names in the ESS schema (R, k_B, N_A); it is declared here with units `J/(mol*K)`, dimensionally compatible with the canonical ideal-gas-constant dimension, so it passes the schema's physical-constant unit check (parse.py `_check_physical_constant_units`).\n\nTests: the upstream component carries no test suite (migration-tracker has_tests: N). The seven inline tests below are authored directly from the two analytic formulas — τ_ra = 1/k_rxn and τ_rg = (1/k_rxn)/(H_star·R·T) — evaluated in float64 at the declared defaults or a single-parameter override. Because both outputs are algebraic and time-independent, `default_conditions` asserts at both t=0 and t=1 to confirm time-invariance; the remaining tests assert at t=0. Coverage sweeps the reaction rate constant (fast/slow first-order reaction), the effective Henry's law solubility (high/low), and the temperature (cold/warm); every test also pins τ_ra to confirm it is independent of H_star and T.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system, no ODE integration. τ_ra is a single division and τ_rg is a three-factor product followed by a division; float64 round-off is ~1e-15, so rel=1e-9 leaves six orders of magnitude of headroom and absorbs any associativity difference in the n-ary product H_star·R·T. The pinned expected values are the exact analytic formulas, so the migration is checkable against the textbook equations, not merely against a prior solver run.\n\nUnit balance (verified):\n  τ_ra `1 / k_rxn`: 1/(s^-1) = s\n  τ_rg `τ_ra / (H_star * R * T)`: s / (mol/(m^3*Pa) · J/(mol*K) · K) = s / (J/(m^3*Pa)); since J = Pa·m^3 the product H_star·R·T = (Pa·m^3)/(m^3·Pa) = 1 (the dimensionless effective Henry's law solubility), so τ_rg = s / 1 = s\nSI throughout; no unit conversion at parse or runtime."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "R": {
@@ -35,7 +35,7 @@
                 "H_star": {
                     "type": "parameter",
                     "units": "mol/(m^3*Pa)",
-                    "default": 1.0e5,
+                    "default": 100000.0,
                     "description": "Effective Henry's law coefficient of the species — the equilibrium ratio of dissolved (aqueous) to gas-phase abundance, enhanced where aqueous-phase dissociation or reaction increases the apparent solubility. Enters the dimensionless solubility factor H*·R·T."
                 },
                 "T": {
@@ -45,10 +45,20 @@
                     "description": "Absolute temperature."
                 },
                 "τ_ra": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "s",
-                    "description": "Aqueous-phase reaction timescale (Seinfeld & Pandis 2006, Eq. 12.76): the e-folding time τ_ra = 1/k_rxn of a dissolved species consumed by a first-order reaction of rate constant k_rxn.",
-                    "expression": {
+                    "description": "Aqueous-phase reaction timescale (Seinfeld & Pandis 2006, Eq. 12.76): the e-folding time τ_ra = 1/k_rxn of a dissolved species consumed by a first-order reaction of rate constant k_rxn."
+                },
+                "τ_rg": {
+                    "type": "unknown",
+                    "units": "s",
+                    "description": "Gas-phase reference reaction timescale (Seinfeld & Pandis 2006, Eq. 12.78): the aqueous-phase reaction timescale referenced to the gas phase, τ_rg = τ_ra/(H*·R·T), divided by the dimensionless effective Henry's law solubility H*·R·T. A more soluble species (larger H*) has a shorter gas-phase reference timescale."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "τ_ra",
+                    "rhs": {
                         "op": "/",
                         "args": [
                             1.0,
@@ -56,11 +66,9 @@
                         ]
                     }
                 },
-                "τ_rg": {
-                    "type": "observed",
-                    "units": "s",
-                    "description": "Gas-phase reference reaction timescale (Seinfeld & Pandis 2006, Eq. 12.78): the aqueous-phase reaction timescale referenced to the gas phase, τ_rg = τ_ra/(H*·R·T), divided by the dimensionless effective Henry's law solubility H*·R·T. A more soluble species (larger H*) has a shorter gas-phase reference timescale.",
-                    "expression": {
+                {
+                    "lhs": "τ_rg",
+                    "rhs": {
                         "op": "/",
                         "args": [
                             "τ_ra",
@@ -75,8 +83,7 @@
                         ]
                     }
                 }
-            },
-            "equations": [],
+            ],
             "tests": [
                 {
                     "id": "default_conditions",
@@ -135,7 +142,7 @@
                     "id": "slow_first_order_reaction",
                     "description": "Slow aqueous reaction: k_rxn lowered to 1.0e-3 s^-1 (1000x slower than the default). The aqueous-phase reaction timescale lengthens to τ_ra = 1/1.0e-3 = 1000.0 s, and the gas-phase reference timescale lengthens in proportion: τ_rg = 1000.0/(1.0e5 · 8.314 · 298.15) ≈ 4.0342e-6 s. Mirror image of `fast_first_order_reaction`.",
                     "parameter_overrides": {
-                        "k_rxn": 1.0e-3
+                        "k_rxn": 0.001
                     },
                     "time_span": {
                         "start": 0.0,
@@ -158,7 +165,7 @@
                     "id": "high_effective_solubility",
                     "description": "Highly soluble species: H_star raised to 1.0e7 mol/(m^3*Pa) (100x the default) with k_rxn and T at their defaults. The aqueous-phase reaction timescale τ_ra = 1/k_rxn = 1.0 s is unchanged — it does not depend on solubility — but the dimensionless solubility factor H*·R·T grows 100x, so the gas-phase reference timescale shortens to τ_rg = 1.0/(1.0e7 · 8.314 · 298.15) ≈ 4.0342e-11 s. Confirms τ_rg ∝ 1/H* (Eq. 12.78) and that τ_ra is independent of H_star.",
                     "parameter_overrides": {
-                        "H_star": 1.0e7
+                        "H_star": 10000000.0
                     },
                     "time_span": {
                         "start": 0.0,
@@ -181,7 +188,7 @@
                     "id": "low_effective_solubility",
                     "description": "Weakly soluble species: H_star lowered to 1.0e2 mol/(m^3*Pa) (1000x below the default) with k_rxn and T at their defaults. The aqueous-phase reaction timescale τ_ra = 1.0 s is again unchanged, while the gas-phase reference timescale lengthens to τ_rg = 1.0/(1.0e2 · 8.314 · 298.15) ≈ 4.0342e-6 s. Mirror image of `high_effective_solubility`.",
                     "parameter_overrides": {
-                        "H_star": 1.0e2
+                        "H_star": 100.0
                     },
                     "time_span": {
                         "start": 0.0,
@@ -247,7 +254,7 @@
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "reaction_rate_sweep",
                     "description": "Sweep the first-order reaction rate constant k_rxn over six orders of magnitude (1.0e-3 to 1.0e3 s^-1, logarithmically) with H_star and T at their defaults. Both timescales fall as 1/k_rxn: the aqueous-phase reaction timescale τ_ra = 1/k_rxn and the gas-phase reference timescale τ_rg = τ_ra/(H*·R·T), which is a fixed factor 1/(H*·R·T) ≈ 4.03e-9 below τ_ra at the default solubility and temperature.",
@@ -261,8 +268,8 @@
                             {
                                 "parameter": "k_rxn",
                                 "range": {
-                                    "start": 1.0e-3,
-                                    "stop": 1.0e3,
+                                    "start": 0.001,
+                                    "stop": 1000.0,
                                     "count": 60,
                                     "scale": "log"
                                 }
@@ -348,8 +355,8 @@
                             {
                                 "parameter": "k_rxn",
                                 "range": {
-                                    "start": 1.0e-3,
-                                    "stop": 1.0e3,
+                                    "start": 0.001,
+                                    "stop": 1000.0,
                                     "count": 30,
                                     "scale": "log"
                                 }
@@ -357,8 +364,8 @@
                             {
                                 "parameter": "H_star",
                                 "range": {
-                                    "start": 1.0e3,
-                                    "stop": 1.0e7,
+                                    "start": 1000.0,
+                                    "stop": 10000000.0,
                                     "count": 20,
                                     "scale": "log"
                                 }

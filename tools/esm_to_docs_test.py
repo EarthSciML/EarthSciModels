@@ -228,7 +228,7 @@ class ComponentEntryDerivedFieldsTest(unittest.TestCase):
             name="DropletGrowth",
             body={},
             esm_path=Path("components/aerosol/cloud_physics/droplet_growth.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={},
         )
         self.assertEqual(entry.domain, "aerosol")
@@ -242,7 +242,7 @@ class ComponentEntryDerivedFieldsTest(unittest.TestCase):
             name="SuperFast",
             body={},
             esm_path=Path("components/gaschem/superfast.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={},
         )
         self.assertEqual(entry.domain, "gaschem")
@@ -251,10 +251,74 @@ class ComponentEntryDerivedFieldsTest(unittest.TestCase):
         self.assertEqual(entry.slug, "gaschem/superfast")
 
 
+class DataSourcePageTest(unittest.TestCase):
+    """`data_sources` is the esm 1.0.0 spelling of 0.x's `data_loaders`.
+
+    A source is pure I/O and exposes no variables (esm-spec §8), so its page
+    carries the I/O descriptor; the fields it feeds are documented on the
+    consuming model as parameters with a `data` update.
+    """
+
+    def _entry(self) -> mod.ComponentEntry:
+        return mod.ComponentEntry(
+            section="data_sources",
+            name="GEOSFP_A1",
+            body={
+                "kind": "grid",
+                "source": {"url_template": "s3://gcgrid/GEOS_0.25x0.3125/{date:%Y/%m}/a1.nc"},
+                "temporal": {"file_period": "P1D", "frequency": "PT1H"},
+            },
+            esm_path=Path("components/earthsci_data/geosfp_a1.esm"),
+            esm_version="1.0.0",
+            file_metadata={},
+        )
+
+    def test_type_label_is_data_source(self):
+        self.assertEqual(self._entry().type_label, "data_source")
+
+    def test_page_renders_io_descriptor(self):
+        md = mod.render_markdown(self._entry())
+        self.assertIn("## Data source", md)
+        self.assertIn("`grid`", md)
+        self.assertIn("s3://gcgrid/", md)
+        self.assertIn("`P1D`", md)
+
+    def test_section_absent_for_models(self):
+        entry = mod.ComponentEntry(
+            section="models",
+            name="Foo",
+            body={"kind": "grid", "variables": {"x": {"type": "parameter"}}},
+            esm_path=Path("components/toy/foo.esm"),
+            esm_version="1.0.0",
+            file_metadata={},
+        )
+        self.assertNotIn("## Data source", mod.render_markdown(entry))
+
+
 class ParseEsmTest(unittest.TestCase):
+    def test_parse_data_source_file(self):
+        body = {
+            "esm": "1.0.0",
+            "metadata": {"name": "X"},
+            "data_sources": {
+                "geosfp_a1": {
+                    "kind": "grid",
+                    "source": {"url_template": "s3://bucket/{date:%Y%m%d}.nc"},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            p = root / "components" / "earthsci_data" / "geosfp_a1.esm"
+            p.parent.mkdir(parents=True)
+            p.write_text(json.dumps(body), encoding="utf-8")
+            entries = mod.parse_esm(p, root)
+            self.assertEqual([e.section for e in entries], ["data_sources"])
+            self.assertEqual(entries[0].type_label, "data_source")
+
     def test_parse_model_file(self):
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "metadata": {"name": "X", "tags": ["a", "b"]},
             "models": {
                 "Foo": {
@@ -276,7 +340,7 @@ class ParseEsmTest(unittest.TestCase):
             self.assertEqual(e.name, "Foo")
             self.assertEqual(e.section, "models")
             self.assertEqual(e.domain, "mydomain")
-            self.assertEqual(e.esm_version, "0.1.0")
+            self.assertEqual(e.esm_version, "1.0.0")
 
 
 class RenderMarkdownTest(unittest.TestCase):
@@ -289,21 +353,29 @@ class RenderMarkdownTest(unittest.TestCase):
             body={
                 "description": "A toy component.",
                 "reference": {"citation": "Smith 2020", "doi": "10.1/abc"},
+                # esm 1.0.0 declares only `unknown` and `parameter`: `y` is
+                # observed and `z` an ODE state purely by virtue of the
+                # equations below (esm-spec §6.3.1).
                 "variables": {
                     "x": {"type": "parameter", "units": "1", "default": 1.0, "description": "a param"},
-                    "y": {
-                        "type": "observed",
-                        "units": "1",
-                        "description": "y = 2x",
-                        "expression": {"op": "*", "args": [2, "x"]},
-                    },
+                    "y": {"type": "unknown", "units": "1", "description": "y = 2x"},
+                    "z": {"type": "unknown", "units": "1", "description": "a state"},
                 },
-                "equations": [{"lhs": "y", "rhs": {"op": "*", "args": [2, "x"]}}],
+                "equations": [
+                    {"lhs": "y", "rhs": {"op": "*", "args": [2, "x"]}},
+                    {"lhs": {"op": "D", "args": ["z"], "wrt": "t"}, "rhs": "y"},
+                ],
                 "tests": [{"id": "t1", "description": "sanity", "assertions": [1, 2]}],
-                "examples": [{"id": "e1", "code": "using Foo"}],
+                "analyses": [
+                    {
+                        "id": "e1",
+                        "description": "a toy run",
+                        "time_span": {"start": 0, "end": 10},
+                    }
+                ],
             },
             esm_path=Path("components/toy/foo.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={"name": "Foo", "tags": ["toy"]},
         )
 
@@ -314,7 +386,7 @@ class RenderMarkdownTest(unittest.TestCase):
         self.assertIn('title: "Foo"', head)
         self.assertIn('domain: "toy"', head)
         self.assertIn('component_type: "model"', head)
-        self.assertIn('esm_version: "0.1.0"', head)
+        self.assertIn('esm_version: "1.0.0"', head)
         self.assertIn("tags: [", head)
 
     def test_body_contains_all_sections(self):
@@ -322,13 +394,52 @@ class RenderMarkdownTest(unittest.TestCase):
         for section in (
             "## Description",
             "## Reference",
+            "## Variables",
             "## Parameters",
             "## Observed",
+            "## Observed expressions",
             "## Equations",
-            "## Examples",
+            "## Analyses",
             "## Raw .esm",
         ):
             self.assertIn(section, md, f"missing section: {section}")
+
+    def test_derived_classification_places_each_variable(self):
+        # The declared type is `unknown` for both y and z; only the equations
+        # say which is observed and which is a state (esm-spec §6.3.1).
+        md = mod.render_markdown(self._make_entry())
+        variables_tbl = md.split("## Variables", 1)[1].split("## Parameters", 1)[0]
+        self.assertIn("`z`", variables_tbl)
+        self.assertNotIn("`y`", variables_tbl)
+        observed_tbl = md.split("## Observed\n", 1)[1].split("## Observed expressions", 1)[0]
+        self.assertIn("`y`", observed_tbl)
+        self.assertNotIn("`z`", observed_tbl)
+
+    def test_observed_definition_not_duplicated_in_equations(self):
+        # `y ~ 2x` is rendered once, under Observed expressions; the Equations
+        # section carries only the remaining (ODE) row.
+        md = mod.render_markdown(self._make_entry())
+        equations = md.split("## Equations", 1)[1].split("\n## ", 1)[0]
+        self.assertIn(r"\mathrm{D}\left(z\right)", equations)
+        self.assertNotIn(r"2 \cdot x", equations)
+        self.assertIn(r"y = 2 \cdot x", md.split("## Observed expressions", 1)[1])
+
+    def test_variable_with_an_undefined_type_is_still_rendered(self):
+        # `"type": "variable"` is in no version's enum, so classification
+        # accounts for it nowhere. Filtering the tables by the classified sets
+        # alone would drop it from the page silently.
+        entry = self._make_entry()
+        entry.body["variables"]["w"] = {"type": "variable", "description": "stray"}
+        md = mod.render_markdown(entry)
+        variables_tbl = md.split("## Variables", 1)[1].split("## Parameters", 1)[0]
+        self.assertIn("`w`", variables_tbl)
+
+    def test_analysis_renders_id_and_time_span(self):
+        md = mod.render_markdown(self._make_entry())
+        analyses = md.split("## Analyses", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("### e1", analyses)
+        self.assertIn("a toy run", analyses)
+        self.assertIn("**Time span:** 0 → 10", analyses)
 
     def test_tests_section_not_rendered(self):
         # Tests are dev-only; they must not appear on user-facing pages.
@@ -371,7 +482,7 @@ class ExpressionTemplatesSectionTest(unittest.TestCase):
                 "species": {"O3": {"units": "mol/m^3"}},
             },
             esm_path=Path("components/gaschem/has_templates.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={},
         )
 
@@ -384,7 +495,7 @@ class ExpressionTemplatesSectionTest(unittest.TestCase):
                 "species": {"O3": {"units": "mol/m^3"}},
             },
             esm_path=Path("components/gaschem/no_templates.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={},
         )
 
@@ -426,7 +537,7 @@ class BuildIndexTest(unittest.TestCase):
             name="SuperFast",
             body={"description": "s", "reference": {"doi": "10.1/x"}},
             esm_path=Path("components/gaschem/superfast.esm"),
-            esm_version="0.1.0",
+            esm_version="1.0.0",
             file_metadata={"tags": ["photochem"]},
         )
         idx = mod.build_index([entry])
@@ -439,6 +550,38 @@ class BuildIndexTest(unittest.TestCase):
         self.assertEqual(rec["reference"], "10.1/x")
 
 
+class SlugCollisionTest(unittest.TestCase):
+    """Two components on one slug means one page is silently overwritten."""
+
+    def _entry(self, section: str, name: str, path: str) -> mod.ComponentEntry:
+        return mod.ComponentEntry(
+            section=section,
+            name=name,
+            body={},
+            esm_path=Path(path),
+            esm_version="1.0.0",
+            file_metadata={},
+        )
+
+    def test_no_collision_reports_nothing(self):
+        entries = [
+            self._entry("models", "CEDS", "components/earthsci_data/ceds.esm"),
+            self._entry("data_sources", "CEDS_BC", "components/earthsci_data/ceds.esm"),
+        ]
+        self.assertEqual(mod._warn_slug_collisions(entries), [])
+
+    def test_same_registry_key_in_two_files_is_reported(self):
+        entries = [
+            self._entry("data_sources", "CEDS_BC", "components/earthsci_data/ceds.esm"),
+            self._entry(
+                "data_sources", "CEDS_BC", "components/earthsci_data/ceds_bc_loader.esm"
+            ),
+        ]
+        self.assertEqual(
+            mod._warn_slug_collisions(entries), ["earthsci_data/ceds_bc"]
+        )
+
+
 class IntegrationRunTest(unittest.TestCase):
     """Runs the full pipeline against a tiny synthetic repo."""
 
@@ -449,7 +592,7 @@ class IntegrationRunTest(unittest.TestCase):
             (root / "components" / "toy" / "a.esm").write_text(
                 json.dumps(
                     {
-                        "esm": "0.1.0",
+                        "esm": "1.0.0",
                         "metadata": {"name": "A"},
                         "models": {
                             "A": {

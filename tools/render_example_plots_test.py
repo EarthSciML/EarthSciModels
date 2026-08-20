@@ -22,17 +22,26 @@ sys.path.insert(0, str(HERE))
 
 import render_example_plots as mod  # noqa: E402
 from earthsci_ast import ExprNode, Model, ModelVariable  # noqa: E402
+from earthsci_ast.classification import (  # noqa: E402
+    observed_definitions,
+    ode_states,
+)
 from earthsci_ast.esm_types import Equation  # noqa: E402
 
 
 def _model(variables: dict, equations: list | None = None) -> Model:
+    """Build a Model from the esm 1.0.0 two-type variable vocabulary.
+
+    Only `unknown` and `parameter` may be declared. An unknown becomes an ODE
+    state, an observed quantity or an algebraic one purely by what `equations`
+    say about it (esm-spec §6.3.1) — there is no `expression` field to set.
+    """
     return Model(
         name="Test",
         variables={
             name: ModelVariable(
                 type=spec.get("type", "parameter"),
                 default=spec.get("default"),
-                expression=spec.get("expression"),
                 units=spec.get("units"),
             )
             for name, spec in variables.items()
@@ -59,12 +68,16 @@ class HasTimeDerivativeTest(unittest.TestCase):
 
 class ComponentHasDynamicsTest(unittest.TestCase):
     def test_observed_only_no_dynamics(self):
+        # `y` is observed because a bare-variable-LHS equation defines it, not
+        # because anything declares it so (esm-spec §6.3.1).
         m = _model(
             {
                 "x": {"type": "parameter", "default": 1.0},
-                "y": {"type": "observed", "expression": ExprNode(op="*", args=["x", 2])},
-            }
+                "y": {"type": "unknown"},
+            },
+            equations=[{"lhs": "y", "rhs": ExprNode(op="*", args=["x", 2])}],
         )
+        self.assertEqual(ode_states(m), [])
         self.assertFalse(mod._component_has_dynamics(m))
 
     def test_algebraic_equation_no_dynamics(self):
@@ -72,7 +85,7 @@ class ComponentHasDynamicsTest(unittest.TestCase):
         m = _model(
             {
                 "T": {"type": "parameter", "default": 298.0},
-                "K_w": {"type": "state"},
+                "K_w": {"type": "unknown"},
             },
             equations=[{"lhs": "K_w", "rhs": ExprNode(op="*", args=["T", 1e-10])}],
         )
@@ -81,7 +94,7 @@ class ComponentHasDynamicsTest(unittest.TestCase):
     def test_ode_equation_has_dynamics(self):
         # Canonical form: D(state, wrt=t) on lhs (DiameterGrowthRate shape).
         m = _model(
-            {"y": {"type": "state"}, "k": {"type": "parameter", "default": 1.0}},
+            {"y": {"type": "unknown"}, "k": {"type": "parameter", "default": 1.0}},
             equations=[
                 {"lhs": ExprNode(op="D", args=["y"], wrt="t"), "rhs": ExprNode(op="*", args=[-1, "y"])}
             ],
@@ -89,7 +102,7 @@ class ComponentHasDynamicsTest(unittest.TestCase):
         self.assertTrue(mod._component_has_dynamics(m))
         # D buried inside rhs expression tree (less common but valid).
         m2 = _model(
-            {"y": {"type": "state"}},
+            {"y": {"type": "unknown"}},
             equations=[{"lhs": "y_dot", "rhs": ExprNode(op="D", args=["y"], wrt="t")}],
         )
         self.assertTrue(mod._component_has_dynamics(m2))
@@ -178,12 +191,16 @@ class EvaluateGridTest(unittest.TestCase):
     algebraic equations (forward and constraint forms)."""
 
     def test_observed_variable(self):
+        # esm 1.0.0: the observed quantity's defining expression lives in
+        # `equations`, and the resolution plan picks it up from there.
         m = _model(
             {
                 "x": {"type": "parameter", "default": 1.0},
-                "y": {"type": "observed", "expression": ExprNode(op="*", args=["x", 2])},
-            }
+                "y": {"type": "unknown"},
+            },
+            equations=[{"lhs": "y", "rhs": ExprNode(op="*", args=["x", 2])}],
         )
+        self.assertEqual(set(observed_definitions(m)), {"y"})
         env = mod._evaluate_grid(
             m,
             base_bindings={"x": 1.0},
@@ -195,7 +212,7 @@ class EvaluateGridTest(unittest.TestCase):
     def test_forward_algebraic_equation(self):
         # WaterEquilibrium-shape: state defined by algebraic equation.
         m = _model(
-            {"T": {"type": "parameter", "default": 298.0}, "y": {"type": "state"}},
+            {"T": {"type": "parameter", "default": 298.0}, "y": {"type": "unknown"}},
             equations=[{"lhs": "y", "rhs": ExprNode(op="+", args=["T", 1])}],
         )
         env = mod._evaluate_grid(
@@ -212,8 +229,8 @@ class EvaluateGridTest(unittest.TestCase):
             {
                 "T": {"type": "parameter", "default": 298.0},
                 "H_plus": {"type": "parameter", "default": 1e-4},
-                "K_w": {"type": "state"},
-                "OH_minus": {"type": "state"},
+                "K_w": {"type": "unknown"},
+                "OH_minus": {"type": "unknown"},
             },
             equations=[
                 {"lhs": "K_w", "rhs": ExprNode(op="*", args=["T", 1e-10])},
@@ -237,10 +254,10 @@ class EvaluateGridTest(unittest.TestCase):
         # behind `ifelse(x > 0, a/x, 0)`, the evaluator hits 0/0 and
         # raises Python's native ZeroDivisionError. The renderer must
         # substitute NaN at that grid point rather than abandoning the
-        # whole example — matches the snow_melt_no_layers.esm failure
+        # whole analysis — matches the snow_melt_no_layers.esm failure
         # mode (W_sno_np1 / W_sno_n at the W_sno_n=0 endpoint).
         m = _model(
-            {"x": {"type": "parameter", "default": 1.0}, "y": {"type": "state"}},
+            {"x": {"type": "parameter", "default": 1.0}, "y": {"type": "unknown"}},
             equations=[{"lhs": "y", "rhs": ExprNode(op="/", args=[1.0, "x"])}],
         )
         env = mod._evaluate_grid(
@@ -260,8 +277,8 @@ class EvaluateGridTest(unittest.TestCase):
         m = _model(
             {
                 "x": {"type": "parameter", "default": 1.0},
-                "y": {"type": "state"},
-                "z": {"type": "state"},
+                "y": {"type": "unknown"},
+                "z": {"type": "unknown"},
             },
             equations=[
                 {"lhs": "y", "rhs": ExprNode(op="/", args=[1.0, "x"])},
@@ -283,7 +300,7 @@ class EvaluateGridTest(unittest.TestCase):
 class ExtractOdeEquationsTest(unittest.TestCase):
     def test_separates_ode_from_algebraic(self):
         m = _model(
-            {"D_p": {"type": "state"}, "I_D": {"type": "state"}, "A": {"type": "state"}},
+            {"D_p": {"type": "unknown"}, "I_D": {"type": "unknown"}, "A": {"type": "unknown"}},
             equations=[
                 {"lhs": ExprNode(op="D", args=["D_p"], wrt="t"), "rhs": "I_D"},
                 {"lhs": "A", "rhs": ExprNode(op="*", args=[1.0, 2.0])},
@@ -296,7 +313,7 @@ class ExtractOdeEquationsTest(unittest.TestCase):
         self.assertEqual([eq.lhs for eq in alg_eqs], ["A", "I_D"])
 
     def test_no_ode_returns_empty_map(self):
-        m = _model({"y": {"type": "state"}}, equations=[{"lhs": "y", "rhs": 1.0}])
+        m = _model({"y": {"type": "unknown"}}, equations=[{"lhs": "y", "rhs": 1.0}])
         ode_map, alg_eqs = mod._extract_ode_equations(m)
         self.assertEqual(ode_map, {})
         self.assertEqual(len(alg_eqs), 1)
@@ -310,7 +327,7 @@ class SolveTimeSeriesTest(unittest.TestCase):
         from earthsci_ast.esm_types import TimeSpan
 
         m = _model(
-            {"k": {"type": "parameter", "default": 0.5}, "y": {"type": "state"}},
+            {"k": {"type": "parameter", "default": 0.5}, "y": {"type": "unknown"}},
             equations=[
                 {
                     "lhs": ExprNode(op="D", args=["y"], wrt="t"),
@@ -337,9 +354,9 @@ class SolveTimeSeriesTest(unittest.TestCase):
 
         m = _model(
             {
-                "A": {"type": "state"},
-                "D_p": {"type": "state"},
-                "I_D": {"type": "state"},
+                "A": {"type": "unknown"},
+                "D_p": {"type": "unknown"},
+                "I_D": {"type": "unknown"},
                 "k": {"type": "parameter", "default": 1.0e-16},
             },
             equations=[
@@ -373,19 +390,18 @@ class IntegrationTest(unittest.TestCase):
 
     def _toy_observed_body(self) -> dict:
         return {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "metadata": {"name": "Toy"},
             "models": {
                 "Toy": {
                     "variables": {
                         "x": {"type": "parameter", "default": 1.0, "units": "m"},
-                        "y": {
-                            "type": "observed",
-                            "expression": {"op": "*", "args": ["x", 2]},
-                        },
+                        # esm 1.0.0: `y` is observed by virtue of the
+                        # bare-variable-LHS equation below, not a declared type.
+                        "y": {"type": "unknown", "units": "m"},
                     },
-                    "equations": [],
-                    "examples": [
+                    "equations": [{"lhs": "y", "rhs": {"op": "*", "args": ["x", 2]}}],
+                    "analyses": [
                         {
                             "id": "y_vs_x",
                             "description": "y over x",
@@ -430,8 +446,8 @@ class IntegrationTest(unittest.TestCase):
 
     def test_run_emits_scatter_plot(self):
         body = self._toy_observed_body()
-        body["models"]["Toy"]["examples"][0]["plots"][0]["type"] = "scatter"
-        body["models"]["Toy"]["examples"][0]["plots"][0]["id"] = "scat"
+        body["models"]["Toy"]["analyses"][0]["plots"][0]["type"] = "scatter"
+        body["models"]["Toy"]["analyses"][0]["plots"][0]["id"] = "scat"
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             self._write_esm(root, body, "toy")
@@ -445,13 +461,13 @@ class IntegrationTest(unittest.TestCase):
         # Mirrors WaterEquilibrium shape: state variable defined by an
         # algebraic equation. Pre-mdl-qz4 the renderer would skip these.
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "metadata": {"name": "Algebraic"},
             "models": {
                 "Algebraic": {
                     "variables": {
                         "T": {"type": "parameter", "default": 298.0, "units": "K"},
-                        "K": {"type": "state"},
+                        "K": {"type": "unknown"},
                     },
                     "equations": [
                         {
@@ -459,7 +475,7 @@ class IntegrationTest(unittest.TestCase):
                             "rhs": {"op": "*", "args": ["T", 1e-3]},
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "k_vs_t",
                             "time_span": {"start": 0.0, "end": 1.0},
@@ -497,20 +513,17 @@ class IntegrationTest(unittest.TestCase):
             png = root / "components" / "alg" / "alg.plots" / "k_vs_t-k_curve.png"
             self.assertTrue(png.is_file())
 
-    def test_skips_examples_without_sweep(self):
+    def test_skips_analyses_without_sweep(self):
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "models": {
                 "T": {
                     "variables": {
                         "x": {"type": "parameter", "default": 1.0},
-                        "y": {
-                            "type": "observed",
-                            "expression": {"op": "*", "args": ["x", 2]},
-                        },
+                        "y": {"type": "unknown"},
                     },
-                    "equations": [],
-                    "examples": [
+                    "equations": [{"lhs": "y", "rhs": {"op": "*", "args": ["x", 2]}}],
+                    "analyses": [
                         {
                             "id": "no_sweep",
                             "time_span": {"start": 0.0, "end": 1.0},
@@ -537,15 +550,15 @@ class IntegrationTest(unittest.TestCase):
     def test_time_series_ode_renders(self):
         # ODE component with time_span + initial_state should render
         # one curve per plot via the integration path (mirrors
-        # DiameterGrowthRate's figure_13_2 examples).
+        # DiameterGrowthRate's figure_13_2 analyses).
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "metadata": {"name": "Decay"},
             "models": {
                 "Decay": {
                     "variables": {
                         "k": {"type": "parameter", "default": 0.5},
-                        "y": {"type": "state"},
+                        "y": {"type": "unknown"},
                     },
                     "equations": [
                         {
@@ -553,7 +566,7 @@ class IntegrationTest(unittest.TestCase):
                             "rhs": {"op": "*", "args": [-1, "k", "y"]},
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "decay",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -587,13 +600,13 @@ class IntegrationTest(unittest.TestCase):
         # ODE + 1-D parameter_sweep: one integration per grid point, one
         # plot with multiple curves overlaid.
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "metadata": {"name": "Decay"},
             "models": {
                 "Decay": {
                     "variables": {
                         "k": {"type": "parameter", "default": 0.5},
-                        "y": {"type": "state"},
+                        "y": {"type": "unknown"},
                     },
                     "equations": [
                         {
@@ -601,7 +614,7 @@ class IntegrationTest(unittest.TestCase):
                             "rhs": {"op": "*", "args": [-1, "k", "y"]},
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "decay_sweep",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -641,9 +654,9 @@ class IntegrationTest(unittest.TestCase):
         # First-order isomerization A -> B, k = 0.5/s. Tests three things at once:
         # (1) reaction_systems are discovered alongside models;
         # (2) species defaults seed the integration when no initial_state present;
-        # (3) plot.x='t' on a reaction_system example draws a time-series curve.
+        # (3) plot.x='t' on a reaction_system analysis draws a time-series curve.
         body = {
-            "esm": "0.3.0",
+            "esm": "1.0.0",
             "metadata": {"name": "AB"},
             "reaction_systems": {
                 "AB": {
@@ -660,7 +673,7 @@ class IntegrationTest(unittest.TestCase):
                             "rate": "k",
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "decay",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -696,7 +709,7 @@ class IntegrationTest(unittest.TestCase):
         # exercises that exact case with A starting at 0 — integration
         # must succeed and the plot must render.
         body = {
-            "esm": "0.3.0",
+            "esm": "1.0.0",
             "metadata": {"name": "ABC"},
             "reaction_systems": {
                 "ABC": {
@@ -717,7 +730,7 @@ class IntegrationTest(unittest.TestCase):
                             "rate": {"op": "/", "args": ["k", "A"]},
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "cancel",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -744,12 +757,12 @@ class IntegrationTest(unittest.TestCase):
 
     def test_reaction_system_initial_state_merges_with_defaults(self):
         # A reaction system with two species — only one is named in the
-        # example's `initial_state.values`. The other should fall back to
+        # analysis's `initial_state.values`. The other should fall back to
         # its declared species default rather than triggering a "missing
-        # ODE state" error. Lets fullchem-scale examples (272 species) name
+        # ODE state" error. Lets fullchem-scale analyses (272 species) name
         # only the few they care about (mdl-dtm).
         body = {
-            "esm": "0.3.0",
+            "esm": "1.0.0",
             "metadata": {"name": "AB"},
             "reaction_systems": {
                 "AB": {
@@ -766,7 +779,7 @@ class IntegrationTest(unittest.TestCase):
                             "rate": "k",
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "partial_ic",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -800,7 +813,7 @@ class IntegrationTest(unittest.TestCase):
         # final-state-vs-sweep dispatch path: plot.x is the swept parameter,
         # not 't', so each grid point's endpoint becomes one data point.
         body = {
-            "esm": "0.3.0",
+            "esm": "1.0.0",
             "metadata": {"name": "AB"},
             "reaction_systems": {
                 "AB": {
@@ -817,7 +830,7 @@ class IntegrationTest(unittest.TestCase):
                             "rate": "k",
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "k_sweep",
                             "time_span": {"start": 0.0, "end": 4.0},
@@ -851,11 +864,11 @@ class IntegrationTest(unittest.TestCase):
 
     def test_skips_components_with_time_derivatives(self):
         body = {
-            "esm": "0.1.0",
+            "esm": "1.0.0",
             "models": {
                 "Ode": {
                     "variables": {
-                        "y": {"type": "state", "default": 1.0},
+                        "y": {"type": "unknown", "default": 1.0},
                         "k": {"type": "parameter", "default": 1.0},
                     },
                     "equations": [
@@ -867,7 +880,7 @@ class IntegrationTest(unittest.TestCase):
                             },
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "sweep",
                             "time_span": {"start": 0.0, "end": 1.0},
@@ -911,12 +924,12 @@ class IntegrationTest(unittest.TestCase):
         # rather than crashing or silently using state defaults. The placeholder
         # must be visibly distinct from a scalar-IC plot (different file bytes).
         body = {
-            "esm": "0.5.0",
+            "esm": "1.0.0",
             "metadata": {"name": "PdeTest"},
             "models": {
                 "PdeTest": {
                     "variables": {
-                        "psi": {"type": "state"},
+                        "psi": {"type": "unknown"},
                         "k": {"type": "parameter", "default": 0.1},
                     },
                     "equations": [
@@ -925,7 +938,7 @@ class IntegrationTest(unittest.TestCase):
                             "rhs": {"op": "*", "args": ["k", "psi"]},
                         }
                     ],
-                    "examples": [
+                    "analyses": [
                         {
                             "id": "pde_ic",
                             "time_span": {"start": 0.0, "end": 1.0},

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "StagePrognosisHCB",
         "description": "Stage (1973) static regression model for height to crown base (HCB) of lodgepole pine. Predicts HCB from tree height, stand density (CCF), elevation, relative tree size (DBH/RMSQD), and habitat type. Single explicit-algebraic equation: HCB = one_foot*(b0 + b1*HT_ft + b2*ln(CCF) + b3*EL_100ft + b4*DBH_in/RMSQD_in + HAB). All regression coefficients are in feet-space; result converted to meters. Migrated from Vegetation.jl@010c3774dc5646d81806c6119c8a029a70f6c9a0:src/stage_prognosis.jl:257.",
@@ -29,7 +29,7 @@
                 "notes": "source_ref: Vegetation.jl@010c3774dc5646d81806c6119c8a029a70f6c9a0:src/stage_prognosis.jl:257\n\nUpstream `StagePrognosisHCB` is an MTK `@component` implementing the Stage (1973, p. 16) regression equation for height to crown base (HCB) as a function of tree and stand characteristics. The component declares 6 `@parameters` (HT_input, DBH_input, CCF, EL, RMSQD, HAB), 3 unit-conversion `@constants` (one_inch=0.0254 m, one_foot=0.3048 m, hundred_feet=30.48 m), 5 regression `@constants` (b_HCB_0=-29.26, b_HCB_HT=0.61, b_HCB_CCF=9.178, b_HCB_EL=-0.222, b_HCB_DBH_RMSQD=-5.8), and 1 algebraic `@variable` (HCB_pred), with 1 equation returning `System(eqs, t; name)`. The upstream Julia tests (`runtests.jl`) confirm `length(unknowns(mtkcompile(sys))) == 0` for all-algebraic System objects after structural simplification.\n\nSystem kind: the single equation `HCB_pred ~ one_foot*(b_HCB_0 + b_HCB_HT*(HT_input/one_foot) + b_HCB_CCF*log(CCF) + b_HCB_EL*(EL/hundred_feet) + b_HCB_DBH_RMSQD*(DBH_input/one_inch)/(RMSQD/one_inch) + HAB)` is an explicit closed-form assignment. HCB_pred depends only on parameters (all RHS terms are parameters or constants) — a triangular single-variable system with zero iterations, no Newton solve, no `initialization_equations`, no `guesses`. `system_kind` is left unset (default 'ode', zero differential states), identical to components/geodynamics/mogi.esm and other explicit-algebraic components.\n\nNote on migration tracker blocking gap. The tracker lists this bead as `gt-ebuq (init_eq/system_kind=nonlinear)`. Investigation of the upstream source confirms the equation is EXPLICITLY algebraic — HCB_pred is a direct closed-form function of 6 parameters with no implicit coupling. The blocking label was applied conservatively to the entire Vegetation gt-ebuq group; StagePrognosisHCB does not use NonlinearSystem semantics in practice (MTK may compile an all-algebraic `System(eqs,t)` to a `NonlinearProblem` internally, but the physical equation requires no iteration). Migration uses the explicit-algebraic path without `system_kind`, exactly as for components/geodynamics/mogi.esm.\n\nNote on constants vs parameters. All 8 @constants (3 unit-conversion + 5 regression) are encoded as `type: parameter` with their upstream default values. The ESM schema has no `constant` type — this follows the same convention as components/vegetation/landis_biomass.esm (e1, B_MAX_ratio, one_yr encoded as parameters) and components/geodynamics/mogi.esm.\n\nEquation faithfulness. The equation from src/stage_prognosis.jl:294-301 is preserved verbatim:\n  HCB_pred = one_foot * (b_HCB_0\n             + b_HCB_HT  * (HT_input  / one_foot)\n             + b_HCB_CCF * log(CCF)\n             + b_HCB_EL  * (EL / hundred_feet)\n             + b_HCB_DBH_RMSQD * (DBH_input / one_inch) / (RMSQD / one_inch)\n             + HAB)\n\nDefault parameters reproduce the upstream Julia defaults: HT_input = 60 ft = 18.288 m, DBH_input = 6 in = 0.1524 m, CCF = 100, EL = 43 hundreds-of-ft = 1310.64 m, RMSQD = 7 in = 0.1778 m, HAB = 0 (Abies/Xerophyllum). Default HCB_pred ≈ 10.6951 m = 35.09 ft.\n\nThe upstream source lists four habitat type adjustments (in feet-space): HAB=0.0 (Abies/Xerophyllum), HAB=-4.24 (Abies/Vaccinium), HAB=-3.86 (Abies/Pachistima), HAB=-5.47 (Pseudotsuga/Calamagrostis). All four are covered by inline tests.\n\nTolerance rationale. Closed-form algebraic evaluation — single explicit assignment, no ODE integration, no implicit solve — so there is no integrator error. rel=1e-6 covers float64 round-off in the log/multiply/divide chains; consistent with mogi.esm and atmospheric_diffusion.esm."
             },
             "tolerance": {
-                "rel": 1.0e-6
+                "rel": 1e-06
             },
             "variables": {
                 "one_inch": {
@@ -117,7 +117,7 @@
                     "description": "Habitat type adjustment in feet-space (Stage 1973, p. 16). Dimensionless additive term. Four forest habitat types: 0.0 (Abies/Xerophyllum, default), -4.24 (Abies/Vaccinium), -3.86 (Abies/Pachistima), -5.47 (Pseudotsuga/Calamagrostis)."
                 },
                 "HCB_pred": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Predicted height to the base of the live crown (Stage 1973 Eq., p. 16). Explicit algebraic function of HT_input, DBH_input, CCF, EL, RMSQD, and HAB. With default parameters ≈ 10.695 m (≈ 35.09 ft)."
                 }
@@ -139,7 +139,10 @@
                                             "b_HCB_HT",
                                             {
                                                 "op": "/",
-                                                "args": ["HT_input", "one_foot"]
+                                                "args": [
+                                                    "HT_input",
+                                                    "one_foot"
+                                                ]
                                             }
                                         ]
                                     },
@@ -149,7 +152,9 @@
                                             "b_HCB_CCF",
                                             {
                                                 "op": "log",
-                                                "args": ["CCF"]
+                                                "args": [
+                                                    "CCF"
+                                                ]
                                             }
                                         ]
                                     },
@@ -159,7 +164,10 @@
                                             "b_HCB_EL",
                                             {
                                                 "op": "/",
-                                                "args": ["EL", "hundred_feet"]
+                                                "args": [
+                                                    "EL",
+                                                    "hundred_feet"
+                                                ]
                                             }
                                         ]
                                     },
@@ -172,11 +180,17 @@
                                                 "args": [
                                                     {
                                                         "op": "/",
-                                                        "args": ["DBH_input", "one_inch"]
+                                                        "args": [
+                                                            "DBH_input",
+                                                            "one_inch"
+                                                        ]
                                                     },
                                                     {
                                                         "op": "/",
-                                                        "args": ["RMSQD", "one_inch"]
+                                                        "args": [
+                                                            "RMSQD",
+                                                            "one_inch"
+                                                        ]
                                                     }
                                                 ]
                                             }
@@ -193,9 +207,16 @@
                 {
                     "id": "default_parameters_baseline",
                     "description": "Default parameters (HT=60 ft, DBH=6 in, CCF=100, EL=43 hundreds-ft, RMSQD=7 in, HAB=0): HCB = one_foot*(-29.26 + 0.61*60 + 9.178*ln(100) - 0.222*43 - 5.8*6/7 + 0) = 0.3048 * 35.0888... ≈ 10.6951 m. Pins the equation at the upstream-documented default point.",
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 10.695073371014400}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 10.6950733710144
+                        }
                     ]
                 },
                 {
@@ -204,9 +225,16 @@
                     "parameter_overrides": {
                         "HAB": -4.24
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.402721371014400}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 9.4027213710144
+                        }
                     ]
                 },
                 {
@@ -215,9 +243,16 @@
                     "parameter_overrides": {
                         "HAB": -3.86
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.518545371014400}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 9.5185453710144
+                        }
                     ]
                 },
                 {
@@ -226,9 +261,16 @@
                     "parameter_overrides": {
                         "HAB": -5.47
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.027817371014400}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 9.0278173710144
+                        }
                     ]
                 },
                 {
@@ -237,9 +279,16 @@
                     "parameter_overrides": {
                         "HT_input": 36.576
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 21.850753371014400}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 21.8507533710144
+                        }
                     ]
                 },
                 {
@@ -248,9 +297,16 @@
                     "parameter_overrides": {
                         "DBH_input": 0.3048
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 9.179781942443257}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 9.179781942443258
+                        }
                     ]
                 },
                 {
@@ -259,9 +315,16 @@
                     "parameter_overrides": {
                         "DBH_input": 0.1778
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 10.442524799542534}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 10.442524799542534
+                        }
                     ]
                 },
                 {
@@ -270,24 +333,39 @@
                     "parameter_overrides": {
                         "CCF": 200.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "HCB_pred", "time": 0.0, "expected": 12.634121001131695}
+                        {
+                            "variable": "HCB_pred",
+                            "time": 0.0,
+                            "expected": 12.634121001131694
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "habitat_type_comparison",
                     "description": "Sweep HAB across the four Stage (1973) habitat types (Abies/Xerophyllum 0.0, Abies/Vaccinium -4.24, Abies/Pachistima -3.86, Pseudotsuga/Calamagrostis -5.47) with default tree and stand parameters. Shows the additive shift in predicted crown base height across habitat types; negative HAB values (shadier habitats) lower the predicted HCB.",
                     "initial_state": {},
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "HAB",
-                                "values": [0.0, -3.86, -4.24, -5.47]
+                                "values": [
+                                    0.0,
+                                    -3.86,
+                                    -4.24,
+                                    -5.47
+                                ]
                             }
                         ]
                     },
@@ -296,8 +374,14 @@
                             "id": "hcb_by_habitat",
                             "type": "line",
                             "description": "Predicted HCB over time (constant, since purely algebraic) for each of the four Stage (1973) habitat types. Demonstrates the habitat adjustment shift.",
-                            "x": {"variable": "t", "label": "time (s)"},
-                            "y": {"variable": "HCB_pred", "label": "HCB_pred (m)"}
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "HCB_pred",
+                                "label": "HCB_pred (m)"
+                            }
                         }
                     ]
                 },
@@ -305,13 +389,21 @@
                     "id": "hcb_vs_tree_height",
                     "description": "Sweep HT_input from 20 ft (6.096 m) to 120 ft (36.576 m) with default stand parameters and HAB=0. Shows the linear relationship between tree height and predicted crown base height (b_HCB_HT=0.61 ft/ft = 61% of height increments go to raising the crown base).",
                     "initial_state": {},
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "HT_input",
-                                "range": {"start": 6.096, "stop": 36.576, "count": 6, "scale": "linear"}
+                                "range": {
+                                    "start": 6.096,
+                                    "stop": 36.576,
+                                    "count": 6,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -320,8 +412,14 @@
                             "id": "hcb_vs_ht",
                             "type": "line",
                             "description": "Predicted HCB_pred (m) for tree heights from 20 ft to 120 ft. Linear response with slope b_HCB_HT = 0.61 ft/ft.",
-                            "x": {"variable": "t", "label": "time (s)"},
-                            "y": {"variable": "HCB_pred", "label": "HCB_pred (m)"}
+                            "x": {
+                                "variable": "t",
+                                "label": "time (s)"
+                            },
+                            "y": {
+                                "variable": "HCB_pred",
+                                "label": "HCB_pred (m)"
+                            }
                         }
                     ]
                 }

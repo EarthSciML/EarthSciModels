@@ -1,5 +1,5 @@
 {
-    "esm": "0.8.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "FuelModelLookup",
         "description": "Anderson (1982) 13 fuel-model parameter lookup: maps integer fuel model code (1–13) to the six Rothermel fire spread fuel properties (σ, w₀, δ, Mₓ, h, Tᶠ). Aggregates the six registered fuel_* functions (fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight) into a single observed-variable component. Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for σ, w₀, δ, Mₓ, and Tᶠ, and 0 J/kg for h. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:155 (`FuelModelLookup` @mtkmodel). Resolves the gt-p3ep blocking gap via ifelse + interp.linear for the five variable-valued properties and a simple ifelse for the constant heat content.",
@@ -44,10 +44,45 @@
                     "description": "Anderson 13 fuel model code (integer 1–13). Values outside this range (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for all properties except h, which returns 0 J/kg for out-of-range codes."
                 },
                 "sigma": {
-                    "type": "observed",
+                    "type": "unknown",
                     "units": "1/m",
-                    "description": "Surface-area-to-volume ratio σ of the fuel particle (m⁻¹). Anderson model 1 (short grass): 11482.94 m⁻¹ through model 13 (heavy slash): 3802.49 m⁻¹. Out-of-range codes return 11482.94 m⁻¹ (fuel model 1 default). Sourced from fuel_savr registered function.",
-                    "expression": {
+                    "description": "Surface-area-to-volume ratio σ of the fuel particle (m⁻¹). Anderson model 1 (short grass): 11482.94 m⁻¹ through model 13 (heavy slash): 3802.49 m⁻¹. Out-of-range codes return 11482.94 m⁻¹ (fuel model 1 default). Sourced from fuel_savr registered function."
+                },
+                "w_0": {
+                    "type": "unknown",
+                    "units": "kg/m^2",
+                    "description": "Oven-dry fuel load per unit area w₀ (kg/m²). Anderson model 1: 0.1660 kg/m² (light short-grass fuel); model 13 (heavy slash): 1.5721 kg/m². Out-of-range codes return 0.1660 kg/m² (fuel model 1 default). Sourced from fuel_load registered function."
+                },
+                "delta": {
+                    "type": "unknown",
+                    "units": "m",
+                    "description": "Fuel bed depth δ (m). Anderson model 1: 0.3048 m (1 ft, short grass); model 4 (chaparral): 1.8288 m (6 ft). Models 8 and 9 (closed/open timber litter): 0.06096 m (0.2 ft). Out-of-range codes return 0.3048 m (fuel model 1 default). Sourced from fuel_depth registered function."
+                },
+                "M_x": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Dead fuel moisture content of extinction Mₓ (dimensionless dry-weight-basis fraction). Ranges from 0.12 (model 1, short grass) to 0.40 (model 7, southern rough). Out-of-range codes return 0.12 (fuel model 1 default). Sourced from fuel_mce registered function."
+                },
+                "h": {
+                    "type": "unknown",
+                    "units": "J/kg",
+                    "description": "Low heat content of combustion h (J/kg). All 13 Anderson fuel models share h = 8000 BTU/lb = 18,608,000 J/kg (using 1 BTU/lb = 2326 J/kg). LANDFIRE non-burnable codes (91–99) and other out-of-range codes return 0 J/kg (no combustion). Sourced from fuel_heat registered function."
+                },
+                "T_f": {
+                    "type": "unknown",
+                    "units": "s",
+                    "description": "Fuel particle residence time Tᶠ (s), computed as the WRF-SFIRE weight constant divided by 0.8514. Codes 1–3 (grass): ≈ 8.22 s; code 4 (chaparral): ≈ 211.4 s; codes 5–7 (shrub): ≈ 29.4 s; codes 8–13 (timber/slash): ≈ 1057 s. Out-of-range codes return ≈ 8.22 s (fuel model 1 default). Sourced from fuel_weight registered function."
+                },
+                "wind_reduction": {
+                    "type": "unknown",
+                    "units": "1",
+                    "description": "Midflame wind adjustment factor (unsheltered fuel; Baughman & Albini 1980, Andrews 2012 RMRS-GTR-266): WAF = 1.83 / ln((6.096 + 0.36·δ)/(0.13·δ)), with δ the fuel-bed depth in METRES and 6.096 m = 20 ft (the reference wind height). This is the feet-form 1.83/ln((20+0.36·δ_ft)/(0.13·δ_ft)) rewritten in SI (multiply num & den by 0.3048) so it is dimensionally consistent. It is the ratio of the midflame wind to the 10 m (≈20 ft) wind: grass (δ=1 ft=0.305 m)→≈0.36, brush/chaparral (δ=6 ft=1.83 m)→≈0.55. Coupled to MidflameWind.wind_reduction to replace the former fixed 0.4, making the reduction fuel-dependent. δ floored at 0.01 m so the log stays finite for non-burnable codes (which carry h=0 → R0=0 anyway)."
+                }
+            },
+            "equations": [
+                {
+                    "lhs": "sigma",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -118,11 +153,9 @@
                         ]
                     }
                 },
-                "w_0": {
-                    "type": "observed",
-                    "units": "kg/m^2",
-                    "description": "Oven-dry fuel load per unit area w₀ (kg/m²). Anderson model 1: 0.1660 kg/m² (light short-grass fuel); model 13 (heavy slash): 1.5721 kg/m². Out-of-range codes return 0.1660 kg/m² (fuel model 1 default). Sourced from fuel_load registered function.",
-                    "expression": {
+                {
+                    "lhs": "w_0",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -193,11 +226,9 @@
                         ]
                     }
                 },
-                "delta": {
-                    "type": "observed",
-                    "units": "m",
-                    "description": "Fuel bed depth δ (m). Anderson model 1: 0.3048 m (1 ft, short grass); model 4 (chaparral): 1.8288 m (6 ft). Models 8 and 9 (closed/open timber litter): 0.06096 m (0.2 ft). Out-of-range codes return 0.3048 m (fuel model 1 default). Sourced from fuel_depth registered function.",
-                    "expression": {
+                {
+                    "lhs": "delta",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -268,11 +299,9 @@
                         ]
                     }
                 },
-                "M_x": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Dead fuel moisture content of extinction Mₓ (dimensionless dry-weight-basis fraction). Ranges from 0.12 (model 1, short grass) to 0.40 (model 7, southern rough). Out-of-range codes return 0.12 (fuel model 1 default). Sourced from fuel_mce registered function.",
-                    "expression": {
+                {
+                    "lhs": "M_x",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -343,11 +372,9 @@
                         ]
                     }
                 },
-                "h": {
-                    "type": "observed",
-                    "units": "J/kg",
-                    "description": "Low heat content of combustion h (J/kg). All 13 Anderson fuel models share h = 8000 BTU/lb = 18,608,000 J/kg (using 1 BTU/lb = 2326 J/kg). LANDFIRE non-burnable codes (91–99) and other out-of-range codes return 0 J/kg (no combustion). Sourced from fuel_heat registered function.",
-                    "expression": {
+                {
+                    "lhs": "h",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -374,11 +401,9 @@
                         ]
                     }
                 },
-                "T_f": {
-                    "type": "observed",
-                    "units": "s",
-                    "description": "Fuel particle residence time Tᶠ (s), computed as the WRF-SFIRE weight constant divided by 0.8514. Codes 1–3 (grass): ≈ 8.22 s; code 4 (chaparral): ≈ 211.4 s; codes 5–7 (shrub): ≈ 29.4 s; codes 8–13 (timber/slash): ≈ 1057 s. Out-of-range codes return ≈ 8.22 s (fuel model 1 default). Sourced from fuel_weight registered function.",
-                    "expression": {
+                {
+                    "lhs": "T_f",
+                    "rhs": {
                         "op": "ifelse",
                         "args": [
                             {
@@ -449,25 +474,58 @@
                         ]
                     }
                 },
-                "wind_reduction": {
-                    "type": "observed",
-                    "units": "1",
-                    "description": "Midflame wind adjustment factor (unsheltered fuel; Baughman & Albini 1980, Andrews 2012 RMRS-GTR-266): WAF = 1.83 / ln((6.096 + 0.36·δ)/(0.13·δ)), with δ the fuel-bed depth in METRES and 6.096 m = 20 ft (the reference wind height). This is the feet-form 1.83/ln((20+0.36·δ_ft)/(0.13·δ_ft)) rewritten in SI (multiply num & den by 0.3048) so it is dimensionally consistent. It is the ratio of the midflame wind to the 10 m (≈20 ft) wind: grass (δ=1 ft=0.305 m)→≈0.36, brush/chaparral (δ=6 ft=1.83 m)→≈0.55. Coupled to MidflameWind.wind_reduction to replace the former fixed 0.4, making the reduction fuel-dependent. δ floored at 0.01 m so the log stays finite for non-burnable codes (which carry h=0 → R0=0 anyway).",
-                    "expression": {
+                {
+                    "lhs": "wind_reduction",
+                    "rhs": {
                         "op": "/",
                         "args": [
                             1.83,
-                            { "op": "log", "args": [
-                                { "op": "/", "args": [
-                                    { "op": "+", "args": [ 6.096, { "op": "*", "args": [ 0.36, { "op": "max", "args": ["delta", 0.01] } ] } ] },
-                                    { "op": "*", "args": [ 0.13, { "op": "max", "args": ["delta", 0.01] } ] }
-                                ] }
-                            ] }
+                            {
+                                "op": "log",
+                                "args": [
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    6.096,
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            0.36,
+                                                            {
+                                                                "op": "max",
+                                                                "args": [
+                                                                    "delta",
+                                                                    0.01
+                                                                ]
+                                                            }
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    0.13,
+                                                    {
+                                                        "op": "max",
+                                                        "args": [
+                                                            "delta",
+                                                            0.01
+                                                        ]
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
                         ]
                     }
                 }
-            },
-            "equations": [],
+            ],
             "tests": [
                 {
                     "id": "code_1_short_grass_all_properties",
@@ -1053,7 +1111,7 @@
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "fuel_properties_vs_code",
                     "description": "Sweep fuel model codes 0–14 to visualise all six Rothermel fuel properties across the 13 Anderson models. Code 0 and 14 return the out-of-range defaults (fuel-model-1 for σ, w₀, δ, Mₓ, Tᶠ; 0 for h). The plots show the piecewise-constant lookup structure and the discontinuity in h at the boundary between burnable (codes 1–13) and non-burnable codes.",

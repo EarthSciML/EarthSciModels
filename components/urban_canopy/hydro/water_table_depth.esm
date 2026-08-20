@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "WaterTableDepth",
         "description": "Water table depth z_v as a function of unconfined-aquifer water storage W_a and the depth of the bottom soil interface z_h_bottom. Implements Oleson et al. (2010) CLM Tech Note Eq. 5.146 (p. 143) with hard clamps at z_v_min = 0.05 m and z_v_max = 80 m. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:743 (`WaterTableDepth` @component). Observed-only: z_h_bottom and W_a are parameters and z_v is given by a single algebraic equation.",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:743\nUpstream `WaterTableDepth` is an MTK `@component` whose two inputs (z_h_bottom, W_a) are `@parameters`, whose five `@constants` (S_y, z_v_min, z_v_max, z_offset, ρ_liq) are physical constants, and whose single output (z_v) is a time-indexed `@variable` with one algebraic equation. Identical structure preserved here.\n\nUpstream `@constants` are encoded as parameters with the upstream default values, mirroring the convention established by the sibling files in this directory (snow_compaction.esm, soil_water_content_calc.esm, interface_hydraulic_conductivity.esm). They are physical constants not intended to be tuned.\n\nUnicode `ρ_liq` is preserved from upstream — sibling files in this directory (soil_water_content_calc.esm, interface_hydraulic_conductivity.esm) already established that unicode identifiers are the rig convention for new urban_canopy migrations and the canonical Python runner accepts them.\n\nThe equation is the verbatim Eq. 5.146 form: z_v = clamp(z_h_bottom + z_offset - W_a / (ρ_liq * S_y), z_v_min, z_v_max), expressed as `max(z_v_min, min(z_v_max, ...))` to match the upstream Julia source ordering of the clamps. With W_a in kg/m² and ρ_liq in kg/m³, W_a/ρ_liq gives meters of equivalent water column; dividing by S_y (specific yield, dimensionless) converts to water-table depth contribution in m.\n\nObservability classification: this component is functionally observed-only — z_v is given by a single algebraic equation in the parameters. The `(t)` time index has no role since there is no derivative. Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_content_calc.esm, interface_hydraulic_conductivity.esm).\n\nDefault parameter values: z_h_bottom = 3.5 m and W_a = 4800 kg/m² are taken from the upstream `WaterTableDepth - Equation Verification` test fixture (UrbanCanopy.jl test/hydrology_test.jl:486). They yield the canonical mid-range value z_v = 3.5 + 25 - 4800/(1000*0.2) = 4.5 m, well within both clamp bounds — so the no-override default scenario evaluates the unclamped branch of Eq. 5.146 directly.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equation involves five IEEE-754 float64 operations (add, subtract, multiply, divide, two compare-selects), so worst-case roundoff is ~5*ULP ≈ 1e-15. 1e-9 leaves comfortable headroom and is well below any plausible physical-discrimination scale on water table depth (which spans ~3 orders of magnitude across the 0.05 m to 80 m clamp range and is typically known to ~1 cm in observations). Clamp tests assert tight equality (`abs: 1e-12`) since the clamp produces an exact algebraic value once active."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "S_y": {
@@ -74,7 +74,7 @@
                     "description": "Water stored in unconfined aquifer (kg/m^2; equivalent to mm of water column)"
                 },
                 "z_v": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "m",
                     "description": "Water table depth (Oleson Eq. 5.146)"
                 }
@@ -93,12 +93,24 @@
                                     {
                                         "op": "-",
                                         "args": [
-                                            { "op": "+", "args": ["z_h_bottom", "z_offset"] },
+                                            {
+                                                "op": "+",
+                                                "args": [
+                                                    "z_h_bottom",
+                                                    "z_offset"
+                                                ]
+                                            },
                                             {
                                                 "op": "/",
                                                 "args": [
                                                     "W_a",
-                                                    { "op": "*", "args": ["ρ_liq", "S_y"] }
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            "ρ_liq",
+                                                            "S_y"
+                                                        ]
+                                                    }
                                                 ]
                                             }
                                         ]
@@ -117,9 +129,16 @@
                         "z_h_bottom": 3.5,
                         "W_a": 4800.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 4.5 }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 4.5
+                        }
                     ]
                 },
                 {
@@ -129,9 +148,19 @@
                         "z_h_bottom": 3.5,
                         "W_a": 6000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 0.05, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 0.05,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -141,9 +170,16 @@
                         "z_h_bottom": 3.5,
                         "W_a": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 28.5 }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 28.5
+                        }
                     ]
                 },
                 {
@@ -153,9 +189,19 @@
                         "z_h_bottom": 100.0,
                         "W_a": 0.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 80.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 80.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -165,9 +211,16 @@
                         "z_h_bottom": 1.0,
                         "W_a": 2000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 16.0 }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 16.0
+                        }
                     ]
                 },
                 {
@@ -177,9 +230,16 @@
                         "z_h_bottom": 3.5,
                         "W_a": 3000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 13.5 }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 13.5
+                        }
                     ]
                 },
                 {
@@ -189,13 +249,23 @@
                         "z_h_bottom": 3.5,
                         "W_a": 5690.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "z_v", "time": 0.0, "expected": 0.05, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "z_v",
+                            "time": 0.0,
+                            "expected": 0.05,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "z_v_vs_W_a",
                     "description": "Water table depth vs. aquifer water storage at fixed z_h_bottom = 3.5 m. Reproduces the upstream qualitative-behavior plot (UrbanCanopy.jl test/hydrology_test.jl:917): sweeping W_a from 0 to 6000 kg/m² traces the linear branch of Eq. 5.146 from the upper region of the soil column through the lower-clamp activation at W_a ≈ 5690 kg/m².",
@@ -203,13 +273,21 @@
                     "parameters": {
                         "z_h_bottom": 3.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "W_a",
-                                "range": { "start": 0.0, "stop": 6000.0, "count": 25, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 6000.0,
+                                    "count": 25,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -218,8 +296,14 @@
                             "id": "z_v_vs_W_a_line",
                             "type": "line",
                             "description": "z_v vs W_a — linear decrease through the unclamped branch, then a flat segment once W_a exceeds ~5690 kg/m² and the lower clamp activates.",
-                            "x": { "variable": "W_a", "label": "W_a (kg/m^2)" },
-                            "y": { "variable": "z_v", "label": "z_v (m)" }
+                            "x": {
+                                "variable": "W_a",
+                                "label": "W_a (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "z_v",
+                                "label": "z_v (m)"
+                            }
                         }
                     ]
                 },
@@ -228,17 +312,30 @@
                     "description": "Joint sweep over W_a and z_h_bottom — surfaces the iso-z_v contours of Eq. 5.146 across the (aquifer storage, soil-column depth) plane. The unclamped branch is a plane in this space (z_v = z_h_bottom + 25 - W_a/200); the lower- and upper-clamp regions appear as flat plateaux at z_v = 0.05 m and z_v = 80 m respectively.",
                     "initial_state": {},
                     "parameters": {},
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "W_a",
-                                "range": { "start": 0.0, "stop": 6000.0, "count": 13, "scale": "linear" }
+                                "range": {
+                                    "start": 0.0,
+                                    "stop": 6000.0,
+                                    "count": 13,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "z_h_bottom",
-                                "range": { "start": 0.5, "stop": 5.0, "count": 10, "scale": "linear" }
+                                "range": {
+                                    "start": 0.5,
+                                    "stop": 5.0,
+                                    "count": 10,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -247,9 +344,18 @@
                             "id": "z_v_heatmap",
                             "type": "heatmap",
                             "description": "z_v as a function of aquifer storage and soil-column depth — diagonal iso-z_v contours in the unclamped region with horizontal plateaux where the lower clamp activates.",
-                            "x": { "variable": "W_a", "label": "W_a (kg/m^2)" },
-                            "y": { "variable": "z_h_bottom", "label": "z_h_bottom (m)" },
-                            "value": { "variable": "z_v", "reduce": "final" }
+                            "x": {
+                                "variable": "W_a",
+                                "label": "W_a (kg/m^2)"
+                            },
+                            "y": {
+                                "variable": "z_h_bottom",
+                                "label": "z_h_bottom (m)"
+                            },
+                            "value": {
+                                "variable": "z_v",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "FreezingPointDepression",
         "description": "Maximum liquid water content in a soil layer below the freezing point, following the supercooled-soil-water freezing-point depression treatment of Niu and Yang (2006). Below T_f, liquid coexists with ice via the matric-potential / latent-heat balance of Oleson et al. (2010) Eq. 4.58; above T_f, the layer holds the fully-saturated maximum Δz·θ_sat·ρ_liq. Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:949 (`FreezingPointDepression` @component). Parameterized as observed-only: T_i, θ_sat, Δz, ψ_sat, B_i, ρ_liq are inputs (parameters); w_liq_max is the algebraic output.",
@@ -32,7 +32,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:949\nUpstream `FreezingPointDepression` is an MTK `@component` whose six inputs (T_i, θ_sat, Δz, ψ_sat, B_i, ρ_liq) are `@parameters` and whose single output (w_liq_max) is a time-indexed `@variable` with one algebraic equation (Eq. 4.58 with an `ifelse` branch on T_i < T_f). Identical equation structure preserved here.\n\nThe upstream component declares four `@constants`: T_f (273.15 K), L_f (3.337e5 J/kg), g (9.80616 m/s^2), and one_ref (1.0, dimensionless reference for non-dimensionalization of the bracket prior to the fractional exponent). They are encoded here as parameters with the upstream values as `default`. one_ref is kept in the equation to maintain 1:1 fidelity with the upstream MTK unit-balancing pattern (the same convention used by snow_melt_no_layers.esm for its `zero_kgm2`/`zero_m` literals): the fractional exponent in Eq. 4.58 is well-defined only on a dimensionless argument, and one_ref makes the dimensional cancellation explicit to MTK's unit checker upstream.\n\nUnicode parameter names (Δz, θ_sat, ψ_sat, ρ_liq) are preserved from upstream — peer ESM components in this rig (snow_melt_no_layers.esm uses Δt, snow_density.esm uses ρ_*) already use unicode in identifiers and the schema's identifier pattern allows it.\n\nThe upstream comment maps the equation to CLM Tech Note Eq. 4.58 and notes a unit subtlety: the paper uses ψ_sat in mm but the upstream component takes ψ_sat in SI (m); the 10^3 mm→m conversion factor is absorbed (so no factor-of-1000 appears in the equation). ψ_sat is conventionally negative (soil matric potential); the equation negates it to keep the base of the fractional exponent positive. These are preserved in the equation as-is.\n\nObservability classification: this component is functionally observed-only — the single output variable is given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (snow_melt_no_layers.esm, total_phase_change_energy.esm, ideal_gas.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only single-equation algebraic system (no ODE integration); the Eq. 4.58 evaluation is a chain of multiplies/divides plus one fractional-power call. Roundoff is at the ULP level (~1e-16) for the multiplicative parts and ~1e-15 for `pow`. 1e-9 leaves comfortable headroom and matches sibling temps files (total_phase_change_energy.esm uses 1e-9). Tighter `abs: 1e-12` is asserted on the `ifelse`-else branch outputs (T_i > T_f cases) where the value reduces to the exact product Δz·θ_sat·ρ_liq with no fractional-power term — the assertion would not silently accept a stuck-at-1e-3 regression. Reference values one-shot generated from the canonical formula (identical to upstream MTK eq.) to IEEE-754 double precision.\n\nThe `T_i = T_f` exact-boundary cannot be tested through the canonical Python runner: the runner's sympy.Piecewise eagerly evaluates both branches symbolically, and at T_i = T_f the cold branch's bracket is 0 raised to the negative power -1/B_i — undefined. The upstream Julia MTK runtime ifelse only evaluates the selected branch and is unaffected. To still anchor the boundary convention (the upstream uses strict `<`, so equality belongs to the saturated `else` branch), the test pair `epsilon_below_freezing` (T_i = 273.149, cold branch, 191.4 kg/m^2) and `just_above_freezing` (T_i = 273.151, else branch, exactly 200 kg/m^2) brackets the boundary at the 1-mK scale — tight enough to detect any swap of `<` and `≤`."
             },
             "tolerance": {
-                "rel": 1.0e-9
+                "rel": 1e-09
             },
             "variables": {
                 "T_i": {
@@ -80,7 +80,7 @@
                 "L_f": {
                     "type": "parameter",
                     "units": "J/kg",
-                    "default": 3.337e5,
+                    "default": 333700.0,
                     "description": "Latent heat of fusion of water (Oleson et al. 2010 Table 1.4 — 3.337e5 J/kg)"
                 },
                 "g": {
@@ -96,7 +96,7 @@
                     "description": "Dimensionless reference for non-dimensionalization of the bracket in Eq. 4.58 prior to the fractional exponent — preserved 1:1 from upstream MTK unit-balancing pattern"
                 },
                 "w_liq_max": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg/m^2",
                     "description": "Maximum liquid water content when T_i < T_f (Oleson Eq. 4.58); above T_f equals fully-saturated Δz·θ_sat·ρ_liq"
                 }
@@ -107,14 +107,26 @@
                     "rhs": {
                         "op": "ifelse",
                         "args": [
-                            { "op": "<", "args": ["T_i", "T_f"] },
+                            {
+                                "op": "<",
+                                "args": [
+                                    "T_i",
+                                    "T_f"
+                                ]
+                            },
                             {
                                 "op": "*",
                                 "args": [
                                     {
                                         "op": "*",
                                         "args": [
-                                            { "op": "*", "args": ["Δz", "θ_sat"] },
+                                            {
+                                                "op": "*",
+                                                "args": [
+                                                    "Δz",
+                                                    "θ_sat"
+                                                ]
+                                            },
                                             "ρ_liq"
                                         ]
                                     },
@@ -131,14 +143,31 @@
                                                                 "op": "*",
                                                                 "args": [
                                                                     "L_f",
-                                                                    { "op": "-", "args": ["T_f", "T_i"] }
+                                                                    {
+                                                                        "op": "-",
+                                                                        "args": [
+                                                                            "T_f",
+                                                                            "T_i"
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             },
                                                             {
                                                                 "op": "*",
                                                                 "args": [
-                                                                    { "op": "*", "args": ["g", "T_i"] },
-                                                                    { "op": "-", "args": ["ψ_sat"] }
+                                                                    {
+                                                                        "op": "*",
+                                                                        "args": [
+                                                                            "g",
+                                                                            "T_i"
+                                                                        ]
+                                                                    },
+                                                                    {
+                                                                        "op": "-",
+                                                                        "args": [
+                                                                            "ψ_sat"
+                                                                        ]
+                                                                    }
                                                                 ]
                                                             }
                                                         ]
@@ -146,7 +175,13 @@
                                                     "one_ref"
                                                 ]
                                             },
-                                            { "op": "/", "args": [-1, "B_i"] }
+                                            {
+                                                "op": "/",
+                                                "args": [
+                                                    -1,
+                                                    "B_i"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -154,7 +189,13 @@
                             {
                                 "op": "*",
                                 "args": [
-                                    { "op": "*", "args": ["Δz", "θ_sat"] },
+                                    {
+                                        "op": "*",
+                                        "args": [
+                                            "Δz",
+                                            "θ_sat"
+                                        ]
+                                    },
                                     "ρ_liq"
                                 ]
                             }
@@ -174,9 +215,19 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 200.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 200.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -190,9 +241,19 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 200.0, "tolerance": { "abs": 1.0e-12 } }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 200.0,
+                            "tolerance": {
+                                "abs": 1e-12
+                            }
+                        }
                     ]
                 },
                 {
@@ -206,9 +267,16 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 34.71683367120432 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 34.71683367120432
+                        }
                     ]
                 },
                 {
@@ -222,9 +290,16 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 48.04190466488627 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 48.04190466488627
+                        }
                     ]
                 },
                 {
@@ -238,9 +313,16 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 30.109200535801378 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 30.109200535801378
+                        }
                     ]
                 },
                 {
@@ -254,9 +336,16 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 26.00926841246697 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 26.00926841246697
+                        }
                     ]
                 },
                 {
@@ -270,9 +359,16 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 191.39847463987002 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 191.39847463987002
+                        }
                     ]
                 },
                 {
@@ -286,9 +382,16 @@
                         "B_i": 10.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 216.5293359874589 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 216.5293359874589
+                        }
                     ]
                 },
                 {
@@ -302,13 +405,20 @@
                         "B_i": 3.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "w_liq_max", "time": 0.0, "expected": 0.7518766309616047 }
+                        {
+                            "variable": "w_liq_max",
+                            "time": 0.0,
+                            "expected": 0.7518766309616047
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "w_liq_max_vs_T_i",
                     "description": "Sweep T_i across the full supercooled-soil-water regime — from 250 K (deep freeze) through 273.15 (T_f boundary) and into 280 K (above freezing). Reproduces the canonical Niu-Yang (2006) supercooled-water curve: w_liq_max rises monotonically with T_i in the cold branch, hits a discontinuity at T_f (the ifelse boundary), and plateaus at Δz·θ_sat·ρ_liq above freezing.",
@@ -320,13 +430,21 @@
                         "B_i": 5.0,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_i",
-                                "range": { "start": 250.0, "stop": 280.0, "count": 31, "scale": "linear" }
+                                "range": {
+                                    "start": 250.0,
+                                    "stop": 280.0,
+                                    "count": 31,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -335,8 +453,14 @@
                             "id": "w_liq_max_curve",
                             "type": "line",
                             "description": "w_liq_max vs T_i: smooth rise in the supercooled-water branch (T_i < T_f), discontinuity at T_f = 273.15 K (ifelse boundary), plateau at 200 kg/m^2 above T_f.",
-                            "x": { "variable": "T_i",       "label": "T_i (K)" },
-                            "y": { "variable": "w_liq_max", "label": "w_liq,max (kg/m^2)" }
+                            "x": {
+                                "variable": "T_i",
+                                "label": "T_i (K)"
+                            },
+                            "y": {
+                                "variable": "w_liq_max",
+                                "label": "w_liq,max (kg/m^2)"
+                            }
                         }
                     ]
                 },
@@ -351,13 +475,21 @@
                         "ψ_sat": -0.1,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "B_i",
-                                "range": { "start": 3.0, "stop": 12.0, "count": 19, "scale": "linear" }
+                                "range": {
+                                    "start": 3.0,
+                                    "stop": 12.0,
+                                    "count": 19,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -366,8 +498,14 @@
                             "id": "w_liq_max_vs_B_curve",
                             "type": "line",
                             "description": "w_liq_max vs B_i at T_i = 263.15 K: monotone rise toward the saturated max as B_i increases — the (-1/B_i) exponent → 0 limit.",
-                            "x": { "variable": "B_i",       "label": "B_i (dimensionless)" },
-                            "y": { "variable": "w_liq_max", "label": "w_liq,max (kg/m^2)" }
+                            "x": {
+                                "variable": "B_i",
+                                "label": "B_i (dimensionless)"
+                            },
+                            "y": {
+                                "variable": "w_liq_max",
+                                "label": "w_liq,max (kg/m^2)"
+                            }
                         }
                     ]
                 },
@@ -381,17 +519,30 @@
                         "ψ_sat": -0.1,
                         "ρ_liq": 1000.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "T_i",
-                                "range": { "start": 250.0, "stop": 273.0, "count": 12, "scale": "linear" }
+                                "range": {
+                                    "start": 250.0,
+                                    "stop": 273.0,
+                                    "count": 12,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "B_i",
-                                "range": { "start": 3.0, "stop": 12.0, "count": 10, "scale": "linear" }
+                                "range": {
+                                    "start": 3.0,
+                                    "stop": 12.0,
+                                    "count": 10,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -400,9 +551,18 @@
                             "id": "w_liq_max_surface",
                             "type": "heatmap",
                             "description": "w_liq_max as a function of T_i (cold branch) and B_i: the supercooled-water response surface per Eq. 4.58, monotone in both axes.",
-                            "x": { "variable": "T_i",       "label": "T_i (K)" },
-                            "y": { "variable": "B_i",       "label": "B_i (dimensionless)" },
-                            "value": { "variable": "w_liq_max", "reduce": "final" }
+                            "x": {
+                                "variable": "T_i",
+                                "label": "T_i (K)"
+                            },
+                            "y": {
+                                "variable": "B_i",
+                                "label": "B_i (dimensionless)"
+                            },
+                            "value": {
+                                "variable": "w_liq_max",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

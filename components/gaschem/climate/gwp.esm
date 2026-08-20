@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "GlobalWarmingPotential",
         "description": "Global Warming Potential (GWP) for atmospheric trace species with first-order exponential-decay perturbation lifetimes (Seinfeld & Pandis 2006 Ch. 23, Eqs. 23.5-23.6 and Problem 23.3, p. 1050). The GWP is defined as the ratio of the time-integrated radiative forcing from a pulse emission of 1 kg of species A to that of 1 kg of CO₂ over a specified time horizon t_f. For species whose atmospheric perturbation decays exponentially as exp(-t/τ_A), the time-integrated forcing reduces to the closed-form expression τ_A · (1 - exp(-t_f/τ_A)), so the GWP becomes GWP = a_A · τ_A · (1 - exp(-t_f/τ_A)) / [a_CO2 · τ_CO2 · (1 - exp(-t_f/τ_CO2))]. The component is observed-only: five algebraic equations on five state variables (decay_integral_A, decay_integral_CO2, AGWP_A, AGWP_CO2, GWP) driven by three input parameters (τ_A the species lifetime, a_A the radiative efficiency relative to CO₂, t_f the time horizon) and two CO₂-reference constants (τ_CO2 the effective CO₂ lifetime, a_CO2 the reference radiative efficiency). No time derivatives, no PDE, no coupling. Migrated from GasChem.jl@280ee50f src/climate_forcing.jl:182 (`GlobalWarmingPotential` @component). The GWP framework is the IPCC standard for comparing the climate impact of different greenhouse gases on a common (CO₂-equivalent) scale and underlies the conversion between mass emissions of CH₄, N₂O, halocarbons, and other well-mixed GHGs to their CO₂-equivalent emissions for policy and inventory accounting. Canonical GWP₁₀₀ values (IPCC AR4 Table 23.1, S&P p. 1042): CH₄ ≈ 23, N₂O ≈ 296, SF₆ ≈ 22800 — the framework's three-order-of-magnitude span anchors the design choice of representing GWP as a derived ratio rather than a hardcoded table.",
@@ -31,7 +31,7 @@
                 "notes": "source_ref: GasChem.jl@280ee50fbc8fb6d8bdf4b12c9ef1c506fe890551:src/climate_forcing.jl:182\n\nUpstream `GlobalWarmingPotential` is an MTK `@component` declaring two `@constants` (`τ_CO2` = 150·yr·s ≈ 4.7336e9 s, the effective CO₂ atmospheric lifetime per S&P p. 1043 assumed value, and `a_CO2` = 1.0, the reference radiative efficiency of CO₂ — normalized so the GWP ratio is dimensionless), three `@parameters` (`τ_A` with no upstream default — the atmospheric lifetime of species A, `a_A` with no upstream default — the radiative efficiency of species A relative to CO₂, and `t_f` = 100·yr·s ≈ 3.1558e9 s, the time horizon for the GWP integration), five time-indexed `@variables` (`GWP` the global warming potential ratio, `AGWP_A` and `AGWP_CO2` the absolute GWPs of species A and CO₂, `decay_integral_A` and `decay_integral_CO2` the exponential-decay time integrals — all algebraic with no derivative), and five algebraic equations (`decay_integral_A ~ τ_A · (1 - exp(-t_f/τ_A))`, `decay_integral_CO2 ~ τ_CO2 · (1 - exp(-t_f/τ_CO2))`, `AGWP_A ~ a_A · decay_integral_A`, `AGWP_CO2 ~ a_CO2 · decay_integral_CO2`, `GWP ~ AGWP_A / AGWP_CO2`). Identical structure preserved here. Upstream structural test (`GlobalWarmingPotential structural verification`, test/climate_forcing_test.jl:148-158) asserts `length(equations(sys)) == 5` and that `GWP` and `AGWP_A` are in the unknowns list — matched here by the five entries in `equations` and the GWP / AGWP_A entries typed as `state` in `variables`.\n\nThe two upstream `@constants` (`τ_CO2`, `a_CO2`) are encoded here as `type: parameter` with the upstream default values, matching the rig-wide convention used by sibling .esm migrations (wien.esm at components/gaschem/radiation/wien.esm encodes its `b` `@constants` the same way; chapman.esm at components/gaschem/stratospheric/chapman.esm encodes its four `@constants` k2_A/k4_A/C_k4/T_ref the same way). This makes the CO₂-reference values overridable from a downstream consumer's `parameter_overrides` block — useful for sensitivity studies that probe the assumed CO₂ lifetime (the 150-yr value is a simplification — the actual CO₂ removal involves multiple coupled reservoir timescales from ~5 yr to >1000 yr, not a single first-order decay, so the upstream choice is an effective-lifetime stand-in noted on S&P p. 1043). The three upstream `@parameters` (`τ_A`, `a_A`, `t_f`) are also `type: parameter` with the canonical CO₂ self-reference defaults: τ_A = 150·yr·s = τ_CO2 and a_A = 1.0 = a_CO2 so that the default-parameter run gives GWP = 1.0 exactly (the CO₂ self-reference scenario from the upstream test at test/climate_forcing_test.jl:160-179). This default choice differs from the upstream MTK model (which leaves τ_A and a_A unbound), but is the natural way to make the component runnable without overrides; downstream consumers will always override τ_A and a_A to the species-specific values (CH₄ at τ=12 yr / a=140, N₂O at τ=114 yr / a=326, SF₆ at τ≈3200 yr / a≈22000, etc.).\n\nObservability classification: this component is observed-only — every output variable is given by a single algebraic equation in the inputs (no time derivative, the `(t)` time index has no role since there is no `D(·)` operator in any of the five equations). Test scenarios use `time_span: [0.0, 1.0]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (wien.esm at components/gaschem/radiation/wien.esm, typical.esm at components/gaschem/combined/typical.esm, slip.esm at components/aerosol/particle_dyn/slip.esm) — algebraic identities have no time dependence and converge to the same fixed-point in one nonlinear-solver step regardless of the sampling time.\n\nPhysics structure: the GWP framework (S&P §23.3) defines AGWP_A = ∫₀^{tf} a_A(t)·`[A](t)` dt where `[A](t)` is the time-evolving concentration perturbation from a 1 kg pulse emission and a_A is the instantaneous radiative efficiency. For species with first-order exponential decay `[A](t)` ∝ exp(-t/τ_A) and constant radiative efficiency a_A, the integral collapses analytically to AGWP_A = a_A · τ_A · (1 - exp(-t_f/τ_A)) — the τ·(1-exp(-tf/τ)) factor is the time-integrated exponential-decay normalization that appears in both the species-A and CO₂-reference paths. The GWP ratio (Problem 23.3 closed form) is the dimensionless ratio AGWP_A / AGWP_CO2, designed so that GWP_CO2 ≡ 1 by construction (independent of t_f) — anchoring the upstream CO2 self-reference test which asserts GWP = 1 at any time horizon when τ_A = τ_CO2 and a_A = a_CO2.\n\nNumerical defaults (S&P Ch. 23 IPCC AR4 baseline, with CO₂ self-reference for τ_A and a_A):\n  τ_CO2 = 150·yr·s = 4733640000.0 s   (Effective CO₂ atmospheric lifetime, S&P p. 1043)\n  a_CO2 = 1.0                          (Reference radiative efficiency, normalized)\n  τ_A   = 150·yr·s = 4733640000.0 s   (Species lifetime, defaults to τ_CO2 → CO₂ self-reference)\n  a_A   = 1.0                          (Radiative efficiency relative to CO₂, defaults to a_CO2 → CO₂ self-reference)\n  t_f   = 100·yr·s = 3155760000.0 s   (Time horizon, S&P canonical 100-yr default)\nNote yr_to_s = 365.25 · 24 · 3600 = 31557600.0 s is the IUPAC Julian year used throughout the upstream Julia code and reproduced exactly here.\nAt these defaults:\n  decay_integral_A   = 4733640000.0 · (1 - exp(-100/150)) = 4733640000.0 · 0.4865829442... = 2303308188.662561 s\n  decay_integral_CO2 = (same — τ_A = τ_CO2)                                              = 2303308188.662561 s\n  AGWP_A             = 1.0 · 2303308188.662561                                            = 2303308188.662561 s\n  AGWP_CO2           = 1.0 · 2303308188.662561                                            = 2303308188.662561 s\n  GWP                = 2303308188.662561 / 2303308188.662561                              = 1.0\nThis matches the upstream `GlobalWarmingPotential CO2 self-reference` test (test/climate_forcing_test.jl:160-179) which asserts GWP = 1.0 at rtol=1e-6 for τ_A=150yr, a_A=1, across t_f ∈ {20, 100, 500} years.\n\nUpstream test reproduction:\n- The upstream `GlobalWarmingPotential structural verification` test (test/climate_forcing_test.jl:148-158) asserts the system has 5 equations and both GWP and AGWP_A are unknowns — reproduced by the .esm structural shape (5 entries in `equations`, GWP and AGWP_A typed as `state` along with AGWP_CO2, decay_integral_A, decay_integral_CO2).\n- The upstream `GlobalWarmingPotential CO2 self-reference` test (test/climate_forcing_test.jl:160-179) asserts GWP = 1.0 at rtol=1e-6 for τ_A=150·yr·s, a_A=1, at three time horizons t_f ∈ {20, 100, 500}·yr·s. Reproduced by `co2_self_reference_t_f_20yr`, `co2_self_reference_t_f_100yr`, `co2_self_reference_t_f_500yr` — three .esm tests pinning GWP = 1.0 at rel=1e-10 (tighter than upstream rtol=1e-6 because the algebra of the @component is a closed-form division of two identical floating-point values, exact to within 0 ULP — IEEE-754 floating-point division of x/x is exactly 1.0 for any finite non-zero x).\n- The upstream `GlobalWarmingPotential CH4 estimate` test (test/climate_forcing_test.jl:181-194) asserts the pure helper function `GWP_exponential(12, 140, 100)` ≈ 23 at rtol=0.1 (within 10% of IPCC tabulated GWP₁₀₀ for CH₄). The pure helper is a Julia-only artifact (the .esm spec has no helper functions), so the CH₄ scenario is reproduced via the @component by binding τ_A=12·yr·s, a_A=140, t_f=100·yr·s in `ch4_100yr_gwp` and pinning GWP = 23.012128662648355 at rel=1e-10. (The exact pinned value vs the IPCC AR4 tabulated 23 reflects the difference between the upstream 4-digit-rounded τ_CO2 = 150 yr / a_CO2 = 1 closed-form and the IPCC TAR atmospheric-chemistry model used for the AR4 table — within the upstream's stated 10% policy bound.)\n- The upstream `GlobalWarmingPotential time horizon dependence` test (test/climate_forcing_test.jl:196-221) asserts that for short-lived species (τ=2 yr) the GWP decreases with increasing t_f and for long-lived species (τ=10000 yr) the GWP increases with t_f. The .esm runner does not directly support cross-test monotonicity assertions; reproduced here by pinning all six absolute GWP values at rel=1e-10 across the (τ ∈ {2, 10000} yr) × (t_f ∈ {20, 100, 500} yr) Cartesian grid in `short_lived_tau_2yr_t_f_{20,100,500}yr` and `long_lived_tau_10000yr_t_f_{20,100,500}yr` — by the analytic monotonicity of τ·(1-exp(-tf/τ))/τ_CO2·(1-exp(-tf/τ_CO2)) in t_f (the function is strictly monotone decreasing in t_f when τ < τ_CO2 and strictly increasing when τ > τ_CO2), the cross-test inequalities are exact under the closed-form division.\n- The upstream `GWP_exponential function` test (test/climate_forcing_test.jl:223-237) asserts (i) GWP_exponential(150, 1, 100) = 1.0 at rtol=1e-10 (already covered by `co2_self_reference_t_f_100yr`); (ii) GWP_exponential(0.001, 1, 100) < 0.01 (very short-lived → GWP → 0); (iii) GWP_exponential(1e6, 1, 100) ≈ 100/(150·(1-exp(-100/150))) at rtol=0.01 (very long-lived → GWP → asymptotic limit a_A·t_f/AGWP_CO2). Reproduced via the @component by binding τ_A to the limit values in `very_short_lived_tau_0p001yr` (pins GWP = 1.3700988932064815e-05 at rel=1e-10) and `very_long_lived_tau_1e6yr` (pins GWP = 1.3700303905452804 at rel=1e-10).\n- The upstream `N2O GWP estimate` test (test/climate_forcing_test.jl:239-249) asserts GWP_exponential(114, 326, 100) ≈ 296 at rtol=0.1 (within 10% of IPCC tabulated GWP₁₀₀ for N₂O). Reproduced via the @component by binding τ_A=114·yr·s, a_A=326, t_f=100·yr·s in `n2o_100yr_gwp` and pinning GWP = 297.3892393811234 at rel=1e-10. (The exact pinned value matches the IPCC AR4 tabulated 296 ± 10%.)\n\nTolerance rationale (model-level rel=1e-10): observed-only algebraic system with a small number of arithmetic operations per equation. Each equation evaluates one of {division, multiplication, subtraction, exp()}; the worst-case error path is the exp() in the decay-integral equation, which is IEEE-754 correctly-rounded to within ~1 ULP ≈ 1e-16 relative at any of the tested magnitudes (decay_integrals range from ~3e4 s at τ_A=0.001·yr to ~5e9 s at τ_A=500·yr, with GWPs spanning 1e-5 to 3e2). 1e-10 leaves 6 orders of magnitude of headroom over the IEEE-754 floor and matches the convention used by sibling algebraic .esm files in this rig (wien.esm at rel=1e-10, typical.esm at rel=1e-10, slip.esm at rel=1e-9). The upstream Julia tests use rtol=1e-6 (CO₂ self-reference structural check), rtol=0.1 (CH₄ and N₂O policy-tolerance bound), rtol=1e-10 (GWP_exponential self-consistency identity), and rtol=0.01 (very-long-lived asymptotic limit) — re-asserted here at the uniform model-level rel=1e-10 which is tighter than upstream for the structural and policy-bound tests and matches upstream for the identity/asymptotic tests.\n\nUnit balance (verified): all five equations balance dimensionally.\n  `decay_integral_A ~ τ_A · (1 - exp(-t_f/τ_A))`: s · (1 - exp(s/s)) = s · dimensionless = s ✓\n  `decay_integral_CO2 ~ τ_CO2 · (1 - exp(-t_f/τ_CO2))`: s · dimensionless = s ✓\n  `AGWP_A ~ a_A · decay_integral_A`: dimensionless · s = s ✓ (matches AGWP_A unit `u\"s\"`)\n  `AGWP_CO2 ~ a_CO2 · decay_integral_CO2`: dimensionless · s = s ✓\n  `GWP ~ AGWP_A / AGWP_CO2`: s / s = dimensionless ✓ (matches GWP unit `u\"1\"`)\nThe migrated `.esm` preserves the upstream units verbatim — all timescales (τ_A, τ_CO2, t_f, decay_integrals, AGWPs) in SI seconds, all radiative-efficiency ratios (a_A, a_CO2, GWP) dimensionless. SI throughout; no unit conversion at parse or runtime."
             },
             "tolerance": {
-                "rel": 1.0e-10
+                "rel": 1e-10
             },
             "variables": {
                 "τ_CO2": {
@@ -65,27 +65,27 @@
                     "description": "Time horizon for the GWP calculation (S&P §23.3). The upstream default 100·yr·s = 100 · 31557600 = 3155760000.0 s is the IPCC AR4 canonical 100-year reporting horizon for the GWP₁₀₀ values published in policy frameworks (Kyoto Protocol, Paris Agreement Annex B). Three time horizons are commonly reported: 20-yr (short-term policy / methane emphasis), 100-yr (canonical reporting / Kyoto), 500-yr (long-term policy / N₂O emphasis). The choice of t_f has a large effect on the GWP for species whose lifetime is dissimilar from τ_CO2: short-lived species (CH₄ at τ ≈ 12 yr) have larger GWP at shorter t_f because their integrated forcing is concentrated in the first decade while CO₂'s is spread over centuries (CH₄ GWP₂₀ ≈ 72 vs GWP₁₀₀ ≈ 23 vs GWP₅₀₀ ≈ 7); long-lived species (SF₆ at τ ≈ 3200 yr) have larger GWP at longer t_f because their integrated forcing keeps accumulating after CO₂'s has saturated."
                 },
                 "decay_integral_A": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s",
                     "description": "Time integral of the exponential-decay impulse-response function for species A (S&P §23.3, exponential-decay closed form). Equals τ_A · (1 - exp(-t_f/τ_A)) which is the analytic closed form for ∫₀^{tf} exp(-t/τ_A) dt — the dimensional factor that converts the instantaneous radiative efficiency a_A into the integrated absolute GWP. Limiting behavior: as t_f → ∞ the integral approaches τ_A (the species reaches its full atmospheric inventory); as t_f → 0 the integral approaches t_f (the species hasn't decayed yet); for t_f = τ_A the integral equals τ_A · (1 - 1/e) ≈ 0.632 · τ_A. The integrand exp(-t/τ_A) is the normalized impulse response of a pure first-order decay process — accurate for species with a single dominant removal mechanism (CH₄ via OH oxidation, N₂O via stratospheric photolysis, halocarbons via stratospheric photolysis + OH), inaccurate for species with multiple competing removal timescales (CO₂'s ocean-uptake / land-uptake / deep-ocean-uptake cascade — handled by the effective-lifetime stand-in)."
                 },
                 "decay_integral_CO2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s",
                     "description": "Time integral of the exponential-decay impulse-response function for CO₂ (S&P §23.3, exponential-decay closed form). Equals τ_CO2 · (1 - exp(-t_f/τ_CO2)) which is the analytic closed form for ∫₀^{tf} exp(-t/τ_CO2) dt — the CO₂-reference denominator of the GWP ratio. At the upstream τ_CO2 = 150·yr·s default, decay_integral_CO2 saturates slowly with t_f: at t_f=20 yr the integral is 590884570.0455421 s (about 12.5% of τ_CO2 — only the first 13 years of CO₂'s integrated forcing have accumulated), at t_f=100 yr it is 2303308188.662561 s (about 49% of τ_CO2), at t_f=500 yr it is 4564772158.131712 s (about 96% of τ_CO2 — nearly saturated)."
                 },
                 "AGWP_A": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s",
                     "description": "Absolute Global Warming Potential of species A (S&P Eq. 23.6). Equals a_A · decay_integral_A = a_A · τ_A · (1 - exp(-t_f/τ_A)). The units (s) reflect the time-integration; the dimensionless a_A and the seconds τ_A multiply to give an integrated forcing with units of (a_A_units · s) which the GWP ratio then cancels against AGWP_CO2 to produce the dimensionless GWP. The 'absolute' qualifier distinguishes AGWP from the normalized GWP ratio: AGWP carries the absolute integrated radiative forcing magnitude (which can be scaled to physical W/m²·yr by multiplying by the absolute CO₂ radiative efficiency of ~1.4e-15 W/m²/molec), while GWP is a dimensionless comparison ratio that abstracts away the absolute scale."
                 },
                 "AGWP_CO2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s",
                     "description": "Absolute Global Warming Potential of CO₂ (S&P Eq. 23.6). Equals a_CO2 · decay_integral_CO2 = a_CO2 · τ_CO2 · (1 - exp(-t_f/τ_CO2)). At the upstream defaults (a_CO2 = 1, τ_CO2 = 150·yr·s, t_f = 100·yr·s), AGWP_CO2 = 2303308188.662561 s. AGWP_CO2 is the CO₂-reference denominator of the GWP ratio — its magnitude alone has no physical interpretation (the absolute CO₂ scale is set to 1 by convention), but its variation with t_f and τ_CO2 directly determines how the GWP ratio responds to those parameters."
                 },
                 "GWP": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Global Warming Potential of species A relative to CO₂ (S&P Eq. 23.5 / Problem 23.3). Equals AGWP_A / AGWP_CO2 = a_A · τ_A · (1 - exp(-t_f/τ_A)) / [a_CO2 · τ_CO2 · (1 - exp(-t_f/τ_CO2))]. Dimensionless by construction. The canonical GWP₁₀₀ table from IPCC AR4 (S&P p. 1042) reports CH₄ ≈ 23 (medium-lived, OH-removed), N₂O ≈ 296 (long-lived, stratospheric photolysis-removed), SF₆ ≈ 22800 (very-long-lived, only stratospheric photolysis removal), HFC-23 ≈ 14800, CFC-12 ≈ 10900. The three-order-of-magnitude span anchors the policy design choice of representing GWP as a derived ratio rather than a hardcoded table — different t_f horizons or different τ_CO2 assumptions give different GWP values for the same species, and the ratio expression makes those sensitivities explicit. By construction GWP_CO2 = 1 at any (t_f, τ_CO2) when τ_A = τ_CO2 and a_A = 1."
                 }
@@ -107,7 +107,13 @@
                                             {
                                                 "op": "/",
                                                 "args": [
-                                                    {"op": "*", "args": [-1, "t_f"]},
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1,
+                                                            "t_f"
+                                                        ]
+                                                    },
                                                     "τ_A"
                                                 ]
                                             }
@@ -134,7 +140,13 @@
                                             {
                                                 "op": "/",
                                                 "args": [
-                                                    {"op": "*", "args": [-1, "t_f"]},
+                                                    {
+                                                        "op": "*",
+                                                        "args": [
+                                                            -1,
+                                                            "t_f"
+                                                        ]
+                                                    },
                                                     "τ_CO2"
                                                 ]
                                             }
@@ -149,21 +161,30 @@
                     "lhs": "AGWP_A",
                     "rhs": {
                         "op": "*",
-                        "args": ["a_A", "decay_integral_A"]
+                        "args": [
+                            "a_A",
+                            "decay_integral_A"
+                        ]
                     }
                 },
                 {
                     "lhs": "AGWP_CO2",
                     "rhs": {
                         "op": "*",
-                        "args": ["a_CO2", "decay_integral_CO2"]
+                        "args": [
+                            "a_CO2",
+                            "decay_integral_CO2"
+                        ]
                     }
                 },
                 {
                     "lhs": "GWP",
                     "rhs": {
                         "op": "/",
-                        "args": ["AGWP_A", "AGWP_CO2"]
+                        "args": [
+                            "AGWP_A",
+                            "AGWP_CO2"
+                        ]
                     }
                 }
             ],
@@ -172,13 +193,51 @@
                     "id": "co2_self_reference_t_f_100yr",
                     "description": "Default scenario: CO₂ self-reference at the upstream t_f = 100·yr·s canonical reporting horizon. With τ_A = τ_CO2 = 4733640000.0 s and a_A = a_CO2 = 1.0, the GWP equation simplifies to AGWP_A / AGWP_CO2 = (1·τ_CO2·X) / (1·τ_CO2·X) = 1.0 exactly where X = 1 - exp(-100/150) ≈ 0.4865829442 is the common decay-integral factor. Reproduces the upstream `GlobalWarmingPotential CO2 self-reference` test (GasChem.jl test/climate_forcing_test.jl:160-179) middle case (t_f = 100 yr): upstream asserts GWP ≈ 1.0 at rtol=1e-6, this one pins GWP = 1.0 (exact IEEE-754 1.0 from x/x division at rel=1e-10) along with the intermediate-state values that anchor the structural regression-detection signal at all five state variables.",
                     "parameter_overrides": {},
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -187,13 +246,51 @@
                     "parameter_overrides": {
                         "t_f": 631152000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -202,13 +299,51 @@
                     "parameter_overrides": {
                         "t_f": 15778800000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -218,13 +353,51 @@
                         "τ_A": 378691200.0,
                         "a_A": 140.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 23.012128662648355, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 53004024387.23438, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 378600174.1945313, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 23.012128662648355,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 53004024387.23438,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 378600174.1945313,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -234,13 +407,51 @@
                         "τ_A": 3597566400.0,
                         "a_A": 326.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 297.3892393811234, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 684979070286.672, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 2101162792.290405, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 297.3892393811234,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 684979070286.672,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 2101162792.290405,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -251,12 +462,43 @@
                         "a_A": 100.0,
                         "t_f": 631152000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 10.680992155454103, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 6311233457.435306, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 63112334.574353054, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 10.680992155454103,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 6311233457.435306,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 63112334.574353054,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -267,12 +509,43 @@
                         "a_A": 100.0,
                         "t_f": 3155760000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 2.7401977864129625, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 6311520000.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 63115200.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 2.7401977864129625,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 6311520000.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 63115200.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -283,12 +556,43 @@
                         "a_A": 100.0,
                         "t_f": 15778800000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.3826582754533807, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 6311520000.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 63115200.0, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.3826582754533807,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 6311520000.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 63115200.0,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -299,12 +603,43 @@
                         "a_A": 100.0,
                         "t_f": 631152000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 106.7080273409575, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 63052126855.76962, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 630521268.5576962, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 590884570.0455421, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 106.7080273409575,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 63052126855.76962,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 630521268.5576962,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 590884570.0455421,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -315,12 +650,43 @@
                         "a_A": 100.0,
                         "t_f": 3155760000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 136.32711767485262, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 314003366477.25256, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 3140033664.772526, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 136.32711767485262,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 314003366477.25256,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 3140033664.772526,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -331,12 +697,43 @@
                         "a_A": 100.0,
                         "t_f": 15778800000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 337.1651990635583, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 1539082313376.2673, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 15390823133.762674, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 4564772158.131712, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 337.1651990635583,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 1539082313376.2673,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 15390823133.762674,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 4564772158.131712,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -346,12 +743,43 @@
                         "τ_A": 31557.6,
                         "a_A": 1.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.3700988932064815e-05, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 31557.600000000002, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 31557.600000000002, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.3700988932064815e-05,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 31557.600000000002,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 31557.600000000002,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -361,12 +789,43 @@
                         "τ_A": 31557600000000.0,
                         "a_A": 1.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 1.3700303905452804, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 3155602217.259511, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 3155602217.259511, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 1.3700303905452804,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 3155602217.259511,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 3155602217.259511,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -375,11 +834,35 @@
                     "parameter_overrides": {
                         "a_CO2": 2.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 0.5, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 2303308188.662561, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 4606616377.325122, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 0.5,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 2303308188.662561,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 4606616377.325122,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 },
                 {
@@ -390,17 +873,55 @@
                         "a_A": 140.0,
                         "τ_CO2": 1577880000.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        {"variable": "GWP", "time": 0.0, "expected": 38.84965228063611, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_A", "time": 0.0, "expected": 53004024387.23438, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "AGWP_CO2", "time": 0.0, "expected": 1364337163.2866135, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_A", "time": 0.0, "expected": 378600174.1945313, "tolerance": {"rel": 1.0e-10}},
-                        {"variable": "decay_integral_CO2", "time": 0.0, "expected": 1364337163.2866135, "tolerance": {"rel": 1.0e-10}}
+                        {
+                            "variable": "GWP",
+                            "time": 0.0,
+                            "expected": 38.84965228063611,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_A",
+                            "time": 0.0,
+                            "expected": 53004024387.23438,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "AGWP_CO2",
+                            "time": 0.0,
+                            "expected": 1364337163.2866135,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_A",
+                            "time": 0.0,
+                            "expected": 378600174.1945313,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        },
+                        {
+                            "variable": "decay_integral_CO2",
+                            "time": 0.0,
+                            "expected": 1364337163.2866135,
+                            "tolerance": {
+                                "rel": 1e-10
+                            }
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "ch4_time_horizon_sweep",
                     "description": "CH₄ GWP across the canonical 20/100/500-yr policy reporting horizons and intermediate values: τ_A = 12·yr·s = 378691200.0 s (perturbation lifetime), a_A = 140 fixed, t_f swept from 5 to 1000 yr on a log scale. Surfaces the canonical short-lived-species GWP-vs-t_f curve from S&P Figure 23.15: at t_f << τ_A the GWP is large (high amplification), at t_f ~ τ_A the GWP transitions through ~τ_A·a_A/τ_CO2, at t_f >> τ_A the GWP decays as ~τ_A·a_A/decay_integral_CO2(t_f). The three canonical reporting horizons (20/100/500 yr) bracket the policy-relevant range — methane's GWP₂₀ ≈ 72 vs GWP₁₀₀ ≈ 23 vs GWP₅₀₀ ≈ 7 illustrates the order-of-magnitude time-horizon sensitivity that makes the choice of reporting horizon a policy lever in its own right.",
@@ -409,13 +930,21 @@
                         "τ_A": 378691200.0,
                         "a_A": 140.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "t_f",
-                                "range": {"start": 157788000.0, "stop": 31557600000.0, "count": 30, "scale": "log"}
+                                "range": {
+                                    "start": 157788000.0,
+                                    "stop": 31557600000.0,
+                                    "count": 30,
+                                    "scale": "log"
+                                }
                             }
                         ]
                     },
@@ -424,8 +953,14 @@
                             "id": "ch4_gwp_vs_tf_loglog",
                             "type": "line",
                             "description": "CH₄ GWP as a function of time horizon t_f on a log-log plot, swept from 5·yr (short policy emphasis) to 1000·yr (multi-millennium horizon) at τ_A = 12·yr fixed. Strictly decreasing curve passing through the canonical IPCC values: GWP₂₀ ≈ 72 at t_f = 20·yr, GWP₁₀₀ ≈ 23 at t_f = 100·yr, GWP₅₀₀ ≈ 7 at t_f = 500·yr. The shape illustrates the short-lived-species GWP-vs-t_f decay: as t_f grows, the species' contribution saturates at τ_A while CO₂'s keeps growing, so the ratio decreases monotonically.",
-                            "x": {"variable": "t_f", "label": "t_f (s)"},
-                            "y": {"variable": "GWP", "label": "GWP (dimensionless)"}
+                            "x": {
+                                "variable": "t_f",
+                                "label": "t_f (s)"
+                            },
+                            "y": {
+                                "variable": "GWP",
+                                "label": "GWP (dimensionless)"
+                            }
                         }
                     ]
                 },
@@ -436,13 +971,21 @@
                     "parameters": {
                         "a_A": 100.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "τ_A",
-                                "range": {"start": 86400.0, "stop": 3155760000000.0, "count": 50, "scale": "log"}
+                                "range": {
+                                    "start": 86400.0,
+                                    "stop": 3155760000000.0,
+                                    "count": 50,
+                                    "scale": "log"
+                                }
                             }
                         ]
                     },
@@ -451,8 +994,14 @@
                             "id": "gwp_vs_tau_a_loglog",
                             "type": "line",
                             "description": "GWP as a function of species lifetime τ_A on a log-log plot at fixed t_f=100·yr and a_A=100. Strictly increasing curve from near-zero at τ_A=1·day (GWP ≈ a_A · τ_A / decay_integral_CO2 ≈ 100 · 86400 / 2.30e9 ≈ 3.8e-6) through ~100 at τ_A=τ_CO2 (CO₂-self-reference inflection) to the asymptotic τ_A → ∞ limit a_A · t_f / decay_integral_CO2 ≈ 100 · 100·yr / 2.30e9 = 136.3 at τ_A=100000·yr. The two log-decade-wide transition near τ_A ~ τ_CO2 visualizes the time-integration crossover from CO₂-bounded (τ_A < τ_CO2 → species saturates first) to species-bounded (τ_A > τ_CO2 → CO₂ saturates first) regimes.",
-                            "x": {"variable": "τ_A", "label": "τ_A (s)"},
-                            "y": {"variable": "GWP", "label": "GWP (dimensionless)"}
+                            "x": {
+                                "variable": "τ_A",
+                                "label": "τ_A (s)"
+                            },
+                            "y": {
+                                "variable": "GWP",
+                                "label": "GWP (dimensionless)"
+                            }
                         }
                     ]
                 },
@@ -463,17 +1012,30 @@
                     "parameters": {
                         "a_A": 100.0
                     },
-                    "time_span": {"start": 0.0, "end": 1.0},
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "τ_A",
-                                "range": {"start": 31557600.0, "stop": 315576000000.0, "count": 20, "scale": "log"}
+                                "range": {
+                                    "start": 31557600.0,
+                                    "stop": 315576000000.0,
+                                    "count": 20,
+                                    "scale": "log"
+                                }
                             },
                             {
                                 "parameter": "t_f",
-                                "range": {"start": 631152000.0, "stop": 15778800000.0, "count": 20, "scale": "log"}
+                                "range": {
+                                    "start": 631152000.0,
+                                    "stop": 15778800000.0,
+                                    "count": 20,
+                                    "scale": "log"
+                                }
                             }
                         ]
                     },
@@ -482,9 +1044,18 @@
                             "id": "gwp_heatmap_tau_a_tf",
                             "type": "heatmap",
                             "description": "GWP as a function of (τ_A, t_f) on a log-log plot at a_A=100 fixed: heatmap surface showing the bivariate dependence. The lower-right corner (τ_A=1yr, t_f=500yr) is the short-species / long-horizon limit where GWP is small (CO₂ has overtaken the saturated species); the upper-left corner (τ_A=10000yr, t_f=20yr) is the long-species / short-horizon limit where GWP is moderate (~107 — both species and CO₂ are still in their linear-accumulation regimes); the upper-right corner (τ_A=10000yr, t_f=500yr) is the long-species / long-horizon limit where GWP is large (~337 — species accumulates linearly while CO₂ saturates). The diagonal CO₂-self-reference line τ_A=τ_CO2=150yr is implicit (GWP=1 there at a_A=1, not at a_A=100 used here so the line is at GWP=100 here).",
-                            "x": {"variable": "τ_A", "label": "τ_A (s)"},
-                            "y": {"variable": "t_f", "label": "t_f (s)"},
-                            "value": {"variable": "GWP", "reduce": "final"}
+                            "x": {
+                                "variable": "τ_A",
+                                "label": "τ_A (s)"
+                            },
+                            "y": {
+                                "variable": "t_f",
+                                "label": "t_f (s)"
+                            },
+                            "value": {
+                                "variable": "GWP",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

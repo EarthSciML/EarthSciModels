@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "InterfaceThermalConductivity",
         "description": "Thermal conductivity at the interface between two adjacent thermal layers of the urban canopy column. Implements the conductivity-weighted harmonic mean (Oleson et al. 2010, CLM Tech Note Ch. 4, Eq. 4.12) derived from continuity of conductive heat flux across the interface (Eq. 4.13). Migrated from UrbanCanopy.jl@9200edd4 src/roof_wall_road_snow_temperatures.jl:278 (`InterfaceThermalConductivity` @component). Parameterized as observed-only: λ_i, λ_ip1, z_i, z_ip1, z_h are inputs (parameters); λ_interface is the algebraic output.",
@@ -28,7 +28,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/roof_wall_road_snow_temperatures.jl:278\nUpstream `InterfaceThermalConductivity` is an MTK `@component` whose five inputs (λ_i, λ_ip1, z_i, z_ip1, z_h) are `@parameters` and whose single output (λ_interface) is a time-indexed `@variable` with one algebraic equation (Eq. 4.12). Identical equation structure preserved here.\n\nThe upstream component declares no `@constants` — every input is a layer-property parameter (conductivities) or a geometry parameter (node and interface depths). The output is the conductivity-weighted harmonic mean λ[z_h] = λ_i * λ_{i+1} * (z_{i+1} - z_i) / (λ_i * (z_{i+1} - z_h) + λ_{i+1} * (z_h - z_i)) of Oleson Eq. 4.12 — derived from continuity of conductive flux at the interface (Eq. 4.13) and reducing to the simple harmonic mean 2*λ_i*λ_{i+1}/(λ_i + λ_{i+1}) at the midpoint z_h = (z_i + z_{i+1})/2.\n\nUnicode parameter names (`λ_i`, `λ_ip1`, `λ_interface`) are preserved from upstream — the schema's identifier pattern allows unicode and sibling observed-only ESM files in this rig already keep Greek-letter parameters from CLM nomenclature (freezing_point_depression.esm uses `θ_sat`, `ψ_sat`, `ρ_liq`; adjusted_layer_thickness.esm uses `Δz_star`). The `α_CN → alpha_CN` rename in heating_cooling_flux.esm was for a constant tied to that file's HVAC algebra, not a rig-wide ban on Greek letters in identifiers.\n\nThe equation is symmetric under physical-interface coordinate flip: swapping (λ_i, z_i) ↔ (λ_{i+1}, z_{i+1}) leaves λ_interface invariant (both numerator and denominator pick up a sign flip from (z_{i+1} - z_i) and the bracketed (z_{i+1} - z_h)/(z_h - z_i) terms). This is asserted directly by the `reciprocity_layer_swap` test below.\n\nObservability classification: this component is functionally observed-only — the single output variable is given by a single algebraic equation in terms of the parameters (the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by sibling observed-only ESM files in this rig (adjusted_layer_thickness.esm, freezing_point_depression.esm, total_phase_change_energy.esm, heating_cooling_flux.esm).\n\nTolerance rationale (model-level rel=1e-10): observed-only single-equation algebraic system (no ODE integration); the equation is two multiplications, three subtractions, one addition, and one division, so roundoff is at the IEEE-754 ULP level (~1e-16). The upstream tests use `rtol = 1.0e-10` (test/roof_wall_road_snow_temperatures_test.jl:232, 243) and we mirror that for fidelity. Test assertion values are exact rationals (1.0, 1.5, 1.875, 3.0, 4.0) or short-decimal rationals (1.8, 2.4) whose IEEE-754 rounding sits below 1e-15, well within the model-level rtol."
             },
             "tolerance": {
-                "rel": 1.0e-10
+                "rel": 1e-10
             },
             "variables": {
                 "λ_i": {
@@ -62,7 +62,7 @@
                     "description": "Interface depth z_{h,i} between layers i and i+1, where the interface conductivity λ_interface is evaluated (Oleson Eq. 4.12)"
                 },
                 "λ_interface": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "W/(m*K)",
                     "description": "Thermal conductivity at the interface z_h between layers i and i+1 (Oleson Eq. 4.12): λ_i * λ_ip1 * (z_ip1 - z_i) / (λ_i * (z_ip1 - z_h) + λ_ip1 * (z_h - z_i)). Reduces to the simple harmonic mean 2*λ_i*λ_ip1/(λ_i + λ_ip1) when z_h is the geometric midpoint."
                 }
@@ -83,7 +83,10 @@
                                             "λ_ip1",
                                             {
                                                 "op": "-",
-                                                "args": ["z_ip1", "z_i"]
+                                                "args": [
+                                                    "z_ip1",
+                                                    "z_i"
+                                                ]
                                             }
                                         ]
                                     }
@@ -98,7 +101,10 @@
                                             "λ_i",
                                             {
                                                 "op": "-",
-                                                "args": ["z_ip1", "z_h"]
+                                                "args": [
+                                                    "z_ip1",
+                                                    "z_h"
+                                                ]
                                             }
                                         ]
                                     },
@@ -108,7 +114,10 @@
                                             "λ_ip1",
                                             {
                                                 "op": "-",
-                                                "args": ["z_h", "z_i"]
+                                                "args": [
+                                                    "z_h",
+                                                    "z_i"
+                                                ]
                                             }
                                         ]
                                     }
@@ -129,9 +138,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.0 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.0
+                        }
                     ]
                 },
                 {
@@ -144,9 +160,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.5 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.5
+                        }
                     ]
                 },
                 {
@@ -159,9 +182,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 3.0 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 3.0
+                        }
                     ]
                 },
                 {
@@ -174,9 +204,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.25
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 4.0 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 4.0
+                        }
                     ]
                 },
                 {
@@ -189,9 +226,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.75
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 2.4 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 2.4
+                        }
                     ]
                 },
                 {
@@ -204,9 +248,16 @@
                         "z_ip1": 1.0,
                         "z_h": 0.3
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.5 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.5
+                        }
                     ]
                 },
                 {
@@ -219,9 +270,16 @@
                         "z_ip1": 0.1,
                         "z_h": 0.05
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.8 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.8
+                        }
                     ]
                 },
                 {
@@ -234,9 +292,16 @@
                         "z_ip1": 0.0,
                         "z_h": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.5 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.5
+                        }
                     ]
                 },
                 {
@@ -249,13 +314,20 @@
                         "z_ip1": 1.5,
                         "z_h": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "λ_interface", "time": 0.0, "expected": 1.875 }
+                        {
+                            "variable": "λ_interface",
+                            "time": 0.0,
+                            "expected": 1.875
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "lambda_interface_vs_z_h",
                     "description": "Sweep the interface depth z_h across the inter-node span (z_h ∈ [0.05, 0.95] m, with z_i = 0, z_ip1 = 1) at fixed conductivities λ_i = 1, λ_ip1 = 3 W/(m*K). λ_interface = 1*3*1 / (1*(1-z_h) + 3*z_h) = 3 / (1 + 2*z_h) traces a monotone decrease from λ_interface ≈ 3 (close to z_i, where the path lies almost entirely inside layer i+1 of conductivity 3) down to λ_interface ≈ 1 (close to z_ip1, where the path lies almost entirely inside layer i of conductivity 1). Crosses the midpoint harmonic mean 1.5 at z_h = 0.5 (the `upstream_harmonic_mean_midpoint` test value). Surfaces the geometric-weight direction of Eq. 4.12 directly.",
@@ -266,13 +338,21 @@
                         "z_i": 0.0,
                         "z_ip1": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "z_h",
-                                "range": { "start": 0.05, "stop": 0.95, "count": 19, "scale": "linear" }
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.95,
+                                    "count": 19,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -281,8 +361,14 @@
                             "id": "lambda_interface_curve",
                             "type": "line",
                             "description": "λ_interface vs z_h: monotone descent from ~λ_ip1 near z_i down to ~λ_i near z_ip1, crossing the midpoint harmonic mean 1.5 W/(m*K) at z_h = 0.5 per Eq. 4.12.",
-                            "x": { "variable": "z_h", "label": "z_h (m)" },
-                            "y": { "variable": "λ_interface", "label": "λ_interface (W/(m·K))" }
+                            "x": {
+                                "variable": "z_h",
+                                "label": "z_h (m)"
+                            },
+                            "y": {
+                                "variable": "λ_interface",
+                                "label": "λ_interface (W/(m·K))"
+                            }
                         }
                     ]
                 },
@@ -296,13 +382,21 @@
                         "z_ip1": 1.0,
                         "z_h": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "λ_ip1",
-                                "range": { "start": 0.1, "stop": 10.0, "count": 21, "scale": "linear" }
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 10.0,
+                                    "count": 21,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -311,8 +405,14 @@
                             "id": "harmonic_mean_curve",
                             "type": "line",
                             "description": "Midpoint λ_interface = 2*λ_i*λ_ip1/(λ_i + λ_ip1) vs λ_ip1 at fixed λ_i = 1: monotone increase saturating toward 2*λ_i = 2 W/(m·K) as λ_ip1 → ∞ — the upper bound for a midpoint harmonic mean per Eq. 4.12.",
-                            "x": { "variable": "λ_ip1", "label": "λ_{i+1} (W/(m·K))" },
-                            "y": { "variable": "λ_interface", "label": "λ_interface (W/(m·K))" }
+                            "x": {
+                                "variable": "λ_ip1",
+                                "label": "λ_{i+1} (W/(m·K))"
+                            },
+                            "y": {
+                                "variable": "λ_interface",
+                                "label": "λ_interface (W/(m·K))"
+                            }
                         }
                     ]
                 },
@@ -325,17 +425,30 @@
                         "z_i": 0.0,
                         "z_ip1": 1.0
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
                             {
                                 "parameter": "λ_ip1",
-                                "range": { "start": 0.1, "stop": 10.0, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.1,
+                                    "stop": 10.0,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             },
                             {
                                 "parameter": "z_h",
-                                "range": { "start": 0.05, "stop": 0.95, "count": 11, "scale": "linear" }
+                                "range": {
+                                    "start": 0.05,
+                                    "stop": 0.95,
+                                    "count": 11,
+                                    "scale": "linear"
+                                }
                             }
                         ]
                     },
@@ -344,9 +457,18 @@
                             "id": "lambda_interface_heatmap",
                             "type": "heatmap",
                             "description": "λ_interface as a function of lower-layer conductivity λ_ip1 and interface depth z_h at fixed λ_i = 1 W/(m·K): smooth surface that asymptotes toward λ_ip1 at small z_h and toward λ_i at large z_h, with the midpoint cross-section recovering the classical harmonic mean 2*λ_i*λ_ip1/(λ_i + λ_ip1).",
-                            "x": { "variable": "λ_ip1", "label": "λ_{i+1} (W/(m·K))" },
-                            "y": { "variable": "z_h", "label": "z_h (m)" },
-                            "value": { "variable": "λ_interface", "reduce": "final" }
+                            "x": {
+                                "variable": "λ_ip1",
+                                "label": "λ_{i+1} (W/(m·K))"
+                            },
+                            "y": {
+                                "variable": "z_h",
+                                "label": "z_h (m)"
+                            },
+                            "value": {
+                                "variable": "λ_interface",
+                                "reduce": "final"
+                            }
                         }
                     ]
                 }

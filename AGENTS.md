@@ -34,6 +34,17 @@ Concrete things this rule forbids in this repo:
 - Hand-translating an `.esm` to a different IR (e.g. emitting raw Julia
   `ODEProblem` code from the AST) for the purpose of simulating it. The
   runners are the IR.
+- Re-deriving **variable classification** from a model's equations. From esm
+  1.0.0 a document declares exactly two variable types, `unknown` and
+  `parameter`. Whether an unknown is an ODE state, an observed quantity or an
+  algebraic one, and whether a parameter is Brownian / discrete / sampled /
+  constant, are DERIVED (esm-spec §6.3.1) and single-sourced in
+  `earthsci_ast.classification` — `ode_states`, `observed_definitions`,
+  `algebraic_unknowns`, `parameters`, `brownian_parameters`, … Code that used
+  to branch on `variable.type == "state"` / `"observed"` / `"brownian"` /
+  `"discrete"` calls those instead. Walking the equations locally to answer
+  the same question is the shadow-logic form of this anti-pattern: it drifts
+  from the spec and from the other four bindings.
 
 If the official runner is missing a feature you need, file a bead against
 EarthSciAST or the relevant toolkit — do not work around it locally.
@@ -42,7 +53,10 @@ EarthSciAST or the relevant toolkit — do not work around it locally.
 
 EarthSciModels is the **model-content rig**. Its job, and only its job, is:
 
-1. Hold authoritative `.esm` files under `components/<domain>/`.
+1. Hold authoritative `.esm` files under `components/<domain>/`, at the
+   **current** format version. The corpus is on esm **1.0.0**, which is a
+   clean break with no deprecation path — `earthsci_ast` rejects every major-0
+   document outright, so there is no such thing as a file left behind on 0.x.
 2. Provide a **thin** loader shim per language (today: the Julia shim in
    `src/EarthSciModels.jl`) that calls the canonical ESS parser and returns the
    appropriate runtime object (`ModelingToolkit.System`, etc.).
@@ -87,7 +101,7 @@ If a docs build needs simulation output to render plots, it **MUST** drive an
 official ESS runner. Specifically:
 
 - Python plot rendering: call `earthsci_ast.load` + `evaluate` and, for
-  ODE examples, the toolkit's official integration entry point. Do **NOT**
+  ODE analyses, the toolkit's official integration entry point. Do **NOT**
   introduce `sympy.lambdify` + `scipy.solve_ivp` (or any equivalent homebrew
   ODE pipeline) in `tools/`.
 - Julia plot rendering: use `EarthSciModels.load_esm` (or
@@ -106,6 +120,28 @@ plan only to recover *observed* variables from the integrated state via
 homebrew `sympy.lambdify` / `scipy.solve_ivp` branch back in; if simulate
 lacks a feature the doc-build needs, file a bead to extend simulate rather
 than re-introducing a side channel.
+
+Both generators read the **esm 1.0.0** vocabulary, and both take their
+variable classification from `earthsci_ast.classification` per §1:
+
+- The illustrative-run block on a Model / ReactionSystem is `analyses`
+  (esm-spec §6.7), not `examples`. The `Analysis` `$def` is
+  `additionalProperties: false`, so the 0.4-era `title` / `code` / `language`
+  keys cannot appear and nothing reads them. Plot artifacts still land at
+  `<esm_dir>/<esm_stem>.plots/<analysis_id>-<plot_id>.png`; the two modules
+  keep their `*_example_*` filenames so the CI job and this convention keep
+  resolving.
+- The document-scoped ingest registry is `data_sources` (esm-spec §8), not
+  `data_loaders`. A source is pure I/O: it is **not** a component, not a
+  coupling endpoint, not a subsystem, and it exposes no variables. A model
+  consumes one by declaring a **parameter** whose `update` is
+  `{kind: "data", source: "<registry key>", from: {file_variable, …}}` — so
+  units live on the parameter, and a `data`-updated parameter must declare a
+  `shape`. `esm_to_docs.py` still emits a page per source, carrying its I/O
+  descriptor rather than a variables table.
+- There is no `variables[v].expression`. An observed quantity is defined by a
+  bare-variable-LHS equation in the model's `equations`, and both generators
+  recover it through `classification.observed_definitions`.
 
 ## 4. `scripts/_archive/*` is historical
 

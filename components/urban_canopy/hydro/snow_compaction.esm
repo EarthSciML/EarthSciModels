@@ -1,5 +1,5 @@
 {
-    "esm": "0.4.0",
+    "esm": "1.0.0",
     "metadata": {
         "name": "SnowCompaction",
         "description": "Total fractional snow-layer compaction rate combining destructive metamorphism (Eq. 5.26), overburden pressure (Eq. 5.28), and melt-induced compaction (Eq. 5.31). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:174 (`SnowCompaction` @component). Implements Oleson et al. (2010) CLM4 Tech Note Chapter 5, Section 5.1.4, Eqs. 5.24–5.33. Parameterized as observed-only: T_i, w_ice, w_liq, dz, P_s, f_ice_n, f_ice_n1 are inputs; c_1, c_2, C_R1, eta, C_R2, C_R3, C_R are algebraic outputs.",
@@ -27,7 +27,7 @@
                 "notes": "source_ref: UrbanCanopy.jl@9200edd4:src/hydrology.jl:174\nUpstream `SnowCompaction` is an MTK `@component` where T_i, w_ice, w_liq, Δz, P_s, f_ice_n, and f_ice_n1 are `@parameters` (driven by a parent layer/timestepper). For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the migration tracker's `(M, equations)` classification. The seven algebraic equations are unchanged from upstream. Δz is renamed to `dz` and η to `eta` for ASCII parameter names.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/ifelse/max closed-form expressions across the relevant snow regimes (T_i 230–273 K, snow densities 50–500 kg/m³, overburden pressures 0–10⁴ kg/m²)."
             },
             "tolerance": {
-                "rel": 1.0e-6
+                "rel": 1e-06
             },
             "variables": {
                 "T_i": {
@@ -81,7 +81,7 @@
                 "c_3": {
                     "type": "parameter",
                     "units": "s^-1",
-                    "default": 2.777e-6,
+                    "default": 2.777e-06,
                     "description": "Fractional compaction rate at T_f (Eq. 5.26)"
                 },
                 "c_4": {
@@ -93,7 +93,7 @@
                 "eta_0": {
                     "type": "parameter",
                     "units": "kg*s/m^2",
-                    "default": 9.0e5,
+                    "default": 900000.0,
                     "description": "Reference viscosity (Eq. 5.29)"
                 },
                 "c_5": {
@@ -133,37 +133,37 @@
                     "description": "Unit rate for nondimensionalization (Eq. 5.31)"
                 },
                 "c_1": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Density-dependent coefficient (Eq. 5.27, dimensionless)"
                 },
                 "c_2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "1",
                     "description": "Liquid-dependent coefficient (Eq. 5.27, dimensionless)"
                 },
                 "C_R1": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s^-1",
                     "description": "Destructive metamorphism compaction rate (Eq. 5.26)"
                 },
                 "eta": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "kg*s/m^2",
                     "description": "Viscosity coefficient (Eq. 5.29; η in upstream Julia source)"
                 },
                 "C_R2": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s^-1",
                     "description": "Overburden compaction rate (Eq. 5.28)"
                 },
                 "C_R3": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s^-1",
                     "description": "Melt compaction rate (Eq. 5.31)"
                 },
                 "C_R": {
-                    "type": "state",
+                    "type": "unknown",
                     "units": "s^-1",
                     "description": "Total fractional compaction rate (Eq. 5.24)"
                 }
@@ -177,7 +177,13 @@
                             {
                                 "op": ">",
                                 "args": [
-                                    { "op": "/", "args": ["w_ice", "dz"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_ice",
+                                            "dz"
+                                        ]
+                                    },
                                     "hundred_kgpm3"
                                 ]
                             },
@@ -192,7 +198,13 @@
                                             {
                                                 "op": "-",
                                                 "args": [
-                                                    { "op": "/", "args": ["w_ice", "dz"] },
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "w_ice",
+                                                            "dz"
+                                                        ]
+                                                    },
                                                     "hundred_kgpm3"
                                                 ]
                                             }
@@ -212,7 +224,13 @@
                             {
                                 "op": ">",
                                 "args": [
-                                    { "op": "/", "args": ["w_liq", "dz"] },
+                                    {
+                                        "op": "/",
+                                        "args": [
+                                            "w_liq",
+                                            "dz"
+                                        ]
+                                    },
                                     "thresh_liq_density"
                                 ]
                             },
@@ -238,7 +256,13 @@
                                         "args": [
                                             -1,
                                             "c_4",
-                                            { "op": "-", "args": ["T_f", "T_i"] }
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "T_f",
+                                                    "T_i"
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -262,14 +286,26 @@
                                                 "op": "*",
                                                 "args": [
                                                     "c_5",
-                                                    { "op": "-", "args": ["T_f", "T_i"] }
+                                                    {
+                                                        "op": "-",
+                                                        "args": [
+                                                            "T_f",
+                                                            "T_i"
+                                                        ]
+                                                    }
                                                 ]
                                             },
                                             {
                                                 "op": "*",
                                                 "args": [
                                                     "c_6",
-                                                    { "op": "/", "args": ["w_ice", "dz"] }
+                                                    {
+                                                        "op": "/",
+                                                        "args": [
+                                                            "w_ice",
+                                                            "dz"
+                                                        ]
+                                                    }
                                                 ]
                                             }
                                         ]
@@ -284,7 +320,13 @@
                     "rhs": {
                         "op": "/",
                         "args": [
-                            { "op": "*", "args": [-1, "P_s"] },
+                            {
+                                "op": "*",
+                                "args": [
+                                    -1,
+                                    "P_s"
+                                ]
+                            },
                             "eta"
                         ]
                     }
@@ -303,8 +345,20 @@
                                     {
                                         "op": "/",
                                         "args": [
-                                            { "op": "-", "args": ["f_ice_n", "f_ice_n1"] },
-                                            { "op": "max", "args": ["f_ice_n", 1.0e-10] }
+                                            {
+                                                "op": "-",
+                                                "args": [
+                                                    "f_ice_n",
+                                                    "f_ice_n1"
+                                                ]
+                                            },
+                                            {
+                                                "op": "max",
+                                                "args": [
+                                                    "f_ice_n",
+                                                    1e-10
+                                                ]
+                                            }
                                         ]
                                     }
                                 ]
@@ -316,7 +370,11 @@
                     "lhs": "C_R",
                     "rhs": {
                         "op": "+",
-                        "args": ["C_R1", "C_R2", "C_R3"]
+                        "args": [
+                            "C_R1",
+                            "C_R2",
+                            "C_R3"
+                        ]
                     }
                 }
             ],
@@ -333,15 +391,46 @@
                         "f_ice_n": 0.9,
                         "f_ice_n1": 0.9
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "c_1",  "time": 0.0, "expected": 1.0 },
-                        { "variable": "c_2",  "time": 0.0, "expected": 2.0 },
-                        { "variable": "C_R1", "time": 0.0, "expected": -3.7229575356819407e-06 },
-                        { "variable": "eta",  "time": 0.0, "expected": 19978156.15329746 },
-                        { "variable": "C_R2", "time": 0.0, "expected": -5.005466932617536e-06 },
-                        { "variable": "C_R3", "time": 0.0, "expected": 0.0 },
-                        { "variable": "C_R",  "time": 0.0, "expected": -8.728424468299477e-06 }
+                        {
+                            "variable": "c_1",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "c_2",
+                            "time": 0.0,
+                            "expected": 2.0
+                        },
+                        {
+                            "variable": "C_R1",
+                            "time": 0.0,
+                            "expected": -3.7229575356819407e-06
+                        },
+                        {
+                            "variable": "eta",
+                            "time": 0.0,
+                            "expected": 19978156.15329746
+                        },
+                        {
+                            "variable": "C_R2",
+                            "time": 0.0,
+                            "expected": -5.005466932617536e-06
+                        },
+                        {
+                            "variable": "C_R3",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "C_R",
+                            "time": 0.0,
+                            "expected": -8.728424468299477e-06
+                        }
                     ]
                 },
                 {
@@ -356,13 +445,36 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "c_1",  "time": 0.0, "expected": 0.010051835744633586 },
-                        { "variable": "c_2",  "time": 0.0, "expected": 1.0 },
-                        { "variable": "C_R1", "time": 0.0, "expected": -1.871127881646035e-08 },
-                        { "variable": "C_R2", "time": 0.0, "expected": 0.0 },
-                        { "variable": "C_R3", "time": 0.0, "expected": 0.0 }
+                        {
+                            "variable": "c_1",
+                            "time": 0.0,
+                            "expected": 0.010051835744633586
+                        },
+                        {
+                            "variable": "c_2",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "C_R1",
+                            "time": 0.0,
+                            "expected": -1.871127881646035e-08
+                        },
+                        {
+                            "variable": "C_R2",
+                            "time": 0.0,
+                            "expected": 0.0
+                        },
+                        {
+                            "variable": "C_R3",
+                            "time": 0.0,
+                            "expected": 0.0
+                        }
                     ]
                 },
                 {
@@ -377,11 +489,26 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "c_1",  "time": 0.0, "expected": 1.0 },
-                        { "variable": "c_2",  "time": 0.0, "expected": 2.0 },
-                        { "variable": "C_R1", "time": 0.0, "expected": -5.304303058007234e-06 }
+                        {
+                            "variable": "c_1",
+                            "time": 0.0,
+                            "expected": 1.0
+                        },
+                        {
+                            "variable": "c_2",
+                            "time": 0.0,
+                            "expected": 2.0
+                        },
+                        {
+                            "variable": "C_R1",
+                            "time": 0.0,
+                            "expected": -5.304303058007234e-06
+                        }
                     ]
                 },
                 {
@@ -396,11 +523,26 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "eta",  "time": 0.0, "expected": 5690989902.689874 },
-                        { "variable": "C_R2", "time": 0.0, "expected": -8.785817732055239e-07 },
-                        { "variable": "C_R",  "time": 0.0, "expected": -8.786929233306654e-07 }
+                        {
+                            "variable": "eta",
+                            "time": 0.0,
+                            "expected": 5690989902.689874
+                        },
+                        {
+                            "variable": "C_R2",
+                            "time": 0.0,
+                            "expected": -8.785817732055239e-07
+                        },
+                        {
+                            "variable": "C_R",
+                            "time": 0.0,
+                            "expected": -8.786929233306654e-07
+                        }
                     ]
                 },
                 {
@@ -415,10 +557,21 @@
                         "f_ice_n": 0.9,
                         "f_ice_n1": 0.7
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "C_R3", "time": 0.0, "expected": -0.2222222222222223 },
-                        { "variable": "C_R",  "time": 0.0, "expected": -0.2222376872594633 }
+                        {
+                            "variable": "C_R3",
+                            "time": 0.0,
+                            "expected": -0.2222222222222223
+                        },
+                        {
+                            "variable": "C_R",
+                            "time": 0.0,
+                            "expected": -0.2222376872594633
+                        }
                     ]
                 },
                 {
@@ -433,9 +586,16 @@
                         "f_ice_n": 0.7,
                         "f_ice_n1": 0.9
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "C_R3", "time": 0.0, "expected": 0.0 }
+                        {
+                            "variable": "C_R3",
+                            "time": 0.0,
+                            "expected": 0.0
+                        }
                     ]
                 },
                 {
@@ -450,11 +610,26 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "C_R1", "time": 0.0, "expected": -1.9698478402571534e-07 },
-                        { "variable": "eta",  "time": 0.0, "expected": 448827884.87023425 },
-                        { "variable": "C_R2", "time": 0.0, "expected": -4.4560511220871287e-07 }
+                        {
+                            "variable": "C_R1",
+                            "time": 0.0,
+                            "expected": -1.9698478402571534e-07
+                        },
+                        {
+                            "variable": "eta",
+                            "time": 0.0,
+                            "expected": 448827884.87023425
+                        },
+                        {
+                            "variable": "C_R2",
+                            "time": 0.0,
+                            "expected": -4.4560511220871287e-07
+                        }
                     ]
                 },
                 {
@@ -467,21 +642,52 @@
                         "dz": 1.0,
                         "P_s": 1000.0,
                         "f_ice_n": 0.85,
-                        "f_ice_n1": 0.80
+                        "f_ice_n1": 0.8
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "assertions": [
-                        { "variable": "c_1",  "time": 0.0, "expected": 0.010051835744633586 },
-                        { "variable": "c_2",  "time": 0.0, "expected": 2.0 },
-                        { "variable": "C_R1", "time": 0.0, "expected": -4.921870173644911e-08 },
-                        { "variable": "eta",  "time": 0.0, "expected": 115196513.64921543 },
-                        { "variable": "C_R2", "time": 0.0, "expected": -8.680818267166463e-06 },
-                        { "variable": "C_R3", "time": 0.0, "expected": -0.05882352941176463 },
-                        { "variable": "C_R",  "time": 0.0, "expected": -0.058832259448733534 }
+                        {
+                            "variable": "c_1",
+                            "time": 0.0,
+                            "expected": 0.010051835744633586
+                        },
+                        {
+                            "variable": "c_2",
+                            "time": 0.0,
+                            "expected": 2.0
+                        },
+                        {
+                            "variable": "C_R1",
+                            "time": 0.0,
+                            "expected": -4.921870173644911e-08
+                        },
+                        {
+                            "variable": "eta",
+                            "time": 0.0,
+                            "expected": 115196513.64921543
+                        },
+                        {
+                            "variable": "C_R2",
+                            "time": 0.0,
+                            "expected": -8.680818267166463e-06
+                        },
+                        {
+                            "variable": "C_R3",
+                            "time": 0.0,
+                            "expected": -0.05882352941176463
+                        },
+                        {
+                            "variable": "C_R",
+                            "time": 0.0,
+                            "expected": -0.058832259448733534
+                        }
                     ]
                 }
             ],
-            "examples": [
+            "analyses": [
                 {
                     "id": "metamorphism_vs_temperature",
                     "description": "Destructive-metamorphism compaction rate C_R1 as a function of snow layer temperature T_i, sweeping the cold-pack to near-freezing range (240–273 K). Holds the c_1 = 1 (w_ice/Δz ≤ 100 kg/m³) and c_2 = 2 (wet) branches of Eq. 5.27 by using the default w_ice/dz = 100 kg/m³ and w_liq/dz = 2 kg/m³. Overburden and melt contributions are zeroed (P_s = 0, f_ice_n = f_ice_n1 = 0.5) so the C_R1 curve stands alone. Surfaces the canonical Anderson-1976 exp(−c_4 (T_f − T_i)) temperature dependence of Eq. 5.26 — C_R1 grows by ≈ exp(c_4 × 33) ≈ 3.7× across the 240→273 K sweep.",
@@ -494,7 +700,10 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
@@ -537,7 +746,10 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
@@ -593,7 +805,10 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
@@ -636,7 +851,10 @@
                         "P_s": 0.0,
                         "f_ice_n": 0.9
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
@@ -678,7 +896,10 @@
                         "f_ice_n": 0.5,
                         "f_ice_n1": 0.5
                     },
-                    "time_span": { "start": 0.0, "end": 1.0 },
+                    "time_span": {
+                        "start": 0.0,
+                        "end": 1.0
+                    },
                     "parameter_sweep": {
                         "type": "cartesian",
                         "dimensions": [
