@@ -28,6 +28,64 @@
       }
     ]
   },
+  "data_sources": {
+    "OpenAQ_obs": {
+      "kind": "points",
+      "source": {
+        "url_template": "https://openaq-data-archive.s3.amazonaws.com/records/csv.gz/locationid={location_id}/year={date:%Y}/month={date:%m}/location-{location_id}-{date:%Y%m%d}.csv.gz"
+      },
+      "temporal": {
+        "start": "2016-01-01T00:00:00Z",
+        "end": "2099-12-31T23:59:59Z",
+        "file_period": "P1D",
+        "frequency": "PT1H",
+        "records_per_file": "auto",
+        "time_variable": "datetime"
+      },
+      "reference": {
+        "citation": "OpenAQ. OpenAQ Data Archive. Open-source global air quality data aggregation platform. https://openaq.org/",
+        "url": "https://openaq.org/"
+      },
+      "metadata": {
+        "tags": [
+          "air_quality",
+          "observations",
+          "monitoring_stations",
+          "hourly",
+          "point_observations"
+        ],
+        "native_crs": {
+          "projection": "longlat",
+          "datum": "WGS84",
+          "proj4": "+proj=longlat +datum=WGS84 +no_defs",
+          "note": "Geographic (unprojected) coordinate reference of the station coordinates. Recorded here for provenance because this points loader omits the formal GDD `grid` block (the native point set is resolved at runtime via station discovery). The regridding model (openaq.esm) selects the longlat IDENTITY reprojection by convention from this projection and bins the stations into target cells with the cell-averaging regridder (ESD regridding/point_cell_average_regrid.esm, esd-47z.4). Migrated from the loader's former DataLoaderSpatial block (crs '+proj=longlat +datum=WGS84 +no_defs', grid_type 'unstructured', staggering lon/lat 'center')."
+        },
+        "unit_conversion_note": "Raw CSV 'value' is reported in µg/m³ (the per-record source unit is carried in the CSV 'unit' column). The runtime scales each variable to its declared `units` (kg/m³) via unit_scale/to_unit at load time (1 µg/m³ = 1×10⁻⁹ kg/m³). The pre-migration explicit numeric `unit_conversion: 1e-9` factor is dropped: under the ESS DataLoaderVariable schema `unit_conversion` is oneOf[number, Expression] and Expression itself admits a number literal, so a bare numeric factor is ambiguous and rejected at load; the conversion is instead expressed by the target `units` declaration (matching the canonical ESS points-loader fixture tests/fixtures/data_loaders/openaq.esm, which declares target units and relies on runtime unit_scale with no explicit factor).",
+        "earthscidata_source": "src/openaq.jl::OpenAQFileSet",
+        "s3_mirror": "https://openaq-data-archive.s3.amazonaws.com",
+        "api_endpoint": "https://api.openaq.org/v3",
+        "station_discovery": "runtime (OpenAQ API v3 /locations endpoint — requires OPENAQ_API_KEY env var or api_key constructor argument; results cached to $EARTHSCIDATADIR/openaq_stations/{parameter}_{bbox}.json; no API key needed for S3 data download)",
+        "file_format": "gzip-compressed CSV (.csv.gz)",
+        "csv_columns": "location_id,sensor_id,location,datetime,lat,lon,parameter,unit,value",
+        "datetime_format": "ISO8601 with timezone offset (e.g. 2024-01-15T12:00:00+00:00); runtime converts all timestamps to UTC before aggregation",
+        "valid_parameters": [
+          "pm25",
+          "pm10",
+          "o3",
+          "no2",
+          "so2",
+          "co",
+          "bc",
+          "pm1",
+          "no",
+          "nox"
+        ],
+        "former_regridding": "The pre-migration data_loaders.regridding block declared fill_value 0.0 and extrapolation 'clamp'. fill_value migrates to the model regrid blocks' `missing_value` 0.0 (cell_average kernel); extrapolation 'clamp' has no analogue in the cell-averaging kernel (which fills empty cells with missing_value rather than extrapolating) and is dropped (RFC pure-io-data-loaders §5.2).",
+        "location_id_note": "The {location_id} URL substitution is a custom (non-standard) template variable resolved at runtime from the station list returned by station discovery. Each station in the discovered list produces one URL per day in the simulation time span.",
+        "data_availability": "Coverage varies by region and time period. Data starting ~2016 in many regions. Missing S3 files (HTTP 404) are treated as no-data (no error); the corresponding station-day contributes zero readings to its grid cell."
+      }
+    }
+  },
   "models": {
     "OpenAQ": {
       "coupletype": "OpenAQCoupler",
@@ -51,14 +109,144 @@
           "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. The runtime cell-averaging regridder converts radians to degrees to bin OpenAQ station coordinates into target grid cells."
         },
         "pm25": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "kg/m^3",
-          "description": "Hourly-averaged PM2.5 concentration at the model grid point (kg/m³), aggregated from monitoring stations within the grid cell by the cell-averaging regridder and converted from µg/m³. Target cells with no stations receive missing_value (0.0; see `regrid`). Sourced from the loader field obs.pm25. Variable name matches the constructor parameter ('pm25' shown here as the representative case; other instantiations use the respective parameter name: pm10, o3, no2, so2, co, bc, pm1, no, nox — each available as obs.<var>)."
-        }
-      },
-      "subsystems": {
-        "obs": {
-          "ref": "./openaq_loader.esm"
+          "shape": [],
+          "description": "Hourly-averaged PM2.5 concentration at the model grid point (kg/m³), aggregated from monitoring stations within the grid cell by the cell-averaging regridder and converted from µg/m³. Target cells with no stations receive missing_value (0.0; see `regrid`). Sourced from the loader field obs.pm25. Variable name matches the constructor parameter ('pm25' shown here as the representative case; other instantiations use the respective parameter name: pm10, o3, no2, so2, co, bc, pm1, no, nox — each available as obs.<var>).",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "PM2.5 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm25'); converted to kg/m³ (1 µg/m³ = 1×10⁻⁹ kg/m³). OpenAQ API parameter ID: 2."
+            }
+          }
+        },
+        "pm10": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "PM10 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm10'); converted to kg/m³. OpenAQ API parameter ID: 1.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "PM10 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm10'); converted to kg/m³. OpenAQ API parameter ID: 1."
+            }
+          }
+        },
+        "o3": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Ozone concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'o3'); converted to kg/m³. OpenAQ API parameter ID: 3.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Ozone concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'o3'); converted to kg/m³. OpenAQ API parameter ID: 3."
+            }
+          }
+        },
+        "no2": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Nitrogen dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no2'); converted to kg/m³. OpenAQ API parameter ID: 5.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Nitrogen dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no2'); converted to kg/m³. OpenAQ API parameter ID: 5."
+            }
+          }
+        },
+        "so2": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Sulfur dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'so2'); converted to kg/m³. OpenAQ API parameter ID: 4.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Sulfur dioxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'so2'); converted to kg/m³. OpenAQ API parameter ID: 4."
+            }
+          }
+        },
+        "co": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Carbon monoxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'co'); converted to kg/m³. OpenAQ API parameter ID: 6.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Carbon monoxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'co'); converted to kg/m³. OpenAQ API parameter ID: 6."
+            }
+          }
+        },
+        "bc": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Black carbon concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'bc'); converted to kg/m³. OpenAQ API parameter ID: 11.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Black carbon concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'bc'); converted to kg/m³. OpenAQ API parameter ID: 11."
+            }
+          }
+        },
+        "pm1": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "PM1 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm1'); converted to kg/m³. OpenAQ API parameter ID: 19.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "PM1 particulate matter concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'pm1'); converted to kg/m³. OpenAQ API parameter ID: 19."
+            }
+          }
+        },
+        "no": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Nitric oxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no'); converted to kg/m³. OpenAQ API parameter ID: 7.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Nitric oxide concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'no'); converted to kg/m³. OpenAQ API parameter ID: 7."
+            }
+          }
+        },
+        "nox": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [],
+          "description": "Nitrogen oxides (NOx) concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'nox'); converted to kg/m³. OpenAQ API parameter ID: 8.",
+          "update": {
+            "kind": "data",
+            "source": "OpenAQ_obs",
+            "from": {
+              "file_variable": "value",
+              "description": "Nitrogen oxides (NOx) concentration. Raw CSV 'value' column in µg/m³ (filtered where 'parameter' column == 'nox'); converted to kg/m³. OpenAQ API parameter ID: 8."
+            }
+          }
         }
       },
       "regrid": {
@@ -113,12 +301,7 @@
           "description": "Nitrogen oxides (NOx) concentration. Scattered station observations → cell-averaging regridder (esd-47z.4); empty target cells filled with missing_value 0.0."
         }
       },
-      "equations": [
-        {
-          "lhs": "pm25",
-          "rhs": "obs.pm25"
-        }
-      ],
+      "equations": [],
       "tests": []
     }
   }

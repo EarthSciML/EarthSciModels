@@ -36,25 +36,26 @@
       }
     ]
   },
-  "data_loaders": {
+  "data_sources": {
     "LANDFIRE": {
       "kind": "static",
       "source": {
         "url_template": "https://lfps.usgs.gov/arcgis/rest/services/Landfire_{version}/{version}_{product}_CONUS/ImageServer/exportImage?bbox={bbox_west_deg},{bbox_south_deg},{bbox_east_deg},{bbox_north_deg}&bboxSR=4326&imageSR=4326&size={image_width},{image_height}&format=tiff&pixelType=S16&interpolation=+RSP_NearestNeighbor&f=image"
-      },
-      "variables": {
-        "fuel_model": {
-          "file_variable": "Band1",
-          "units": "1",
-          "description": "Fire behavior fuel model code (categorical integer). Raw GeoTIFF pixel type S16; TiffImages reads as Q0f15 fixed-point — multiply by 32768 to recover integer fuel model codes. For FBFM13 (Anderson 13): codes 0 (no fuel), 1–13 (burnable), 91=urban, 92=snow/ice, 93=agriculture, 98=water, 99=barren. For FBFM40 (Scott & Burgan 40): codes 101–204 additional. Coverage: contiguous United States (CONUS) only. This is CATEGORICAL data — see metadata.interpolation_note and the regridding model's regrid.fuel_model description for the regridding-kernel consideration."
-        }
       },
       "reference": {
         "citation": "USGS LANDFIRE (2022). LF2022 Fire Behavior Fuel Model 13 (FBFM13) / Fuel Model 40 (FBFM40). U.S. Department of Agriculture, Forest Service; U.S. Department of Interior.",
         "url": "https://landfire.gov/"
       },
       "metadata": {
-        "tags": ["wildland_fire", "fuel_model", "landfire", "static", "conus", "categorical", "longlat"],
+        "tags": [
+          "wildland_fire",
+          "fuel_model",
+          "landfire",
+          "static",
+          "conus",
+          "categorical",
+          "longlat"
+        ],
         "earthscidata_source": "src/landfire.jl::LANDFIREFileSet",
         "api_type": "ArcGIS ImageServer REST (exportImage endpoint)",
         "file_format": "GeoTIFF, S16 signed 16-bit integer pixels (Q0f15 fixed-point in TiffImages; multiply by 32768 to get integer fuel model codes)",
@@ -65,16 +66,32 @@
         "native_staggering": "Cell-centered (lon 'center', lat 'center') — LANDFIRE is a regular non-staggered raster. The regridding model regrids fuel_model conservatively per the migration spec (RFC §5.2; bead esm-3nc.4); see landfire.esm regrid.fuel_model and interpolation_note below for the categorical caveat.",
         "native_extent": {
           "comment": "Approximate CONUS envelope; the actual requested bbox is domain-derived at load time (WGS84 envelope of the model domain with a one-cell buffer).",
-          "lon": [-125.0, -66.0],
-          "lat": [24.0, 50.0]
+          "lon": [
+            -125.0,
+            -66.0
+          ],
+          "lat": [
+            24.0,
+            50.0
+          ]
         },
         "interpolation_note": "The upstream EarthSciData.jl loader regrids this CATEGORICAL dataset with nearest-neighbour (BSpline(Constant())) interpolation — interpolated values BETWEEN integer codes are physically meaningless. The new ESS RegridSpec offers only {conservative, bspline, cell_average}; per the esm-3nc.4 migration spec (cell-centered → conservative) the regridding model declares regrid.fuel_model.method = conservative. Downstream consumers (components/wildland_fire/fuel_model_lookup.esm and the fuel_* registered functions) round/clamp to integer codes via ifelse + interp.linear, tolerating non-integer inputs. This nearest-neighbour-vs-conservative consideration is carried forward as a documented gap (gotcha §8) pending a nearest/mode regrid kernel in ESS.",
         "bbox_computation": "The URL template substitutions {bbox_west_deg}, {bbox_south_deg}, {bbox_east_deg}, {bbox_north_deg}, {image_width}, {image_height} are domain-derived at runtime: the bounding box is the WGS84 envelope of the model domain (with a one-resolution-cell buffer), and the image dimensions are computed from the bbox extent divided by the requested resolution (default 1.0 arc-second ≈ 30m, clamped to 4000×4000 pixels per LANDFIRE ImageServer limit).",
         "url_substitutions": "{version}=LF2022 (default), {product}=FBFM13 (default, use FBFM40 for Scott & Burgan 40 models), {bbox_*_deg}=domain WGS84 bounding box in degrees, {image_width}/{image_height}=computed pixel dimensions",
-        "url_defaults": {"version": "LF2022", "product": "FBFM13", "size_cap": 4000},
+        "url_defaults": {
+          "version": "LF2022",
+          "product": "FBFM13",
+          "size_cap": 4000
+        },
         "coverage": "Contiguous United States (CONUS) only. Requests outside CONUS may return fill values or errors.",
-        "valid_products": ["FBFM13", "FBFM40"],
-        "valid_versions": ["LF2020", "LF2022"],
+        "valid_products": [
+          "FBFM13",
+          "FBFM40"
+        ],
+        "valid_versions": [
+          "LF2020",
+          "LF2022"
+        ],
         "cache_path_pattern": "landfire/{product}_{bbox_west}_{bbox_south}_{bbox_east}_{bbox_north}_{width}x{height}.tif",
         "static_note": "No temporal block: kind='static' and the absence of `temporal` seed CONST cadence (ess-v9a.5). The runtime fetches the GeoTIFF once per simulation domain and never reloads it (upstream DataFrequencyInfo uses a single interval spanning [starttime, endtime + 1 day], with build_interp_event firing once at simulation start)."
       }

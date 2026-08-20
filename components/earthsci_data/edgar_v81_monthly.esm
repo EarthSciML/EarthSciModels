@@ -28,6 +28,65 @@
       }
     ]
   },
+  "data_sources": {
+    "EDGAR_v81": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://jeodpp.jrc.ec.europa.eu/ftp/jrc-opendata/EDGAR/datasets/v81_FT2022_AP_new/monthly/{species}/bkl_{sector}/bkl_{sector}_flx_nc.zip"
+      },
+      "temporal": {
+        "start": "2000-01-01T00:00:00Z",
+        "end": "2022-12-31T23:59:59Z",
+        "file_period": "P1Y",
+        "frequency": "P1M",
+        "records_per_file": 12,
+        "time_variable": "time"
+      },
+      "reference": {
+        "citation": "Crippa, M. et al. (2023). EDGAR v8.1 Global Air Pollutant Emissions (1970–2022). European Commission, Joint Research Centre (JRC). Available: https://edgar.jrc.ec.europa.eu/dataset_ap81",
+        "url": "https://edgar.jrc.ec.europa.eu/dataset_ap81"
+      },
+      "metadata": {
+        "tags": [
+          "emissions",
+          "anthropogenic",
+          "edgar",
+          "monthly",
+          "gridded"
+        ],
+        "earthscidata_source": "src/edgar_v81_monthly.jl::EDGARv81MonthlyEmisFileSet",
+        "valid_species": [
+          "BC",
+          "CO",
+          "NH3",
+          "NMVOC",
+          "NOx",
+          "OC",
+          "PM10",
+          "PM2.5",
+          "SO2"
+        ],
+        "packaging": "zip-of-netcdf",
+        "unit_note": "Raw NC file may declare units 'kg m-2 s-1'; the loadmetadata function reads var.attrib['units'] and applies to_unit() conversion — default assumed if attribute absent.",
+        "native_resolution_deg": {
+          "lon": 0.1,
+          "lat": 0.1
+        },
+        "native_extent": {
+          "lon": [
+            -180.0,
+            180.0
+          ],
+          "lat": [
+            -90.0,
+            90.0
+          ]
+        },
+        "proj4_string": "+proj=longlat +datum=WGS84 +no_defs",
+        "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (edgar_v81_monthly.esm `regrid`)."
+      }
+    }
+  },
   "models": {
     "EDGARv81MonthlyEmis": {
       "coupletype": "EDGARv81MonthlyEmisCoupler",
@@ -72,11 +131,20 @@
           "type": "unknown",
           "units": "kg/m^3/s",
           "description": "Volumetric emission rate (kg m⁻³ s⁻¹) at the current grid point and time. Non-zero only in the surface layer (lev < 2): emission = EDGAR_v81.flx / Δz * scale. Zero for lev ≥ 2. Corresponds to the upstream observed variable created per varnames(fileset) by create_interp_equation with wrapper_f = eq -> ifelse(lev < 2, eq / Δz * scale, zero_emis)."
-        }
-      },
-      "subsystems": {
-        "EDGAR_v81": {
-          "ref": "./edgar_v81_monthly_loader.esm"
+        },
+        "flx": {
+          "type": "parameter",
+          "units": "kg/m^2/s",
+          "shape": [],
+          "description": "Surface emission flux for the configured species and sector. Variable name 'flx' is derived from the _flx_nc.zip archive naming convention for EDGAR v8.1 AP datasets.",
+          "update": {
+            "kind": "data",
+            "source": "EDGAR_v81",
+            "from": {
+              "file_variable": "flx",
+              "description": "Surface emission flux for the configured species and sector. Variable name 'flx' is derived from the _flx_nc.zip archive naming convention for EDGAR v8.1 AP datasets."
+            }
+          }
         }
       },
       "regrid": {
@@ -104,7 +172,7 @@
                   {
                     "op": "/",
                     "args": [
-                      "EDGAR_v81.flx",
+                      "flx",
                       "Δz"
                     ]
                   },

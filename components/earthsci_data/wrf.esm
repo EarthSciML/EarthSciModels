@@ -32,6 +32,72 @@
       }
     ]
   },
+  "data_sources": {
+    "WRF_hourly_d01": {
+      "kind": "grid",
+      "source": {
+        "url_template": "https://data.rda.ucar.edu/d340000/{date:%Y%m}/wrfout_hourly_d01_{date:%Y-%m-%d}_{date:%H}:00:00.nc"
+      },
+      "temporal": {
+        "start": "2019-05-01T00:00:00Z",
+        "end": "2026-05-31T23:59:59Z",
+        "file_period": "PT1H",
+        "frequency": "PT1H",
+        "records_per_file": 1,
+        "time_variable": "Times"
+      },
+      "reference": {
+        "citation": "UCAR Research Data Archive, dataset d340000. WRF-Chem v3.9.1 CONUS 12 km hourly output.",
+        "url": "https://rda.ucar.edu/datasets/d340000/"
+      },
+      "metadata": {
+        "tags": [
+          "wrf",
+          "meteorology",
+          "regional_climate",
+          "conus",
+          "lambert_conformal",
+          "12km"
+        ],
+        "earthscidata_source": "src/wrf.jl::WRFFileSet",
+        "domain_id": "d01",
+        "projection": "lambert_conformal_conic",
+        "map_proj": 1,
+        "lcc_parameters": {
+          "truelat1": 30.0,
+          "truelat2": 60.0,
+          "cen_lat": 38.999996,
+          "stand_lon": -97.0,
+          "sphere_radius_m": 6370000.0
+        },
+        "native_resolution_m": {
+          "west_east": 12000.0,
+          "south_north": 12000.0
+        },
+        "native_extent_m": {
+          "west_east": [
+            -2334000.0,
+            2334000.0
+          ],
+          "south_north": [
+            -1374000.0,
+            1374000.0
+          ]
+        },
+        "mass_grid_dimensions": [
+          389,
+          229,
+          32
+        ],
+        "model_version": "WRF-Chem v3.9.1",
+        "proj4_string": "+proj=lcc +lat_1=30.0 +lat_2=60.0 +lat_0=38.999996 +lon_0=-97.0 +x_0=0 +y_0=0 +a=6370000 +b=6370000 +to_meter=1",
+        "wrf_variable_note": "The upstream WRF() constructor reads ALL variables in the WRF output file dynamically via WRFFileSet.varnames(). This loader documents the nine core meteorological variables (U, V, W, T, PH, PHB, P, PB, QVAPOR) present in all CONUS d340000 files and that drive EarthSciML coupling. Additional WRF-Chem tracer/diagnostic variables (T2, U10, V10, PSFC, chemistry species) can be added as additional loader variables.",
+        "staggering_note": "WRF uses an Arakawa C-grid. Staggered-grid variables (U on west_east_stag, V on south_north_stag, W/PH/PHB on bottom_top_stag) live on the cell-edge dimensions; scalars (T, P, PB, QVAPOR) live on the mass (cell-centred) dimensions. The regridding model (wrf.esm) regrids the C-grid wind components U/V/W with a B-spline interpolating kernel and the scalars conservatively (RFC §5.2). The upstream EarthSciData.jl loader de-staggers staggered variables to cell centres in loadmetadata; the GDD grid above preserves the native staggered dimensions so the regridding model can choose the kernel by location.",
+        "access_note": "UCAR RDA data access requires a free registration at https://rda.ucar.edu/. The upstream EarthSciData.jl WRFFileSet uses standard HTTP downloads (login cookie only). Ensure $EARTHSCIDATADIR is set for local caching.",
+        "w_extrapolation_note": "Vertical wind W uses zero-boundary extrapolation (extrapolate_type=0.0) in the upstream loader to prevent spurious mass transport through the ground surface. All other variables use clamp extrapolation. Per-variable extrapolation override is a future ESM-schema concern; here it is documented for the runtime."
+      }
+    }
+  },
   "models": {
     "WRF": {
       "coupletype": "WRFCoupler",
@@ -67,49 +133,130 @@
           "description": "Reference epoch (seconds since the Julian date epoch) from which the WRF file time axis is offset. Set from DomainInfo.get_tref(domaininfo) at construction time."
         },
         "U": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "m/s",
-          "description": "Zonal (west–east) wind component (m/s). Sourced from the loader field raw.U (WRF variable U on the west_east_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lon via WRFCoupler/couple2."
+          "shape": [],
+          "description": "Zonal (west–east) wind component (m/s). Sourced from the loader field raw.U (WRF variable U on the west_east_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lon via WRFCoupler/couple2.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "U",
+              "description": "Zonal (west–east) wind component. WRF output variable U on the west_east_stag grid (C-grid x-edges). The regridding model interpolates this staggered field with a B-spline kernel."
+            }
+          }
         },
         "V": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "m/s",
-          "description": "Meridional (south–north) wind component (m/s). Sourced from the loader field raw.V (WRF variable V on the south_north_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lat via WRFCoupler/couple2."
+          "shape": [],
+          "description": "Meridional (south–north) wind component (m/s). Sourced from the loader field raw.V (WRF variable V on the south_north_stag C-grid edges), regridded with a B-spline kernel. Coupled to MeanWind.v_lat via WRFCoupler/couple2.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "V",
+              "description": "Meridional (south–north) wind component. WRF output variable V on the south_north_stag grid (C-grid y-edges). The regridding model interpolates this staggered field with a B-spline kernel."
+            }
+          }
         },
         "W": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "m/s",
-          "description": "Vertical wind component (m/s). Sourced from the loader field raw.W (WRF variable W on the bottom_top_stag C-grid edges), regridded with a B-spline kernel. Zero-extrapolated below the surface in the upstream loader. Coupled to MeanWind.v_lev via WRFCoupler/couple2."
+          "shape": [],
+          "description": "Vertical wind component (m/s). Sourced from the loader field raw.W (WRF variable W on the bottom_top_stag C-grid edges), regridded with a B-spline kernel. Zero-extrapolated below the surface in the upstream loader. Coupled to MeanWind.v_lev via WRFCoupler/couple2.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "W",
+              "description": "Vertical wind component. WRF output variable W on the bottom_top_stag grid (C-grid z-edges). The regridding model interpolates this staggered field with a B-spline kernel. Zero extrapolation below the surface (extrapolate_type=0.0 in the upstream loader, overriding the default clamp for this variable only)."
+            }
+          }
         },
         "T": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "K",
-          "description": "Perturbation potential temperature (K). Full potential temperature θ = T + 300 K. Cell-centred (mass grid), conservatively regridded. Sourced from raw.T."
+          "shape": [],
+          "description": "Perturbation potential temperature (K). Full potential temperature θ = T + 300 K. Cell-centred (mass grid), conservatively regridded. Sourced from raw.T.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "T",
+              "description": "Perturbation potential temperature (K). On the mass (bottom_top) grid, cell-centred. Full potential temperature θ = T + 300 K."
+            }
+          }
         },
         "PH": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "m^2/s^2",
-          "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PH."
+          "shape": [],
+          "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PH.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "PH",
+              "description": "Perturbation geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. Together with PHB provides geopotential height z = (PH+PHB)/g."
+            }
+          }
         },
         "PHB": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "m^2/s^2",
-          "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PHB."
+          "shape": [],
+          "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. PH + PHB gives total geopotential. Sourced from raw.PHB.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "PHB",
+              "description": "Base-state geopotential (m² s⁻²). On the w-level (bottom_top_stag) grid. Together with PH provides geopotential height z = (PH+PHB)/g."
+            }
+          }
         },
         "P": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "Pa",
-          "description": "Perturbation pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.P."
+          "shape": [],
+          "description": "Perturbation pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.P.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "P",
+              "description": "Perturbation pressure (Pa). On the mass (bottom_top) grid, cell-centred. Together with PB provides total atmospheric pressure P_total = P + PB."
+            }
+          }
         },
         "PB": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "Pa",
-          "description": "Base-state pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.PB."
+          "shape": [],
+          "description": "Base-state pressure (Pa). Cell-centred (mass grid). P + PB gives total atmospheric pressure. Sourced from raw.PB.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "PB",
+              "description": "Base-state pressure (Pa). On the mass (bottom_top) grid, cell-centred. Together with P provides total atmospheric pressure P_total = P + PB."
+            }
+          }
         },
         "QVAPOR": {
-          "type": "unknown",
+          "type": "parameter",
           "units": "kg/kg",
-          "description": "Water vapor mixing ratio (kg water per kg dry air). Cell-centred (mass grid). Sourced from raw.QVAPOR."
+          "shape": [],
+          "description": "Water vapor mixing ratio (kg water per kg dry air). Cell-centred (mass grid). Sourced from raw.QVAPOR.",
+          "update": {
+            "kind": "data",
+            "source": "WRF_hourly_d01",
+            "from": {
+              "file_variable": "QVAPOR",
+              "description": "Water vapor mixing ratio (kg water kg⁻¹ dry air). On the mass (bottom_top) grid, cell-centred."
+            }
+          }
         },
         "P_total": {
           "type": "unknown",
@@ -130,11 +277,6 @@
           "type": "unknown",
           "units": "m/rad",
           "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters = 111.32×10³·(180/π) ≈ 6378166 m rad⁻¹. Constant (does not depend on position). Emitted only in lat/lon coordinate domains."
-        }
-      },
-      "subsystems": {
-        "raw": {
-          "ref": "./wrf_loader.esm"
         }
       },
       "regrid": {
@@ -177,48 +319,12 @@
       },
       "equations": [
         {
-          "lhs": "U",
-          "rhs": "raw.U"
-        },
-        {
-          "lhs": "V",
-          "rhs": "raw.V"
-        },
-        {
-          "lhs": "W",
-          "rhs": "raw.W"
-        },
-        {
-          "lhs": "T",
-          "rhs": "raw.T"
-        },
-        {
-          "lhs": "PH",
-          "rhs": "raw.PH"
-        },
-        {
-          "lhs": "PHB",
-          "rhs": "raw.PHB"
-        },
-        {
-          "lhs": "P",
-          "rhs": "raw.P"
-        },
-        {
-          "lhs": "PB",
-          "rhs": "raw.PB"
-        },
-        {
-          "lhs": "QVAPOR",
-          "rhs": "raw.QVAPOR"
-        },
-        {
           "lhs": "P_total",
           "rhs": {
             "op": "+",
             "args": [
-              "raw.P",
-              "raw.PB"
+              "P",
+              "PB"
             ]
           }
         },
@@ -230,8 +336,8 @@
               {
                 "op": "+",
                 "args": [
-                  "raw.PH",
-                  "raw.PHB"
+                  "PH",
+                  "PHB"
                 ]
               },
               9.80665
