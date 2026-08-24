@@ -103,7 +103,7 @@ from earthsci_ast.numpy_interpreter import (  # noqa: E402
     NumpyInterpreterError,
     fold_constant_expr,
 )
-from earthsci_ast.simulation import simulate  # noqa: E402
+from earthsci_ast import ReturnCode, esm_problem, solve  # noqa: E402
 
 
 class UnsupportedExpression(Exception):
@@ -496,17 +496,24 @@ def _solve_time_series(
     """
     sim_input: Any = flat if flat is not None else _wrap_model_as_esm(model)
     t0, t1 = float(time_span.start), float(time_span.end)
-    result = simulate(
-        sim_input,
-        tspan=(t0, t1),
-        parameters=dict(base_bindings),
-        initial_conditions=dict(initial_state_values),
-        method="LSODA",
-        rtol=1e-8,
-        atol=1e-12,
+    # EarthSciAST phase 4: `simulate` is gone. Build once with `esm_problem`,
+    # then `solve`. The tolerances stay explicit and tight -- the library
+    # defaults are now 1e-4/1e-6, which would visibly coarsen a plotted curve.
+    result = solve(
+        esm_problem(
+            sim_input,
+            (t0, t1),
+            p=dict(base_bindings),
+            u0=dict(initial_state_values),
+        ),
+        alg="LSODA",
+        reltol=1e-8,
+        abstol=1e-12,
     )
-    if not result.success:
-        raise UnsupportedExpression(f"ODE integration failed: {result.message}")
+    if result.retcode is not ReturnCode.Success:
+        raise UnsupportedExpression(
+            f"ODE integration failed ({result.retcode.name}): {result.message}"
+        )
 
     t_dense = np.asarray(result.t, dtype=float)
     t_out = np.linspace(t0, t1, n_points)

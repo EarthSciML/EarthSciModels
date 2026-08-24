@@ -334,7 +334,7 @@ def _run_tests_for_container(
 ) -> None:
     if not tests:
         return
-    from earthsci_ast import flatten, simulate
+    from earthsci_ast import ReturnCode, esm_problem, flatten, solve
     from earthsci_ast.pde_inline_tests import (
         BuildInspection, _ephemeral_injected_file,
     )
@@ -379,16 +379,28 @@ def _run_tests_for_container(
             ic = dict(t.initial_conditions or {})
             ic = _seed_denom_ic(ic, run_flat, container_name)
             params = dict(t.parameter_overrides or {})
-            res = simulate(
-                run_flat,
-                tspan=(t.time_span.start, t.time_span.end),
-                parameters=params,
-                initial_conditions=ic,
-                method=method,
-                rtol=1e-10,
-                atol=1e-12,
-                cse=cse_flag,
-                inspect=insp,
+            # EarthSciAST phase 4: `simulate` is gone; a run is
+            # `esm_problem(...)` (build, per document) then `solve(...)` (run,
+            # per knob-set). Everything the BUILD depends on -- cse, inspect --
+            # moves to construction; only the solver knobs stay on solve.
+            #
+            # The tolerances stay EXPLICIT and stay tight. The library defaults
+            # are now 1e-4/1e-6, which is deliberately loose: a default is what a
+            # document gets when nobody expressed an opinion about accuracy. This
+            # driver asserts declared numbers, so it must state the accuracy it
+            # needs rather than inherit whatever the default happens to be.
+            res = solve(
+                esm_problem(
+                    run_flat,
+                    (t.time_span.start, t.time_span.end),
+                    p=params,
+                    u0=ic,
+                    cse=cse_flag,
+                    inspect=insp,
+                ),
+                alg=method,
+                reltol=1e-10,
+                abstol=1e-12,
             )
         except Exception as err:  # noqa: BLE001
             for i, a in enumerate(t.assertions):
@@ -403,12 +415,12 @@ def _run_tests_for_container(
                     expected=a.expected,
                     actual=None,
                     status="ERROR",
-                    message=f"simulate() raised: {type(err).__name__}: {err}",
+                    message=f"esm_problem()/solve() raised: {type(err).__name__}: {err}",
                     duration_s=time.time() - t_start,
                 ))
             continue
 
-        if not res.success:
+        if res.retcode is not ReturnCode.Success:
             for i, a in enumerate(t.assertions):
                 rows.append(AssertionRow(
                     file=file_path,
@@ -421,7 +433,7 @@ def _run_tests_for_container(
                     expected=a.expected,
                     actual=None,
                     status="ERROR",
-                    message=f"integrator failed: {res.message}",
+                    message=f"integrator failed ({res.retcode.name}): {res.message}",
                     duration_s=time.time() - t_start,
                 ))
             continue
