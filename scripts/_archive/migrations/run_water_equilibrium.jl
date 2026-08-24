@@ -49,7 +49,7 @@ end
 println("Scaffold written: ", out_path)
 
 # Quick structural summary
-esm_file = EarthSciAST.load(out_path)
+esm_file = EarthSciAST.load_path(out_path)
 model = esm_file.models["WaterEquilibrium"]
 println("Variables declared: ", length(model.variables))
 println("Equations: ", length(model.equations))

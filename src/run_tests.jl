@@ -6,7 +6,7 @@ Discovery + inline-test runner for `.esm` files in this repo.
 Each `Model` and `ReactionSystem` may carry a `tests` block (ESM spec §6.6) of
 scalar `(variable, time, expected, [tolerance])` assertions. This module walks
 `components/` (organized by science domain), parses every `.esm` file via
-`EarthSciAST.load`, simulates each Test on the resulting MTK system,
+`EarthSciAST.load_path`, simulates each Test on the resulting MTK system,
 samples each Assertion via the solution interpolant, and compares to the
 declared expected value with the tolerance resolved per spec §6.6.4 (assertion
 > test > model > default `rel=1e-6`).
@@ -337,7 +337,7 @@ end
 function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
     local esm_file
     try
-        esm_file = EarthSciAST.load(String(path))
+        esm_file = EarthSciAST.load_path(String(path))
     catch err
         push!(results, AssertionResult(
             path, :file, "<parse>", "<load>", 0, "", NaN, NaN, nothing,

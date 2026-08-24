@@ -293,7 +293,7 @@ Notes for the projected/special cases:
 
 The CI gate (`tools/run_esm_inline_tests.py`) walks `components/**/*.esm` and,
 for a file with no inline `tests` (all loaders/regridding models — they need real
-NetCDF), runs a **load-only minimum-bar gate**: `earthsci_ast.load(file)`
+NetCDF), runs a **load-only minimum-bar gate**: `earthsci_ast.load_path(file)`
 must succeed. Both halves must load independently (the model load resolves the
 `{"ref": ...}` to the loader file).
 

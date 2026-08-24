@@ -10,10 +10,10 @@ acceptance sentence:
      to the pre-migration inline pipeline."
 
 What it checks, using the canonical ESS Python runner
-(``earthsci_ast.load`` — the single simulation/resolution pathway per
+(``earthsci_ast.load_path`` — the single simulation/resolution pathway per
 AGENTS.md §1; no parallel evaluator):
 
-  1. RESOLVES — ``load()`` the consumer fixture
+  1. RESOLVES — ``load_path()`` the consumer fixture
      ``test/fixtures/earthsci_data/consumer_openaq.esm``. The consumer
      {"ref"}-includes the migrated single-component model
      ``components/earthsci_data/openaq.esm`` as the subsystem ``aq``;
@@ -23,7 +23,7 @@ AGENTS.md §1; no parallel evaluator):
 
   2. REGRIDS — the migrated model carries a per-variable ``regrid`` block
      (the post-migration home of regridding, moved off the loader). A
-     successful ``load()`` schema-validates that block; this check
+     successful ``load_path()`` schema-validates that block; this check
      additionally asserts the kernel + ``missing_value`` are present.
 
   3. FIELDS IDENTICAL (to tolerance) — the migrated model's exposed field
@@ -96,7 +96,7 @@ def _exposed_vars(model: dict) -> dict:
 
 def main() -> int:
     try:
-        from earthsci_ast import load
+        from earthsci_ast import load_path
     except Exception as e:  # pragma: no cover - environment guard
         print(f"FATAL: cannot import earthsci_ast ({e}). "
               f"Install the canonical ESS runner (see .github/workflows/test-esm.yml).")
@@ -108,11 +108,11 @@ def main() -> int:
     print("[1] consumer ref-include resolves through the canonical runner")
     for label, path in (("consumer", CONSUMER), ("migrated OpenAQ model", MIGRATED)):
         try:
-            load(path)
-            _ok(f"{label} load() resolved: {os.path.relpath(path, _ROOT)}")
+            load_path(path)
+            _ok(f"{label} load_path() resolved: {os.path.relpath(path, _ROOT)}")
         except Exception as e:
             failures += 1
-            _fail(f"{label} load() raised {type(e).__name__}: "
+            _fail(f"{label} load_path() raised {type(e).__name__}: "
                   f"{(str(e).splitlines() or [''])[0][:200]}")
 
     # Load JSON declarations for the interface / regrid comparison.

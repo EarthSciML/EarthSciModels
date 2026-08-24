@@ -4,7 +4,7 @@
 F-data-4 FEASIBILITY GATE for the three observed-fire pure-IO data loaders
 (campfire-e2e plan, observed-fire-data-loaders-plan-2026-06-26.md): confirm
 that the canonical ESS Python runner (``earthsci_ast``) can READ each new
-loader END-TO-END — both the structural ``load()`` (the same path the
+loader END-TO-END — both the structural ``load_path()`` (the same path the
 ``tools/run_esm_inline_tests.py`` gate walks) AND the per-kind runtime
 slice (``load_grid`` / ``load_static`` / ``load_points``) — across THREE
 modalities the pure-IO loader framework has not previously exercised:
@@ -83,7 +83,7 @@ def _have(mod: str) -> bool:
 def main() -> int:
     try:
         from earthsci_ast import (
-            load, load_grid, load_points, load_static,
+            load_path, load_grid, load_points, load_static,
         )
     except Exception as e:  # pragma: no cover - environment guard
         print(f"FATAL: cannot import earthsci_ast ({e}). "
@@ -97,18 +97,18 @@ def main() -> int:
     tmp = tempfile.mkdtemp(prefix="obsfire_feasibility_")
 
     # ------------------------------------------------------------------ #
-    # [1] STRUCTURAL: every loader load()s through the canonical runner   #
+    # [1] STRUCTURAL: every loader load_path()s through the canonical runner #
     #     (the same minimum-bar gate tools/run_esm_inline_tests.py runs). #
     # ------------------------------------------------------------------ #
-    print("[1] structural load() — all three loaders resolve through the runner")
+    print("[1] structural load_path() — all three loaders resolve through the runner")
     parsed = {}
     for fname, dlname in LOADERS.items():
         path = os.path.join(LOADER_DIR, fname)
         try:
-            m = load(path)
+            m = load_path(path)
             dl = m.data_loaders[dlname]
             parsed[dlname] = dl
-            _ok(f"{fname}: load() resolved (kind={dl.kind.value}, "
+            _ok(f"{fname}: load_path() resolved (kind={dl.kind.value}, "
                 f"vars={list(dl.variables)})")
         except Exception as e:
             failures += 1

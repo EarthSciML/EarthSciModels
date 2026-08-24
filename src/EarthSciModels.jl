@@ -20,7 +20,7 @@ sys = load_esm(joinpath(pkgdir(EarthSciModels), "components/gaschem/superfast.es
 ```
 
 For multi-component files, or to choose which model in a file to materialize,
-use `EarthSciAST.load(path)` directly and then construct the desired
+use `EarthSciAST.load_path(path)` directly and then construct the desired
 `System`/`PDESystem`/`ReactionSystem` from the returned `EsmFile`.
 """
 module EarthSciModels
@@ -41,19 +41,19 @@ Requires `ModelingToolkit` (and optionally `Catalyst` / `DomainSets`) to be
 loaded at the call site so `EarthSciAST`'s MTK extension is active.
 
 Raises an `ArgumentError` when the file contains zero or multiple models — in
-that case use `EarthSciAST.load(path)` directly and pick the model
+that case use `EarthSciAST.load_path(path)` directly and pick the model
 you want.
 """
 function load_esm(path::AbstractString)
-    esm_file = EarthSciAST.load(String(path))
+    esm_file = EarthSciAST.load_path(String(path))
     models = esm_file.models
     if models === nothing || isempty(models)
-        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciAST.load() for non-Model entries (reaction_systems, operators). A `data_sources` entry is not a component from esm 1.0.0 — a model consumes one through a parameter whose `update` names it, so a data-source-only file has no system to materialize."))
+        throw(ArgumentError("ESM file has no models: $(path). Use EarthSciAST.load_path() for non-Model entries (reaction_systems, operators). A `data_sources` entry is not a component from esm 1.0.0 — a model consumes one through a parameter whose `update` names it, so a data-source-only file has no system to materialize."))
     elseif length(models) == 1
         return _to_system(first(values(models)))
     else
         names = collect(keys(models))
-        throw(ArgumentError("ESM file has multiple models $(names); call EarthSciAST.load() and materialize the one you want."))
+        throw(ArgumentError("ESM file has multiple models $(names); call EarthSciAST.load_path() and materialize the one you want."))
     end
 end
 

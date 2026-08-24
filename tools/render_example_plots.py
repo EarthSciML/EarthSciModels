@@ -79,7 +79,7 @@ from earthsci_ast import (  # noqa: E402
     Model,
     free_variables,
     from_sympy,
-    load,
+    load_path,
     to_sympy,
 )
 from earthsci_ast.classification import (  # noqa: E402
@@ -1129,7 +1129,7 @@ class _RenderStats:
 
 def render_analyses_for_file(esm_path: Path, stats: _RenderStats) -> None:
     try:
-        esm: EsmFile = load(str(esm_path))
+        esm: EsmFile = load_path(str(esm_path))
     except Exception as exc:
         # Stay liberal on parse errors — surface and move on.
         print(f"[skip] {esm_path.name}: ESS load failed: {exc}", file=sys.stderr)

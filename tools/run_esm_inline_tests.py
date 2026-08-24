@@ -13,7 +13,7 @@ value with the spec §6.6.4 tolerance precedence (assertion > test >
 container > default rel=1e-6).
 
 Minimum-bar gate (mdl-14s): a discovered .esm with no inline tests still
-counts as a checked file — the worker calls ``earthsci_ast.load`` on
+counts as a checked file — the worker calls ``earthsci_ast.load_path`` on
 it and emits a synthetic ``<load>`` PASS row. A load failure emits an
 ERROR row and fails the gate. This catches structural-validation drift
 on lib/ files (e.g. lib/solar.esm) at PR time, which is the class of bug
@@ -499,11 +499,11 @@ def _run_tests_for_container(
 def run_worker(file_path: str) -> int:
     _set_memory_limit(WORKER_RLIMIT_BYTES)
 
-    from earthsci_ast import flatten, load
+    from earthsci_ast import flatten, load_path
 
     rows: List[AssertionRow] = []
     try:
-        ef = load(file_path)
+        ef = load_path(file_path)
     except Exception as err:  # noqa: BLE001
         rows.append(AssertionRow(
             file=file_path, container_kind="file", container_name="<load>",
@@ -529,7 +529,7 @@ def run_worker(file_path: str) -> int:
                 ))
 
     if not containers:
-        # mdl-14s: minimum-bar gate. With no inline tests, the load() call
+        # mdl-14s: minimum-bar gate. With no inline tests, the load_path() call
         # above is the only structural check. Emit a synthetic PASS row so
         # the parent summary shows the file was actually verified, not
         # silently skipped.
@@ -537,7 +537,7 @@ def run_worker(file_path: str) -> int:
             file=file_path, container_kind="file", container_name="<load>",
             test_id="<load>", assertion_idx=0, variable="", time=0.0,
             expected=0.0, actual=None, status="PASS",
-            message="load() succeeded (no inline tests declared)",
+            message="load_path() succeeded (no inline tests declared)",
             duration_s=0.0,
         ))
         _emit_worker_results(rows)

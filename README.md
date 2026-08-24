@@ -75,7 +75,7 @@ use the underlying parser directly:
 
 ```julia
 using EarthSciAST
-esm_file = EarthSciAST.load(path)   # returns an EsmFile
+esm_file = EarthSciAST.load_path(path)   # returns an EsmFile
 # then pick the component you want and build its System / PDESystem / ReactionSystem
 ```
 

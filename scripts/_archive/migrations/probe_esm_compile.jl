@@ -28,7 +28,7 @@ println("[probe] loading $(ESM_PATH) ...")
 flush(stdout)
 GC.gc()
 t0 = time()
-esm_file = EarthSciAST.load(ESM_PATH)
+esm_file = EarthSciAST.load_path(ESM_PATH)
 t_load = time() - t0
 println("[probe] load done in $(round(t_load, digits=2)) s")
 flush(stdout)

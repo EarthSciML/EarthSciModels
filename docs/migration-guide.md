@@ -163,9 +163,9 @@ using ModelingToolkit   # so the ESS MTK extension activates
 sys = load_esm(esm_path("components", "gaschem", "superfast.esm"))
 ```
 
-`load_esm` delegates to `EarthSciAST.load(...)` and asserts the
+`load_esm` delegates to `EarthSciAST.load_path(...)` and asserts the
 file contains exactly one model. For multi-component files, drop down
-to `EarthSciAST.load(path)` and pick the entry yourself.
+to `EarthSciAST.load_path(path)` and pick the entry yourself.
 
 ---
 

@@ -19,7 +19,7 @@ using EarthSciModels
 const WATER_PATH = joinpath(@__DIR__, "..", "..", "components", "aerosol", "aq_eq", "water.esm")
 
 println("── Loading water.esm ──────────────────────────────────────")
-esm_file = EarthSciAST.load(WATER_PATH)
+esm_file = EarthSciAST.load_path(WATER_PATH)
 model = esm_file.models["WaterEquilibrium"]
 println("variables: ", collect(keys(model.variables)))
 println("equations: ", length(model.equations))

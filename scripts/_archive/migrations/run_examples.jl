@@ -118,7 +118,7 @@ function run_example(example, simp)
 end
 
 println("── Loading water.esm ──────────────────────────────────────")
-esm_file = EarthSciAST.load(WATER_PATH)
+esm_file = EarthSciAST.load_path(WATER_PATH)
 model = esm_file.models["WaterEquilibrium"]
 sys = ModelingToolkit.System(model; name = :WaterEquilibrium)
 simp = ModelingToolkit.mtkcompile(sys)
