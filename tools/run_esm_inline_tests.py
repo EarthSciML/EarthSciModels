@@ -6,8 +6,8 @@ Python inline-test gate for the EarthSciModels rig.
 Walks ``components/**/*.esm`` and ``lib/**/*.esm`` (both default roots) and
 runs every inline test (``Model.tests`` / ``ReactionSystem.tests`` per ESM
 spec §6.6) through the canonical ESS Python runner
-``earthsci_ast.simulation.simulate``. For each ``(time, variable,
-expected[, tolerance])`` assertion, samples the ``SimulationResult``
+``earthsci_ast.solve``. For each ``(time, variable,
+expected[, tolerance])`` assertion, samples the ``Solution``
 trajectory at the requested time and compares to the declared expected
 value with the spec §6.6.4 tolerance precedence (assertion > test >
 container > default rel=1e-6).
@@ -20,10 +20,10 @@ on lib/ files (e.g. lib/solar.esm) at PR time, which is the class of bug
 that motivated the extension (see closed beads mdl-pk3, mdl-97r).
 
 Single-pathway rule (CLAUDE.md "Simulation Pathway — ABSOLUTE Rule"):
-this driver invokes ``earthsci_ast.simulation.simulate`` as the
+this driver invokes ``earthsci_ast.solve`` as the
 **official ESS Python runner** — no homebrew lambdify+solve_ivp, no
 parallel evaluator. The cse=False knob is requested via the public
-``cse: bool`` kwarg on ``simulate`` (esm-5gk, ESS audit follow-up
+``cse: bool`` argument on ``esm_problem`` (esm-5gk, ESS audit follow-up
 mdl-167); the runner handles compile-cache population internally.
 
 CSE per-file override (esm-wqy1): cse=False is the default — the
@@ -50,7 +50,7 @@ OOM guardrails (per bead mdl-w1j scope):
   * Each .esm is processed in its own subprocess via
     ``--worker <path>`` so Python's per-process GC structurally
     prevents cross-file accumulation, even if a future runner change
-    reintroduces growth across simulate() calls.
+    reintroduces growth across solve() calls.
   * Each subprocess sets ``RLIMIT_AS = 6 GiB`` (hard) so a runaway
     compile aborts cleanly instead of OOM-killing the CI runner.
   * Worker count = 1 (no parallel test execution); the parent walker
@@ -61,7 +61,7 @@ Cross-rig dependency (mdl-79g substrate-detection heuristic, ESS):
   main, the geoschem_fullchem mechanism's RHS divides by SO2/SALAAL/
   SALCAL whose default initial values are 0 (denominators of 0 →
   non-finite RHS). Workaround: seed those species to a small positive
-  ppb-scale value via the ``initial_conditions`` kwarg of simulate().
+  ppb-scale value via the ``u0`` argument of esm_problem().
   Remove the seed (the ``_DENOM_SEED_PPB`` block below) once
   EarthSciAST main contains a commit referencing the
   substrate-detection heuristic drop.
@@ -132,30 +132,30 @@ CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
 
 
 def _cse_for_file(file_path: str) -> bool:
-    """Return the ``cse`` kwarg value for ``simulate()`` on the given
+    """Return the ``cse`` argument value for ``esm_problem()`` on the given
     .esm. cse=False is the default; basenames listed in
     ``CSE_TRUE_OVERRIDE_FILENAMES`` opt into cse=True (see esm-wqy1)."""
     return Path(file_path).name in CSE_TRUE_OVERRIDE_FILENAMES
 
 
 # Per-file ODE-solver override (esm-4sxf). .esm basenames mapped here are
-# simulated with the named scipy method instead of ``simulate()``'s 'LSODA'
+# simulated with the named scipy method instead of ``solve()``'s 'LSODA'
 # default. Entry criteria: the file's inline tests are an ODE integration
 # that scipy's LSODA cannot complete (it hangs, or its Fortran RHS callback
 # overflows: "Call-back cb_f_in_lsoda__user__routines failed"), AND the
 # replacement method has been verified to reproduce the file's reference
-# data within the spec §6.6.4 declared tolerances. ``simulate()``'s public
+# data within the spec §6.6.4 declared tolerances. ``solve()``'s public
 # ``method`` argument is the sanctioned ESS API for this — no parallel
 # evaluator, single-pathway rule preserved (AGENTS.md §1).
 SOLVER_METHOD_OVERRIDE_FILENAMES: Dict[str, str] = {
     # pollu.esm (esm-4sxf): the POLLU stiff-ODE benchmark (Verwer 1994) has
     # rate constants spanning ~8e-7 to ~7e9 1/s. scipy's LSODA — the
-    # ``simulate()`` default — cannot integrate it: the lsoda Fortran
+    # ``solve()`` default — cannot integrate it: the lsoda Fortran
     # callback overflows even with an analytic Jacobian and even for a 60 s
     # window. scipy BDF integrates the full 3600 s benchmark in ~0.2 s and
     # reproduces the upstream GasChem.jl Pollu() Rosenbrock23 trajectory
     # (O3@3600 = 5.523140, matching the published POLLU reference solution).
-    # ``simulate()``'s own docstring documents the method default as 'BDF';
+    # ``solve()``'s own docstring documents the alg default as 'BDF';
     # only its signature default is 'LSODA' — once that ESS discrepancy is
     # resolved upstream this override can be dropped.
     "pollu.esm": "BDF",
@@ -163,13 +163,13 @@ SOLVER_METHOD_OVERRIDE_FILENAMES: Dict[str, str] = {
 
 
 def _method_for_file(file_path: str) -> str:
-    """Return the scipy solver method for ``simulate()`` on the given .esm.
-    'LSODA' is the ``simulate()`` default; basenames listed in
+    """Return the scipy solver alg for ``solve()`` on the given .esm.
+    'LSODA' is the ``solve()`` default; basenames listed in
     ``SOLVER_METHOD_OVERRIDE_FILENAMES`` opt into a different method
     (see esm-4sxf)."""
     return SOLVER_METHOD_OVERRIDE_FILENAMES.get(Path(file_path).name, "LSODA")
 
-# Variables we may need to identify by their bare name in the simulate()
+# Variables we may need to identify by their bare name in the solve()
 # output where ``vars`` is dot-namespaced (e.g. ``"SuperFast.O3"``).
 
 
@@ -258,7 +258,7 @@ def _seed_denom_ic(
 
     Adds ``DENOM_SEED_PPB`` entries for any state variable whose bare
     name matches and that is not already overridden by the test. Uses
-    the dot-namespaced state name from ``flat`` so simulate() resolves
+    the dot-namespaced state name from ``flat`` so esm_problem() resolves
     it deterministically.
     """
     out = dict(initial_conditions)
@@ -283,7 +283,7 @@ def _seed_denom_ic(
 
 def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
     """Evaluate a §6.6.5 field assertion (``reduce`` / ``coords``) from a
-    ``SimulationResult``, reusing the official toolkit primitives so the gate
+    ``Solution``, reusing the official toolkit primitives so the gate
     and ``run_pde_tests`` agree byte-for-byte. Collapses the spatial field of
     ``a.variable`` to a scalar: ``reduce`` applies the named reduction (mean,
     L2_error, …) over every cell (optionally against an analytic ``reference``);
@@ -300,7 +300,7 @@ def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
     cells = state_cells(var_map, a.variable, model_name)
     if not cells:
         raise RuntimeError(
-            f"array field '{a.variable}' has no cells in simulate() output")
+            f"array field '{a.variable}' has no cells in solve() output")
     cell_tuples = [c for c, _ in cells]
     field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
     if a.coords is not None:
@@ -464,7 +464,7 @@ def _run_tests_for_container(
                             actual=None,
                             status="ERROR",
                             message=(
-                                f"variable not found in simulate() output "
+                                f"variable not found in solve() output "
                                 f"(have {len(sim_vars)} vars; sample: "
                                 f"{sim_vars[:3]})"
                             ),
@@ -573,7 +573,7 @@ def run_worker(file_path: str) -> int:
         return 1
 
     # One inline runner for both ODE (scalar) and PDE (array/form-C) tests:
-    # `_run_tests_for_container` drives the official `simulate` engine, applying
+    # `_run_tests_for_container` drives the official `esm_problem`/`solve` engine, applying
     # per-test discretization injection and `reduce`/`coords` field collapse when
     # present, and plain scalar sampling otherwise.
     for kind, name, tol, tests in containers:

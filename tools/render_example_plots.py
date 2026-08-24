@@ -37,7 +37,7 @@ Renderable components:
 - ODE models (one or more `D(state)/dt = rhs` equations) drive the
   time-series path when the analysis carries `initial_state` (per_variable
   form). Each analysis integrates via the canonical Python runner
-  (`earthsci_ast.simulation.simulate`) and plots state/algebraic
+  (`earthsci_ast.esm_problem` + `solve`) and plots state/algebraic
   trajectories vs `t`. A 1-D `parameter_sweep` is allowed and produces a
   family of curves on one axes (one integration per grid point).
   DiameterGrowthRate's Fig. 13.2 analyses drive this path.
@@ -402,13 +402,13 @@ def _extract_ode_equations(model: Model) -> tuple[dict[str, Any], list[Any]]:
 
 
 def _wrap_model_as_esm(model: Any) -> EsmFile:
-    """Wrap a Model or _AdapterModel into a minimal EsmFile for `simulate`.
+    """Wrap a Model or _AdapterModel into a minimal EsmFile for `esm_problem`.
 
     The renderer iterates per top-level component (one Model or one
     ReactionSystem-derived _AdapterModel at a time), but the canonical
     Python runner consumes an EsmFile (which it flattens internally). This
     helper materialises a single-component EsmFile around the renderer's
-    in-hand model so the simulate call has the shape it expects, without
+    in-hand model so the esm_problem call has the shape it expects, without
     making the renderer track the originating EsmFile through every layer.
     """
     if isinstance(model, _AdapterModel):
@@ -467,11 +467,11 @@ def _solve_time_series(
 ) -> dict[str, np.ndarray]:
     """Integrate the model's ODE system over `time_span` and return trajectories.
 
-    Routes through `earthsci_ast.simulation.simulate` — the canonical
+    Routes through `earthsci_ast.esm_problem` + `solve` — the canonical
     Python ESS runner — per CLAUDE.md "Simulation Pathway — ABSOLUTE Rule".
     The runner handles ODE compilation (sympy lambdify with shared CSE),
     integration, dense output, and algebraic-state trajectory recovery
-    internally. simulate's `vars` only surface state variables; observed
+    internally. A Solution's `vars` only surface state variables; observed
     variables (e.g. fastjx's `j_NO2 = Σ F_i·σ_i`) are recovered here by
     walking the model's resolution plan against each saved time sample,
     using `earthsci_ast.numpy_interpreter.fold_constant_expr` — the
@@ -480,17 +480,17 @@ def _solve_time_series(
     pipeline.
 
     `flat` is an optional pre-built :class:`FlattenedSystem`. Passing it
-    lets sweep loops reuse simulate's `_simulate_compile_cache` (attached
+    lets sweep loops reuse the `_simulate_compile_cache` (attached
     to the flat instance) across every sweep point, which dominates wall
     time on large mechanisms (geoschem_fullchem: ~30 s lambdify per
     integration). When `flat` is None — the test path — this function
-    wraps `model` into a fresh single-component EsmFile and lets simulate
+    wraps `model` into a fresh single-component EsmFile and lets the build
     flatten internally.
 
     Returns a dict mapping every name (parameters as 0-d arrays, ODE
     states, algebraic-recovered states, observed-variable trajectories,
     and `t`) to a 1-D numpy array of length `n_points` sampled uniformly
-    across `[time_span.start, time_span.end]`. simulate produces a dense
+    across `[time_span.start, time_span.end]`. solve produces a dense
     ~10k-point grid via `dense_output=True`; we resample to `n_points` so
     plotters / fixtures can keep their current grid expectations.
     """
@@ -528,7 +528,7 @@ def _solve_time_series(
         if name not in out:
             out[name] = np.asarray(val)
 
-    # Observed-variable recovery. simulate returns only state-variable
+    # Observed-variable recovery. solve returns only state-variable
     # trajectories, but the renderer's plot specs may name observed vars
     # (e.g. fastjx's `j_NO2`). Build a resolution plan over the algebraic
     # subset of model equations and run the canonical AST evaluator at
@@ -1144,7 +1144,7 @@ def render_analyses_for_file(esm_path: Path, stats: _RenderStats) -> None:
     plots_dir = esm_path.parent / (esm_path.stem + ".plots")
 
     # Build the FlattenedSystem once per top-level component and pass it to
-    # every analysis on that component. simulate caches its compiled rhs on
+    # every analysis on that component. The build caches its compiled rhs on
     # the FlattenedSystem (`_simulate_compile_cache`); reusing the same flat
     # across all analyses on geoschem_fullchem cuts ~30 s of sympy.lambdify
     # work per extra analysis after the first (3 analyses × ~30 s saved).
@@ -1309,7 +1309,7 @@ def _render_time_series_analysis(
 
     `flat` is the per-component :class:`FlattenedSystem` materialised by the
     file driver (`render_analyses_for_file`). Passing it through lets every
-    sweep-point integration share simulate's `_simulate_compile_cache`,
+    sweep-point integration share the `_simulate_compile_cache`,
     avoiding a ~30 s lambdify per sweep step on large mechanisms. When None
     (e.g. test entry points exercising `_render_time_series_analysis` in
     isolation), `_solve_time_series` falls back to wrapping the model into a
@@ -1420,7 +1420,7 @@ def discover_esm_files(components_root: Path) -> list[Path]:
     return sorted(p for p in components_root.rglob("*.esm") if p.is_file())
 
 
-# Defensive memory budget for the doc-build path. simulate() compiles each
+# Defensive memory budget for the doc-build path. esm_problem() compiles each
 # mechanism via sympy.lambdify(..., cse=True), which has a known memory
 # cliff on very large reaction systems. The CI doc-build runner has ~7 GB
 # available; aborting here at 6 GB lets us emit a diagnostic instead of
@@ -1447,9 +1447,9 @@ def _check_rss_budget(label: str) -> None:
     if rss > _RSS_HARD_ABORT_GB:
         print(
             f"\n[render_example_plots] HARD ABORT after {label}: RSS={rss:.2f} GB "
-            f"exceeds {_RSS_HARD_ABORT_GB:.1f} GB budget. simulate() likely hit "
+            f"exceeds {_RSS_HARD_ABORT_GB:.1f} GB budget. esm_problem() likely hit "
             f"its lambdify memory cliff on a large mechanism — file a bead to "
-            f"extend simulate's API (e.g. cse=False knob) rather than re-adding "
+            f"extend esm_problem's API (e.g. cse=False knob) rather than re-adding "
             f"a homebrew solver path.",
             file=sys.stderr,
         )
