@@ -82,8 +82,14 @@ def _have(mod: str) -> bool:
 
 def main() -> int:
     try:
-        from earthsci_ast import (
-            load_path, load_grid, load_points, load_static,
+        # phase-6 H-4: the data-loading tier is no longer re-exported at the
+        # top level of `earthsci_ast` — it lives in `earthsci_ast.data_sources`
+        # (the Python counterpart of Rust's `esio` feature and Julia's
+        # EarthSciASTEarthSciIOExt). `load_path` is format-library surface and
+        # stays where it was.
+        from earthsci_ast import load_path
+        from earthsci_ast.data_sources import (
+            load_grid, load_points, load_static,
         )
     except Exception as e:  # pragma: no cover - environment guard
         print(f"FATAL: cannot import earthsci_ast ({e}). "

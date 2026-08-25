@@ -36,8 +36,11 @@ they stay standalone rather than being merged into a consumer the way the other
   no longer a component and carries no variable map; each former loader
   variable becomes a **parameter on the consuming model** with
   `update: {kind: "data", source: "<registry key>", from: {file_variable, …}}`,
-  and `earthsci_ast.load_data` / `load_grid` / `load_points` / `load_static`
-  take `bindings = {consuming parameter name -> DataSourceBinding}`.
+  and `earthsci_ast.data_sources.load_data` / `load_grid` / `load_points` /
+  `load_static` take `bindings = {consuming parameter name -> DataSourceBinding}`
+  (phase-6 H-4 moved the data-loading tier out of the top-level namespace; the
+  xarray-backed `grid` / `static` openers now need the `data` extra:
+  `pip install "earthsci-ast[data]"`).
 - These catalogs have no consumer, so they cannot supply those bindings. Their
   six `file_variable` / `units` / `description` declarations are parked
   verbatim in each source's `metadata.unconsumed_file_variables`, with the

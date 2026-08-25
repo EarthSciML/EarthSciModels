@@ -23,7 +23,7 @@ jobs:
   #
   # Walks components/**/*.esm and lib/**/*.esm (mdl-14s) and runs every inline
   # test through the canonical ESS Python runner
-  # (earthsci_ast.simulation.simulate, cse=False). lib/*.esm files without
+  # (earthsci_ast.esm_problem + solve, cse=False). lib/*.esm files without
   # inline tests still get a load-only minimum-bar gate so structural drift
   # (e.g. mdl-pk3, mdl-97r in lib/solar.esm) is caught at PR time. One
   # subprocess per file (Python's per-process GC is the OOM guardrail; cf.
@@ -50,8 +50,12 @@ jobs:
       - name: Install earthsci_ast (from EarthSciAST main)
         run: |
           python -m pip install --upgrade pip
+          # phase-6 H-4: SciPy is NOT a base dependency of earthsci-ast (a
+          # library must not embed a solver; esm-libraries-spec §2.4/§2.5.9).
+          # This gate integrates every inline test, so it asks for the
+          # `simulate` extra by name rather than getting the solver by accident.
           python -m pip install \
-            "earthsci_ast @ git+https://github.com/EarthSciML/EarthSciAST.git@main#subdirectory=pkg/earthsci-ast-py"
+            "earthsci_ast[simulate] @ git+https://github.com/EarthSciML/EarthSciAST.git@main#subdirectory=pkg/earthsci-ast-py"
       # Discretization library for PDE components: a discretization-agnostic PDE
       # leaf (e.g. surface_runoff/saint_venant.esm) injects a discretization at
       # test time whose adapter imports an EarthSciDiscretizations stencil via a
@@ -113,6 +117,8 @@ jobs:
       - name: Install earthsci_ast (from EarthSciAST main)
         run: |
           python -m pip install --upgrade pip
+          # This job only `load_path()`s: no solver, so the BASE install is
+          # deliberately enough (phase-6 H-4 — scipy/xarray are extras).
           python -m pip install \
             "earthsci_ast @ git+https://github.com/EarthSciML/EarthSciAST.git@main#subdirectory=pkg/earthsci-ast-py"
       - name: Run consumer ref-include + regrid-intent e2e (esm-3nc.6)
