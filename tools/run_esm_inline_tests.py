@@ -281,13 +281,57 @@ def _seed_denom_ic(
     return out
 
 
-def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
+def _observed_field(a, res, model_name: str, insp, prob):
+    """The ARRAY OBSERVED named by a §6.6.5 assertion, as an ``ndarray`` — the
+    observed-assertion form (esm-spec §6.6.5 admits any shaped variable, and
+    §5.23 makes a reference denote its expansion). Two sources, cheapest
+    first, both the official toolkit primitives of ``run_pde_tests``:
+
+      * a STATE-FREE array observed is materialized once at build time and
+        read back from the ``BuildInspection`` (``_inspection_field``);
+      * a STATE-DEPENDENT one (a column tendency ``dthdt = D(K*D(th,lev),lev)``)
+        moves with the state, so it is replayed through the official observed
+        driver (``observed_at_state``) at the trajectory sample nearest
+        ``a.time`` — the same driver the RHS used at that state.
+
+    Returns ``None`` when neither source knows the name, or when the
+    installed EarthSciAST predates the observed-assertion support (PR #177),
+    so the caller can raise its standard missing-field error.
+    """
+    import numpy as np
+    try:
+        from earthsci_ast.pde_inline_tests import _inspection_field
+        from earthsci_ast.simulation import observed_at_state
+    except ImportError:
+        return None
+    obs = _inspection_field(insp, model_name, str(a.variable))
+    if obs is not None:
+        return obs
+    build = getattr(prob, "build", None)
+    flat = getattr(prob, "flat", None)
+    if build is None or flat is None:
+        return None
+    ti = int(np.argmin(np.abs(res.t - float(a.time))))
+    state = np.asarray(res.y[:, ti], dtype=float)
+    for name in (f"{model_name}.{a.variable}", str(a.variable)):
+        value = observed_at_state(build, flat, name, float(res.t[ti]), state)
+        if value is None:
+            continue
+        arr = np.asarray(value, dtype=float)
+        if arr.ndim == 0:
+            return None
+        return arr
+    return None
+
+
+def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp, prob=None):
     """Evaluate a §6.6.5 field assertion (``reduce`` / ``coords``) from a
     ``Solution``, reusing the official toolkit primitives so the gate
     and ``run_pde_tests`` agree byte-for-byte. Collapses the spatial field of
     ``a.variable`` to a scalar: ``reduce`` applies the named reduction (mean,
     L2_error, …) over every cell (optionally against an analytic ``reference``);
-    ``coords`` picks one grid cell.
+    ``coords`` picks one grid cell. The field is the cells of an array STATE
+    when the name has ODE slots, else an array OBSERVED (``_observed_field``).
     """
     import numpy as np
     from earthsci_ast.pde_inline_tests import (
@@ -298,11 +342,19 @@ def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp):
         raise RuntimeError("`coords` and `reduce` are mutually exclusive")
     var_map = {str(v): i for i, v in enumerate(res.vars)}
     cells = state_cells(var_map, a.variable, model_name)
-    if not cells:
-        raise RuntimeError(
-            f"array field '{a.variable}' has no cells in solve() output")
-    cell_tuples = [c for c, _ in cells]
-    field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
+    if cells:
+        cell_tuples = [c for c, _ in cells]
+        field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
+    else:
+        obs = _observed_field(a, res, model_name, insp, prob)
+        if obs is None:
+            raise RuntimeError(
+                f"array field '{a.variable}' has no cells in solve() output, "
+                f"and no array observed of that name is exposed by the build "
+                f"or evaluable at the assertion time")
+        idxs = list(np.ndindex(*obs.shape))
+        cell_tuples = [[int(i) + 1 for i in idx] for idx in idxs]
+        field = [float(obs[idx]) for idx in idxs]
     if a.coords is not None:
         from earthsci_ast.pde_inline_tests import _coords_cell, _variable_shape
         shape = _variable_shape(eval_ef, model_name, str(a.variable))
@@ -389,19 +441,15 @@ def _run_tests_for_container(
             # document gets when nobody expressed an opinion about accuracy. This
             # driver asserts declared numbers, so it must state the accuracy it
             # needs rather than inherit whatever the default happens to be.
-            res = solve(
-                esm_problem(
-                    run_flat,
-                    (t.time_span.start, t.time_span.end),
-                    p=params,
-                    u0=ic,
-                    cse=cse_flag,
-                    inspect=insp,
-                ),
-                alg=method,
-                reltol=1e-10,
-                abstol=1e-12,
+            prob = esm_problem(
+                run_flat,
+                (t.time_span.start, t.time_span.end),
+                p=params,
+                u0=ic,
+                cse=cse_flag,
+                inspect=insp,
             )
+            res = solve(prob, alg=method, reltol=1e-10, abstol=1e-12)
         except Exception as err:  # noqa: BLE001
             for i, a in enumerate(t.assertions):
                 rows.append(AssertionRow(
@@ -448,7 +496,7 @@ def _run_tests_for_container(
                     # §6.6.5 field assertion (array/PDE): collapse the spatial
                     # field to a scalar via the shared toolkit primitives.
                     actual = _sample_pde_assertion(
-                        a, res, container_name, eval_ef, insp)
+                        a, res, container_name, eval_ef, insp, prob)
                 else:
                     idx = _resolve_var_index(a.variable, sim_vars, container_name)
                     if idx is None:
