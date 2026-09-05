@@ -62,21 +62,44 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    appropriate runtime object (`ModelingToolkit.System`, etc.).
 3. Run each `.esm` file's inline `tests` block (ESS spec §6.6) through a
    canonical runner to verify the model's `(variable, time, expected)`
-   assertions. Two canonical runners cover this:
+   assertions. All three canonical runners sweep the corpus in CI
+   (`.github/workflows/test-esm.yml`), because a single-runner sweep cannot
+   see a cross-binding divergence.
 
-   - **CI gate of record (Python):** `tools/run_esm_inline_tests.py`,
-     which drives `earthsci_ast.simulation.simulate(cse=False)` per
-     §1 (mdl-w1j → mdl-lvu). Per-file subprocess for OOM isolation;
-     walks both `components/**/*.esm` and `lib/**/*.esm`. This is the
-     blocking gate on every PR and push.
-   - **Julia runner (`EarthSciModels.run_esm_tests`):** the canonical
-     Julia walker; runs by default under `pkg test` for local
-     development and exercises the same `.esm` files via MTK directly.
-     CI skips this walk (`ESM_TESTS_SKIP_LIVE_REPO=1`) because its
-     ~85 s/file in-process MTK build does not scale to the migration
-     burst — the Python gate provides the same coverage with OOM
-     isolation in ~9 min (esm-g97l). Julia shim unit tests and the
-     fixture-based exercise of `run_esm_tests` still run in CI.
+   Every runner walks the WHOLE corpus and every runner blocks. There is
+   no allowlist, no deferred set and no per-runner exclusion: where one
+   binding cannot yet run what another already does, that is reported as
+   a failing job. A green CI therefore means all three bindings agree on
+   every assertion, and a red one names which binding does not.
+
+   - **Python (`tools/run_esm_inline_tests.py`):** drives
+     `earthsci_ast.solve(cse=False)` per §1 (mdl-w1j → mdl-lvu).
+     Per-file subprocess, so it is the only runner with OOM isolation,
+     and the one the corpus was migrated against. Walks
+     `components/**`, `lib/**` and `registered_functions/**`.
+   - **Julia (`EarthSciModels.run_esm_tests`):** the canonical Julia
+     walker; runs by default under `pkg test` for local development and
+     exercises the same `.esm` files via MTK directly. In CI it runs as
+     the `julia-inline-tests` matrix, one shard per job
+     (`ESM_TESTS_SHARD="i/n"`, see `shard_esm_files`): the walk builds
+     every system in-process at ~a minute-plus per file, which is what
+     blew the single-job budget in esm-g97l / esm-m0r2. Sharding splits
+     the cost across runners; it does not drop a file — the shards are a
+     partition of the corpus. `ESM_TESTS_SKIP_LIVE_REPO=1` still
+     short-circuits the walk locally for a fast shim-only `pkg test`.
+   - **Rust (`esm test`):** the `earthsci-ast` crate's CLI, built from
+     EarthSciAST main by the `rust-cli-inline-tests` job.
+
+   The Rust and Julia paths do not clear the corpus today, and the jobs
+   say so rather than hiding it. Measured when they landed: the Rust
+   sweep leaves 96 of the 322 files with inline tests carrying at least
+   one non-pass row (diffsol failing the first step, algebraic unknowns
+   with no `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs, a few
+   numeric divergences), and the in-process Julia walk is not expected to
+   survive geoschem_fullchem.esm's 819-reaction Catalyst → MTK build on a
+   16 GB runner. Closing those is upstream work on EarthSciAST, not
+   corpus work here — but it is upstream work with a red job attached to
+   it, which is the point.
 
 What does **not** belong in this rig:
 
