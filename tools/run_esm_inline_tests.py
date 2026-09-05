@@ -291,30 +291,52 @@ def _observed_field(a, res, model_name: str, insp, prob):
         read back from the ``BuildInspection`` (``_inspection_field``);
       * a STATE-DEPENDENT one (a column tendency ``dthdt = D(K*D(th,lev),lev)``)
         moves with the state, so it is replayed through the official observed
-        driver (``observed_at_state``) at the trajectory sample nearest
-        ``a.time`` — the same driver the RHS used at that state.
+        driver (``observed_at_state``) at ``a.time`` — the same driver the RHS
+        used at that state.
 
-    Returns ``None`` when neither source knows the name, or when the
-    installed EarthSciAST predates the observed-assertion support (PR #177),
-    so the caller can raise its standard missing-field error.
+    The two sources are probed under SEPARATE imports on purpose. The
+    state-free half (``_inspection_field``) is already on EarthSciAST main and
+    is what ``run_pde_tests`` reads there today; the state-dependent half
+    (``observed_at_state``) arrives with EarthSciAST PR #177. Binding them to
+    one import would strand the half the installed toolchain can already serve
+    behind the half it cannot.
+
+    Returns ``None`` when neither source knows the name, so the caller can
+    raise its standard missing-field error.
     """
     import numpy as np
     try:
         from earthsci_ast.pde_inline_tests import _inspection_field
+    except ImportError:
+        _inspection_field = None
+    if _inspection_field is not None:
+        obs = _inspection_field(insp, model_name, str(a.variable))
+        if obs is not None:
+            return obs
+    try:
         from earthsci_ast.simulation import observed_at_state
     except ImportError:
         return None
-    obs = _inspection_field(insp, model_name, str(a.variable))
-    if obs is not None:
-        return obs
     build = getattr(prob, "build", None)
     flat = getattr(prob, "flat", None)
     if build is None or flat is None:
         return None
-    ti = int(np.argmin(np.abs(res.t - float(a.time))))
-    state = np.asarray(res.y[:, ti], dtype=float)
+    # Sample the state the SAME way the array-state branch of
+    # _sample_pde_assertion does -- linear interpolation at exactly `a.time`.
+    # Reading the nearest output node instead would answer the assertion at a
+    # different instant than a state assertion in the same test: this gate
+    # passes no `saveat`, so `res.t` is the dense default grid and the nearest
+    # node sits up to (t1 - t0)/2/(len(res.t) - 1) away, silently, where
+    # upstream `simulate_states` refuses a mismatch beyond 1e-9. An observed
+    # replayed off-time is exactly the byte-for-byte divergence from
+    # `run_pde_tests` this driver exists to avoid.
+    t = float(a.time)
+    state = np.array(
+        [float(np.interp(t, res.t, res.y[row])) for row in range(res.y.shape[0])],
+        dtype=float,
+    )
     for name in (f"{model_name}.{a.variable}", str(a.variable)):
-        value = observed_at_state(build, flat, name, float(res.t[ti]), state)
+        value = observed_at_state(build, flat, name, t, state)
         if value is None:
             continue
         arr = np.asarray(value, dtype=float)
