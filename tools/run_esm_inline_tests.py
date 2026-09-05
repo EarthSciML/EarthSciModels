@@ -80,6 +80,7 @@ import os
 import resource
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -96,6 +97,25 @@ DEFAULT_REL_TOL = 1e-6
 # ubuntu-latest CI runner even if multiple processes are alive (parent +
 # worker), and matches the budget called out in the bead mdl-w1j scope.
 WORKER_RLIMIT_BYTES = 6 * 1024 * 1024 * 1024
+
+# Recursion budget for the worker process. CPython's default limit of 1000
+# Python frames is below what the deepest .esm in the corpus needs: the ESS
+# AST walks are recursive and cost ~4 frames per expression-tree level
+# (flatten._namespace_expr -> map_children -> child listcomp -> per-child
+# lambda), so geoschem_fullchem.esm (819 reactions -> 272 flattened equations,
+# deepest RHS ~322 levels) peaks at ~1,300 frames in flatten() alone and every
+# one of its 81 assertions errored as "flatten failed: RecursionError".
+# 20,000 is ~15x that measured peak — headroom for a deeper mechanism, while
+# still low enough that runaway recursion trips a clean RecursionError (an
+# ERROR row) rather than blowing the C stack (an opaque rc=-11 worker crash).
+# See _run_on_deep_stack() for the matching thread-stack sizing.
+WORKER_RECURSION_LIMIT = 20_000
+
+# Stack for the thread the worker body runs on. The 8 MiB default is sized for
+# the default 1000-frame limit; C-level recursion reached through the runner
+# costs real stack per level, so give the raised limit proportionate room.
+# 64 MiB is ~1% of WORKER_RLIMIT_BYTES, which the reservation counts against.
+WORKER_THREAD_STACK_BYTES = 64 * 1024 * 1024
 
 # Initial-condition seed for SO2/SALAAL/SALCAL (mdl-79g workaround).
 # A few ppb is far below any plausible boundary value and large enough
@@ -508,9 +528,72 @@ def _run_tests_for_container(
             ))
 
 
+def _run_on_deep_stack(fn):
+    """Run ``fn`` on a thread with a raised recursion limit and a big stack.
+
+    The ESS AST walks are recursive, so the Python frame budget a file needs
+    scales with the DEPTH of its expression trees, not with its size. The
+    worst case in the corpus is ``components/gaschem/geoschem_fullchem.esm``
+    (a 819-reaction ``reaction_systems`` document flattening to 272
+    equations): its deepest RHS nests ~322 expression levels, and
+    ``earthsci_ast.flatten._namespace_expr`` burns ~4 Python frames per level
+    (``_namespace_expr`` → ``map_children`` → the child listcomp → the
+    per-child lambda). Measured peak: ~1,300 frames inside ``flatten()``,
+    i.e. past CPython's default limit of 1000 — every assertion in that file
+    errored as ``flatten failed: RecursionError`` before this guard, which is
+    a gate-process configuration problem, not a model problem.
+
+    ``WORKER_RECURSION_LIMIT`` is set ~15x above that measured peak: enough
+    headroom that a legitimately deeper mechanism still runs, small enough
+    that a genuinely runaway (e.g. cyclic) walk still raises a clean
+    ``RecursionError`` — which the caller turns into ERROR rows — instead of
+    exhausting the C stack and segfaulting the worker, which the parent can
+    only report as an opaque ``worker exited rc=-11``. The thread's stack is
+    sized well above the 8 MiB default for the same reason: C-level recursion
+    (``deepcopy``/``repr``-style walks reached through the runner) costs real
+    stack per level. Both are worker-process-only — the parent driver keeps
+    stock limits, and ``run_worker()`` is reached solely via ``--worker``.
+
+    The stack reservation counts against the worker's ``RLIMIT_AS``, so it is
+    kept to a small fraction of ``WORKER_RLIMIT_BYTES``.
+    """
+    box: Dict[str, object] = {}
+
+    def _target() -> None:
+        # Per-interpreter, but this process only ever runs one .esm file.
+        sys.setrecursionlimit(WORKER_RECURSION_LIMIT)
+        try:
+            box["rc"] = fn()
+        except BaseException as err:  # noqa: BLE001
+            box["err"] = err
+
+    try:
+        threading.stack_size(WORKER_THREAD_STACK_BYTES)
+    except (ValueError, RuntimeError):
+        # Platform refused the size; fall back to the default stack.
+        pass
+    th = threading.Thread(target=_target, name="esm-inline-test-worker")
+    try:
+        th.start()
+    except (RuntimeError, MemoryError):
+        # No thread available (address space exhausted by the 64 MiB stack
+        # reservation, thread limits, …). Fall back to the calling thread so
+        # the file is still attempted: the raised recursion limit is
+        # interpreter-wide, so only the extra stack is lost.
+        _target()
+    else:
+        th.join()
+    if "err" in box:
+        raise box["err"]  # type: ignore[misc]
+    return int(box.get("rc", 2))  # type: ignore[arg-type]
+
+
 def run_worker(file_path: str) -> int:
     _set_memory_limit(WORKER_RLIMIT_BYTES)
+    return _run_on_deep_stack(lambda: _run_worker_body(file_path))
 
+
+def _run_worker_body(file_path: str) -> int:
     from earthsci_ast import flatten, load_path
 
     rows: List[AssertionRow] = []
