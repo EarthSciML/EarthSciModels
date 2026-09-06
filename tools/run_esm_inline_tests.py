@@ -56,15 +56,18 @@ OOM guardrails (per bead mdl-w1j scope):
   * Worker count = 1 (no parallel test execution); the parent walker
     spawns one subprocess at a time.
 
-Cross-rig dependency (mdl-79g substrate-detection heuristic, ESS):
-  Until the heuristic-removal series lands on EarthSciAST
-  main, the geoschem_fullchem mechanism's RHS divides by SO2/SALAAL/
-  SALCAL whose default initial values are 0 (denominators of 0 →
-  non-finite RHS). Workaround: seed those species to a small positive
-  ppb-scale value via the ``u0`` argument of esm_problem().
-  Remove the seed (the ``_DENOM_SEED_PPB`` block below) once
-  EarthSciAST main contains a commit referencing the
-  substrate-detection heuristic drop.
+Denominator seeds (mdl-79g) live in the DOCUMENT, not here:
+  The geoschem_fullchem mechanism's RHS divides by SO2/SALAAL/SALCAL, so a
+  0 initial value makes the first RHS evaluation non-finite. That is a fact
+  about the document, and it is stated there -- those three species declare
+  a small positive ``default`` in components/gaschem/geoschem_fullchem.esm.
+  This driver used to patch it in via ``u0`` from a DENOM_SEED_PPB table
+  keyed by BARE species name, which applied to every .esm in the corpus:
+  pollu.esm also declares an SO2 state, with a declared default of 1e-11,
+  and the table would have overwritten it with 1e-3 -- a 1e8 error on a
+  published benchmark -- for any pollu test that did not set SO2 itself.
+  Every runner of these documents needs the seed, not just this one, so it
+  belongs in the .esm.
 
 Exit codes:
   0  every assertion passed
@@ -97,17 +100,6 @@ DEFAULT_REL_TOL = 1e-6
 # ubuntu-latest CI runner even if multiple processes are alive (parent +
 # worker), and matches the budget called out in the bead mdl-w1j scope.
 WORKER_RLIMIT_BYTES = 6 * 1024 * 1024 * 1024
-
-# Initial-condition seed for SO2/SALAAL/SALCAL (mdl-79g workaround).
-# A few ppb is far below any plausible boundary value and large enough
-# to keep the heuristic-introduced denominators away from 0 during the
-# integrator's first RHS evaluation. Remove this block once mdl-79g
-# (substrate-detection heuristic drop) has landed on ESS main.
-DENOM_SEED_PPB: Dict[str, float] = {
-    "SO2": 1.0e-3,
-    "SALAAL": 1.0e-3,
-    "SALCAL": 1.0e-3,
-}
 
 # Per-file CSE override (esm-wqy1). .esm basenames listed here will be
 # simulated with cse=True instead of the cse=False default. Entry
@@ -276,38 +268,6 @@ def _check(actual: float, expected: float, rtol: float, atol: float) -> bool:
         return False
     diff = abs(a - e)
     return diff <= atol or diff <= rtol * max(abs(e), _REL_EPS)
-
-
-def _seed_denom_ic(
-    initial_conditions: Dict[str, float],
-    flat,
-    container_name: str,
-) -> Dict[str, float]:
-    """Apply the mdl-79g denominator-seed workaround.
-
-    Adds ``DENOM_SEED_PPB`` entries for any state variable whose bare
-    name matches and that is not already overridden by the test. Uses
-    the dot-namespaced state name from ``flat`` so esm_problem() resolves
-    it deterministically.
-    """
-    out = dict(initial_conditions)
-    state_names = list(flat.state_variables.keys()) if hasattr(
-        flat, "state_variables"
-    ) else [n for n in getattr(flat, "_state_names", [])]
-    if not state_names:
-        # Best-effort: pull from the compile cache we just built.
-        cache = getattr(flat, "_simulate_compile_cache", None)
-        if cache is not None:
-            state_names = list(cache.state_names)
-    for state_name in state_names:
-        bare = state_name.rsplit(".", 1)[-1]
-        if bare not in DENOM_SEED_PPB:
-            continue
-        # Don't clobber a test-supplied IC.
-        if state_name in out or bare in out:
-            continue
-        out[state_name] = DENOM_SEED_PPB[bare]
-    return out
 
 
 def _observed_field(a, res, model_name: str, insp, prob):
@@ -480,7 +440,6 @@ def _run_tests_for_container(
         insp = BuildInspection()
         try:
             ic = dict(t.initial_conditions or {})
-            ic = _seed_denom_ic(ic, run_flat, container_name)
             params = dict(t.parameter_overrides or {})
             # EarthSciAST phase 4: `simulate` is gone; a run is
             # `esm_problem(...)` (build, per document) then `solve(...)` (run,
