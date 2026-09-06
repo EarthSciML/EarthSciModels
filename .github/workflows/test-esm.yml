@@ -93,19 +93,32 @@ jobs:
   # §6.6 test and samples the interpolant. It is the runner this repo's own
   # `src/` shim is written against, and it was the last one still missing from
   # CI: `esm-g97l` set ESM_TESTS_SKIP_LIVE_REPO=1 on the Julia job and `esm-m0r2`
-  # removed the job outright, because the walk builds every system IN-PROCESS at
-  # roughly a minute-plus per file and a single job could not hold the corpus
-  # inside the 30-minute budget.
+  # removed the job outright, because the walk builds every system IN-PROCESS
+  # and a single job could not hold the corpus inside the 30-minute budget.
   #
-  # That was a budget problem, not a coverage one, and a budget problem has a
-  # budget fix: `ESM_TESTS_SHARD="i/n"` (see `shard_esm_files` in
-  # src/run_tests.jl) strides the sorted corpus so each shard gets an interleaved
-  # slice of every science domain rather than a contiguous block of one. The
-  # shards together are a partition — every committed `.esm` is walked by exactly
-  # one of them — so the sweep is whole again, just spread across n runners.
+  # Re-measured when this job landed, the per-file figure those beads recorded
+  # (~85 s) is long stale: a 40-way shard of 9 files ran its walk in 30 s, and a
+  # shard drawn to include the two largest non-GEOS-Chem documents
+  # (registered_functions/calc_direct_fluxes.esm at 3.0 MB and
+  # fastjx/fastjx_interp_troposphere.esm at 1.2 MB) came in around 5 s/file —
+  # those are big lookup tables, not big ODE systems, and MTK builds them
+  # cheaply. Call it ~4 s/file, so the whole 347-file walk is ~25 minutes in one
+  # process: past the 25-minute cap the Python gate runs under, and growing with
+  # the corpus.
+  #
+  # So the walk is sharded — `ESM_TESTS_SHARD="i/n"` (see `shard_esm_files` in
+  # src/run_tests.jl), one shard per matrix job, striding the sorted corpus so
+  # each shard gets an interleaved slice of every science domain rather than a
+  # contiguous block of one. Four shards puts each walk near 6 minutes, which
+  # leaves room for a per-file cost several times the measured one before any
+  # shard threatens the timeout, while keeping the duplicated Julia precompile
+  # to four jobs rather than eight. The shards are a partition — every committed
+  # `.esm` is walked by exactly one of them — so nothing is dropped to buy the
+  # speed.
   #
   # Each shard also runs the shim unit tests and the fixture-based exercise of
-  # the runner (that part is seconds, and was already in CI before esm-m0r2).
+  # the runner (~2 min, most of it first-call JIT, and already in CI before
+  # esm-m0r2).
   #
   # Every `.esm` is walked — ESM_TESTS_EXCLUDE is deliberately not set. That
   # includes geoschem_fullchem.esm, whose 819-reaction Catalyst → MTK build the
@@ -122,10 +135,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     env:
       # Keep in step with the `shard:` list above.
-      ESM_TESTS_SHARD: ${{ matrix.shard }}/8
+      ESM_TESTS_SHARD: ${{ matrix.shard }}/4
       # Absolute: `Pkg.test()` runs the suite in a subprocess whose working
       # directory is not guaranteed to be the workspace root.
       ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/julia-esm-tests-${{ matrix.shard }}.xml
@@ -140,8 +153,8 @@ jobs:
       # `include-matrix: false` gives every shard ONE shared cache key. The
       # depot content is identical across shards (same Manifest, same
       # precompiled MTK/Catalyst), and a per-shard key would mean paying the
-      # ~20-minute cold MTK precompile eight times over on every cache miss
-      # instead of once.
+      # cold MTK precompile — comfortably the most expensive thing in this job,
+      # far more than the walk — once per shard instead of once.
       - uses: julia-actions/cache@v2
         with:
           cache-name: julia-inline-tests
@@ -167,7 +180,7 @@ jobs:
       # OrdinaryDiffEq are test-target deps and are not visible outside the test
       # environment. `ESM_TESTS_SHARD` selects this shard's slice; the junit
       # report is written in the same pass.
-      - name: Julia inline-test sweep (shard ${{ matrix.shard }} of 8)
+      - name: Julia inline-test sweep (shard ${{ matrix.shard }} of 4)
         run: julia --project=. -e 'using Pkg; Pkg.test()'
 
       - name: Upload junit XML

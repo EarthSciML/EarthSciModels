@@ -143,10 +143,11 @@ the MTK build of whichever domain a file belongs to, so contiguous blocks would
 hand one shard every large chemistry mechanism and another only the cheap
 leaves. Striding interleaves the domains and keeps shard wall-times close.
 
-This exists because the Julia walk builds every system IN-PROCESS: it is the
-per-file cost that made the single-job walk blow the 30-minute CI budget once
-the corpus passed ~25 components (esm-g97l). Sharding is what lets the walk
-back into CI without either raising the per-job budget or dropping coverage.
+This exists because the Julia walk builds every system IN-PROCESS, so its cost
+scales linearly with the corpus — measured at ~4 s/file, which puts the whole
+walk near 25 minutes in one process and growing. Sharding is what lets the walk
+back into CI (esm-g97l, esm-m0r2 removed it) without either raising the per-job
+budget or dropping coverage.
 """
 function shard_esm_files(files::AbstractVector{<:AbstractString};
                          shard::Union{Nothing,AbstractString}=nothing)
