@@ -78,23 +78,38 @@ end
 
     @testset "shard_esm_files strides, and covers the corpus exactly once" begin
         files = ["a", "b", "c", "d", "e", "f", "g"]
-        @test shard_esm_files(files) == files                     # no shard → all
-        @test shard_esm_files(files; shard="1/3") == ["a", "d", "g"]
-        @test shard_esm_files(files; shard="2/3") == ["b", "e"]
-        @test shard_esm_files(files; shard="3/3") == ["c", "f"]
-        # Union of every shard is a partition of the input.
-        union3 = vcat((shard_esm_files(files; shard="$i/3") for i in 1:3)...)
-        @test sort(union3) == sort(files)
-        @test length(union3) == length(files)
-        # More shards than files: the tail shards are empty, not an error.
-        @test shard_esm_files(["a"]; shard="2/4") == String[]
 
+        # This testset asserts what `shard_esm_files` does for a GIVEN spec, so
+        # it has to own the env var the function falls back to. Under CI it does
+        # not: the julia-inline-tests matrix sets ESM_TESTS_SHARD for the whole
+        # job, and an ambient "1/40" silently turned the no-shard case below into
+        # shard 1 of 40. Clear it for the duration and put it back after.
         prev = get(ENV, "ESM_TESTS_SHARD", nothing)
+        delete!(ENV, "ESM_TESTS_SHARD")
         try
+            @test shard_esm_files(files) == files                 # no shard → all
+            @test shard_esm_files(files; shard="1/3") == ["a", "d", "g"]
+            @test shard_esm_files(files; shard="2/3") == ["b", "e"]
+            @test shard_esm_files(files; shard="3/3") == ["c", "f"]
+            # Union of every shard is a partition of the input.
+            union3 = vcat((shard_esm_files(files; shard="$i/3") for i in 1:3)...)
+            @test sort(union3) == sort(files)
+            @test length(union3) == length(files)
+            # More shards than files: the tail shards are empty, not an error.
+            @test shard_esm_files(["a"]; shard="2/4") == String[]
+
+            # The env var is the fallback, and an explicit `shard=` overrides it.
             ENV["ESM_TESTS_SHARD"] = "2/3"
             @test shard_esm_files(files) == ["b", "e"]
+            @test shard_esm_files(files; shard="1/3") == ["a", "d", "g"]
             ENV["ESM_TESTS_SHARD"] = ""
             @test shard_esm_files(files) == files
+            delete!(ENV, "ESM_TESTS_SHARD")
+
+            @test_throws ArgumentError shard_esm_files(files; shard="1")
+            @test_throws ArgumentError shard_esm_files(files; shard="x/3")
+            @test_throws ArgumentError shard_esm_files(files; shard="0/3")
+            @test_throws ArgumentError shard_esm_files(files; shard="4/3")
         finally
             if prev === nothing
                 delete!(ENV, "ESM_TESTS_SHARD")
@@ -102,11 +117,6 @@ end
                 ENV["ESM_TESTS_SHARD"] = prev
             end
         end
-
-        @test_throws ArgumentError shard_esm_files(files; shard="1")
-        @test_throws ArgumentError shard_esm_files(files; shard="x/3")
-        @test_throws ArgumentError shard_esm_files(files; shard="0/3")
-        @test_throws ArgumentError shard_esm_files(files; shard="4/3")
     end
 
     @testset "passing fixture → all PASS" begin
