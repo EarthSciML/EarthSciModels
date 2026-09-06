@@ -26,25 +26,36 @@ parallel evaluator. The cse=False knob is requested via the public
 ``cse: bool`` argument on ``esm_problem`` (esm-5gk, ESS audit follow-up
 mdl-167); the runner handles compile-cache population internally.
 
-CSE per-file override (esm-wqy1): cse=False is the default — the
-original audit concern (mdl-167, mirrored in
+CSE per-file override (esm-wqy1, re-measured): cse=True is the default.
+It was cse=False, defensively — the mdl-167 audit concern (mirrored in
 ``tools/render_example_plots.py`` near ``_RSS_HARD_ABORT_GB``) was
-defensive against ``sympy.lambdify(..., cse=True)``'s memory cliff
-on very large reaction systems. The cse=False path runs through
-``earthsci_ast.sympy_bridge._flat_to_sympy_rhs``'s topological
-algebraic-state substitution loop, which has the opposite cliff:
-models with many cross-referenced algebraic states explode in
-compile time (>30 min on a single file vs <30s under cse=True).
-``CSE_TRUE_OVERRIDE_FILENAMES`` below names .esm basenames that
-opt into cse=True to dodge the substitution-loop cliff. Numerical
-equivalence cse=True ↔ cse=False at IEEE-754 ULP scale was verified
-in esm-wqy1 across a sample of stratospheric / radical-pool .esm
-files (mismatches confined to numerically-zero values below the
-``atol=1e-12`` integrator floor; non-zero values match within the
-spec §6.6.4 default ``rel=1e-6`` tolerance). ess-as2 (upstream ESS
-sympy_bridge sequential-algebraic-evaluation perf fix, tracked via
-esm-kpo6) is the long-term path that would let the override allowlist
-stay empty.
+``sympy.lambdify(..., cse=True)``'s memory cliff on very large reaction
+systems. A full-corpus A/B measured that cliff not to appear: under the
+same 6 GiB ``RLIMIT_AS``, cse=True walked all 347 files without an OOM,
+and the two largest systems (geoschem_fullchem, 275 species; and
+superfast_ratelaws) failed IDENTICALLY under both settings, for reasons
+that predate the compile step (``flatten`` RecursionError;
+AmbiguousParameterError). Meanwhile the cse=False path pays the opposite
+cliff for real: it runs ``earthsci_ast.sympy_bridge._flat_to_sympy_rhs``'s
+topological algebraic-state substitution loop, and models with many
+cross-referenced algebraic states explode in compile time (>30 min on a
+single file vs <30 s under cse=True).
+
+Measured over components/ + lib/ + registered_functions/ (347 files,
+8184 assertions), cse=True default with the two exceptions below:
+8052 PASS / 0 FAIL / 132 ERROR in 694 s, against 8052 / 0 / 132 in
+1029 s for the old cse=False default — identical verdicts, 33% less
+wall. Numerical equivalence at IEEE-754 ULP scale was verified in
+esm-wqy1 across stratospheric / radical-pool files; the A/B above adds
+that no assertion anywhere in the corpus changes verdict, and that
+cse=True's failures are hard errors rather than wrong numbers (FAIL
+stayed 0 in every run).
+
+``CSE_FALSE_OVERRIDE_FILENAMES`` below names the .esm basenames that must
+stay on cse=False. Both hit one upstream defect, not a perf cliff: under
+cse=True their ``ifelse`` chains reach numpy as
+``invalid entry N in condlist: should be boolean ndarray``. Filed
+upstream; remove each entry once that lands.
 
 OOM guardrails (per bead mdl-w1j scope):
   * Each .esm is processed in its own subprocess via
@@ -128,34 +139,30 @@ DENOM_SEED_PPB: Dict[str, float] = {
     "SALCAL": 1.0e-3,
 }
 
-# Per-file CSE override (esm-wqy1). .esm basenames listed here will be
-# simulated with cse=True instead of the cse=False default. Entry
-# criteria: cse=False compile time exceeds ~10 min wall on a single
-# file (CI's 25-min walk-cap leaves no slack for one file to consume
-# the whole budget), AND cse=True correctness has been verified
-# against either a parallel forward evaluator or the file's existing
-# reference data within the spec §6.6.4 declared tolerances. See the
-# module docstring for the audit decision and ess-as2 (esm-kpo6) for
-# the long-term substitution-loop perf fix.
-CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
-    # heat_momentum_fluxes.esm (esm-0ro4): 78 algebraic states with
-    # cross-referenced ψ_m/ψ_h piecewise calls feeding through
-    # r_ah/r_aw/T_ac/q_ac/dH_*_dT produce ~419K substituted ops
-    # post-flatten; cse=False compile >30 min, cse=True ~29s. ULP
-    # correctness verified against a parallel Python forward
-    # evaluator (rel ≤ 5e-15) before listing here.
-    "heat_momentum_fluxes.esm",
-    # urban_canopy_model.esm (esm-vmik): inlines HeatMomentumFluxes with 78
-    # algebraic states; inherits same substitution-loop cliff as above.
-    "urban_canopy_model.esm",
+# Per-file cse=False override. cse=True is the default (see the module
+# docstring for the corpus A/B behind that). Entry criterion: the file does
+# not RUN under cse=True. Both current entries hit the same upstream defect
+# — an `ifelse` chain reaches numpy as "invalid entry N in condlist: should
+# be boolean ndarray" — not a perf or memory cliff. Neither is a numerical
+# disagreement: cse=True produced 0 FAIL corpus-wide, only hard errors.
+CSE_FALSE_OVERRIDE_FILENAMES: frozenset = frozenset({
+    # nonlocal_abl.esm: 196 assertions, all green under cse=False, all
+    # erroring under cse=True. 32 scalar variables, 20 `ifelse` over
+    # relational conditions; scalar pathway, no shaped variables.
+    "nonlocal_abl.esm",
+    # lightning_fire_occurrence.esm: 17 green assertions lost the same way.
+    # Nested `ifelse` chains defining observed quantities (CGRATE et al).
+    "lightning_fire_occurrence.esm",
 })
 
 
 def _cse_for_file(file_path: str) -> bool:
-    """Return the ``cse`` argument value for ``esm_problem()`` on the given
-    .esm. cse=False is the default; basenames listed in
-    ``CSE_TRUE_OVERRIDE_FILENAMES`` opt into cse=True (see esm-wqy1)."""
-    return Path(file_path).name in CSE_TRUE_OVERRIDE_FILENAMES
+    """Return the ``cse`` argument for ``esm_problem()`` on the given .esm.
+
+    cse=True is the default; basenames in ``CSE_FALSE_OVERRIDE_FILENAMES``
+    opt back out because they do not run under it.
+    """
+    return Path(file_path).name not in CSE_FALSE_OVERRIDE_FILENAMES
 
 
 # Per-file ODE-solver override (esm-4sxf). .esm basenames mapped here are
