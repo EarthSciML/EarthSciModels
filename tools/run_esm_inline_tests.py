@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import resource
 import subprocess
@@ -263,10 +264,38 @@ def _resolve_tolerance(
     return DEFAULT_REL_TOL, 0.0
 
 
+# esm-spec §6.6.3: "An implementation-defined small epsilon (e.g., 1e-300)
+# protects the relative check when `expected` is zero."
+_REL_EPS = 1e-300
+
+
 def _check(actual: float, expected: float, rtol: float, atol: float) -> bool:
-    if rtol == 0.0 and atol == 0.0:
-        return actual == expected
-    return abs(actual - expected) <= atol + rtol * abs(expected)
+    """The esm-spec §6.6.3 pass predicate, verbatim:
+
+        actual == expected
+        OR (both finite AND (|a-e| <= abs  OR  |a-e| / max(|e|, eps) <= rel))
+
+    Two bounds, satisfied by EITHER -- not summed. The previous form here,
+    ``|a-e| <= atol + rtol*|e|``, is numpy's ``isclose``, which ADDS them; a
+    sum is never smaller than the larger bound, so it accepted values §6.6.3
+    rejects. It only diverged where an assertion declares both `abs` and
+    `rel` (1924 of this corpus's assertions do).
+
+    Finiteness is judged before tolerance, per §6.6.3. This form never had
+    the infinity hole the spec warns about -- that one comes from a relative
+    denominator of ``max(|a|, |e|)``, which goes infinite with `a`; the
+    denominator here is `max(|e|, eps)`, so `|inf - e| <= rel*|e|` was always
+    False. The explicit guard is kept anyway because the spec requires the
+    predicate to state it rather than inherit it from the algebra.
+    """
+    a = float(actual)
+    e = float(expected)
+    if a == e:
+        return True
+    if not (math.isfinite(a) and math.isfinite(e)):
+        return False
+    diff = abs(a - e)
+    return diff <= atol or diff <= rtol * max(abs(e), _REL_EPS)
 
 
 def _seed_denom_ic(
