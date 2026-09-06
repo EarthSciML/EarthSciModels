@@ -197,3 +197,5 @@ Rules for `scripts/_archive/`:
 - Migration tracker (Phase-0 inventory): [`docs/migration-tracker.md`](docs/migration-tracker.md)
 - ESS spec: <https://github.com/EarthSciML/EarthSciAST/blob/main/esm-spec.md>
 - ESS schema: <https://github.com/EarthSciML/EarthSciAST/blob/main/esm-schema.json>
+
+Do not put "Co-Authored-By: Claude ..." in any commit messages. Claude is an LLM and LLMs cannot take responsibility for outputs, therefore they cannot be authors.
