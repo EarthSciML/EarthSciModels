@@ -1,12 +1,8 @@
-# AGENTS.md — EarthSciModels (ESM rig)
-
-This file is the rig-specific addendum to the workspace-level Gas Town agent
-guide ([`/CLAUDE.md`](../CLAUDE.md)). Read that first; the rules here apply
-only to the EarthSciModels repo.
+# AGENTS.md — EarthSciModels
 
 ## 1. The single-pathway rule (absolute)
 
-> **A model is simulated through exactly one pathway: an official ESS runner.**
+> **A model is simulated through exactly one pathway: an official EarthSciAST runner.**
 
 EarthSciML defines one canonical simulation toolchain — the EarthSciAST
 (ESS) runners — across every supported language:
