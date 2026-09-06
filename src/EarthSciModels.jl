@@ -29,7 +29,7 @@ import EarthSciAST
 using Printf: @printf
 
 export load_esm, esm_root, esm_path,
-       discover_esm_files, run_esm_tests, write_junit_xml
+       discover_esm_files, shard_esm_files, run_esm_tests, write_junit_xml
 
 """
     load_esm(path::AbstractString)

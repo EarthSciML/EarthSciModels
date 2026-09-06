@@ -17,6 +17,7 @@ const FIXTURE = joinpath(@__DIR__, "fixtures", "minimal_model.esm")
         @test isdefined(EarthSciModels, :esm_path)
         @test isdefined(EarthSciModels, :run_esm_tests)
         @test isdefined(EarthSciModels, :discover_esm_files)
+        @test isdefined(EarthSciModels, :shard_esm_files)
     end
 
     @testset "esm_root / esm_path" begin
@@ -65,6 +66,59 @@ end
         end
     end
 
+    @testset "discover_esm_files accepts file paths, and de-duplicates" begin
+        one = joinpath(inline_dir, "passing_decay.esm")
+        @test discover_esm_files([one]) == [one]
+        # A file named alongside the directory that already contains it is
+        # listed once, not twice.
+        @test discover_esm_files([inline_dir, one]) == discover_esm_files([inline_dir])
+        # A non-.esm file is not a root.
+        @test isempty(discover_esm_files([@__FILE__]))
+    end
+
+    @testset "shard_esm_files strides, and covers the corpus exactly once" begin
+        files = ["a", "b", "c", "d", "e", "f", "g"]
+
+        # This testset asserts what `shard_esm_files` does for a GIVEN spec, so
+        # it has to own the env var the function falls back to. Under CI it does
+        # not: the julia-inline-tests matrix sets ESM_TESTS_SHARD for the whole
+        # job, and an ambient "1/40" silently turned the no-shard case below into
+        # shard 1 of 40. Clear it for the duration and put it back after.
+        prev = get(ENV, "ESM_TESTS_SHARD", nothing)
+        delete!(ENV, "ESM_TESTS_SHARD")
+        try
+            @test shard_esm_files(files) == files                 # no shard → all
+            @test shard_esm_files(files; shard="1/3") == ["a", "d", "g"]
+            @test shard_esm_files(files; shard="2/3") == ["b", "e"]
+            @test shard_esm_files(files; shard="3/3") == ["c", "f"]
+            # Union of every shard is a partition of the input.
+            union3 = vcat((shard_esm_files(files; shard="$i/3") for i in 1:3)...)
+            @test sort(union3) == sort(files)
+            @test length(union3) == length(files)
+            # More shards than files: the tail shards are empty, not an error.
+            @test shard_esm_files(["a"]; shard="2/4") == String[]
+
+            # The env var is the fallback, and an explicit `shard=` overrides it.
+            ENV["ESM_TESTS_SHARD"] = "2/3"
+            @test shard_esm_files(files) == ["b", "e"]
+            @test shard_esm_files(files; shard="1/3") == ["a", "d", "g"]
+            ENV["ESM_TESTS_SHARD"] = ""
+            @test shard_esm_files(files) == files
+            delete!(ENV, "ESM_TESTS_SHARD")
+
+            @test_throws ArgumentError shard_esm_files(files; shard="1")
+            @test_throws ArgumentError shard_esm_files(files; shard="x/3")
+            @test_throws ArgumentError shard_esm_files(files; shard="0/3")
+            @test_throws ArgumentError shard_esm_files(files; shard="4/3")
+        finally
+            if prev === nothing
+                delete!(ENV, "ESM_TESTS_SHARD")
+            else
+                ENV["ESM_TESTS_SHARD"] = prev
+            end
+        end
+    end
+
     @testset "passing fixture → all PASS" begin
         passing = joinpath(inline_dir, "passing_decay.esm")
         results, exit_code = run_esm_tests([dirname(passing)]; verbose=false)
@@ -97,26 +151,33 @@ end
     end
 
     @testset "live repo: every committed .esm passes" begin
-        # Walk `components/` (all per-science-domain subdirs). An empty tree
-        # is OK (Phase 0/1/2 — early migration). Once .esm files land, this
-        # gate makes sure they all pass on every push.
+        # Walk the DEFAULT_ROOTS corpus (`components/` and its per-science-domain
+        # subdirs, plus `lib/` and `registered_functions/`). An empty tree is OK
+        # (Phase 0/1/2 — early migration). Once .esm files land, this gate makes
+        # sure they all pass on every push.
         # CI sets ESM_TESTS_JUNIT_XML to collect a junit artifact in the same
         # pass — avoids a second `julia --project=.` invocation which can't
         # see MTK (it's a test-only dep).
         #
-        # ESM_TESTS_SKIP_LIVE_REPO=1 short-circuits this walk. CI sets it on
-        # the julia-test job because the python-inline-tests gate (mdl-w1j,
-        # promoted to gate of record in mdl-lvu) covers the same .esm files
-        # via per-file subprocess in ~9 min, while the in-process MTK walk
-        # here scales linearly with component count (~85 s/file) and blew
-        # past the 30-minute job budget once the migration burst pushed the
-        # repo past ~25 components. The walk remains the default locally —
-        # only the workflow opts out (esm-g97l).
+        # ESM_TESTS_SHARD="i/n" walks only shard i of n (see `shard_esm_files`).
+        # This is how the walk fits CI: it builds every system IN-PROCESS, so
+        # cost scales linearly with the corpus — measured at ~4 s/file, which
+        # puts the whole walk near 25 minutes in one process. The
+        # `julia-inline-tests` matrix in .github/workflows/test-esm.yml runs one
+        # shard per job, and the shards partition the corpus, so the sweep is
+        # whole. Unset (the local default) walks everything in one process.
+        #
+        # ESM_TESTS_SKIP_LIVE_REPO=1 still short-circuits the walk entirely, for
+        # a fast shim-only `pkg test`.
         if get(ENV, "ESM_TESTS_SKIP_LIVE_REPO", "") in ("1", "true", "yes")
-            @info "ESM_TESTS_SKIP_LIVE_REPO set — deferring live-repo walk to python-inline-tests gate."
+            @info "ESM_TESTS_SKIP_LIVE_REPO set — skipping the live-repo walk."
         else
             junit_xml = get(ENV, "ESM_TESTS_JUNIT_XML", nothing)
-            results, exit_code = run_esm_tests(; junit_xml=junit_xml)
+            shard = get(ENV, "ESM_TESTS_SHARD", "")
+            discovered = discover_esm_files()
+            files = shard_esm_files(discovered)
+            isempty(shard) || @info "ESM_TESTS_SHARD=$(shard) — walking $(length(files)) of $(length(discovered)) discovered .esm file(s)."
+            results, exit_code = run_esm_tests(files; junit_xml=junit_xml)
             if !isempty(results)
                 failures = filter(r -> r.status != EarthSciModels.PASS, results)
                 for f in failures
@@ -124,8 +185,10 @@ end
                             "/", f.test_id, " — ", f.message)
                 end
                 @test exit_code == 0
+            elseif isempty(files)
+                @info "No .esm files in this shard — runner exercised only against fixtures."
             else
-                @info "No committed .esm files yet — runner exercised only against fixtures."
+                @info "No inline tests in this shard's .esm files."
             end
         end
     end

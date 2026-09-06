@@ -21,6 +21,14 @@ jobs:
   # builds do not scale to the live migration burst and were blowing job
   # timeouts even with ESM_TESTS_SKIP_LIVE_REPO).
   #
+  # It is no longer the only sweep: `julia-inline-tests` (the rig's own MTK
+  # walker, sharded across a matrix) and `rust-cli-inline-tests` (the `esm test`
+  # CLI) sweep the same corpus through the other two canonical ESS runners. All
+  # three walk every file and all three block — where a binding cannot yet run
+  # what another already does, that is reported as a failing job, not filtered
+  # out. This one is still the runner with per-file OOM isolation, and the one
+  # the corpus was migrated against.
+  #
   # Walks components/**/*.esm and lib/**/*.esm (mdl-14s) and runs every inline
   # test through the canonical ESS Python runner
   # (earthsci_ast.esm_problem + solve, cse=False). lib/*.esm files without
@@ -34,8 +42,9 @@ jobs:
   # This is the **gate of record** for live-repo inline tests. The 819-reaction
   # geoschem_fullchem.esm Catalyst → MTK build OOM-kills the 16 GB GHA runner
   # in-process, but this gate exercises it safely via per-file subprocess
-  # (peak ~196 MB). Local devs still get full Julia coverage via `pkg test`
-  # — see docs/migration-guide.md (mdl-cac).
+  # (peak ~196 MB) — the in-process Julia walk below has no such isolation and
+  # is not expected to survive that file. Local devs still get full Julia
+  # coverage via `pkg test` — see docs/migration-guide.md (mdl-cac).
   python-inline-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -74,6 +83,194 @@ jobs:
         with:
           name: python-esm-inline-tests-junit
           path: python-esm-tests.xml
+          if-no-files-found: ignore
+
+  # Julia inline-test sweep (the rig's own runner, back in CI).
+  #
+  # `EarthSciModels.run_esm_tests` is the canonical Julia walker (AGENTS.md §1):
+  # it loads each `.esm` through `EarthSciAST.load_path`, builds a
+  # `ModelingToolkit.System` (or a Catalyst `ReactionSystem`), integrates each
+  # §6.6 test and samples the interpolant. It is the runner this repo's own
+  # `src/` shim is written against, and it was the last one still missing from
+  # CI: `esm-g97l` set ESM_TESTS_SKIP_LIVE_REPO=1 on the Julia job and `esm-m0r2`
+  # removed the job outright, because the walk builds every system IN-PROCESS
+  # and a single job could not hold the corpus inside the 30-minute budget.
+  #
+  # Re-measured when this job landed, the per-file figure those beads recorded
+  # (~85 s) is long stale: a 40-way shard of 9 files ran its walk in 30 s, and a
+  # shard drawn to include the two largest non-GEOS-Chem documents
+  # (registered_functions/calc_direct_fluxes.esm at 3.0 MB and
+  # fastjx/fastjx_interp_troposphere.esm at 1.2 MB) came in around 5 s/file —
+  # those are big lookup tables, not big ODE systems, and MTK builds them
+  # cheaply. Call it ~4 s/file, so the whole 347-file walk is ~25 minutes in one
+  # process: past the 25-minute cap the Python gate runs under, and growing with
+  # the corpus.
+  #
+  # So the walk is sharded — `ESM_TESTS_SHARD="i/n"` (see `shard_esm_files` in
+  # src/run_tests.jl), one shard per matrix job, striding the sorted corpus so
+  # each shard gets an interleaved slice of every science domain rather than a
+  # contiguous block of one. Four shards puts each walk near 6 minutes, which
+  # leaves room for a per-file cost several times the measured one before any
+  # shard threatens the timeout, while keeping the duplicated Julia precompile
+  # to four jobs rather than eight. The shards are a partition — every committed
+  # `.esm` is walked by exactly one of them — so nothing is dropped to buy the
+  # speed.
+  #
+  # Each shard also runs the shim unit tests and the fixture-based exercise of
+  # the runner (~2 min, most of it first-call JIT, and already in CI before
+  # esm-m0r2).
+  #
+  # Every `.esm` is walked — ESM_TESTS_EXCLUDE is deliberately not set. That
+  # includes geoschem_fullchem.esm, whose 819-reaction Catalyst → MTK build the
+  # in-process walker is not expected to survive on a 16 GB runner (the Python
+  # gate carries it in a subprocess at ~196 MB peak). Its shard failing is the
+  # honest report of where the Julia path stands; excluding the file would only
+  # move that fact out of CI and into a comment.
+  #
+  # `fail-fast: false`: a failure in one shard says nothing about the others, and
+  # a partial matrix hides which domains are actually broken.
+  julia-inline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      # Keep in step with the `shard:` list above.
+      ESM_TESTS_SHARD: ${{ matrix.shard }}/4
+      # Absolute: `Pkg.test()` runs the suite in a subprocess whose working
+      # directory is not guaranteed to be the workspace root.
+      ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/julia-esm-tests-${{ matrix.shard }}.xml
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          # The version this rig's [compat] pins.
+          version: '1.12'
+
+      # `include-matrix: false` gives every shard ONE shared cache key. The
+      # depot content is identical across shards (same Manifest, same
+      # precompiled MTK/Catalyst), and a per-shard key would mean paying the
+      # cold MTK precompile — comfortably the most expensive thing in this job,
+      # far more than the walk — once per shard instead of once.
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: julia-inline-tests
+          include-matrix: false
+
+      # EarthSciAST.jl is registered in General only at 0.2.0's registry entry
+      # and this rig tracks `main`, so the environment is resolved the way
+      # docs/ and local development do it — through the repo's own setup script,
+      # which Pkg.add's the package from GitHub and instantiates.
+      - name: Resolve EarthSciAST.jl into the project environment
+        run: scripts/setup_polecat_env.sh
+
+      # Same discretization library the Python gate clones: a
+      # discretization-agnostic PDE leaf pulls an EarthSciDiscretizations
+      # stencil in over a `${ESD_ROOT}` ref (esm-spec §4.7).
+      - name: Clone EarthSciDiscretizations (discretization library)
+        run: |
+          git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
+          echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
+
+      # The walk runs INSIDE `Pkg.test()` rather than as a second
+      # `julia --project=.` call, because ModelingToolkit / Catalyst /
+      # OrdinaryDiffEq are test-target deps and are not visible outside the test
+      # environment. `ESM_TESTS_SHARD` selects this shard's slice; the junit
+      # report is written in the same pass.
+      - name: Julia inline-test sweep (shard ${{ matrix.shard }} of 4)
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Upload junit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: julia-esm-inline-tests-junit-${{ matrix.shard }}
+          path: julia-esm-tests-${{ matrix.shard }}.xml
+          if-no-files-found: ignore
+
+  # Rust CLI inline-test sweep.
+  #
+  # Runs the same `.esm` corpus as `python-inline-tests` through the canonical
+  # **Rust** ESS runner — `esm test`, the CLI binary of the `earthsci-ast` crate
+  # (AGENTS.md §1). The point is not redundant coverage of the models: the
+  # Python gate already owns that. The point is that op semantics, tolerance
+  # resolution (§6.6.4) and the flatten/classify pipeline are single-sourced
+  # ACROSS bindings, and nothing in this rig noticed when two bindings answered
+  # a `(variable, time, expected)` assertion differently, because only one
+  # binding ever ran here.
+  #
+  # The CLI is built from EarthSciAST `main`, the same revision the Python gate
+  # pip-installs, so the two jobs compare like with like. `esm` is not published
+  # to crates.io and the repo cuts no binary releases, so building it is the only
+  # way to get it; ~8 min from cold, and Swatinem/rust-cache keeps the dependency
+  # tree (diffsol, s2rst, ndarray, jsonschema) out of every later run.
+  #
+  # The sweep covers every `.esm` under components/, lib/ and
+  # registered_functions/, and the job fails on any non-pass row. There is no
+  # allowlist and no deferred set: where the Rust binding does not yet reach what
+  # the Python gate already runs, that shows up here as a red job rather than as
+  # a quiet line in a skip file. As measured when this job landed, that is a real
+  # and substantial gap — 96 of 322 files with inline tests carry at least one
+  # non-pass row (diffsol failing the very first step, algebraic unknowns with no
+  # D(x,t) equation, unexpanded §4.7 `${VAR}` refs, a few numeric divergences) —
+  # and closing it is upstream work on EarthSciAST, not corpus work here.
+  rust-cli-inline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # `/_EarthSciAST/` is this repo's conventional (and .gitignore'd) spot for
+      # a sibling EarthSciAST checkout, so the clone sits inside the workspace
+      # where Swatinem/rust-cache resolves its `workspaces` paths.
+      ESS_RS: _EarthSciAST/pkg/earthsci-ast-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cloned before the toolchain/cache steps: Swatinem/rust-cache keys on the
+      # Cargo.lock it finds in `workspaces`, so the checkout has to exist first.
+      - name: Clone EarthSciAST (Rust runner source, from main)
+        run: git clone --depth=1 https://github.com/EarthSciML/EarthSciAST.git _EarthSciAST
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ env.ESS_RS }}
+
+      # `--locked`: build the dependency versions EarthSciAST committed, so a
+      # fresh minor release of a transitive dep cannot turn this job red with no
+      # commit behind it (the reason ESS pins its own linters).
+      - name: Build the canonical `esm` CLI
+        run: |
+          cargo build --release --locked --bin esm \
+            --manifest-path "$ESS_RS/Cargo.toml"
+          "$ESS_RS/target/release/esm" --version
+
+      # Same discretization library the Python gate clones, for the same reason:
+      # a discretization-agnostic PDE leaf injects an adapter whose stencil comes
+      # in over a `${ESD_ROOT}` ref (esm-spec §4.7). The Rust loader does not
+      # expand `${VAR}` in a ref yet — which is exactly the kind of divergence
+      # this job exists to surface — so wiring it here means the fix, when it
+      # lands upstream, needs no change on this side.
+      - name: Clone EarthSciDiscretizations (discretization library)
+        run: |
+          git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
+          echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
+
+      - name: Rust inline-test sweep
+        run: |
+          set -eo pipefail
+          "$ESS_RS/target/release/esm" test components lib registered_functions \
+            | tee /tmp/rust-sweep.log
+
+      - name: Upload Rust sweep log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-esm-inline-tests-log
+          path: /tmp/rust-sweep.log
           if-no-files-found: ignore
 
   # Consumer end-to-end gate (esm-3nc.6 fixture; wired into CI by esm-aha).

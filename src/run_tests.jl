@@ -17,13 +17,21 @@ loaded at the call site so the EarthSciAST MTK / Catalyst extensions
 are active.
 
 Public surface:
-- `discover_esm_files(roots)` — recursive `.esm` walk
+- `discover_esm_files(roots)` — recursive `.esm` walk over directories and/or
+  explicit `.esm` files
+- `shard_esm_files(files; shard="i/n")` — select shard `i` of `n` (defaults to
+  the `ESM_TESTS_SHARD` env var), so the walk can be split across CI jobs
 - `run_esm_tests(roots; junit_xml=nothing, verbose=true)` — returns
   `(results, exit_code)` where `exit_code == 0` iff every assertion passed
 - `write_junit_xml(results, path)` — emit a junit-compatible report
 """
 
-const DEFAULT_ROOTS = ["components"]
+# Sweep roots, kept in parity with the Python gate's DEFAULT_ROOTS in
+# `tools/run_esm_inline_tests.py`. `components/` holds the per-science-domain
+# corpus; `lib/` and `registered_functions/` hold the shared leaves the
+# components `ref`-include. The two runners walking different corpora is how a
+# cross-runner divergence hides, so they walk the same three.
+const DEFAULT_ROOTS = ["components", "lib", "registered_functions"]
 
 @enum AssertionStatus PASS FAIL ERROR SKIP
 
@@ -80,10 +88,13 @@ end
 """
     discover_esm_files(roots; exclude=nothing) -> Vector{String}
 
-Recursively walk each directory in `roots` (relative to `esm_root()` if not
-absolute) and return all `*.esm` paths in deterministic sorted order. Missing
-roots are skipped silently — empty top-level dirs are normal in the migration
-window.
+Resolve `roots` (each relative to `esm_root()` when not absolute) to a
+deterministic, sorted, de-duplicated list of `*.esm` paths. A root that names a
+directory is walked recursively; a root that names a `.esm` file is taken as
+itself, so a caller can hand the runner an explicit file list — the same
+"files and/or directories" surface the Rust CLI's `esm test PATH...` and the
+Python gate's `--files` offer. Missing roots are skipped silently — empty
+top-level dirs are normal in the migration window.
 
 `exclude` (or the `ESM_TESTS_EXCLUDE` env var, ";"- or ":"-separated) is a list
 of substring patterns; any discovered file whose absolute or repo-relative
@@ -97,9 +108,15 @@ function discover_esm_files(roots::AbstractVector{<:AbstractString};
     patterns = _resolve_exclude(exclude)
     found = String[]
     for r in roots
-        dir = isabspath(r) ? r : joinpath(base, r)
-        isdir(dir) || continue
-        for (root, _dirs, files) in walkdir(dir)
+        path = isabspath(r) ? r : joinpath(base, r)
+        if isfile(path)
+            endswith(path, ".esm") || continue
+            _is_excluded(path, base, patterns) && continue
+            push!(found, path)
+            continue
+        end
+        isdir(path) || continue
+        for (root, _dirs, files) in walkdir(path)
             for f in files
                 endswith(f, ".esm") || continue
                 full = joinpath(root, f)
@@ -109,7 +126,47 @@ function discover_esm_files(roots::AbstractVector{<:AbstractString};
         end
     end
     sort!(found)
+    unique!(found)
     return found
+end
+
+"""
+    shard_esm_files(files; shard=nothing) -> Vector{String}
+
+Select one shard of `files`. `shard` is an `"i/n"` string (1-based `i` of `n`
+shards) and defaults to the `ESM_TESTS_SHARD` env var; when neither is set,
+`files` is returned unchanged.
+
+Selection is by **stride** (`files[i:n:end]`), not by contiguous block: the
+sorted corpus is grouped by science domain, and per-file cost is dominated by
+the MTK build of whichever domain a file belongs to, so contiguous blocks would
+hand one shard every large chemistry mechanism and another only the cheap
+leaves. Striding interleaves the domains and keeps shard wall-times close.
+
+This exists because the Julia walk builds every system IN-PROCESS, so its cost
+scales linearly with the corpus — measured at ~4 s/file, which puts the whole
+walk near 25 minutes in one process and growing. Sharding is what lets the walk
+back into CI (esm-g97l, esm-m0r2 removed it) without either raising the per-job
+budget or dropping coverage.
+"""
+function shard_esm_files(files::AbstractVector{<:AbstractString};
+                         shard::Union{Nothing,AbstractString}=nothing)
+    spec = shard === nothing ? get(ENV, "ESM_TESTS_SHARD", "") : String(shard)
+    spec = String(strip(spec))
+    isempty(spec) && return collect(String, files)
+
+    parts = split(spec, "/"; keepempty=false)
+    length(parts) == 2 || throw(ArgumentError(
+        "ESM_TESTS_SHARD must be \"i/n\" (1-based shard i of n); got \"$(spec)\"."))
+    i = tryparse(Int, strip(parts[1]))
+    n = tryparse(Int, strip(parts[2]))
+    (i === nothing || n === nothing) && throw(ArgumentError(
+        "ESM_TESTS_SHARD must be \"i/n\" with integer i and n; got \"$(spec)\"."))
+    n >= 1 || throw(ArgumentError("ESM_TESTS_SHARD shard count must be >= 1; got $(n)."))
+    1 <= i <= n || throw(ArgumentError(
+        "ESM_TESTS_SHARD index $(i) is out of range for $(n) shard(s)."))
+
+    return collect(String, files[i:n:end])
 end
 
 discover_esm_files(; kwargs...) = discover_esm_files(DEFAULT_ROOTS; kwargs...)
