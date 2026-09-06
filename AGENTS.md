@@ -82,10 +82,11 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
      exercises the same `.esm` files via MTK directly. In CI it runs as
      the `julia-inline-tests` matrix, one shard per job
      (`ESM_TESTS_SHARD="i/n"`, see `shard_esm_files`): the walk builds
-     every system in-process at ~a minute-plus per file, which is what
-     blew the single-job budget in esm-g97l / esm-m0r2. Sharding splits
-     the cost across runners; it does not drop a file — the shards are a
-     partition of the corpus. `ESM_TESTS_SKIP_LIVE_REPO=1` still
+     every system in-process, so its cost scales with the corpus — ~4
+     s/file measured, ~25 min for the whole walk — which is what blew the
+     single-job budget in esm-g97l / esm-m0r2. Sharding splits the cost
+     across runners; it does not drop a file — the shards are a partition
+     of the corpus. `ESM_TESTS_SKIP_LIVE_REPO=1` still
      short-circuits the walk locally for a fast shim-only `pkg test`.
    - **Rust (`esm test`):** the `earthsci-ast` crate's CLI, built from
      EarthSciAST main by the `rust-cli-inline-tests` job.

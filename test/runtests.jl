@@ -160,10 +160,9 @@ end
         # see MTK (it's a test-only dep).
         #
         # ESM_TESTS_SHARD="i/n" walks only shard i of n (see `shard_esm_files`).
-        # This is how the walk fits CI: it builds every system IN-PROCESS at
-        # ~a minute-plus per file, which scales linearly with component count
-        # and blew past the 30-minute job budget once the migration burst pushed
-        # the repo past ~25 components (esm-g97l, esm-m0r2). The
+        # This is how the walk fits CI: it builds every system IN-PROCESS, so
+        # cost scales linearly with the corpus — measured at ~4 s/file, which
+        # puts the whole walk near 25 minutes in one process. The
         # `julia-inline-tests` matrix in .github/workflows/test-esm.yml runs one
         # shard per job, and the shards partition the corpus, so the sweep is
         # whole. Unset (the local default) walks everything in one process.
