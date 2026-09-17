@@ -175,18 +175,8 @@ discover_esm_files(; kwargs...) = discover_esm_files(DEFAULT_ROOTS; kwargs...)
 # Tolerance resolution (spec §6.6.4)
 # ---------------------------------------------------------------------------
 
-const _DEFAULT_REL_TOL = 1.0e-6
 
 # Returns (rtol, atol) — the most-specific declared tolerance wins.
-function _resolve_tolerance(model_tol, test_tol, assertion_tol)
-    for candidate in (assertion_tol, test_tol, model_tol)
-        candidate === nothing && continue
-        rel = candidate.rel === nothing ? 0.0 : candidate.rel
-        atol = candidate.abs === nothing ? 0.0 : candidate.abs
-        return (Float64(rel), Float64(atol))
-    end
-    return (_DEFAULT_REL_TOL, 0.0)
-end
 
 # ---------------------------------------------------------------------------
 # Symbol lookup on a compiled MTK system
@@ -196,38 +186,11 @@ end
 # extension's `_san` rewrites dots to underscores when constructing symbolic
 # names. After mtkcompile, `getproperty(simp, Symbol(name))` returns the
 # symbolic handle for either form, prefixed by the wrapper system's name.
-function _resolve_handle(simp, sys_name::Symbol, var_spec::AbstractString)
-    MTK = _require_mtk()
-    sanitized = replace(String(var_spec), "." => "_")
-    qualified = Symbol(String(sys_name) * "_" * sanitized)
-    if hasproperty(simp, qualified)
-        return getproperty(simp, qualified)
-    end
-    bare = Symbol(sanitized)
-    if hasproperty(simp, bare)
-        return getproperty(simp, bare)
-    end
-    throw(ArgumentError("Variable '$(var_spec)' not found on compiled system " *
-                         "(tried '$(qualified)' and '$(bare)')."))
-end
 
 # Lazy module lookup so this file can `include` without a hard dep on MTK
 # being loaded at module-init time. Mirrors the pattern used by `_to_system`
 # in EarthSciModels.jl.
-function _require_mtk()
-    pkg = Base.PkgId(Base.UUID("961ee093-0014-501f-94e3-6117800e7a78"),
-                     "ModelingToolkit")
-    mod = get(Base.loaded_modules, pkg, nothing)
-    mod === nothing && throw(ArgumentError(
-        "run_esm_tests requires ModelingToolkit to be loaded. " *
-        "Call `using ModelingToolkit` first."))
-    return mod
-end
 
-function _try_require(uuid::AbstractString, name::AbstractString)
-    pkg = Base.PkgId(Base.UUID(uuid), name)
-    return get(Base.loaded_modules, pkg, nothing)
-end
 
 # Per-file stiff-solver override (esm-4sxf). .esm basenames listed here are
 # integrated with the stiff Rosenbrock23 solver instead of the default
@@ -241,215 +204,43 @@ const STIFF_SOLVER_OVERRIDE_FILENAMES = Set(["pollu.esm"])
 
 # Pick a solver: prefer Tsit5 (non-stiff, fast); fall back to Rosenbrock23.
 # `.esm` files in `STIFF_SOLVER_OVERRIDE_FILENAMES` force Rosenbrock23.
-function _pick_solver(file::AbstractString="")
-    rb = _try_require("43230ef6-c299-4910-a778-202eb28ce4ce",
-                      "OrdinaryDiffEqRosenbrock")
-    if rb !== nothing && basename(file) in STIFF_SOLVER_OVERRIDE_FILENAMES
-        return (rb.Rosenbrock23(), :rosenbrock23)
-    end
-    tsit = _try_require("b1df2697-797e-41e3-8120-5422d3b24e4a",
-                        "OrdinaryDiffEqTsit5")
-    tsit !== nothing && return (tsit.Tsit5(), :tsit5)
-    rb !== nothing && return (rb.Rosenbrock23(), :rosenbrock23)
-    throw(ArgumentError(
-        "run_esm_tests requires an OrdinaryDiffEq solver to be loaded " *
-        "(`using OrdinaryDiffEqTsit5` or `using OrdinaryDiffEqRosenbrock`)."))
-end
 
 # ---------------------------------------------------------------------------
 # Per-container test execution
 # ---------------------------------------------------------------------------
 
-function _check_assertion(actual::Real, expected::Float64,
-                          rtol::Float64, atol::Float64)
-    if rtol == 0.0 && atol == 0.0
-        return Float64(actual) == expected
-    end
-    return isapprox(Float64(actual), expected; rtol=rtol, atol=atol)
-end
 
-function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
-                                container_name::AbstractString,
-                                container_tolerance, tests, simp,
-                                sys_name::Symbol, results::Vector{AssertionResult};
-                                esm_container=nothing)
-    isempty(tests) && return
-    MTK = _require_mtk()
-    solver, _solver_kind = _pick_solver(file)
 
-    # For reaction_system containers, species and parameter defaults declared
-    # in the ESM file are NOT propagated through the Catalyst.@species /
-    # @parameters metadata by the EarthSciAST Catalyst extension
-    # (the Core.eval path builds bare symbolics). Compensate by seeding u0
-    # and p from the ESM defaults here — a pure-Model path still works as
-    # before because `esm_container` is nothing and the maps stay empty.
-    defaults_u0 = Dict{Any,Float64}()
-    defaults_p  = Dict{Any,Float64}()
-    if container_kind === :reaction_system && esm_container !== nothing
-        for sp in esm_container.species
-            sp.default === nothing && continue
-            handle = try _resolve_handle(simp, sys_name, sp.name) catch; nothing end
-            handle === nothing && continue
-            defaults_u0[handle] = Float64(sp.default)
-        end
-        for pr in esm_container.parameters
-            pr.default === nothing && continue
-            handle = try _resolve_handle(simp, sys_name, pr.name) catch; nothing end
-            handle === nothing && continue
-            defaults_p[handle] = Float64(pr.default)
-        end
-    end
 
-    for t in tests
-        t_start = time()
-        local sol = nothing
-        local prob_err::Union{Nothing,Exception} = nothing
-        try
-            u0_map = copy(defaults_u0)
-            for (spec, val) in t.initial_conditions
-                handle = _resolve_handle(simp, sys_name, spec)
-                u0_map[handle] = Float64(val)
-            end
-            p_map = copy(defaults_p)
-            for (spec, val) in t.parameter_overrides
-                handle = _resolve_handle(simp, sys_name, spec)
-                p_map[handle] = Float64(val)
-            end
-            tspan = (t.time_span.start, t.time_span.stop)
-            # MTK11+ deprecated the (u0, tspan, p) form; merged Dict is the
-            # canonical shape and keeps both initial-condition + parameter
-            # overrides on a single map.
-            merged = isempty(p_map) ? u0_map : merge(u0_map, p_map)
-            prob = if container_kind === :reaction_system
-                # Catalyst.ReactionSystem → ODEProblem directly; disables
-                # combinatoric rate-law multipliers so macroscopic rate
-                # coefficients match the upstream SuperFast convention.
-                MTK.ODEProblem(simp, merged, tspan; combinatoric_ratelaws=false)
-            else
-                MTK.ODEProblem(simp, merged, tspan)
-            end
-            sol = MTK.SciMLBase.solve(prob, solver;
-                                       reltol=1e-10, abstol=1e-12)
-        catch err
-            prob_err = err
-        end
-
-        for (i, a) in enumerate(t.assertions)
-            if prob_err !== nothing
-                push!(results, AssertionResult(
-                    file, container_kind, String(container_name), t.id, i,
-                    a.variable, a.time, a.expected, nothing, ERROR,
-                    "Solve setup failed: $(prob_err)",
-                    time() - t_start))
-                continue
-            end
-
-            rtol, atol = _resolve_tolerance(container_tolerance, t.tolerance,
-                                             a.tolerance)
-            local actual_val::Union{Float64,Nothing} = nothing
-            local status::AssertionStatus = FAIL
-            local msg::String = ""
-            try
-                handle = _resolve_handle(simp, sys_name, a.variable)
-                raw = sol(a.time, idxs=handle)
-                actual_val = Float64(raw)
-                if _check_assertion(actual_val, a.expected, rtol, atol)
-                    status = PASS
-                else
-                    msg = "actual=$(actual_val) expected=$(a.expected) " *
-                          "(rtol=$(rtol), atol=$(atol))"
-                end
-            catch err
-                status = ERROR
-                msg = "Sample/compare failed: $(err)"
-            end
-
-            push!(results, AssertionResult(
-                file, container_kind, String(container_name), t.id, i,
-                a.variable, a.time, a.expected, actual_val, status, msg,
-                time() - t_start))
-        end
-    end
-end
-
-function _compile_model(model, name::Symbol)
-    MTK = _require_mtk()
-    sys = MTK.System(model; name=name)
-    return MTK.mtkcompile(sys)
-end
-
-function _compile_reaction_system(rs, name::Symbol)
-    MTK = _require_mtk()
-    cat = _try_require("479239e8-5488-4da2-87a7-35f2df7eef83", "Catalyst")
-    cat === nothing && throw(ArgumentError(
-        "ReactionSystem inline tests require Catalyst to be loaded."))
-    catalyst_rs = cat.ReactionSystem(rs; name=name)
-    return MTK.complete(catalyst_rs)
-end
 
 # ---------------------------------------------------------------------------
 # Per-file driver
 # ---------------------------------------------------------------------------
 
 function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
-    local esm_file
-    try
-        esm_file = EarthSciAST.load_path(String(path))
-    catch err
+    upstream = EarthSciAST.AssertionResult[]
+    EarthSciAST.run_file_tests!(upstream, String(path);
+                                stiff_files=STIFF_SOLVER_OVERRIDE_FILENAMES)
+    for r in upstream
         push!(results, AssertionResult(
-            path, :file, "<parse>", "<load>", 0, "", NaN, NaN, nothing,
-            ERROR, "Parse failed: $(err)", 0.0))
-        return
+            r.file, r.container_kind, r.container_name, r.test_id,
+            r.assertion_idx, r.variable, r.time, r.expected, r.actual,
+            _status_from_upstream(r.status), r.message, r.duration_s))
     end
-
-    if esm_file.models !== nothing
-        for (mname, model) in esm_file.models
-            isempty(model.tests) && continue
-            sys_name = Symbol(mname)
-            local simp
-            try
-                simp = _compile_model(model, sys_name)
-            catch err
-                # One synthetic ERROR row per test so we can see which tests were skipped.
-                for t in model.tests
-                    push!(results, AssertionResult(
-                        path, :model, String(mname), t.id, 0, "", NaN, NaN,
-                        nothing, ERROR, "Model compile failed: $(err)", 0.0))
-                end
-                continue
-            end
-            _run_tests_on_compiled(path, :model, String(mname),
-                                    model.tolerance, model.tests, simp,
-                                    sys_name, results)
-        end
-    end
-
-    if esm_file.reaction_systems !== nothing
-        for (rname, rs) in esm_file.reaction_systems
-            isempty(rs.tests) && continue
-            sys_name = Symbol(rname)
-            local simp
-            try
-                simp = _compile_reaction_system(rs, sys_name)
-            catch err
-                for t in rs.tests
-                    push!(results, AssertionResult(
-                        path, :reaction_system, String(rname), t.id, 0, "",
-                        NaN, NaN, nothing, ERROR,
-                        "ReactionSystem compile failed: $(err)", 0.0))
-                end
-                continue
-            end
-            _run_tests_on_compiled(path, :reaction_system, String(rname),
-                                    rs.tolerance, rs.tests, simp, sys_name,
-                                    results; esm_container=rs)
-        end
-    end
+    return results
 end
 
-# ---------------------------------------------------------------------------
-# Top-level
-# ---------------------------------------------------------------------------
+"""Map the upstream `AssertionStatus` onto this package's own enum. The two are
+declared identically; the conversion goes through the symbol so that a new
+status added upstream fails loudly here rather than silently mapping to PASS."""
+function _status_from_upstream(status)::AssertionStatus
+    sym = Symbol(status)
+    sym === :PASS && return PASS
+    sym === :FAIL && return FAIL
+    sym === :ERROR && return ERROR
+    sym === :SKIP && return SKIP
+    throw(ArgumentError("unknown upstream AssertionStatus: $(status)"))
+end
 
 """
     run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
