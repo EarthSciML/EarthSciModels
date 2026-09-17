@@ -4,6 +4,12 @@ using ModelingToolkit
 using Catalyst
 using OrdinaryDiffEqTsit5
 using OrdinaryDiffEqNonlinearSolve
+# The runner picks Rosenbrock23 for a document declaring `solver.stiffness =
+# "high"` (esm-spec §2.2), but only if the package is LOADED: the selection
+# goes through `Base.loaded_modules`, so a test-target dependency that is
+# never `using`-ed leaves a stiff document on the non-stiff solver, where it
+# overflows instead of failing loudly.
+using OrdinaryDiffEqRosenbrock
 
 # Placeholder .esm fixture — replaced once real .esm files land. The fixture
 # exists so the shim's parse → System → materialize path is exercised in CI
