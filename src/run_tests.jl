@@ -102,9 +102,13 @@ its own `solver.stiffness` declaration asks for (esm-spec §2.2), and a single
 corpus-wide algorithm named here would override that for every document —
 which a stiff member of the corpus does not survive.
 
-Documents are run ONE AT A TIME rather than as a single batch call: the per-file
-loop is what gives the summary below its per-file rows, and it keeps a file's
-`(pass, fail, error)` counts attributable when a whole document fails to load.
+Documents are run ONE AT A TIME, each passed as its own one-element VECTOR:
+that selects the runner's batch semantics, where a document that fails to LOAD
+contributes an ERROR row naming it instead of throwing and ending the walk on
+the first unreadable file. Rows are attributed to their file by the runner, so
+a single batch call would summarize identically; what the loop does NOT buy is
+isolation from a throw raised past the loader — that still ends the walk, and
+the per-file subprocess of the Python gate is what this side does not have.
 
 `shard` is `nothing` by default rather than deferring to `ESM_TESTS_SHARD`: the
 CI matrix sets that variable for the WHOLE job, so an ambient fallback would

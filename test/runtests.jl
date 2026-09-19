@@ -1,6 +1,6 @@
 using Test
 using EarthSciModels
-using EarthSciAST: PASS, FAIL
+using EarthSciAST: PASS, FAIL, ERROR
 using ModelingToolkit
 using Catalyst
 using OrdinaryDiffEqTsit5
@@ -132,6 +132,27 @@ end
         @test !isempty(failing_results)
         @test any(r -> r.status == FAIL, failing_results)
         @test exit_code != 0
+    end
+
+    @testset "a document that cannot load is a row, not the end of the walk" begin
+        # The Julia counterpart of the failure mode the Python gate's tests
+        # pin: one unreadable file must not cost the walk every other file's
+        # verdict, and must not be silently absent from the results either.
+        # `run_esm_tests` hands each document to the runner as its own
+        # one-element batch, which is what makes the load failure a row.
+        mktempdir() do tmp
+            write(joinpath(tmp, "broken.esm"), "{ this is not a document")
+            cp(joinpath(inline_dir, "passing_decay.esm"),
+               joinpath(tmp, "passing_decay.esm"))
+            results, exit_code = run_esm_tests([tmp]; verbose=false)
+            broken = filter(r -> endswith(r.file, "broken.esm"), results)
+            @test !isempty(broken)
+            @test all(r -> r.status == ERROR, broken)
+            @test exit_code != 0
+            # The readable file beside it was still walked.
+            @test any(r -> endswith(r.file, "passing_decay.esm") && r.status == PASS,
+                      results)
+        end
     end
 
     @testset "junit XML emission" begin
