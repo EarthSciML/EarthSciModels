@@ -76,12 +76,18 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
      It is the runner the corpus was migrated against. Walks
      `components/**`, `lib/**` and `registered_functions/**`.
 
-     No per-file knob tables live in this rig. A document that needs a
-     stiff integrator says so ITSELF with `solver.stiffness: "high"`
-     (esm-spec §2.2), which every binding maps to its own solver; a
-     basename table in one gate cannot travel to the other two. The
-     `cse` knob is likewise not the rig's business — the runner's own
-     default is the supported path.
+     No per-file knob tables live in this rig, with one measured
+     exception. A document that needs a stiff integrator says so ITSELF
+     with `solver.stiffness: "high"` (esm-spec §2.2), which every binding
+     maps to its own solver; a basename table in one gate cannot travel
+     to the other two. `cse` is the exception, because the spec keeps it
+     out of the document (it is a SymPy-lowering knob, not a fact about
+     the model) and the corpus contains one document the library default
+     cannot build in usable time: `geoschem_fullchem.esm` does not finish
+     in 50 minutes under `cse=True` and passes 81/81 in 8.8 minutes under
+     `cse=False`, while `urban_canopy_model.esm` is the mirror image
+     (2.3 min / >50 min). `CSE_FALSE_FILENAMES` in the gate names the one
+     document, and goes away when the toolkit picks CSE from system size.
    - **Julia (`EarthSciModels.run_esm_tests`):** drives
      `EarthSciAST.run_inline_tests` — the TREE-WALK runner, the same
      pathway the Python gate uses — one document at a time. It runs by

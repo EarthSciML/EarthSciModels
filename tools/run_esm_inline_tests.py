@@ -29,11 +29,13 @@ rows" as "no inline tests": the gate reported 22 assertions over a
 2,500-assertion corpus and went green on models it never ran. A gate that
 can only fail by breaking loudly is the point of the rewrite.
 
-Solver / CSE policy lives in the DOCUMENT, not here. A stiff document says so
-itself with ``solver.stiffness: "high"`` (esm-spec §2.2), which every binding
-maps to its own integrator; a basename table in this gate could not travel to
-the Julia or Rust runners, which is exactly why the spec grew the block. The
-``cse`` knob is likewise gone: the runner's default is the supported path.
+Solver policy lives in the DOCUMENT, not here. A stiff document says so itself
+with ``solver.stiffness: "high"`` (esm-spec §2.2), which every binding maps to
+its own integrator; a basename table in this gate could not travel to the Julia
+or Rust runners, which is exactly why the spec grew the block.
+
+``cse`` is the one exception, and it is deliberately ONE line rather than a
+table — see ``CSE_FALSE_FILENAMES``.
 
 Exit codes:
   0  every assertion passed
@@ -62,6 +64,32 @@ from typing import Dict, List, Optional, Sequence, Tuple
 DEFAULT_ROOTS = ["components", "lib", "registered_functions"]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# The documents this gate asks to be built WITHOUT common-subexpression
+# elimination. `cse` is a SymPy-lowering knob, not a fact about the model
+# (esm-spec §2.2 keeps it out of the document on purpose), so it can only be
+# said here — and it has to be said, because the corpus contains one document
+# the library's default cannot build in any usable time.
+#
+# Measured on this corpus (Python runner, per-file subprocess):
+#
+#   geoschem_fullchem.esm   cse=True  did not finish in 50 min
+#                           cse=False 8.8 min, 81/81 assertions pass
+#   urban_canopy_model.esm  cse=True  2.3 min, passes
+#                           cse=False did not finish in 50 min
+#
+# The two want OPPOSITE settings, so neither a global `cse=False` nor the
+# default serves the whole corpus, and the NumPy (non-SymPy) engine finishes
+# neither document — it was measured too. In CI the cost is not subtle: the
+# walk cleared 195 files in 19 minutes and then spent 26 minutes on
+# geoschem_fullchem alone before the job cap.
+#
+# Exit criterion: this set disappears the moment the toolkit picks CSE from
+# the system's own size rather than from the caller. The two documents sit far
+# apart on exactly that axis (819 reactions against 78 algebraic states), so
+# the choice is the library's to make; until it does, the gate states it for
+# the one document that needs it.
+CSE_FALSE_FILENAMES: frozenset = frozenset({"geoschem_fullchem.esm"})
 
 # Per-subprocess hard memory ceiling. 6 GiB leaves headroom on the 16 GiB
 # ubuntu-latest CI runner even with parent + worker alive.
@@ -117,7 +145,17 @@ def run_worker(file_path: str) -> int:
     _set_memory_limit(WORKER_RLIMIT_BYTES)
     sys.setrecursionlimit(WORKER_RECURSION_LIMIT)
 
-    from earthsci_ast.inline_tests import run_inline_tests
+    from earthsci_ast.inline_tests import InlineTestOptions, run_inline_tests
+
+    def options_for(document):
+        """The toolkit's per-document policy hook (it exists so a corpus gate's
+        site policy stays at the site instead of being re-implemented around
+        the runner). Everything this gate could say here, it says in the
+        DOCUMENT instead — except `cse`, which the spec keeps out of the
+        document because it is a binding's lowering knob."""
+        if isinstance(document, str) and Path(document).name in CSE_FALSE_FILENAMES:
+            return InlineTestOptions(cse=False)
+        return None
 
     t0 = time.time()
     rows: List[AssertionRow] = []
@@ -125,7 +163,7 @@ def run_worker(file_path: str) -> int:
         # A LIST input selects the runner's batch semantics: a document that
         # fails to load contributes an ERROR row naming the path instead of
         # raising, so a load failure is reported like every other failure.
-        results = run_inline_tests([file_path])
+        results = run_inline_tests([file_path], options_for=options_for)
     except Exception as err:  # noqa: BLE001 — the row IS the report
         rows.append(AssertionRow(
             file=file_path, container_name="<runner>", test_id="<run>",
