@@ -82,30 +82,36 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
      basename table in one gate cannot travel to the other two. The
      `cse` knob is likewise not the rig's business — the runner's own
      default is the supported path.
-   - **Julia (`EarthSciModels.run_esm_tests`):** the canonical Julia
-     walker; runs by default under `pkg test` for local development and
-     exercises the same `.esm` files via MTK directly. In CI it runs as
-     the `julia-inline-tests` matrix, one shard per job
-     (`ESM_TESTS_SHARD="i/n"`, see `shard_esm_files`): the walk builds
-     every system in-process, so its cost scales with the corpus — ~4
-     s/file measured, ~25 min for the whole walk — which is what blew the
-     single-job budget in esm-g97l / esm-m0r2. Sharding splits the cost
-     across runners; it does not drop a file — the shards are a partition
-     of the corpus. `ESM_TESTS_SKIP_LIVE_REPO=1` still
-     short-circuits the walk locally for a fast shim-only `pkg test`.
+   - **Julia (`EarthSciModels.run_esm_tests`):** drives
+     `EarthSciAST.run_inline_tests` — the TREE-WALK runner, the same
+     pathway the Python gate uses — one document at a time. It runs by
+     default under `pkg test` for local development, and in CI as the
+     `julia-inline-tests` matrix, one shard per job
+     (`ESM_TESTS_SHARD="i/n"`, see `shard_esm_files`); the shards are a
+     partition of the corpus, so sharding splits the cost without
+     dropping a file. `ESM_TESTS_SKIP_LIVE_REPO=1` short-circuits the
+     walk locally for a fast shim-only `pkg test`.
+
+     Deliberately NOT `EarthSciAST.run_esm_tests`, the MTK walker: its
+     lowering has no arm for a long tail of ops this corpus uses (`and`,
+     `or`, `floor`, `atan2`, `datetime.hour`, an unexpanded
+     `apply_expression_template` in a reaction rate), so documents that
+     integrate fine fail there at compile time — over a sample of the
+     files the job used to report red, the MTK walker passed 0 of 276
+     assertions and the tree-walk runner 190. Materializing a document
+     as an MTK `System` is `load_esm`, and the package's own tests cover
+     it; it is not how the corpus gate runs.
    - **Rust (`esm test`):** the `earthsci-ast` crate's CLI, built from
      EarthSciAST main by the `rust-cli-inline-tests` job.
 
-   The Rust and Julia paths do not clear the corpus today, and the jobs
-   say so rather than hiding it. Measured when they landed: the Rust
-   sweep leaves 96 of the 322 files with inline tests carrying at least
-   one non-pass row (diffsol failing the first step, algebraic unknowns
-   with no `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs, a few
-   numeric divergences), and the in-process Julia walk is not expected to
-   survive geoschem_fullchem.esm's 819-reaction Catalyst → MTK build on a
-   16 GB runner. Closing those is upstream work on EarthSciAST, not
-   corpus work here — but it is upstream work with a red job attached to
-   it, which is the point.
+   The Rust path does not clear the corpus today, and the job says so
+   rather than hiding it: measured when it landed, the Rust sweep leaves
+   96 of the 322 files with inline tests carrying at least one non-pass
+   row (diffsol failing the first step, algebraic unknowns with no
+   `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs, a few numeric
+   divergences). Closing that is upstream work on EarthSciAST, not corpus
+   work here — but it is upstream work with a red job attached to it,
+   which is the point.
 
 What does **not** belong in this rig:
 
