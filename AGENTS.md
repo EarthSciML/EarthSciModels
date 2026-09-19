@@ -53,6 +53,10 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    **current** format version. The corpus is on esm **1.0.0**, which is a
    clean break with no deprecation path — `earthsci_ast` rejects every major-0
    document outright, so there is no such thing as a file left behind on 0.x.
+   A document declares a higher minor version when, and only when, it uses a
+   construct that arrives there: `components/gaschem/pollu.esm` is on **1.1.0**
+   because the top-level `solver` block (esm-spec §2.2) does, and a 1.0.0
+   document carrying one is rejected with `solver_version_too_old`.
 2. Provide a **thin** loader shim per language (today: the Julia shim in
    `src/EarthSciModels.jl`) that calls the canonical ESS parser and returns the
    appropriate runtime object (`ModelingToolkit.System`, etc.).
@@ -80,7 +84,12 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
      exception. A document that needs a stiff integrator says so ITSELF
      with `solver.stiffness: "high"` (esm-spec §2.2), which every binding
      maps to its own solver; a basename table in one gate cannot travel
-     to the other two. `cse` is the exception, because the spec keeps it
+     to the other two. One document in the corpus declares it —
+     `components/gaschem/pollu.esm`, the POLLU stiff benchmark, whose
+     rate constants span ~8e-7 to ~7e9 1/s: with the declaration each
+     binding picks an implicit method and all 61 of its assertions pass,
+     and without it Julia's explicit default gives every one of them back
+     as `retcode MaxIters`. `cse` is the exception, because the spec keeps it
      out of the document (it is a SymPy-lowering knob, not a fact about
      the model) and the corpus contains one document the library default
      cannot build in usable time: `geoschem_fullchem.esm` does not finish
