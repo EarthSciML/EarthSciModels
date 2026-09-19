@@ -204,18 +204,22 @@ def _spawn_row(file_path: Path, message: str) -> AssertionRow:
     )
 
 
-def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
-    """Spawn the worker subprocess for one .esm file. Returns
-    (rows, exit_code, raw_stderr)."""
-    cmd = [
-        sys.executable, "-X", "faulthandler",
-        str(Path(__file__).resolve()), "--worker", str(file_path),
-    ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+def rows_from_worker(
+    file_path: Path, stdout: str, returncode: int, stderr: str
+) -> List[AssertionRow]:
+    """Parse one worker's output into rows, turning a worker that did not
+    finish into an ERROR row.
 
+    The ``__DONE__`` marker is what separates "this file has no inline tests"
+    from "the worker died before it could say anything" — an OOM kill, the
+    address-space rlimit, a segfault, an import that raised. Those look
+    identical in the row stream (both are empty), and reading the second as
+    the first is exactly how this gate came to report 22 assertions over a
+    corpus of 8,176 and call it green.
+    """
     rows: List[AssertionRow] = []
     done = False
-    for line in proc.stdout.splitlines():
+    for line in stdout.splitlines():
         line = line.strip()
         if line == "__DONE__":
             done = True
@@ -228,21 +232,28 @@ def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
             continue
 
     if not done:
-        # No marker: the worker died before it could report (OOM kill, rlimit,
-        # segfault, an import that raised). Whatever it had said so far is
-        # kept, and the death itself becomes a row — the failure mode this
-        # gate previously swallowed as "no inline tests".
         rows.append(_spawn_row(
             file_path,
-            f"worker exited rc={proc.returncode} without emitting __DONE__; "
-            f"stderr_tail={proc.stderr[-500:]!r}",
+            f"worker exited rc={returncode} without emitting __DONE__; "
+            f"stderr_tail={stderr[-500:]!r}",
         ))
-    elif proc.returncode not in (0, 1):
+    elif returncode not in (0, 1):
         rows.append(_spawn_row(
             file_path,
-            f"worker exited rc={proc.returncode}; "
-            f"stderr_tail={proc.stderr[-500:]!r}",
+            f"worker exited rc={returncode}; stderr_tail={stderr[-500:]!r}",
         ))
+    return rows
+
+
+def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
+    """Spawn the worker subprocess for one .esm file. Returns
+    (rows, exit_code, raw_stderr)."""
+    cmd = [
+        sys.executable, "-X", "faulthandler",
+        str(Path(__file__).resolve()), "--worker", str(file_path),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    rows = rows_from_worker(file_path, proc.stdout, proc.returncode, proc.stderr)
     return rows, proc.returncode, proc.stderr
 
 
