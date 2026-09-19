@@ -140,14 +140,23 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    LSODA callback, against 86 s and 28/28 under the Julia runner and 0.02 s
    and 28/28 under the Rust CLI.
 
-   The Julia sweep has failures of its own that the Python gate does not
-   see, and no one has yet walked the whole corpus through it to count
-   them — the matrix job is what will. One is characterized:
-   `gaschem/stratospheric/chapman.esm`'s `dense_M_perturbation` test errors
-   with `maxiters` under the non-stiff default, and a stiff integrator
-   clears it at no cost elsewhere (66/67 in 5.6 s against 61/67 in 94.7 s).
-   That document declares no `solver.stiffness`; whether it should is a
-   question about the model, not about the gate.
+   The Julia sweep is further behind, and until this branch nobody had
+   counted by how much. A single-process walk of 343 documents (the corpus
+   less the four slowest) through `EarthSciAST.run_inline_tests` takes
+   about 40 minutes and returns 7,562 passes, 30 failures and 457 errors,
+   with 17 documents carrying at least one non-pass row. Measured with
+   `${ESD_ROOT}` unset, which also errors the two `surface_runoff`
+   documents that need it; CI sets it, so those are not in these figures.
+
+   Two documents dominate. `stratospheric_ozone_system.esm` errors all 176
+   of its assertions after 19.5 minutes, where the Python gate passes all
+   176 in 5.9 s; `gaschem/methane/methane_ode.esm` errors all 107 after
+   3.7 minutes, against 107 passes in 2.9 s. A third is diagnosed:
+   `gaschem/stratospheric/chapman.esm`'s `dense_M_perturbation` errors with
+   `maxiters` under the non-stiff default, and a stiff integrator clears it
+   at no cost elsewhere (66/67 in 5.6 s against 61/67 in 94.7 s) — that
+   document declares no `solver.stiffness`, and whether it should is a
+   question about the model rather than about the gate.
 
    The Rust path does not clear it either, and that job says so too:
    measured when it landed, the Rust sweep leaves
