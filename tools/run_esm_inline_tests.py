@@ -11,10 +11,12 @@ Python runner :func:`earthsci_ast.inline_tests.run_inline_tests`.
 What this file owns, and nothing else:
 
   * discovery of this repo's ``.esm`` corpus,
-  * one SUBPROCESS PER FILE — several at a time (``--jobs``) — so a runaway
-    build cannot take the whole CI job with it (Python's per-process GC is the
-    OOM guardrail; each worker caps its own address space at
-    ``WORKER_RLIMIT_BYTES``),
+  * one SUBPROCESS PER FILE — several at a time (``--jobs``), each optionally
+    under a wall-clock cap (``--timeout-seconds``) — so a runaway build cannot
+    take the whole CI job with it (Python's per-process GC is the OOM
+    guardrail; each worker caps its own address space at
+    ``WORKER_RLIMIT_BYTES``, and a worker past the cap is killed and reported
+    as an ERROR row for its file),
   * the junit report CI uploads, and the summary a human reads.
 
 Everything about what an inline test MEANS — tolerance resolution (§6.6.4),
@@ -74,7 +76,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # Measured on this corpus (Python runner, per-file subprocess):
 #
 #   geoschem_fullchem.esm   cse=True  did not finish in 50 min
-#                           cse=False 8.8 min, 81/81 assertions pass
+#                           cse=False 506 s (8.4 min), 81/81 assertions pass
 #   urban_canopy_model.esm  cse=True  2.3 min, passes
 #                           cse=False did not finish in 50 min
 #
@@ -114,6 +116,12 @@ WORKER_RLIMIT_BYTES = 6 * 1024 * 1024 * 1024
 # swallowed: the worker dies without its `__DONE__` marker and the parent
 # turns that into an ERROR row for the file (see `rows_from_worker`).
 WORKER_RECURSION_LIMIT = 20_000
+
+# The exit code the driver reports for a worker it killed at the per-file cap.
+# 124 is what `timeout(1)` uses, and it is outside the worker's own 0/1, so it
+# takes the `rows_from_worker` / `verdict_for_file` path every other worker
+# that could not report takes.
+TIMEOUT_RC = 124
 
 
 # ---------------------------------------------------------------------------
@@ -312,16 +320,42 @@ def verdict_for_file(rows: List[AssertionRow], returncode: int) -> int:
     return 1 if any(r.status in ("FAIL", "ERROR") for r in rows) else 0
 
 
-def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
+def run_one_file(
+    file_path: Path, timeout_s: float = 0.0
+) -> Tuple[List[AssertionRow], int, str]:
     """Spawn the worker subprocess for one .esm file. Returns
-    (rows, exit_code, raw_stderr)."""
+    (rows, exit_code, raw_stderr).
+
+    ``timeout_s`` (0 = no cap) is the wall-clock a single document may take
+    before its worker is killed and the file reported as an ERROR row. A
+    document that never finishes is otherwise indistinguishable to CI from a
+    slow one: the job hits its own cap, and the log says nothing about which
+    file it was sitting on, whether the rest of the corpus passed, or what the
+    junit report would have said — none of which is ever written. A cap turns
+    that into a named row and lets the walk finish."""
     cmd = [
         sys.executable, "-X", "faulthandler",
         str(Path(__file__).resolve()), "--worker", str(file_path),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False,
+                              timeout=timeout_s if timeout_s > 0 else None)
+    except subprocess.TimeoutExpired as expired:
+        # The partial streams come back undecoded even in text mode.
+        out = _as_text(expired.stdout)
+        err = (f"worker killed after the {timeout_s:g}s per-file cap "
+               f"(--timeout-seconds)\n" + _as_text(expired.stderr))
+        return rows_from_worker(file_path, out, TIMEOUT_RC, err), TIMEOUT_RC, err
     rows = rows_from_worker(file_path, proc.stdout, proc.returncode, proc.stderr)
     return rows, proc.returncode, proc.stderr
+
+
+def _as_text(stream) -> str:
+    if stream is None:
+        return ""
+    if isinstance(stream, bytes):
+        return stream.decode("utf-8", "replace")
+    return str(stream)
 
 
 def _print_summary(all_rows: List[AssertionRow], files: List[Path]) -> None:
@@ -443,6 +477,15 @@ def main(argv: Optional[List[str]] = None) -> int:
              "Files are independent — the workers share nothing but the CPU.",
     )
     ap.add_argument(
+        "--timeout-seconds", type=float, default=0.0,
+        help="Wall-clock a single .esm may take before its worker is killed "
+             "and the file reported as an ERROR row. 0 (the default) is no "
+             "cap, which is what a local run of one document wants; CI passes "
+             "a value sized against its own job timeout, so that a document "
+             "that does not finish is named in the report instead of taking "
+             "the job down with nothing written.",
+    )
+    ap.add_argument(
         "--junit-xml", default=None,
         help="If set, also emit a junit-compatible XML report at this path.",
     )
@@ -459,14 +502,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     jobs = args.jobs or min(os.cpu_count() or 1, 8)
-    print(f"Walking {len(files)} .esm file(s), {jobs} at a time ...")
+    cap = (f", {args.timeout_seconds:g}s cap per file"
+           if args.timeout_seconds > 0 else "")
+    print(f"Walking {len(files)} .esm file(s), {jobs} at a time{cap} ...")
     all_rows: List[AssertionRow] = []
     overall_rc = 0
     t_total = time.time()
 
     def _one(f: Path):
         t0 = time.time()
-        rows, rc, stderr = run_one_file(f)
+        rows, rc, stderr = run_one_file(f, timeout_s=args.timeout_seconds)
         return f, rows, rc, stderr, time.time() - t0
 
     # Results are reported in discovery order however the workers finish, so a

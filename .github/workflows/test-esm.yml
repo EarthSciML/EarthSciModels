@@ -36,7 +36,8 @@ jobs:
   # lib/solar.esm) is caught at PR time. One subprocess per file (Python's
   # per-process GC is the OOM guardrail, and one document's runaway build dies
   # as a worker — an ERROR row for its file — instead of taking the job with
-  # it). The job cap is on the job below, not on the walk.
+  # it). Two caps bound the run: this job's own `timeout-minutes` just below,
+  # and the gate's per-file `--timeout-seconds` on the run step.
   #
   # No per-file knob tables: the gate passes no solver `method`, and a stiff
   # document declares `solver.stiffness: "high"` (esm-spec §2.2) so every
@@ -57,7 +58,7 @@ jobs:
     # A walk that actually integrates the corpus is not a 6-minute job. Most
     # documents take seconds, but a handful are minutes each — measured on this
     # corpus: wesley_dry_gas.esm 9.2 min, urban_canopy_model.esm 2.3 min,
-    # geoschem_fullchem.esm 8.8 min — so with `--jobs 4` the makespan is set by
+    # geoschem_fullchem.esm 8.4 min — so with `--jobs 4` the makespan is set by
     # the longest file, not by the total. 45 minutes leaves room for that
     # without hiding a runaway.
     timeout-minutes: 45
@@ -92,9 +93,22 @@ jobs:
       # inline tests, which is how it once reported a vacuous run as green.
       - name: Unit test the gate
         run: python -m unittest tools/run_esm_inline_tests_test.py
+      # `--timeout-seconds 1500` bounds what ONE document can cost this job.
+      # Most of the corpus is seconds per file, but the tail is minutes —
+      # measured off CI: puff.esm 12.0 min, wesley_dry_gas.esm 9.2,
+      # geoschem_fullchem.esm 8.4, urban_canopy_model.esm 2.3 — and a document
+      # that grows past the job's own 45-minute cap takes the whole run with
+      # it: no summary, no junit artifact, and no line naming which of the 347
+      # files it was sitting on. With the cap the worker is killed, that file
+      # becomes an ERROR row naming the cap, and every other file still gets a
+      # verdict. 25 minutes is ~2x the slowest document measured; no run of
+      # this gate has ever completed on a GHA runner, so if a file that passes
+      # locally starts reporting the cap there, raise this before assuming the
+      # model broke.
       - name: Run Python inline-test gate (per-file subprocess)
         run: |
           python tools/run_esm_inline_tests.py --jobs 4 \
+            --timeout-seconds 1500 \
             --junit-xml python-esm-tests.xml
       - name: Upload junit XML
         if: always()
@@ -107,8 +121,9 @@ jobs:
   # Julia inline-test sweep.
   #
   # `EarthSciModels.run_esm_tests` drives `EarthSciAST.run_inline_tests` — the
-  # TREE-WALK runner, the same pathway the Python gate above uses, one document
-  # at a time so every file's rows stay attributable.
+  # TREE-WALK runner, the same pathway the Python gate above uses — one
+  # document at a time, each as its own one-element batch, so a file that
+  # cannot be loaded becomes an ERROR row instead of the end of the shard.
   #
   # It is deliberately NOT `EarthSciAST.run_esm_tests`, which lowers each
   # document to ModelingToolkit first. That runner cannot read this corpus: its

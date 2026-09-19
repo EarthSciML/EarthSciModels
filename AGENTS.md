@@ -93,7 +93,7 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
      out of the document (it is a SymPy-lowering knob, not a fact about
      the model) and the corpus contains one document the library default
      cannot build in usable time: `geoschem_fullchem.esm` does not finish
-     in 50 minutes under `cse=True` and passes 81/81 in 8.8 minutes under
+     in 50 minutes under `cse=True` and passes 81/81 in 506 s under
      `cse=False`, while `urban_canopy_model.esm` is the mirror image
      (2.3 min / >50 min). `CSE_FALSE_FILENAMES` in the gate names the one
      document, and goes away when the toolkit picks CSE from system size.
@@ -119,8 +119,38 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    - **Rust (`esm test`):** the `earthsci-ast` crate's CLI, built from
      EarthSciAST main by the `rust-cli-inline-tests` job.
 
-   The Rust path does not clear the corpus today, and the job says so
-   rather than hiding it: measured when it landed, the Rust sweep leaves
+   No binding clears the corpus today, and the jobs say so rather than
+   hiding it. The Python gate — the one that reported 22 assertions while
+   running nothing — passes 8,181 of the 8,198 rows it emits over the whole
+   corpus (a count that includes one load-only row per document declaring
+   no inline tests). The seventeen exceptions are of two kinds.
+
+   Seven are numeric misses of a declared tolerance, in three documents:
+   `aerosol/transport/droplet_mass_balance.esm` (4, worst ~4e-8 against a
+   declared 1e-8), `gaschem/stratospheric/brox_cycle.esm` (2, worst 1.4e-4
+   against 1e-5) and `gaschem/stratospheric/chapman.esm` (1, 2.6e-6 against
+   1e-6). All three bindings reproduce those seven, agreeing with each
+   other to ~10 significant digits and disagreeing with the stored
+   `expected` — so the question is the recorded value or the tolerance, not
+   a binding.
+
+   The other ten are `environmental_transport/puff.esm`, the corpus's
+   sharpest cross-binding divergence: 12.0 minutes under the Python runner,
+   ten of its 28 assertions coming back as `solve failed` from scipy's
+   LSODA callback, against 86 s and 28/28 under the Julia runner and 0.02 s
+   and 28/28 under the Rust CLI.
+
+   The Julia sweep has failures of its own that the Python gate does not
+   see, and no one has yet walked the whole corpus through it to count
+   them — the matrix job is what will. One is characterized:
+   `gaschem/stratospheric/chapman.esm`'s `dense_M_perturbation` test errors
+   with `maxiters` under the non-stiff default, and a stiff integrator
+   clears it at no cost elsewhere (66/67 in 5.6 s against 61/67 in 94.7 s).
+   That document declares no `solver.stiffness`; whether it should is a
+   question about the model, not about the gate.
+
+   The Rust path does not clear it either, and that job says so too:
+   measured when it landed, the Rust sweep leaves
    96 of the 322 files with inline tests carrying at least one non-pass
    row (diffsol failing the first step, algebraic unknowns with no
    `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs, a few numeric

@@ -149,6 +149,17 @@ class EndToEndFixtureTest(unittest.TestCase):
         self.assertIn("FAIL", [r.status for r in rows])
         self.assertEqual(rc, 1)
 
+    def test_a_worker_past_the_cap_is_killed_and_reported(self):
+        """A cap that no worker can meet stands in for the document that does
+        not finish: the file comes back as an ERROR row naming the cap, and
+        the walk carries on."""
+        rows, rc, _ = gate.run_one_file(
+            FIXTURES / "passing_decay.esm", timeout_s=0.01)
+        self.assertEqual(rc, gate.TIMEOUT_RC)
+        self.assertEqual([r.status for r in rows], ["ERROR"])
+        self.assertIn("per-file cap", rows[0].message)
+        self.assertEqual(gate.verdict_for_file(rows, rc), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
