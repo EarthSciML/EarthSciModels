@@ -68,11 +68,20 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    a failing job. A green CI therefore means all three bindings agree on
    every assertion, and a red one names which binding does not.
 
-   - **Python (`tools/run_esm_inline_tests.py`):** drives
-     `earthsci_ast.solve(cse=False)` per §1 (mdl-w1j → mdl-lvu).
-     Per-file subprocess, so it is the only runner with OOM isolation,
-     and the one the corpus was migrated against. Walks
+   - **Python (`tools/run_esm_inline_tests.py`):** drives the public
+     `earthsci_ast.inline_tests.run_inline_tests` per §1. The gate itself
+     owns only discovery, the per-file subprocess (so it is the only
+     runner with OOM isolation), the junit report and the summary —
+     §6.6 semantics, the integrator and its tolerances are the toolkit's.
+     It is the runner the corpus was migrated against. Walks
      `components/**`, `lib/**` and `registered_functions/**`.
+
+     No per-file knob tables live in this rig. A document that needs a
+     stiff integrator says so ITSELF with `solver.stiffness: "high"`
+     (esm-spec §2.2), which every binding maps to its own solver; a
+     basename table in one gate cannot travel to the other two. The
+     `cse` knob is likewise not the rig's business — the runner's own
+     default is the supported path.
    - **Julia (`EarthSciModels.run_esm_tests`):** the canonical Julia
      walker; runs by default under `pkg test` for local development and
      exercises the same `.esm` files via MTK directly. In CI it runs as

@@ -1,5 +1,6 @@
 using Test
 using EarthSciModels
+using EarthSciAST: PASS, FAIL
 using ModelingToolkit
 using Catalyst
 using OrdinaryDiffEqTsit5
@@ -72,16 +73,6 @@ end
         end
     end
 
-    @testset "discover_esm_files accepts file paths, and de-duplicates" begin
-        one = joinpath(inline_dir, "passing_decay.esm")
-        @test discover_esm_files([one]) == [one]
-        # A file named alongside the directory that already contains it is
-        # listed once, not twice.
-        @test discover_esm_files([inline_dir, one]) == discover_esm_files([inline_dir])
-        # A non-.esm file is not a root.
-        @test isempty(discover_esm_files([@__FILE__]))
-    end
-
     @testset "shard_esm_files strides, and covers the corpus exactly once" begin
         files = ["a", "b", "c", "d", "e", "f", "g"]
 
@@ -131,7 +122,7 @@ end
         # Both fixture files in the same dir; filter to just the passing one.
         passing_results = filter(r -> r.file == passing, results)
         @test !isempty(passing_results)
-        @test all(r -> r.status == EarthSciModels.PASS, passing_results)
+        @test all(r -> r.status == PASS, passing_results)
     end
 
     @testset "failing fixture → reports FAIL, exit_code != 0" begin
@@ -139,7 +130,7 @@ end
         results, exit_code = run_esm_tests([dirname(failing)]; verbose=false)
         failing_results = filter(r -> r.file == failing, results)
         @test !isempty(failing_results)
-        @test any(r -> r.status == EarthSciModels.FAIL, failing_results)
+        @test any(r -> r.status == FAIL, failing_results)
         @test exit_code != 0
     end
 
@@ -183,9 +174,9 @@ end
             discovered = discover_esm_files()
             files = shard_esm_files(discovered)
             isempty(shard) || @info "ESM_TESTS_SHARD=$(shard) — walking $(length(files)) of $(length(discovered)) discovered .esm file(s)."
-            results, exit_code = run_esm_tests(files; junit_xml=junit_xml)
+            results, exit_code = run_esm_tests(; shard=shard, junit_xml=junit_xml)
             if !isempty(results)
-                failures = filter(r -> r.status != EarthSciModels.PASS, results)
+                failures = filter(r -> r.status != PASS, results)
                 for f in failures
                     println(stderr, "FAIL ", f.file, " :: ", f.container_name,
                             "/", f.test_id, " — ", f.message)

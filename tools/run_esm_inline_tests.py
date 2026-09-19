@@ -1,78 +1,44 @@
 #!/usr/bin/env python3
-"""tools/run_esm_inline_tests.py  (mdl-w1j, lib/ extension mdl-14s)
+"""tools/run_esm_inline_tests.py
 
 Python inline-test gate for the EarthSciModels rig.
 
-Walks ``components/**/*.esm`` and ``lib/**/*.esm`` (both default roots) and
-runs every inline test (``Model.tests`` / ``ReactionSystem.tests`` per ESM
-spec §6.6) through the canonical ESS Python runner
-``earthsci_ast.solve``. For each ``(time, variable,
-expected[, tolerance])`` assertion, samples the ``Solution``
-trajectory at the requested time and compares to the declared expected
-value with the spec §6.6.4 tolerance precedence (assertion > test >
-container > default rel=1e-6).
+Walks ``components/``, ``lib/`` and ``registered_functions/`` and runs every
+inline test (``Model.tests`` / ``ReactionSystem.tests``, esm-spec §6.6,
+including the §6.6.5 field assertions) through the **public** EarthSciAST
+Python runner :func:`earthsci_ast.inline_tests.run_inline_tests`.
 
-Minimum-bar gate (mdl-14s): a discovered .esm with no inline tests still
-counts as a checked file — the worker calls ``earthsci_ast.load_path`` on
-it and emits a synthetic ``<load>`` PASS row. A load failure emits an
-ERROR row and fails the gate. This catches structural-validation drift
-on lib/ files (e.g. lib/solar.esm) at PR time, which is the class of bug
-that motivated the extension (see closed beads mdl-pk3, mdl-97r).
+What this file owns, and nothing else:
 
-Single-pathway rule (CLAUDE.md "Simulation Pathway — ABSOLUTE Rule"):
-this driver invokes ``earthsci_ast.solve`` as the
-**official ESS Python runner** — no homebrew lambdify+solve_ivp, no
-parallel evaluator. The cse=False knob is requested via the public
-``cse: bool`` argument on ``esm_problem`` (esm-5gk, ESS audit follow-up
-mdl-167); the runner handles compile-cache population internally.
+  * discovery of this repo's ``.esm`` corpus,
+  * one SUBPROCESS PER FILE — several at a time (``--jobs``) — so a runaway
+    build cannot take the whole CI job with it (Python's per-process GC is the
+    OOM guardrail; each worker caps its own address space at
+    ``WORKER_RLIMIT_BYTES``),
+  * the junit report CI uploads, and the summary a human reads.
 
-CSE per-file override (esm-wqy1): cse=False is the default — the
-original audit concern (mdl-167, mirrored in
-``tools/render_example_plots.py`` near ``_RSS_HARD_ABORT_GB``) was
-defensive against ``sympy.lambdify(..., cse=True)``'s memory cliff
-on very large reaction systems. The cse=False path runs through
-``earthsci_ast.sympy_bridge._flat_to_sympy_rhs``'s topological
-algebraic-state substitution loop, which has the opposite cliff:
-models with many cross-referenced algebraic states explode in
-compile time (>30 min on a single file vs <30s under cse=True).
-``CSE_TRUE_OVERRIDE_FILENAMES`` below names .esm basenames that
-opt into cse=True to dodge the substitution-loop cliff. Numerical
-equivalence cse=True ↔ cse=False at IEEE-754 ULP scale was verified
-in esm-wqy1 across a sample of stratospheric / radical-pool .esm
-files (mismatches confined to numerically-zero values below the
-``atol=1e-12`` integrator floor; non-zero values match within the
-spec §6.6.4 default ``rel=1e-6`` tolerance). ess-as2 (upstream ESS
-sympy_bridge sequential-algebraic-evaluation perf fix, tracked via
-esm-kpo6) is the long-term path that would let the override allowlist
-stay empty.
+Everything about what an inline test MEANS — tolerance resolution (§6.6.4),
+the pass predicate (§6.6.3), variable lookup on the built system, §6.6.5
+``reduce`` / ``coords`` field collapse, the integrator and its tolerances —
+belongs to the toolkit and is not restated here. This driver previously
+carried its own copy of all of that, reaching into private upstream modules
+(``earthsci_ast.pde_inline_tests``, ``earthsci_ast.simulation.observed_at_state``)
+to do it. When upstream renamed that module the private import raised inside
+the worker, the worker died before emitting a row, and the parent read "no
+rows" as "no inline tests": the gate reported 22 assertions over a
+2,500-assertion corpus and went green on models it never ran. A gate that
+can only fail by breaking loudly is the point of the rewrite.
 
-OOM guardrails (per bead mdl-w1j scope):
-  * Each .esm is processed in its own subprocess via
-    ``--worker <path>`` so Python's per-process GC structurally
-    prevents cross-file accumulation, even if a future runner change
-    reintroduces growth across solve() calls.
-  * Each subprocess sets ``RLIMIT_AS = 6 GiB`` (hard) so a runaway
-    compile aborts cleanly instead of OOM-killing the CI runner.
-  * Worker count = 1 (no parallel test execution); the parent walker
-    spawns one subprocess at a time.
-
-Denominator seeds (mdl-79g) live in the DOCUMENT, not here:
-  The geoschem_fullchem mechanism's RHS divides by SO2/SALAAL/SALCAL, so a
-  0 initial value makes the first RHS evaluation non-finite. That is a fact
-  about the document, and it is stated there -- those three species declare
-  a small positive ``default`` in components/gaschem/geoschem_fullchem.esm.
-  This driver used to patch it in via ``u0`` from a DENOM_SEED_PPB table
-  keyed by BARE species name, which applied to every .esm in the corpus:
-  pollu.esm also declares an SO2 state, with a declared default of 1e-11,
-  and the table would have overwritten it with 1e-3 -- a 1e8 error on a
-  published benchmark -- for any pollu test that did not set SO2 itself.
-  Every runner of these documents needs the seed, not just this one, so it
-  belongs in the .esm.
+Solver / CSE policy lives in the DOCUMENT, not here. A stiff document says so
+itself with ``solver.stiffness: "high"`` (esm-spec §2.2), which every binding
+maps to its own integrator; a basename table in this gate could not travel to
+the Julia or Rust runners, which is exactly why the spec grew the block. The
+``cse`` knob is likewise gone: the runner's default is the supported path.
 
 Exit codes:
   0  every assertion passed
   1  at least one assertion failed or errored
-  2  internal driver failure (parse error, etc.)
+  2  internal driver failure (a worker that could not report at all)
 """
 
 from __future__ import annotations
@@ -83,117 +49,41 @@ import os
 import resource
 import subprocess
 import sys
-import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
-
+# Sweep roots. `components/` holds the per-science-domain corpus; `lib/` and
+# `registered_functions/` hold the shared leaves the components `ref`-include.
+# Kept in parity with the Julia gate's roots — two runners walking different
+# corpora is how a cross-runner divergence hides.
 DEFAULT_ROOTS = ["components", "lib", "registered_functions"]
-DEFAULT_REL_TOL = 1e-6
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Per-subprocess hard memory ceiling. 6 GiB leaves headroom on the 16 GiB
-# ubuntu-latest CI runner even if multiple processes are alive (parent +
-# worker), and matches the budget called out in the bead mdl-w1j scope.
+# ubuntu-latest CI runner even with parent + worker alive.
 WORKER_RLIMIT_BYTES = 6 * 1024 * 1024 * 1024
 
-# Recursion budget for the worker process. CPython's default limit of 1000
-# Python frames is below what the deepest .esm in the corpus needs: the ESS
-# AST walks are recursive and cost ~4 frames per expression-tree level
-# (flatten._namespace_expr -> map_children -> child listcomp -> per-child
-# lambda), so geoschem_fullchem.esm (819 reactions -> 272 flattened equations,
-# deepest RHS ~322 levels) peaks at ~1,300 frames in flatten() alone and every
-# one of its 81 assertions errored as "flatten failed: RecursionError".
-# 20,000 is ~15x that measured peak — headroom for a deeper mechanism, while
-# still low enough that runaway recursion trips a clean RecursionError (an
-# ERROR row) rather than blowing the C stack (an opaque rc=-11 worker crash).
-# See _run_on_deep_stack() for the matching thread-stack sizing.
+# CPython's default 1000-frame limit is below what the deepest documents in
+# this corpus need: the toolkit's AST walks are recursive and
+# geoschem_fullchem.esm (819 reactions, deepest RHS ~322 levels) peaks near
+# 1,300 frames in flatten() alone. 20,000 is ~15x that, while still low enough
+# that runaway recursion trips a clean RecursionError (an ERROR row) rather
+# than blowing the C stack.
 WORKER_RECURSION_LIMIT = 20_000
-
-# Stack for the thread the worker body runs on. The 8 MiB default is sized for
-# the default 1000-frame limit; C-level recursion reached through the runner
-# costs real stack per level, so give the raised limit proportionate room.
-# 64 MiB is ~1% of WORKER_RLIMIT_BYTES, which the reservation counts against.
-WORKER_THREAD_STACK_BYTES = 64 * 1024 * 1024
-
-# Per-file CSE override (esm-wqy1). .esm basenames listed here will be
-# simulated with cse=True instead of the cse=False default. Entry
-# criteria: cse=False compile time exceeds ~10 min wall on a single
-# file (CI's 25-min walk-cap leaves no slack for one file to consume
-# the whole budget), AND cse=True correctness has been verified
-# against either a parallel forward evaluator or the file's existing
-# reference data within the spec §6.6.4 declared tolerances. See the
-# module docstring for the audit decision and ess-as2 (esm-kpo6) for
-# the long-term substitution-loop perf fix.
-CSE_TRUE_OVERRIDE_FILENAMES: frozenset = frozenset({
-    # heat_momentum_fluxes.esm (esm-0ro4): 78 algebraic states with
-    # cross-referenced ψ_m/ψ_h piecewise calls feeding through
-    # r_ah/r_aw/T_ac/q_ac/dH_*_dT produce ~419K substituted ops
-    # post-flatten; cse=False compile >30 min, cse=True ~29s. ULP
-    # correctness verified against a parallel Python forward
-    # evaluator (rel ≤ 5e-15) before listing here.
-    "heat_momentum_fluxes.esm",
-    # urban_canopy_model.esm (esm-vmik): inlines HeatMomentumFluxes with 78
-    # algebraic states; inherits same substitution-loop cliff as above.
-    "urban_canopy_model.esm",
-})
-
-
-def _cse_for_file(file_path: str) -> bool:
-    """Return the ``cse`` argument value for ``esm_problem()`` on the given
-    .esm. cse=False is the default; basenames listed in
-    ``CSE_TRUE_OVERRIDE_FILENAMES`` opt into cse=True (see esm-wqy1)."""
-    return Path(file_path).name in CSE_TRUE_OVERRIDE_FILENAMES
-
-
-# Per-file ODE-solver override (esm-4sxf). .esm basenames mapped here are
-# simulated with the named scipy method instead of ``solve()``'s 'LSODA'
-# default. Entry criteria: the file's inline tests are an ODE integration
-# that scipy's LSODA cannot complete (it hangs, or its Fortran RHS callback
-# overflows: "Call-back cb_f_in_lsoda__user__routines failed"), AND the
-# replacement method has been verified to reproduce the file's reference
-# data within the spec §6.6.4 declared tolerances. ``solve()``'s public
-# ``method`` argument is the sanctioned ESS API for this — no parallel
-# evaluator, single-pathway rule preserved (AGENTS.md §1).
-SOLVER_METHOD_OVERRIDE_FILENAMES: Dict[str, str] = {
-    # pollu.esm (esm-4sxf): the POLLU stiff-ODE benchmark (Verwer 1994) has
-    # rate constants spanning ~8e-7 to ~7e9 1/s. scipy's LSODA — the
-    # ``solve()`` default — cannot integrate it: the lsoda Fortran
-    # callback overflows even with an analytic Jacobian and even for a 60 s
-    # window. scipy BDF integrates the full 3600 s benchmark in ~0.2 s and
-    # reproduces the upstream GasChem.jl Pollu() Rosenbrock23 trajectory
-    # (O3@3600 = 5.523140, matching the published POLLU reference solution).
-    # ``solve()``'s own docstring documents the alg default as 'BDF';
-    # only its signature default is 'LSODA' — once that ESS discrepancy is
-    # resolved upstream this override can be dropped.
-    "pollu.esm": "BDF",
-}
-
-
-def _method_for_file(file_path: str) -> str:
-    """Return the scipy solver alg for ``solve()`` on the given .esm.
-    'LSODA' is the ``solve()`` default; basenames listed in
-    ``SOLVER_METHOD_OVERRIDE_FILENAMES`` opt into a different method
-    (see esm-4sxf)."""
-    return SOLVER_METHOD_OVERRIDE_FILENAMES.get(Path(file_path).name, "LSODA")
-
-# Variables we may need to identify by their bare name in the solve()
-# output where ``vars`` is dot-namespaced (e.g. ``"SuperFast.O3"``).
 
 
 # ---------------------------------------------------------------------------
-# Result types (parent-side)
+# Result rows (the parent/worker wire format)
 # ---------------------------------------------------------------------------
 
 
 @dataclass
 class AssertionRow:
     file: str
-    container_kind: str  # "model" | "reaction_system"
     container_name: str
     test_id: str
     assertion_idx: int
@@ -207,7 +97,7 @@ class AssertionRow:
 
 
 # ---------------------------------------------------------------------------
-# Worker
+# Worker: one .esm file, one process
 # ---------------------------------------------------------------------------
 
 
@@ -223,485 +113,66 @@ def _set_memory_limit(nbytes: int) -> None:
         pass
 
 
-def _resolve_var_index(
-    var_spec: str, sim_vars: List[str], container_name: str
-) -> Optional[int]:
-    """Map an ESM variable spec ("O3", "Sub.x", etc.) to a sim_vars index."""
-    if var_spec in sim_vars:
-        return sim_vars.index(var_spec)
-    qualified = f"{container_name}.{var_spec}"
-    if qualified in sim_vars:
-        return sim_vars.index(qualified)
-    bare = var_spec.rsplit(".", 1)[-1]
-    matches = [
-        i for i, v in enumerate(sim_vars)
-        if v == bare or v.endswith("." + bare)
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    return None
-
-
-def _resolve_tolerance(
-    container_tol, test_tol, assertion_tol
-) -> Tuple[float, float]:
-    """ESM spec §6.6.4: most-specific declared tolerance wins."""
-    for cand in (assertion_tol, test_tol, container_tol):
-        if cand is None:
-            continue
-        rel = cand.rel if cand.rel is not None else 0.0
-        atol = cand.abs if cand.abs is not None else 0.0
-        return float(rel), float(atol)
-    return DEFAULT_REL_TOL, 0.0
-
-
-def _check(actual: float, expected: float, rtol: float, atol: float) -> bool:
-    if rtol == 0.0 and atol == 0.0:
-        return actual == expected
-    return abs(actual - expected) <= atol + rtol * abs(expected)
-
-
-def _observed_field(a, res, model_name: str, insp, prob):
-    """The ARRAY OBSERVED named by a §6.6.5 assertion, as an ``ndarray`` — the
-    observed-assertion form (esm-spec §6.6.5 admits any shaped variable, and
-    §5.23 makes a reference denote its expansion). Two sources, cheapest
-    first, both the official toolkit primitives of ``run_pde_tests``:
-
-      * a STATE-FREE array observed is materialized once at build time and
-        read back from the ``BuildInspection`` (``_inspection_field``);
-      * a STATE-DEPENDENT one (a column tendency ``dthdt = D(K*D(th,lev),lev)``)
-        moves with the state, so it is replayed through the official observed
-        driver (``observed_at_state``) at ``a.time`` — the same driver the RHS
-        used at that state.
-
-    The two sources are probed under SEPARATE imports on purpose. The
-    state-free half (``_inspection_field``) is already on EarthSciAST main and
-    is what ``run_pde_tests`` reads there today; the state-dependent half
-    (``observed_at_state``) arrives with EarthSciAST PR #177. Binding them to
-    one import would strand the half the installed toolchain can already serve
-    behind the half it cannot.
-
-    Returns ``None`` when neither source knows the name, so the caller can
-    raise its standard missing-field error.
-    """
-    import numpy as np
-    try:
-        from earthsci_ast.pde_inline_tests import _inspection_field
-    except ImportError:
-        _inspection_field = None
-    if _inspection_field is not None:
-        obs = _inspection_field(insp, model_name, str(a.variable))
-        if obs is not None:
-            return obs
-    try:
-        from earthsci_ast.simulation import observed_at_state
-    except ImportError:
-        return None
-    build = getattr(prob, "build", None)
-    flat = getattr(prob, "flat", None)
-    if build is None or flat is None:
-        return None
-    # Sample the state the SAME way the array-state branch of
-    # _sample_pde_assertion does -- linear interpolation at exactly `a.time`.
-    # Reading the nearest output node instead would answer the assertion at a
-    # different instant than a state assertion in the same test: this gate
-    # passes no `saveat`, so `res.t` is the dense default grid and the nearest
-    # node sits up to (t1 - t0)/2/(len(res.t) - 1) away, silently, where
-    # upstream `simulate_states` refuses a mismatch beyond 1e-9. An observed
-    # replayed off-time is exactly the byte-for-byte divergence from
-    # `run_pde_tests` this driver exists to avoid.
-    t = float(a.time)
-    state = np.array(
-        [float(np.interp(t, res.t, res.y[row])) for row in range(res.y.shape[0])],
-        dtype=float,
-    )
-    for name in (f"{model_name}.{a.variable}", str(a.variable)):
-        value = observed_at_state(build, flat, name, t, state)
-        if value is None:
-            continue
-        arr = np.asarray(value, dtype=float)
-        if arr.ndim == 0:
-            return None
-        return arr
-    return None
-
-
-def _sample_pde_assertion(a, res, model_name: str, eval_ef, insp, prob=None):
-    """Evaluate a §6.6.5 field assertion (``reduce`` / ``coords``) from a
-    ``Solution``, reusing the official toolkit primitives so the gate
-    and ``run_pde_tests`` agree byte-for-byte. Collapses the spatial field of
-    ``a.variable`` to a scalar: ``reduce`` applies the named reduction (mean,
-    L2_error, …) over every cell (optionally against an analytic ``reference``);
-    ``coords`` picks one grid cell. The field is the cells of an array STATE
-    when the name has ODE slots, else an array OBSERVED (``_observed_field``).
-    """
-    import numpy as np
-    from earthsci_ast.pde_inline_tests import (
-        evaluate_cellwise, field_reduce, state_cells,
-    )
-
-    if a.coords is not None and a.reduce is not None:
-        raise RuntimeError("`coords` and `reduce` are mutually exclusive")
-    var_map = {str(v): i for i, v in enumerate(res.vars)}
-    cells = state_cells(var_map, a.variable, model_name)
-    if cells:
-        cell_tuples = [c for c, _ in cells]
-        field = [float(np.interp(a.time, res.t, res.y[slot])) for _, slot in cells]
-    else:
-        obs = _observed_field(a, res, model_name, insp, prob)
-        if obs is None:
-            raise RuntimeError(
-                f"array field '{a.variable}' has no cells in solve() output, "
-                f"and no array observed of that name is exposed by the build "
-                f"or evaluable at the assertion time")
-        idxs = list(np.ndindex(*obs.shape))
-        cell_tuples = [[int(i) + 1 for i in idx] for idx in idxs]
-        field = [float(obs[idx]) for idx in idxs]
-    if a.coords is not None:
-        from earthsci_ast.pde_inline_tests import _coords_cell, _variable_shape
-        shape = _variable_shape(eval_ef, model_name, str(a.variable))
-        target = _coords_cell(a.coords, shape, eval_ef.index_sets)
-        try:
-            pos = cell_tuples.index(target)
-        except ValueError:
-            raise RuntimeError(
-                f"no grid sample at cell {target} of '{a.variable}'") from None
-        return float(field[pos])
-    ref = None
-    if a.reference is not None:
-        ref = evaluate_cellwise(
-            a.reference, cell_tuples,
-            index_sets=(eval_ef.index_sets if eval_ef is not None else None),
-            params=(getattr(insp, "params", None) or {}))
-    return field_reduce(a.reduce, field, reference=ref)
-
-
-def _run_tests_for_container(
-    file_path: str,
-    container_kind: str,
-    container_name: str,
-    container_tolerance,
-    tests,
-    flat,
-    rows: List[AssertionRow],
-    ef=None,
-) -> None:
-    if not tests:
-        return
-    from earthsci_ast import ReturnCode, esm_problem, flatten, solve
-    from earthsci_ast.pde_inline_tests import (
-        BuildInspection, _ephemeral_injected_file,
-    )
-    import numpy as np
-
-    sim_vars: List[str] = []
-    cse_flag = _cse_for_file(file_path)
-    method = _method_for_file(file_path)
-    base_dir = os.path.dirname(os.path.abspath(file_path))
-    for t in tests:
-        t_start = time.time()
-        # esm-spec §9.7.10 form C: a test that injects a discretization runs
-        # against an EPHEMERAL instance of the enclosing component with the
-        # test's imports appended to its scope (its spatial `D` lowered for this
-        # test only); the persisted component is untouched. A test with no
-        # injection runs against the shared flattened system. This is the one
-        # inline runner for both ODE (scalar) and PDE (array) components.
-        run_flat = flat
-        eval_ef = ef
-        if getattr(t, "expression_template_imports", None) and ef is not None:
-            try:
-                inj_ef = _ephemeral_injected_file(
-                    ef, file_path, container_name,
-                    t.expression_template_imports, base_dir,
-                )
-                run_flat = flatten(inj_ef)
-                eval_ef = inj_ef
-            except Exception as err:  # noqa: BLE001
-                for i, a in enumerate(t.assertions):
-                    rows.append(AssertionRow(
-                        file=file_path, container_kind=container_kind,
-                        container_name=container_name, test_id=t.id,
-                        assertion_idx=i, variable=a.variable, time=a.time,
-                        expected=a.expected, actual=None, status="ERROR",
-                        message=(f"discretization injection failed: "
-                                 f"{type(err).__name__}: {err}"),
-                        duration_s=time.time() - t_start,
-                    ))
-                continue
-        insp = BuildInspection()
-        try:
-            ic = dict(t.initial_conditions or {})
-            params = dict(t.parameter_overrides or {})
-            # EarthSciAST phase 4: `simulate` is gone; a run is
-            # `esm_problem(...)` (build, per document) then `solve(...)` (run,
-            # per knob-set). Everything the BUILD depends on -- cse, inspect --
-            # moves to construction; only the solver knobs stay on solve.
-            #
-            # The tolerances stay EXPLICIT and stay tight. The library defaults
-            # are now 1e-4/1e-6, which is deliberately loose: a default is what a
-            # document gets when nobody expressed an opinion about accuracy. This
-            # driver asserts declared numbers, so it must state the accuracy it
-            # needs rather than inherit whatever the default happens to be.
-            prob = esm_problem(
-                run_flat,
-                (t.time_span.start, t.time_span.end),
-                p=params,
-                u0=ic,
-                cse=cse_flag,
-                inspect=insp,
-            )
-            res = solve(prob, alg=method, reltol=1e-10, abstol=1e-12)
-        except Exception as err:  # noqa: BLE001
-            for i, a in enumerate(t.assertions):
-                rows.append(AssertionRow(
-                    file=file_path,
-                    container_kind=container_kind,
-                    container_name=container_name,
-                    test_id=t.id,
-                    assertion_idx=i,
-                    variable=a.variable,
-                    time=a.time,
-                    expected=a.expected,
-                    actual=None,
-                    status="ERROR",
-                    message=f"esm_problem()/solve() raised: {type(err).__name__}: {err}",
-                    duration_s=time.time() - t_start,
-                ))
-            continue
-
-        if res.retcode is not ReturnCode.Success:
-            for i, a in enumerate(t.assertions):
-                rows.append(AssertionRow(
-                    file=file_path,
-                    container_kind=container_kind,
-                    container_name=container_name,
-                    test_id=t.id,
-                    assertion_idx=i,
-                    variable=a.variable,
-                    time=a.time,
-                    expected=a.expected,
-                    actual=None,
-                    status="ERROR",
-                    message=f"integrator failed ({res.retcode.name}): {res.message}",
-                    duration_s=time.time() - t_start,
-                ))
-            continue
-
-        sim_vars = res.vars
-        for i, a in enumerate(t.assertions):
-            rtol, atol = _resolve_tolerance(
-                container_tolerance, t.tolerance, a.tolerance
-            )
-            try:
-                if getattr(a, "reduce", None) or getattr(a, "coords", None):
-                    # §6.6.5 field assertion (array/PDE): collapse the spatial
-                    # field to a scalar via the shared toolkit primitives.
-                    actual = _sample_pde_assertion(
-                        a, res, container_name, eval_ef, insp, prob)
-                else:
-                    idx = _resolve_var_index(a.variable, sim_vars, container_name)
-                    if idx is None:
-                        rows.append(AssertionRow(
-                            file=file_path,
-                            container_kind=container_kind,
-                            container_name=container_name,
-                            test_id=t.id,
-                            assertion_idx=i,
-                            variable=a.variable,
-                            time=a.time,
-                            expected=a.expected,
-                            actual=None,
-                            status="ERROR",
-                            message=(
-                                f"variable not found in solve() output "
-                                f"(have {len(sim_vars)} vars; sample: "
-                                f"{sim_vars[:3]})"
-                            ),
-                            duration_s=time.time() - t_start,
-                        ))
-                        continue
-                    actual = float(np.interp(a.time, res.t, res.y[idx]))
-            except Exception as err:  # noqa: BLE001
-                rows.append(AssertionRow(
-                    file=file_path,
-                    container_kind=container_kind,
-                    container_name=container_name,
-                    test_id=t.id,
-                    assertion_idx=i,
-                    variable=a.variable,
-                    time=a.time,
-                    expected=a.expected,
-                    actual=None,
-                    status="ERROR",
-                    message=f"sample failed: {type(err).__name__}: {err}",
-                    duration_s=time.time() - t_start,
-                ))
-                continue
-            ok = _check(actual, a.expected, rtol, atol)
-            rows.append(AssertionRow(
-                file=file_path,
-                container_kind=container_kind,
-                container_name=container_name,
-                test_id=t.id,
-                assertion_idx=i,
-                variable=a.variable,
-                time=a.time,
-                expected=a.expected,
-                actual=actual,
-                status="PASS" if ok else "FAIL",
-                message="" if ok else (
-                    f"actual={actual!r} expected={a.expected!r} "
-                    f"(rtol={rtol}, atol={atol})"
-                ),
-                duration_s=time.time() - t_start,
-            ))
-
-
-def _run_on_deep_stack(fn):
-    """Run ``fn`` on a thread with a raised recursion limit and a big stack.
-
-    The ESS AST walks are recursive, so the Python frame budget a file needs
-    scales with the DEPTH of its expression trees, not with its size. The
-    worst case in the corpus is ``components/gaschem/geoschem_fullchem.esm``
-    (a 819-reaction ``reaction_systems`` document flattening to 272
-    equations): its deepest RHS nests ~322 expression levels, and
-    ``earthsci_ast.flatten._namespace_expr`` burns ~4 Python frames per level
-    (``_namespace_expr`` → ``map_children`` → the child listcomp → the
-    per-child lambda). Measured peak: ~1,300 frames inside ``flatten()``,
-    i.e. past CPython's default limit of 1000 — every assertion in that file
-    errored as ``flatten failed: RecursionError`` before this guard, which is
-    a gate-process configuration problem, not a model problem.
-
-    ``WORKER_RECURSION_LIMIT`` is set ~15x above that measured peak: enough
-    headroom that a legitimately deeper mechanism still runs, small enough
-    that a genuinely runaway (e.g. cyclic) walk still raises a clean
-    ``RecursionError`` — which the caller turns into ERROR rows — instead of
-    exhausting the C stack and segfaulting the worker, which the parent can
-    only report as an opaque ``worker exited rc=-11``. The thread's stack is
-    sized well above the 8 MiB default for the same reason: C-level recursion
-    (``deepcopy``/``repr``-style walks reached through the runner) costs real
-    stack per level. Both are worker-process-only — the parent driver keeps
-    stock limits, and ``run_worker()`` is reached solely via ``--worker``.
-
-    The stack reservation counts against the worker's ``RLIMIT_AS``, so it is
-    kept to a small fraction of ``WORKER_RLIMIT_BYTES``.
-    """
-    box: Dict[str, object] = {}
-
-    def _target() -> None:
-        # Per-interpreter, but this process only ever runs one .esm file.
-        sys.setrecursionlimit(WORKER_RECURSION_LIMIT)
-        try:
-            box["rc"] = fn()
-        except BaseException as err:  # noqa: BLE001
-            box["err"] = err
-
-    try:
-        threading.stack_size(WORKER_THREAD_STACK_BYTES)
-    except (ValueError, RuntimeError):
-        # Platform refused the size; fall back to the default stack.
-        pass
-    th = threading.Thread(target=_target, name="esm-inline-test-worker")
-    try:
-        th.start()
-    except (RuntimeError, MemoryError):
-        # No thread available (address space exhausted by the 64 MiB stack
-        # reservation, thread limits, …). Fall back to the calling thread so
-        # the file is still attempted: the raised recursion limit is
-        # interpreter-wide, so only the extra stack is lost.
-        _target()
-    else:
-        th.join()
-    if "err" in box:
-        raise box["err"]  # type: ignore[misc]
-    return int(box.get("rc", 2))  # type: ignore[arg-type]
-
-
 def run_worker(file_path: str) -> int:
     _set_memory_limit(WORKER_RLIMIT_BYTES)
-    return _run_on_deep_stack(lambda: _run_worker_body(file_path))
+    sys.setrecursionlimit(WORKER_RECURSION_LIMIT)
 
+    from earthsci_ast.inline_tests import run_inline_tests
 
-def _run_worker_body(file_path: str) -> int:
-    from earthsci_ast import flatten, load_path
-
+    t0 = time.time()
     rows: List[AssertionRow] = []
     try:
-        ef = load_path(file_path)
-    except Exception as err:  # noqa: BLE001
+        # A LIST input selects the runner's batch semantics: a document that
+        # fails to load contributes an ERROR row naming the path instead of
+        # raising, so a load failure is reported like every other failure.
+        results = run_inline_tests([file_path])
+    except Exception as err:  # noqa: BLE001 — the row IS the report
         rows.append(AssertionRow(
-            file=file_path, container_kind="file", container_name="<load>",
-            test_id="<load>", assertion_idx=0, variable="", time=0.0,
-            expected=0.0, actual=None, status="ERROR",
-            message=f"load failed: {type(err).__name__}: {err}",
-            duration_s=0.0,
+            file=file_path, container_name="<runner>", test_id="<run>",
+            assertion_idx=0, variable="", time=0.0, expected=0.0, actual=None,
+            status="ERROR",
+            message=f"run_inline_tests failed: {type(err).__name__}: {err}",
+            duration_s=time.time() - t0,
         ))
         _emit_worker_results(rows)
         return 1
 
-    # Containers worth processing.
-    containers: List[Tuple[str, str, object, list]] = []
-    if ef.models:
-        for mname, m in ef.models.items():
-            if m.tests:
-                containers.append(("model", mname, m.tolerance, m.tests))
-    if ef.reaction_systems:
-        for rname, rs in ef.reaction_systems.items():
-            if rs.tests:
-                containers.append((
-                    "reaction_system", rname, rs.tolerance, rs.tests,
-                ))
-
-    if not containers:
-        # mdl-14s: minimum-bar gate. With no inline tests, the load_path() call
-        # above is the only structural check. Emit a synthetic PASS row so
-        # the parent summary shows the file was actually verified, not
-        # silently skipped.
+    # One wall-clock measurement per file, shared evenly across its
+    # assertions: junit sums <testcase> times, so stamping each assertion with
+    # the cumulative figure would overcount the file N-fold.
+    share = (time.time() - t0) / max(len(results), 1)
+    for r in results:
+        # `actual is None` is how the runner reports "never evaluated" (the
+        # simulate/build/load failed) as opposed to "evaluated and wrong".
+        status = "PASS" if r.passed else ("ERROR" if r.actual is None else "FAIL")
         rows.append(AssertionRow(
-            file=file_path, container_kind="file", container_name="<load>",
-            test_id="<load>", assertion_idx=0, variable="", time=0.0,
-            expected=0.0, actual=None, status="PASS",
-            message="load_path() succeeded (no inline tests declared)",
-            duration_s=0.0,
+            file=file_path, container_name=str(r.model), test_id=str(r.test_id),
+            assertion_idx=int(r.assertion_idx), variable=str(r.variable),
+            time=float(r.time), expected=float(r.expected), actual=r.actual,
+            status=status, message=r.message, duration_s=share,
         ))
-        _emit_worker_results(rows)
-        return 0
 
-    try:
-        flat = flatten(ef)
-    except Exception as err:  # noqa: BLE001
-        for kind, name, _tol, tests in containers:
-            for t in tests:
-                for i, a in enumerate(t.assertions):
-                    rows.append(AssertionRow(
-                        file=file_path, container_kind=kind,
-                        container_name=name, test_id=t.id,
-                        assertion_idx=i, variable=a.variable, time=a.time,
-                        expected=a.expected, actual=None, status="ERROR",
-                        message=f"flatten failed: {type(err).__name__}: {err}",
-                        duration_s=0.0,
-                    ))
-        _emit_worker_results(rows)
-        return 1
-
-    # One inline runner for both ODE (scalar) and PDE (array/form-C) tests:
-    # `_run_tests_for_container` drives the official `esm_problem`/`solve` engine, applying
-    # per-test discretization injection and `reduce`/`coords` field collapse when
-    # present, and plain scalar sampling otherwise.
-    for kind, name, tol, tests in containers:
-        _run_tests_for_container(
-            file_path, kind, name, tol, tests, flat, rows, ef=ef,
-        )
+    if not results:
+        # Minimum-bar gate: a document with no inline tests still had to LOAD
+        # (the runner loads before it can find no tests), so structural drift
+        # in a leaf is caught here at PR time. Recorded as a row so the file
+        # is visibly checked rather than silently absent.
+        rows.append(AssertionRow(
+            file=file_path, container_name="<load>", test_id="<load>",
+            assertion_idx=0, variable="", time=0.0, expected=0.0, actual=None,
+            status="PASS", message="loaded; no inline tests declared",
+            duration_s=time.time() - t0,
+        ))
 
     _emit_worker_results(rows)
-    n_bad = sum(1 for r in rows if r.status in ("FAIL", "ERROR"))
-    return 1 if n_bad else 0
+    return 1 if any(r.status in ("FAIL", "ERROR") for r in rows) else 0
 
 
 def _emit_worker_results(rows: List[AssertionRow]) -> None:
     """Worker writes one JSON object per assertion to stdout, then a final
-    ``__DONE__`` marker. Parent reads only lines starting with ``{`` so
-    incidental Python warnings on stderr don't pollute the parser."""
+    ``__DONE__`` marker. The parent reads only lines starting with ``{`` so
+    incidental warnings do not pollute the parser, and treats a missing
+    marker as a worker that died mid-file."""
     for r in rows:
         sys.stdout.write(json.dumps(asdict(r)) + "\n")
     sys.stdout.write("__DONE__\n")
@@ -713,67 +184,64 @@ def _emit_worker_results(rows: List[AssertionRow]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def discover_esm_files(roots: List[str]) -> List[Path]:
+def discover_esm_files(roots: Sequence[str]) -> List[Path]:
     found: List[Path] = []
-    repo_root = Path(__file__).resolve().parent.parent
     for r in roots:
         p = Path(r)
         if not p.is_absolute():
-            p = repo_root / p
+            p = REPO_ROOT / p
         if not p.is_dir():
             continue
-        for path in sorted(p.rglob("*.esm")):
-            found.append(path)
-    return sorted(found)
+        found.extend(sorted(p.rglob("*.esm")))
+    return sorted(set(found))
+
+
+def _spawn_row(file_path: Path, message: str) -> AssertionRow:
+    return AssertionRow(
+        file=str(file_path), container_name="<worker>", test_id="<spawn>",
+        assertion_idx=0, variable="", time=0.0, expected=0.0, actual=None,
+        status="ERROR", message=message, duration_s=0.0,
+    )
 
 
 def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
     """Spawn the worker subprocess for one .esm file. Returns
     (rows, exit_code, raw_stderr)."""
     cmd = [
-        sys.executable,
-        "-X", "faulthandler",
-        str(Path(__file__).resolve()),
-        "--worker", str(file_path),
+        sys.executable, "-X", "faulthandler",
+        str(Path(__file__).resolve()), "--worker", str(file_path),
     ]
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True, check=False,
-    )
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
     rows: List[AssertionRow] = []
+    done = False
     for line in proc.stdout.splitlines():
         line = line.strip()
-        if not line or not line.startswith("{"):
+        if line == "__DONE__":
+            done = True
+            continue
+        if not line.startswith("{"):
             continue
         try:
-            d = json.loads(line)
-        except json.JSONDecodeError:
+            rows.append(AssertionRow(**json.loads(line)))
+        except (json.JSONDecodeError, TypeError):
             continue
-        rows.append(AssertionRow(**d))
-    if proc.returncode == 0 and not any(
-        line.strip() == "__DONE__" for line in proc.stdout.splitlines()
-    ):
-        # Worker exited 0 but did not emit the done marker → treat as
-        # internal failure (likely OOM kill or rlimit).
-        rows.append(AssertionRow(
-            file=str(file_path), container_kind="file",
-            container_name="<worker>", test_id="<spawn>",
-            assertion_idx=0, variable="", time=0.0, expected=0.0,
-            actual=None, status="ERROR",
-            message="worker exited without emitting __DONE__",
-            duration_s=0.0,
+
+    if not done:
+        # No marker: the worker died before it could report (OOM kill, rlimit,
+        # segfault, an import that raised). Whatever it had said so far is
+        # kept, and the death itself becomes a row — the failure mode this
+        # gate previously swallowed as "no inline tests".
+        rows.append(_spawn_row(
+            file_path,
+            f"worker exited rc={proc.returncode} without emitting __DONE__; "
+            f"stderr_tail={proc.stderr[-500:]!r}",
         ))
-    if proc.returncode not in (0, 1):
-        # Crash, OOM kill, rlimit, etc.
-        rows.append(AssertionRow(
-            file=str(file_path), container_kind="file",
-            container_name="<worker>", test_id="<spawn>",
-            assertion_idx=0, variable="", time=0.0, expected=0.0,
-            actual=None, status="ERROR",
-            message=(
-                f"worker exited rc={proc.returncode}; "
-                f"stderr_tail={proc.stderr[-500:]!r}"
-            ),
-            duration_s=0.0,
+    elif proc.returncode not in (0, 1):
+        rows.append(_spawn_row(
+            file_path,
+            f"worker exited rc={proc.returncode}; "
+            f"stderr_tail={proc.stderr[-500:]!r}",
         ))
     return rows, proc.returncode, proc.stderr
 
@@ -798,7 +266,7 @@ def _print_summary(all_rows: List[AssertionRow], files: List[Path]) -> None:
     for f in files:
         rs = by_file.get(str(f), [])
         if not rs:
-            print(f"  {f}: (no inline tests)")
+            print(f"  [??? ] {f}: no rows reported")
             continue
         p = sum(1 for r in rs if r.status == "PASS")
         fa = sum(1 for r in rs if r.status == "FAIL")
@@ -820,6 +288,58 @@ def _print_summary(all_rows: List[AssertionRow], files: List[Path]) -> None:
             shown += 1
 
 
+def _write_junit_xml(rows: List[AssertionRow], path: str) -> None:
+    """Minimal junit XML — one <testsuite> per file, one <testcase> per
+    assertion. Symmetric with the Julia gate's report."""
+    from xml.sax.saxutils import quoteattr
+
+    by_file: Dict[str, List[AssertionRow]] = {}
+    for r in rows:
+        by_file.setdefault(r.file, []).append(r)
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<testsuites>"]
+    for f, rs in by_file.items():
+        nf = sum(1 for r in rs if r.status == "FAIL")
+        ne = sum(1 for r in rs if r.status == "ERROR")
+        lines.append(
+            f'  <testsuite name={quoteattr(f)} tests="{len(rs)}" '
+            f'failures="{nf}" errors="{ne}">'
+        )
+        for r in rs:
+            tname = (
+                f"{r.container_name}::{r.test_id}#{r.assertion_idx}"
+                f"::{r.variable}@{r.time}"
+            )
+            lines.append(
+                f'    <testcase classname={quoteattr(f)} '
+                f'name={quoteattr(tname)} time="{r.duration_s:.4f}">'
+            )
+            if r.status == "FAIL":
+                lines.append(f'      <failure message={quoteattr(r.message)}/>')
+            elif r.status == "ERROR":
+                lines.append(f'      <error message={quoteattr(r.message)}/>')
+            lines.append("    </testcase>")
+        lines.append("  </testsuite>")
+    lines.append("</testsuites>\n")
+    with open(path, "w") as fh:
+        fh.write("\n".join(lines))
+
+
+def _resolve_files(args, ap) -> List[Path]:
+    if args.files:
+        files: List[Path] = []
+        for f in args.files:
+            p = Path(f)
+            if not p.is_absolute():
+                p = REPO_ROOT / p
+            if not p.exists():
+                ap.error(f"--files: not found: {p}")
+            if p.suffix != ".esm":
+                ap.error(f"--files: not a .esm file: {p}")
+            files.append(p.resolve())
+        return sorted(set(files))
+    return discover_esm_files(args.root or DEFAULT_ROOTS)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -829,19 +349,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     ap.add_argument(
         "--root", action="append", default=None,
-        help="Root directory to search for .esm files. May be passed "
-             "multiple times. Defaults to ./components, ./lib, and "
-             "./registered_functions "
-             "(mdl-14s: lib/ included so structural-validation drift in "
-             "lib/*.esm is caught at PR time; esm-1rhq: registered_functions/ "
-             "added for standalone registered-function lookup tables). "
-             "Mutually exclusive with --files.",
+        help="Root directory to search for .esm files. May be passed multiple "
+             "times. Defaults to ./components, ./lib and "
+             "./registered_functions. Mutually exclusive with --files.",
     )
     ap.add_argument(
         "--files", nargs="+", default=None,
         help="Explicit list of .esm files to test (instead of walking --root "
-             "directories). Useful for pre-merge gates that only want to test "
-             "files changed in the diff. Mutually exclusive with --root.",
+             "directories). Mutually exclusive with --root.",
+    )
+    ap.add_argument(
+        "--jobs", type=int, default=0,
+        help="Number of .esm files to test concurrently (one subprocess each). "
+             "0 (the default) picks os.cpu_count() capped at 8; 1 is serial. "
+             "Files are independent — the workers share nothing but the CPU.",
     )
     ap.add_argument(
         "--junit-xml", default=None,
@@ -851,59 +372,39 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.worker:
         return run_worker(args.worker)
-
     if args.files and args.root:
         ap.error("--files and --root are mutually exclusive")
 
-    if args.files:
-        repo_root = Path(__file__).resolve().parent.parent
-        files: List[Path] = []
-        for f in args.files:
-            p = Path(f)
-            if not p.is_absolute():
-                p = repo_root / p
-            if not p.exists():
-                print(f"ERROR: --files: not found: {p}", file=sys.stderr)
-                return 2
-            if p.suffix != ".esm":
-                print(f"ERROR: --files: not a .esm file: {p}", file=sys.stderr)
-                return 2
-            files.append(p.resolve())
-        files = sorted(set(files))
-        if not files:
-            print("No .esm files passed via --files.", file=sys.stderr)
-            return 0
-    else:
-        roots = args.root or DEFAULT_ROOTS
-        files = discover_esm_files(roots)
-        if not files:
-            print(
-                f"No .esm files discovered under: {', '.join(roots)}",
-                file=sys.stderr,
-            )
-            return 0
+    files = _resolve_files(args, ap)
+    if not files:
+        print("No .esm files discovered.", file=sys.stderr)
+        return 2
 
-    print(f"Walking {len(files)} .esm file(s) ...")
+    jobs = args.jobs or min(os.cpu_count() or 1, 8)
+    print(f"Walking {len(files)} .esm file(s), {jobs} at a time ...")
     all_rows: List[AssertionRow] = []
     overall_rc = 0
     t_total = time.time()
-    for f in files:
+
+    def _one(f: Path):
         t0 = time.time()
         rows, rc, stderr = run_one_file(f)
-        all_rows.extend(rows)
-        bad = sum(1 for r in rows if r.status in ("FAIL", "ERROR"))
-        tag = "OK " if bad == 0 else "FAIL"
-        print(
-            f"  [{tag}] {f}  ({len(rows)} assertions, "
-            f"{time.time() - t0:.1f}s)"
-        )
-        if rc not in (0, 1):
-            overall_rc = max(overall_rc, 2)
-            print(f"    worker stderr tail:\n{stderr[-400:]}", file=sys.stderr)
-        elif rc == 1 and overall_rc == 0:
-            overall_rc = 1
-        elif bad and overall_rc == 0:
-            overall_rc = 1
+        return f, rows, rc, stderr, time.time() - t0
+
+    # Results are reported in discovery order however the workers finish, so a
+    # log diffed between two runs lines up file for file.
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        for f, rows, rc, stderr, wall in pool.map(_one, files):
+            all_rows.extend(rows)
+            bad = sum(1 for r in rows if r.status in ("FAIL", "ERROR"))
+            tag = "OK " if bad == 0 else "FAIL"
+            print(f"  [{tag}] {f}  ({len(rows)} assertions, {wall:.1f}s)",
+                  flush=True)
+            if rc not in (0, 1):
+                overall_rc = max(overall_rc, 2)
+                print(f"    worker stderr tail:\n{stderr[-400:]}", file=sys.stderr)
+            elif bad:
+                overall_rc = max(overall_rc, 1)
 
     _print_summary(all_rows, files)
     print(f"Total wall: {time.time() - t_total:.1f}s")
@@ -912,47 +413,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         _write_junit_xml(all_rows, args.junit_xml)
 
     return overall_rc
-
-
-def _write_junit_xml(rows: List[AssertionRow], path: str) -> None:
-    """Minimal junit XML — one <testsuite> per file, one <testcase> per
-    assertion. Keeps the CI-side artifact symmetric with the existing
-    Julia junit emitter (mdl-08t)."""
-    from xml.sax.saxutils import escape
-    by_file: Dict[str, List[AssertionRow]] = {}
-    for r in rows:
-        by_file.setdefault(r.file, []).append(r)
-    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<testsuites>"]
-    for f, rs in by_file.items():
-        n = len(rs)
-        nf = sum(1 for r in rs if r.status == "FAIL")
-        ne = sum(1 for r in rs if r.status == "ERROR")
-        lines.append(
-            f'  <testsuite name="{escape(f)}" tests="{n}" '
-            f'failures="{nf}" errors="{ne}">'
-        )
-        for r in rs:
-            tname = (
-                f"{r.container_name}::{r.test_id}#{r.assertion_idx}"
-                f"::{r.variable}@{r.time}"
-            )
-            lines.append(
-                f'    <testcase classname="{escape(f)}" '
-                f'name="{escape(tname)}" time="{r.duration_s:.4f}">'
-            )
-            if r.status == "FAIL":
-                lines.append(
-                    f'      <failure message="{escape(r.message)}"/>'
-                )
-            elif r.status == "ERROR":
-                lines.append(
-                    f'      <error message="{escape(r.message)}"/>'
-                )
-            lines.append("    </testcase>")
-        lines.append("  </testsuite>")
-    lines.append("</testsuites>\n")
-    with open(path, "w") as fh:
-        fh.write("\n".join(lines))
 
 
 if __name__ == "__main__":

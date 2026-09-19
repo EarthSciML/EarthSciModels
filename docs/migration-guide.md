@@ -392,8 +392,8 @@ This loads `test/runtests.jl`, which calls
 environment), and do not paraphrase the command — copy it.
 
 > **CI runs the same inline-test contract via the Python gate of
-> record** (`tools/run_esm_inline_tests.py`, driving
-> `earthsci_ast.simulation.simulate(cse=False)` per AGENTS.md §1).
+> record** (`tools/run_esm_inline_tests.py`, driving the public
+> `earthsci_ast.inline_tests.run_inline_tests` per AGENTS.md §1).
 > The Julia walker is the local equivalent — it covers the same
 > `(variable, time, expected)` assertions and is the one to debug
 > against locally because the failure messages cite Julia/MTK
