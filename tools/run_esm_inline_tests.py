@@ -25,8 +25,8 @@ carried its own copy of all of that, reaching into private upstream modules
 (``earthsci_ast.pde_inline_tests``, ``earthsci_ast.simulation.observed_at_state``)
 to do it. When upstream renamed that module the private import raised inside
 the worker, the worker died before emitting a row, and the parent read "no
-rows" as "no inline tests": the gate reported 22 assertions over a
-2,500-assertion corpus and went green on models it never ran. A gate that
+rows" as "no inline tests": the gate reported 22 assertions over a corpus
+that declares 8,176, and went green on models it never ran. A gate that
 can only fail by breaking loudly is the point of the rewrite.
 
 Solver policy lives in the DOCUMENT, not here. A stiff document says so itself
@@ -91,16 +91,28 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # the one document that needs it.
 CSE_FALSE_FILENAMES: frozenset = frozenset({"geoschem_fullchem.esm"})
 
-# Per-subprocess hard memory ceiling. 6 GiB leaves headroom on the 16 GiB
-# ubuntu-latest CI runner even with parent + worker alive.
+# Per-subprocess hard address-space ceiling. It is a PER-WORKER guard, not a
+# budget for the run: with `--jobs N` there are N of them, so N * 6 GiB can
+# exceed the 16 GiB ubuntu-latest runner on paper. What keeps that theoretical
+# is that the documents in this corpus build far below the ceiling — the
+# ceiling exists so that ONE runaway build dies as a worker (an ERROR row for
+# its file) instead of taking the whole job down with an OOM kill, and a
+# smaller number would refuse documents that legitimately need the room.
 WORKER_RLIMIT_BYTES = 6 * 1024 * 1024 * 1024
 
 # CPython's default 1000-frame limit is below what the deepest documents in
 # this corpus need: the toolkit's AST walks are recursive and
 # geoschem_fullchem.esm (819 reactions, deepest RHS ~322 levels) peaks near
-# 1,300 frames in flatten() alone. 20,000 is ~15x that, while still low enough
-# that runaway recursion trips a clean RecursionError (an ERROR row) rather
-# than blowing the C stack.
+# 1,300 frames in flatten() alone — measured when the limit was still the
+# default, where every one of its 81 assertions errored as
+# "flatten failed: RecursionError". 20,000 is ~15x that measured peak: enough
+# headroom for a deeper mechanism than any in the corpus today.
+#
+# It is raised on the worker's own (main) thread, so the C stack is whatever
+# the process was given. A walk deep enough to exhaust that stack segfaults
+# the worker rather than raising RecursionError — which is reported, not
+# swallowed: the worker dies without its `__DONE__` marker and the parent
+# turns that into an ERROR row for the file (see `rows_from_worker`).
 WORKER_RECURSION_LIMIT = 20_000
 
 
@@ -283,6 +295,23 @@ def rows_from_worker(
     return rows
 
 
+def verdict_for_file(rows: List[AssertionRow], returncode: int) -> int:
+    """This file's contribution to the driver's exit code: 0 clean, 1 an
+    assertion failed or errored, 2 the driver could not test the file at all.
+
+    A file that produced NO row is a 2, not a 0. Every path that reaches here
+    should have left at least one row — a finished worker with no inline tests
+    still emits its ``<load>`` row, and a worker that did not finish is given a
+    spawn row by `rows_from_worker` — so an empty list means the driver lost
+    the file somewhere, and the one thing this gate must never do is call that
+    a pass."""
+    if returncode not in (0, 1):
+        return 2
+    if not rows:
+        return 2
+    return 1 if any(r.status in ("FAIL", "ERROR") for r in rows) else 0
+
+
 def run_one_file(file_path: Path) -> Tuple[List[AssertionRow], int, str]:
     """Spawn the worker subprocess for one .esm file. Returns
     (rows, exit_code, raw_stderr)."""
@@ -445,15 +474,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         for f, rows, rc, stderr, wall in pool.map(_one, files):
             all_rows.extend(rows)
-            bad = sum(1 for r in rows if r.status in ("FAIL", "ERROR"))
-            tag = "OK " if bad == 0 else "FAIL"
+            verdict = verdict_for_file(rows, rc)
+            tag = "OK " if verdict == 0 else "FAIL"
             print(f"  [{tag}] {f}  ({len(rows)} assertions, {wall:.1f}s)",
                   flush=True)
             if rc not in (0, 1):
-                overall_rc = max(overall_rc, 2)
                 print(f"    worker stderr tail:\n{stderr[-400:]}", file=sys.stderr)
-            elif bad:
-                overall_rc = max(overall_rc, 1)
+            overall_rc = max(overall_rc, verdict)
 
     _print_summary(all_rows, files)
     print(f"Total wall: {time.time() - t_total:.1f}s")

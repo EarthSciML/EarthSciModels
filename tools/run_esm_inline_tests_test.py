@@ -73,6 +73,67 @@ class WorkerOutputTest(unittest.TestCase):
         self.assertEqual([r.status for r in rows], ["PASS"])
 
 
+class VerdictTest(unittest.TestCase):
+    """The exit code the driver takes from one file. The failure mode this
+    gate exists to prevent is a file that was never tested being counted as a
+    pass, so "no rows at all" is a driver failure (2), never a 0."""
+
+    def test_clean_file_is_zero(self):
+        rows = gate.rows_from_worker(
+            Path("f.esm"), _line() + "\n__DONE__\n", 0, "")
+        self.assertEqual(gate.verdict_for_file(rows, 0), 0)
+
+    def test_a_failed_assertion_is_one(self):
+        rows = gate.rows_from_worker(
+            Path("f.esm"), _line(status="FAIL") + "\n__DONE__\n", 1, "")
+        self.assertEqual(gate.verdict_for_file(rows, 1), 1)
+
+    def test_an_unexpected_exit_code_is_two(self):
+        rows = gate.rows_from_worker(Path("f.esm"), "", -9, "Killed")
+        self.assertEqual(gate.verdict_for_file(rows, -9), 2)
+
+    def test_no_rows_at_all_is_a_driver_failure_not_a_pass(self):
+        self.assertEqual(gate.verdict_for_file([], 0), 2)
+
+
+class JunitXmlTest(unittest.TestCase):
+    """The report CI uploads has to parse. A message is arbitrary text from
+    the toolkit — a diff, an exception string — so the markup it can carry is
+    the part worth pinning."""
+
+    def test_report_parses_and_counts_each_status(self):
+        import tempfile
+        import xml.etree.ElementTree as ET
+
+        rows = [
+            gate.AssertionRow(
+                file="a.esm", container_name="M", test_id="t", assertion_idx=0,
+                variable="x", time=1.0, expected=1.0, actual=1.0,
+                status="PASS", message="", duration_s=0.5),
+            gate.AssertionRow(
+                file="a.esm", container_name="M", test_id="t", assertion_idx=1,
+                variable="y", time=2.0, expected=1.0, actual=2.0,
+                status="FAIL", message='expected 1 < 2 & "off" \n line two',
+                duration_s=0.5),
+            gate.AssertionRow(
+                file="b.esm", container_name="<load>", test_id="<load>",
+                assertion_idx=0, variable="", time=float("nan"),
+                expected=float("nan"), actual=None, status="ERROR",
+                message="load failed: <Foo> & co", duration_s=0.0),
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "report.xml")
+            gate._write_junit_xml(rows, path)
+            tree = ET.parse(path)
+        suites = {s.get("name"): s for s in tree.getroot()}
+        self.assertEqual(set(suites), {"a.esm", "b.esm"})
+        self.assertEqual(suites["a.esm"].get("tests"), "2")
+        self.assertEqual(suites["a.esm"].get("failures"), "1")
+        self.assertEqual(suites["b.esm"].get("errors"), "1")
+        self.assertEqual(len(suites["a.esm"].findall("testcase/failure")), 1)
+        self.assertEqual(len(suites["b.esm"].findall("testcase/error")), 1)
+
+
 class EndToEndFixtureTest(unittest.TestCase):
     """The gate against the two inline-test fixtures, through the real runner —
     the wiring the unit tests above deliberately do not touch."""
