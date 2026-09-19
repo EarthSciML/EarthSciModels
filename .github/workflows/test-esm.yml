@@ -21,9 +21,9 @@ jobs:
   # builds do not scale to the live migration burst and were blowing job
   # timeouts even with ESM_TESTS_SKIP_LIVE_REPO).
   #
-  # It is no longer the only sweep: `julia-inline-tests` (the rig's own MTK
-  # walker, sharded across a matrix) and `rust-cli-inline-tests` (the `esm test`
-  # CLI) sweep the same corpus through the other two canonical ESS runners. All
+  # It is no longer the only sweep: `julia-inline-tests` (the Julia binding's
+  # tree-walk runner, sharded across a matrix) and `rust-cli-inline-tests` (the
+  # `esm test` CLI) sweep the same corpus through the other two ESS runners. All
   # three walk every file and all three block — where a binding cannot yet run
   # what another already does, that is reported as a failing job, not filtered
   # out. This one is still the runner with per-file OOM isolation, and the one
@@ -34,9 +34,9 @@ jobs:
   # (`earthsci_ast.inline_tests.run_inline_tests`). A file without inline tests
   # still gets a load-only minimum-bar gate so structural drift (e.g. in
   # lib/solar.esm) is caught at PR time. One subprocess per file (Python's
-  # per-process GC is the OOM guardrail; the esm-9ms phase-wise RSS diagnostic
-  # showed peak 196 MB across geoschem_fullchem). 25-min hard cap stays under
-  # CI's 30-min job timeout.
+  # per-process GC is the OOM guardrail, and one document's runaway build dies
+  # as a worker — an ERROR row for its file — instead of taking the job with
+  # it). The job cap is on the job below, not on the walk.
   #
   # No per-file knob tables: the gate passes no solver `method`, and a stiff
   # document declares `solver.stiffness: "high"` (esm-spec §2.2) so every
@@ -46,12 +46,12 @@ jobs:
   # gate names the one document (geoschem_fullchem.esm) the library's default
   # cannot build in usable time, with the measurements beside it.
   #
-  # This is the **gate of record** for live-repo inline tests. The 819-reaction
-  # geoschem_fullchem.esm Catalyst → MTK build OOM-kills the 16 GB GHA runner
-  # in-process, but this gate exercises it safely via per-file subprocess
-  # (peak ~196 MB) — the in-process Julia walk below has no such isolation and
-  # is not expected to survive that file. Local devs still get full Julia
-  # coverage via `pkg test` — see docs/migration-guide.md (mdl-cac).
+  # This is the **gate of record** for live-repo inline tests: it is the gate
+  # the corpus was migrated against, and the only one that isolates a document
+  # in its own process. The Julia job below walks the same corpus in-process,
+  # which is why a document that exhausts the runner takes its whole shard
+  # rather than one file. Local devs get the Julia walk via `pkg test` — see
+  # docs/migration-guide.md (mdl-cac).
   python-inline-tests:
     runs-on: ubuntu-latest
     # A walk that actually integrates the corpus is not a 6-minute job. Most
@@ -130,7 +130,9 @@ jobs:
   # speed.
   #
   # Each shard also runs the shim unit tests and the fixture-based exercise of
-  # the runner (~2 min, most of it first-call JIT).
+  # the runner: ~4 min measured with ESM_TESTS_SKIP_LIVE_REPO=1, i.e. before
+  # this shard's slice of the corpus is walked at all, most of it first-call
+  # JIT rather than work that scales with the shard.
   #
   # Every `.esm` is walked — ESM_TESTS_EXCLUDE is deliberately not set.
   #

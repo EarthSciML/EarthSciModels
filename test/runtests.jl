@@ -157,12 +157,12 @@ end
         # see MTK (it's a test-only dep).
         #
         # ESM_TESTS_SHARD="i/n" walks only shard i of n (see `shard_esm_files`).
-        # This is how the walk fits CI: it builds every system IN-PROCESS, so
-        # cost scales linearly with the corpus — measured at ~4 s/file, which
-        # puts the whole walk near 25 minutes in one process. The
-        # `julia-inline-tests` matrix in .github/workflows/test-esm.yml runs one
-        # shard per job, and the shards partition the corpus, so the sweep is
-        # whole. Unset (the local default) walks everything in one process.
+        # This is how the walk fits CI: it runs every document IN THIS PROCESS,
+        # so its cost scales with the corpus and the whole of it does not fit
+        # one job's budget. The `julia-inline-tests` matrix in
+        # .github/workflows/test-esm.yml runs one shard per job, and the shards
+        # partition the corpus, so the sweep is whole. Unset (the local
+        # default) walks everything in one process.
         #
         # ESM_TESTS_SKIP_LIVE_REPO=1 still short-circuits the walk entirely, for
         # a fast shim-only `pkg test`.
