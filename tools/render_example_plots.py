@@ -103,7 +103,12 @@ from earthsci_ast.numpy_interpreter import (  # noqa: E402
     NumpyInterpreterError,
     fold_constant_expr,
 )
-from earthsci_ast import ReturnCode, esm_problem, solve  # noqa: E402
+from earthsci_ast import (  # noqa: E402
+    ReturnCode,
+    UnsupportedDimensionalityError,
+    esm_problem,
+    solve,
+)
 
 
 class UnsupportedExpression(Exception):
@@ -499,17 +504,22 @@ def _solve_time_series(
     # EarthSciAST phase 4: `simulate` is gone. Build once with `esm_problem`,
     # then `solve`. The tolerances stay explicit and tight -- the library
     # defaults are now 1e-4/1e-6, which would visibly coarsen a plotted curve.
-    result = solve(
-        esm_problem(
+    try:
+        problem = esm_problem(
             sim_input,
             (t0, t1),
             p=dict(base_bindings),
             u0=dict(initial_state_values),
-        ),
-        alg="LSODA",
-        reltol=1e-8,
-        abstol=1e-12,
-    )
+        )
+    except UnsupportedDimensionalityError as exc:
+        # A document whose flattened system carries a SPATIAL independent
+        # variable is a PDE: `esm_problem` builds time-only systems, and this
+        # renderer has no spatial plot form to put the solution in. Report it
+        # the way every other un-renderable analysis is reported -- a skip
+        # line -- instead of ending the whole docs build on the first PDE
+        # component in the corpus.
+        raise UnsupportedExpression(f"PDE component (not a time-only system): {exc}") from exc
+    result = solve(problem, alg="LSODA", reltol=1e-8, abstol=1e-12)
     if result.retcode is not ReturnCode.Success:
         raise UnsupportedExpression(
             f"ODE integration failed ({result.retcode.name}): {result.message}"

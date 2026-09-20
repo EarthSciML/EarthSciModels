@@ -21,33 +21,50 @@ jobs:
   # builds do not scale to the live migration burst and were blowing job
   # timeouts even with ESM_TESTS_SKIP_LIVE_REPO).
   #
-  # It is no longer the only sweep: `julia-inline-tests` (the rig's own MTK
-  # walker, sharded across a matrix) and `rust-cli-inline-tests` (the `esm test`
-  # CLI) sweep the same corpus through the other two canonical ESS runners. All
+  # It is no longer the only sweep: `julia-inline-tests` (the Julia binding's
+  # tree-walk runner, sharded across a matrix) and `rust-cli-inline-tests` (the
+  # `esm test` CLI) sweep the same corpus through the other two ESS runners. All
   # three walk every file and all three block — where a binding cannot yet run
   # what another already does, that is reported as a failing job, not filtered
   # out. This one is still the runner with per-file OOM isolation, and the one
   # the corpus was migrated against.
   #
-  # Walks components/**/*.esm and lib/**/*.esm (mdl-14s) and runs every inline
-  # test through the canonical ESS Python runner
-  # (earthsci_ast.esm_problem + solve, cse=False). lib/*.esm files without
-  # inline tests still get a load-only minimum-bar gate so structural drift
-  # (e.g. mdl-pk3, mdl-97r in lib/solar.esm) is caught at PR time. One
-  # subprocess per file (Python's per-process GC is the OOM guardrail; cf.
-  # bead mdl-w1j scope and the esm-9ms phase-wise RSS diagnostic showing peak
-  # 196 MB across geoschem_fullchem). 25-min hard cap stays under CI's 30-min
-  # job timeout.
+  # Walks components/**, lib/** and registered_functions/** and runs every
+  # inline test through the PUBLIC EarthSciAST runner
+  # (`earthsci_ast.inline_tests.run_inline_tests`). A file without inline tests
+  # still gets a load-only minimum-bar gate so structural drift (e.g. in
+  # lib/solar.esm) is caught at PR time. One subprocess per file (Python's
+  # per-process GC is the OOM guardrail, and one document's runaway build dies
+  # as a worker — an ERROR row for its file — instead of taking the job with
+  # it). Two caps bound the run: this job's own `timeout-minutes` just below,
+  # and the gate's per-file `--timeout-seconds` on the run step.
   #
-  # This is the **gate of record** for live-repo inline tests. The 819-reaction
-  # geoschem_fullchem.esm Catalyst → MTK build OOM-kills the 16 GB GHA runner
-  # in-process, but this gate exercises it safely via per-file subprocess
-  # (peak ~196 MB) — the in-process Julia walk below has no such isolation and
-  # is not expected to survive that file. Local devs still get full Julia
-  # coverage via `pkg test` — see docs/migration-guide.md (mdl-cac).
+  # No per-file knob tables: the gate passes no solver `method`, and a stiff
+  # document declares `solver.stiffness: "high"` (esm-spec §2.2) — a basename
+  # table here could not travel to the Julia or Rust jobs below. Python acts
+  # on that declaration by picking BDF and Julia by picking Rosenbrock23; the
+  # Rust runner parses and version-checks it but chooses no integrator from
+  # it, which conforms (the field is advisory) and is why a document that
+  # declares stiffness moves the first two jobs and not the third. The single exception is `cse`,
+  # which the spec keeps OUT of the document: `CSE_FALSE_FILENAMES` in the
+  # gate names the one document (geoschem_fullchem.esm) the library's default
+  # cannot build in usable time, with the measurements beside it.
+  #
+  # This is the **gate of record** for live-repo inline tests: it is the gate
+  # the corpus was migrated against, and the only one that isolates a document
+  # in its own process. The Julia job below walks the same corpus in-process,
+  # which is why a document that exhausts the runner takes its whole shard
+  # rather than one file. Local devs get the Julia walk via `pkg test` — see
+  # docs/migration-guide.md (mdl-cac).
   python-inline-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # A walk that actually integrates the corpus is not a 6-minute job. Most
+    # documents take seconds, but a handful are minutes each — measured on this
+    # corpus: wesley_dry_gas.esm 9.2 min, urban_canopy_model.esm 2.3 min,
+    # geoschem_fullchem.esm 8.4 min — so with `--jobs 4` the makespan is set by
+    # the longest file, not by the total. 45 minutes leaves room for that
+    # without hiding a runaway.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,10 +76,10 @@ jobs:
       - name: Install earthsci_ast (from EarthSciAST main)
         run: |
           python -m pip install --upgrade pip
-          # phase-6 H-4: SciPy is NOT a base dependency of earthsci-ast (a
-          # library must not embed a solver; esm-libraries-spec §2.4/§2.5.9).
-          # This gate integrates every inline test, so it asks for the
-          # `simulate` extra by name rather than getting the solver by accident.
+          # SciPy is NOT a base dependency of earthsci-ast (a library must not
+          # embed a solver; esm-libraries-spec §2.4/§2.5.9). This gate
+          # integrates every inline test, so it asks for the `simulate` extra
+          # by name rather than getting the solver by accident.
           python -m pip install \
             "earthsci_ast[simulate] @ git+https://github.com/EarthSciML/EarthSciAST.git@main#subdirectory=pkg/earthsci-ast-py"
       # Discretization library for PDE components: a discretization-agnostic PDE
@@ -74,9 +91,28 @@ jobs:
         run: |
           git clone --depth=1 https://github.com/EarthSciML/earthscidiscretizations.git /tmp/esd
           echo "ESD_ROOT=/tmp/esd" >> "$GITHUB_ENV"
-      - name: Run Python inline-test gate (cse=False, per-file subprocess)
+      # The gate's own unit tests, first: they pin the one thing the gate can
+      # get wrong on its own — reading a worker that DIED as a file with no
+      # inline tests, which is how it once reported a vacuous run as green.
+      - name: Unit test the gate
+        run: python -m unittest tools/run_esm_inline_tests_test.py
+      # `--timeout-seconds 1500` bounds what ONE document can cost this job.
+      # Most of the corpus is seconds per file, but the tail is minutes —
+      # measured off CI: puff.esm 12.0 min, wesley_dry_gas.esm 9.2,
+      # geoschem_fullchem.esm 8.4, urban_canopy_model.esm 2.3 — and a document
+      # that grows past the job's own 45-minute cap takes the whole run with
+      # it: no summary, no junit artifact, and no line naming which of the 347
+      # files it was sitting on. With the cap the worker is killed, that file
+      # becomes an ERROR row naming the cap, and every other file still gets a
+      # verdict. 25 minutes is ~2x the slowest document measured; no run of
+      # this gate has ever completed on a GHA runner, so if a file that passes
+      # locally starts reporting the cap there, raise this before assuming the
+      # model broke.
+      - name: Run Python inline-test gate (per-file subprocess)
         run: |
-          python tools/run_esm_inline_tests.py --junit-xml python-esm-tests.xml
+          python tools/run_esm_inline_tests.py --jobs 4 \
+            --timeout-seconds 1500 \
+            --junit-xml python-esm-tests.xml
       - name: Upload junit XML
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,47 +121,86 @@ jobs:
           path: python-esm-tests.xml
           if-no-files-found: ignore
 
-  # Julia inline-test sweep (the rig's own runner, back in CI).
+  # Julia inline-test sweep.
   #
-  # `EarthSciModels.run_esm_tests` is the canonical Julia walker (AGENTS.md §1):
-  # it loads each `.esm` through `EarthSciAST.load_path`, builds a
-  # `ModelingToolkit.System` (or a Catalyst `ReactionSystem`), integrates each
-  # §6.6 test and samples the interpolant. It is the runner this repo's own
-  # `src/` shim is written against, and it was the last one still missing from
-  # CI: `esm-g97l` set ESM_TESTS_SKIP_LIVE_REPO=1 on the Julia job and `esm-m0r2`
-  # removed the job outright, because the walk builds every system IN-PROCESS
-  # and a single job could not hold the corpus inside the 30-minute budget.
+  # `EarthSciModels.run_esm_tests` drives `EarthSciAST.run_inline_tests` — the
+  # TREE-WALK runner, the same pathway the Python gate above uses — one
+  # document at a time, each as its own one-element batch, so a file that
+  # cannot be loaded becomes an ERROR row instead of the end of the shard.
   #
-  # Re-measured when this job landed, the per-file figure those beads recorded
-  # (~85 s) is long stale: a 40-way shard of 9 files ran its walk in 30 s, and a
-  # shard drawn to include the two largest non-GEOS-Chem documents
-  # (registered_functions/calc_direct_fluxes.esm at 3.0 MB and
-  # fastjx/fastjx_interp_troposphere.esm at 1.2 MB) came in around 5 s/file —
-  # those are big lookup tables, not big ODE systems, and MTK builds them
-  # cheaply. Call it ~4 s/file, so the whole 347-file walk is ~25 minutes in one
-  # process: past the 25-minute cap the Python gate runs under, and growing with
-  # the corpus.
+  # It is deliberately NOT `EarthSciAST.run_esm_tests`, which lowers each
+  # document to ModelingToolkit first. That runner cannot read this corpus: its
+  # lowering has no arm for a long tail of ops the models use (`and`, `or`,
+  # `floor`, `atan2`, `datetime.hour`, an unexpanded `apply_expression_template`
+  # in a reaction rate), and a document reaching one of them fails at COMPILE
+  # time there while the tree-walk runner integrates it — measured across a
+  # sample of the files this job used to fail on, the MTK walker passed 0 of
+  # 276 assertions and the tree-walk runner passed 190 of them, the remainder
+  # being real gaps rather than lowering arms. Loading a document as an MTK
+  # `System` is still covered — that is what `load_esm` does, and the shim
+  # tests in this same job exercise it.
   #
-  # So the walk is sharded — `ESM_TESTS_SHARD="i/n"` (see `shard_esm_files` in
+  # The walk is sharded — `ESM_TESTS_SHARD="i/n"` (see `shard_esm_files` in
   # src/run_tests.jl), one shard per matrix job, striding the sorted corpus so
   # each shard gets an interleaved slice of every science domain rather than a
-  # contiguous block of one. Four shards puts each walk near 6 minutes, which
-  # leaves room for a per-file cost several times the measured one before any
-  # shard threatens the timeout, while keeping the duplicated Julia precompile
-  # to four jobs rather than eight. The shards are a partition — every committed
+  # contiguous block of one. The shards are a partition — every committed
   # `.esm` is walked by exactly one of them — so nothing is dropped to buy the
   # speed.
   #
   # Each shard also runs the shim unit tests and the fixture-based exercise of
-  # the runner (~2 min, most of it first-call JIT, and already in CI before
-  # esm-m0r2).
+  # the runner: ~4 min measured with ESM_TESTS_SKIP_LIVE_REPO=1, i.e. before
+  # this shard's slice of the corpus is walked at all, most of it first-call
+  # JIT rather than work that scales with the shard.
   #
-  # Every `.esm` is walked — ESM_TESTS_EXCLUDE is deliberately not set. That
-  # includes geoschem_fullchem.esm, whose 819-reaction Catalyst → MTK build the
-  # in-process walker is not expected to survive on a 16 GB runner (the Python
-  # gate carries it in a subprocess at ~196 MB peak). Its shard failing is the
-  # honest report of where the Julia path stands; excluding the file would only
-  # move that fact out of CI and into a comment.
+  # Every `.esm` is walked — ESM_TESTS_EXCLUDE is deliberately not set.
+  #
+  # Expect this matrix to be red, and expect it to have room to run. Walked
+  # off CI in ONE process, 343 of the 347 documents take ~40 minutes and
+  # return 7,562 passes, 30 failures and 457 errors, with 17 documents
+  # carrying at least one non-pass row (AGENTS.md §2 names the worst of
+  # them).
+  #
+  # FOUR shards, because eight were measured and bought nothing. Sharding pays
+  # only if a shard's cost is dominated by its slice, and here it is not. Step
+  # timings from a hosted runner, shard 1 of an eight-way split:
+  #
+  #   17.7 min  Resolve EarthSciAST.jl into the project environment
+  #   25.9 min  the sweep itself, over an EIGHTH of the corpus
+  #
+  # Halving the slice from a quarter to an eighth moved the whole job from ~46
+  # minutes to ~43, every shard still ran 42-45 minutes, and shard 4 was still
+  # cancelled at the cap. What a shard spends its time on is resolving and
+  # precompiling the toolkit — about 18 minutes, paid once per shard whatever
+  # the slice — and then compiling the runner and its solvers on first call.
+  # The documents themselves are minutes. More shards multiply the fixed cost
+  # and leave the wall time alone.
+  #
+  # The fixed cost is the thing to attack, not the shard count, and most of it
+  # has now been: the sweep step was precompiling the whole dependency tree a
+  # second time, because `Pkg.test()` before Julia 1.13 forces
+  # `--check-bounds=yes` and that is a different precompile configuration from
+  # the one the resolve step built. Running 1.13 (see `setup-julia` below)
+  # deletes that second pass — about 20 of the sweep's minutes on the box it
+  # was measured on.
+  #
+  # What remains is the resolve itself, 13-18 min per shard: the Julia depot
+  # cache restores nothing here (`julia-actions/cache`'s restore and save steps
+  # both take 0.0 min), because the resolve step below re-adds EarthSciAST from
+  # GitHub at `rev=main` on every run and no committed Manifest pins it. That
+  # is the next thing worth fixing, and four shards is where this sits until
+  # then.
+  #
+  # Shard 4 has been cancelled at the 60-minute cap on every run so far. The
+  # per-document progress the walk now prints names what it dies on:
+  # components/gaschem/geoschem_fullchem.esm, document 49 of that shard's 86,
+  # which had ~15 minutes left and did not finish. It is the same document the
+  # Python gate has to run with `cse=False` to get through in 506 s.
+  #
+  # Two documents that used to dominate a shard no longer do:
+  # gaschem/stratospheric/stratospheric_ozone_system.esm was 19.5 minutes of
+  # `MaxIters` grinding and gaschem/methane/methane_ode.esm 3.7; both now
+  # declare `solver.stiffness: "high"` and finish in about two minutes and
+  # under one respectively.
   #
   # `fail-fast: false`: a failure in one shard says nothing about the others, and
   # a partial matrix hides which domains are actually broken.
@@ -147,8 +222,26 @@ jobs:
 
       - uses: julia-actions/setup-julia@v2
         with:
-          # The version this rig's [compat] pins.
-          version: '1.12'
+          # 1.13, above the 1.12 floor `[compat]` declares, and not for any
+          # language feature: on 1.12 and earlier `Pkg.test()` runs the test
+          # environment under `--check-bounds=yes`, which is a DIFFERENT
+          # precompile configuration from the one the resolve step below just
+          # built. Every dependency is therefore precompiled a SECOND time
+          # before a single test runs. 1.13 dropped that flag from the
+          # default, so the test run reuses the caches that are already there.
+          #
+          # Measured cold-depot, one 4-core box, this repo's own environment,
+          # a 1/40 slice so the walk itself is not what is being timed:
+          #
+          #               resolve    Pkg.test()   total
+          #   1.12.6     21.2 min     23.5 min   44.7 min   (423 deps, 1195 s)
+          #   1.13.0     18.9 min      3.0 min   21.9 min   (3 deps, 27 s)
+          #
+          # Same 9 documents, same 147 passes / 4 errors, the same single
+          # failing assertion, per-document walk times within a few tenths of
+          # a second: the whole difference is the precompile 1.13 does not
+          # repeat.
+          version: '1.13'
 
       # `include-matrix: false` gives every shard ONE shared cache key. The
       # depot content is identical across shards (same Manifest, same
@@ -180,7 +273,7 @@ jobs:
       # OrdinaryDiffEq are test-target deps and are not visible outside the test
       # environment. `ESM_TESTS_SHARD` selects this shard's slice; the junit
       # report is written in the same pass.
-      - name: Julia inline-test sweep (shard ${{ matrix.shard }} of 4)
+      - name: Julia inline-test sweep (shard ${{ matrix.shard }})
         run: julia --project=. -e 'using Pkg; Pkg.test()'
 
       - name: Upload junit XML

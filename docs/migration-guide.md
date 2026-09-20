@@ -392,16 +392,15 @@ This loads `test/runtests.jl`, which calls
 environment), and do not paraphrase the command — copy it.
 
 > **CI runs the same inline-test contract via the Python gate of
-> record** (`tools/run_esm_inline_tests.py`, driving
-> `earthsci_ast.simulation.simulate(cse=False)` per AGENTS.md §1).
-> The Julia walker is the local equivalent — it covers the same
-> `(variable, time, expected)` assertions and is the one to debug
-> against locally because the failure messages cite Julia/MTK
-> internals. The Python gate is what blocks the merge; the Julia
-> walker is what you run to find and fix the failure. CI sets
-> `ESM_TESTS_SKIP_LIVE_REPO=1` on the Julia job so that walk stays
-> a local-only step — running it on every push blew the 30-minute
-> CI budget once the repo crossed ~25 components (esm-g97l).
+> record** (`tools/run_esm_inline_tests.py`, driving the public
+> `earthsci_ast.inline_tests.run_inline_tests` per AGENTS.md §1).
+> The Julia walker covers the same `(variable, time, expected)`
+> assertions through the same tree-walk pathway, and is the one to
+> run locally. Both block the merge: CI runs the Julia walk too, as
+> the `julia-inline-tests` matrix, one shard of the corpus per job
+> (`ESM_TESTS_SHARD="i/n"`). `ESM_TESTS_SKIP_LIVE_REPO=1` skips the
+> walk for a fast shim-only `pkg test`; it is a local convenience and
+> is not set in CI.
 
 ### 7.2 Report the assertion count
 
@@ -438,7 +437,7 @@ These are commonly confused. They are not interchangeable:
 | **Lives in** | `EarthSciAST.jl` | `EarthSciModels` (`src/run_tests.jl`) |
 | **Input** | An upstream MTK `.jl` file | Every committed `.esm` under `components/` |
 | **What it checks** | `mtk → esm → mtk` trajectory drift on the upstream system | The committed `.esm`'s `tests:` assertions, sample-by-sample |
-| **Solve path** | Whatever `roundtrip.jl` configures (Tsit5, default reltol/abstol) | `run_esm_tests` solver pick (Tsit5 → Rosenbrock23 fallback), `reltol=1e-10`, `abstol=1e-12`, `combinatoric_ratelaws=false` for ReactionSystems |
+| **Solve path** | Whatever `roundtrip.jl` configures (Tsit5, default reltol/abstol) | `EarthSciAST.run_inline_tests` — the tree-walk runner, no MTK lowering. The integrator and its tolerances are the toolkit's: a document's own `solver` block (esm-spec §2.2) first, then the runner's test defaults |
 | **CI runs it?** | No (one-shot polecat-side validation) | **Yes** — this is the gate |
 
 A roundtrip pass tells you the scaffolder didn't drift the trajectory.

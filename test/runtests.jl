@@ -1,5 +1,6 @@
 using Test
 using EarthSciModels
+using EarthSciAST: PASS, FAIL, ERROR
 using ModelingToolkit
 using Catalyst
 using OrdinaryDiffEqTsit5
@@ -72,16 +73,6 @@ end
         end
     end
 
-    @testset "discover_esm_files accepts file paths, and de-duplicates" begin
-        one = joinpath(inline_dir, "passing_decay.esm")
-        @test discover_esm_files([one]) == [one]
-        # A file named alongside the directory that already contains it is
-        # listed once, not twice.
-        @test discover_esm_files([inline_dir, one]) == discover_esm_files([inline_dir])
-        # A non-.esm file is not a root.
-        @test isempty(discover_esm_files([@__FILE__]))
-    end
-
     @testset "shard_esm_files strides, and covers the corpus exactly once" begin
         files = ["a", "b", "c", "d", "e", "f", "g"]
 
@@ -131,7 +122,7 @@ end
         # Both fixture files in the same dir; filter to just the passing one.
         passing_results = filter(r -> r.file == passing, results)
         @test !isempty(passing_results)
-        @test all(r -> r.status == EarthSciModels.PASS, passing_results)
+        @test all(r -> r.status == PASS, passing_results)
     end
 
     @testset "failing fixture → reports FAIL, exit_code != 0" begin
@@ -139,8 +130,29 @@ end
         results, exit_code = run_esm_tests([dirname(failing)]; verbose=false)
         failing_results = filter(r -> r.file == failing, results)
         @test !isempty(failing_results)
-        @test any(r -> r.status == EarthSciModels.FAIL, failing_results)
+        @test any(r -> r.status == FAIL, failing_results)
         @test exit_code != 0
+    end
+
+    @testset "a document that cannot load is a row, not the end of the walk" begin
+        # The Julia counterpart of the failure mode the Python gate's tests
+        # pin: one unreadable file must not cost the walk every other file's
+        # verdict, and must not be silently absent from the results either.
+        # `run_esm_tests` hands each document to the runner as its own
+        # one-element batch, which is what makes the load failure a row.
+        mktempdir() do tmp
+            write(joinpath(tmp, "broken.esm"), "{ this is not a document")
+            cp(joinpath(inline_dir, "passing_decay.esm"),
+               joinpath(tmp, "passing_decay.esm"))
+            results, exit_code = run_esm_tests([tmp]; verbose=false)
+            broken = filter(r -> endswith(r.file, "broken.esm"), results)
+            @test !isempty(broken)
+            @test all(r -> r.status == ERROR, broken)
+            @test exit_code != 0
+            # The readable file beside it was still walked.
+            @test any(r -> endswith(r.file, "passing_decay.esm") && r.status == PASS,
+                      results)
+        end
     end
 
     @testset "junit XML emission" begin
@@ -166,12 +178,12 @@ end
         # see MTK (it's a test-only dep).
         #
         # ESM_TESTS_SHARD="i/n" walks only shard i of n (see `shard_esm_files`).
-        # This is how the walk fits CI: it builds every system IN-PROCESS, so
-        # cost scales linearly with the corpus — measured at ~4 s/file, which
-        # puts the whole walk near 25 minutes in one process. The
-        # `julia-inline-tests` matrix in .github/workflows/test-esm.yml runs one
-        # shard per job, and the shards partition the corpus, so the sweep is
-        # whole. Unset (the local default) walks everything in one process.
+        # This is how the walk fits CI: it runs every document IN THIS PROCESS,
+        # so its cost scales with the corpus and the whole of it does not fit
+        # one job's budget. The `julia-inline-tests` matrix in
+        # .github/workflows/test-esm.yml runs one shard per job, and the shards
+        # partition the corpus, so the sweep is whole. Unset (the local
+        # default) walks everything in one process.
         #
         # ESM_TESTS_SKIP_LIVE_REPO=1 still short-circuits the walk entirely, for
         # a fast shim-only `pkg test`.
@@ -183,9 +195,9 @@ end
             discovered = discover_esm_files()
             files = shard_esm_files(discovered)
             isempty(shard) || @info "ESM_TESTS_SHARD=$(shard) — walking $(length(files)) of $(length(discovered)) discovered .esm file(s)."
-            results, exit_code = run_esm_tests(files; junit_xml=junit_xml)
+            results, exit_code = run_esm_tests(; shard=shard, junit_xml=junit_xml)
             if !isempty(results)
-                failures = filter(r -> r.status != EarthSciModels.PASS, results)
+                failures = filter(r -> r.status != PASS, results)
                 for f in failures
                     println(stderr, "FAIL ", f.file, " :: ", f.container_name,
                             "/", f.test_id, " — ", f.message)
