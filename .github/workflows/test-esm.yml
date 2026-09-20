@@ -175,11 +175,26 @@ jobs:
   # The documents themselves are minutes. More shards multiply the fixed cost
   # and leave the wall time alone.
   #
-  # The fixed cost is the thing to attack, not the shard count: the Julia
-  # depot cache restores nothing here (`julia-actions/cache`'s restore and save
-  # steps both take 0.0 min), because the resolve step below re-adds
-  # EarthSciAST from GitHub at `rev=main` on every run and no committed
-  # Manifest pins it. Until that is fixed, four shards is where this sits.
+  # The fixed cost is the thing to attack, not the shard count, and most of it
+  # has now been: the sweep step was precompiling the whole dependency tree a
+  # second time, because `Pkg.test()` before Julia 1.13 forces
+  # `--check-bounds=yes` and that is a different precompile configuration from
+  # the one the resolve step built. Running 1.13 (see `setup-julia` below)
+  # deletes that second pass — about 20 of the sweep's minutes on the box it
+  # was measured on.
+  #
+  # What remains is the resolve itself, 13-18 min per shard: the Julia depot
+  # cache restores nothing here (`julia-actions/cache`'s restore and save steps
+  # both take 0.0 min), because the resolve step below re-adds EarthSciAST from
+  # GitHub at `rev=main` on every run and no committed Manifest pins it. That
+  # is the next thing worth fixing, and four shards is where this sits until
+  # then.
+  #
+  # Shard 4 has been cancelled at the 60-minute cap on every run so far. The
+  # per-document progress the walk now prints names what it dies on:
+  # components/gaschem/geoschem_fullchem.esm, document 49 of that shard's 86,
+  # which had ~15 minutes left and did not finish. It is the same document the
+  # Python gate has to run with `cse=False` to get through in 506 s.
   #
   # Two documents that used to dominate a shard no longer do:
   # gaschem/stratospheric/stratospheric_ozone_system.esm was 19.5 minutes of
@@ -207,8 +222,26 @@ jobs:
 
       - uses: julia-actions/setup-julia@v2
         with:
-          # The version this rig's [compat] pins.
-          version: '1.12'
+          # 1.13, above the 1.12 floor `[compat]` declares, and not for any
+          # language feature: on 1.12 and earlier `Pkg.test()` runs the test
+          # environment under `--check-bounds=yes`, which is a DIFFERENT
+          # precompile configuration from the one the resolve step below just
+          # built. Every dependency is therefore precompiled a SECOND time
+          # before a single test runs. 1.13 dropped that flag from the
+          # default, so the test run reuses the caches that are already there.
+          #
+          # Measured cold-depot, one 4-core box, this repo's own environment,
+          # a 1/40 slice so the walk itself is not what is being timed:
+          #
+          #               resolve    Pkg.test()   total
+          #   1.12.6     21.2 min     23.5 min   44.7 min   (423 deps, 1195 s)
+          #   1.13.0     18.9 min      3.0 min   21.9 min   (3 deps, 27 s)
+          #
+          # Same 9 documents, same 147 passes / 4 errors, the same single
+          # failing assertion, per-document walk times within a few tenths of
+          # a second: the whole difference is the precompile 1.13 does not
+          # repeat.
+          version: '1.13'
 
       # `include-matrix: false` gives every shard ONE shared cache key. The
       # depot content is identical across shards (same Manifest, same
