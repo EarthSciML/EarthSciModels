@@ -160,26 +160,32 @@ jobs:
   # carrying at least one non-pass row (AGENTS.md §2 names the worst of
   # them).
   #
-  # EIGHT shards, not four, and the count is measured rather than round. At
-  # four, a hosted runner took 45.5, 46.7 and 47.2 minutes for three of them
-  # and CANCELLED the fourth at the 60-minute cap — so a quarter of the corpus
-  # returned no verdict and no junit artifact, which is the one outcome worth
-  # spending a runner to avoid: a shard that reports nothing hides a
-  # regression rather than reporting it. Hosted runners are roughly four times
-  # slower per document than the machine the ~40-minute figure came from.
-  # Halving the slice puts the expected walk near 22 minutes and leaves the cap
-  # a factor of two, which the stride alone cannot guarantee: a single document
-  # that the runner cannot integrate is carried whole by whichever shard draws
-  # it. When the eight shards were measured, that document was
-  # gaschem/stratospheric/stratospheric_ozone_system.esm at 19.5 minutes — it
-  # now declares `solver.stiffness: "high"` and finishes in about two minutes,
-  # as does gaschem/methane/methane_ode.esm, which was 3.7. The eight are kept
-  # because the four-shard cancellation was measured and this is not: whether
-  # the walk now fits in fewer shards is a re-measurement, not an inference.
+  # FOUR shards, because eight were measured and bought nothing. Sharding pays
+  # only if a shard's cost is dominated by its slice, and here it is not. Step
+  # timings from a hosted runner, shard 1 of an eight-way split:
   #
-  # The cost is the ~4 minutes of precompilation and shim tests below, now
-  # paid eight times instead of four. That is the trade: runner minutes for a
-  # matrix that always reports.
+  #   17.7 min  Resolve EarthSciAST.jl into the project environment
+  #   25.9 min  the sweep itself, over an EIGHTH of the corpus
+  #
+  # Halving the slice from a quarter to an eighth moved the whole job from ~46
+  # minutes to ~43, every shard still ran 42-45 minutes, and shard 4 was still
+  # cancelled at the cap. What a shard spends its time on is resolving and
+  # precompiling the toolkit — about 18 minutes, paid once per shard whatever
+  # the slice — and then compiling the runner and its solvers on first call.
+  # The documents themselves are minutes. More shards multiply the fixed cost
+  # and leave the wall time alone.
+  #
+  # The fixed cost is the thing to attack, not the shard count: the Julia
+  # depot cache restores nothing here (`julia-actions/cache`'s restore and save
+  # steps both take 0.0 min), because the resolve step below re-adds
+  # EarthSciAST from GitHub at `rev=main` on every run and no committed
+  # Manifest pins it. Until that is fixed, four shards is where this sits.
+  #
+  # Two documents that used to dominate a shard no longer do:
+  # gaschem/stratospheric/stratospheric_ozone_system.esm was 19.5 minutes of
+  # `MaxIters` grinding and gaschem/methane/methane_ode.esm 3.7; both now
+  # declare `solver.stiffness: "high"` and finish in about two minutes and
+  # under one respectively.
   #
   # `fail-fast: false`: a failure in one shard says nothing about the others, and
   # a partial matrix hides which domains are actually broken.
@@ -189,10 +195,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4]
     env:
       # Keep in step with the `shard:` list above.
-      ESM_TESTS_SHARD: ${{ matrix.shard }}/8
+      ESM_TESTS_SHARD: ${{ matrix.shard }}/4
       # Absolute: `Pkg.test()` runs the suite in a subprocess whose working
       # directory is not guaranteed to be the workspace root.
       ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/julia-esm-tests-${{ matrix.shard }}.xml
@@ -234,7 +240,7 @@ jobs:
       # OrdinaryDiffEq are test-target deps and are not visible outside the test
       # environment. `ESM_TESTS_SHARD` selects this shard's slice; the junit
       # report is written in the same pass.
-      - name: Julia inline-test sweep (shard ${{ matrix.shard }} of 4)
+      - name: Julia inline-test sweep (shard ${{ matrix.shard }})
         run: julia --project=. -e 'using Pkg; Pkg.test()'
 
       - name: Upload junit XML

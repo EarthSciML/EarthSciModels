@@ -130,12 +130,30 @@ function run_esm_tests(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
     if isempty(files)
         verbose && println(io, "No .esm files discovered under: ", join(roots, ", "))
     else
-        for f in files
+        base = esm_root()
+        verbose && println(io, "Walking ", length(files), " .esm file(s) ...")
+        for (i, f) in enumerate(files)
+            t0 = time()
             # A one-element VECTOR, not the path itself: that selects the
             # runner's batch semantics, where a document that fails to LOAD
             # contributes an ERROR row naming it instead of throwing and
             # ending the walk on its first unreadable file.
-            append!(results, EarthSciAST.run_inline_tests([f]; kwargs...))
+            rows = EarthSciAST.run_inline_tests([f]; kwargs...)
+            append!(results, rows)
+            # Printed per document, and FLUSHED, because the alternative is
+            # what a 60-minute job cap taught: a shard killed mid-walk had
+            # emitted nothing at all, so the log could not say which document
+            # it was on, how far it had got, or whether it was stuck. A
+            # summary that only exists at the end does not survive the run
+            # being cut short — which is exactly when it is most wanted.
+            if verbose
+                bad = count(r -> r.status != EarthSciAST.PASS, rows)
+                @printf(io, "  [%s] %4d/%d %s  (%d rows, %.1fs)\n",
+                        bad == 0 ? "OK " : "FAIL", i, length(files),
+                        startswith(f, base) ? relpath(f, base) : f,
+                        length(rows), time() - t0)
+                flush(io)
+            end
         end
     end
 

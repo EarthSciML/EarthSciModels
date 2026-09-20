@@ -26,6 +26,7 @@ use `EarthSciAST.load_path(path)` directly and then construct the desired
 module EarthSciModels
 
 import EarthSciAST
+using Printf: @printf
 
 export load_esm, esm_root, esm_path,
        discover_esm_files, shard_esm_files, run_esm_tests
