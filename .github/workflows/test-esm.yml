@@ -155,10 +155,23 @@ jobs:
   # off CI in ONE process, 343 of the 347 documents take ~40 minutes and
   # return 7,562 passes, 30 failures and 457 errors, with 17 documents
   # carrying at least one non-pass row (AGENTS.md §2 names the worst of
-  # them). Four shards divide that walk, so no shard should come near the cap
-  # below — but the stride is what keeps that true, because one document,
+  # them).
+  #
+  # EIGHT shards, not four, and the count is measured rather than round. At
+  # four, a hosted runner took 45.5, 46.7 and 47.2 minutes for three of them
+  # and CANCELLED the fourth at the 60-minute cap — so a quarter of the corpus
+  # returned no verdict and no junit artifact, which is the one outcome worth
+  # spending a runner to avoid: a shard that reports nothing hides a
+  # regression rather than reporting it. Hosted runners are roughly four times
+  # slower per document than the machine the ~40-minute figure came from.
+  # Halving the slice puts the expected walk near 22 minutes and leaves the cap
+  # a factor of two, which the stride alone cannot guarantee: one document,
   # gaschem/stratospheric/stratospheric_ozone_system.esm, is 19.5 minutes of
-  # it on its own, and whichever shard draws it carries it whole.
+  # the walk on its own, and whichever shard draws it carries it whole.
+  #
+  # The cost is the ~4 minutes of precompilation and shim tests below, now
+  # paid eight times instead of four. That is the trade: runner minutes for a
+  # matrix that always reports.
   #
   # `fail-fast: false`: a failure in one shard says nothing about the others, and
   # a partial matrix hides which domains are actually broken.
@@ -168,10 +181,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       # Keep in step with the `shard:` list above.
-      ESM_TESTS_SHARD: ${{ matrix.shard }}/4
+      ESM_TESTS_SHARD: ${{ matrix.shard }}/8
       # Absolute: `Pkg.test()` runs the suite in a subprocess whose working
       # directory is not guaranteed to be the workspace root.
       ESM_TESTS_JUNIT_XML: ${{ github.workspace }}/julia-esm-tests-${{ matrix.shard }}.xml
