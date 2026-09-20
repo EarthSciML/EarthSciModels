@@ -32,9 +32,14 @@ that declares 8,176, and went green on models it never ran. A gate that
 can only fail by breaking loudly is the point of the rewrite.
 
 Solver policy lives in the DOCUMENT, not here. A stiff document says so itself
-with ``solver.stiffness: "high"`` (esm-spec §2.2), which every binding maps to
-its own integrator; a basename table in this gate could not travel to the Julia
-or Rust runners, which is exactly why the spec grew the block.
+with ``solver.stiffness: "high"`` (esm-spec §2.2); a basename table in this
+gate could not travel to the Julia or Rust runners, which is exactly why the
+spec grew the block. Two of the three bindings act on it today — Python picks
+BDF and Julia picks Rosenbrock23 — while the Rust runner parses and
+version-checks the block but maps it to no integrator choice, so a document
+that declares it is unchanged there. The field is advisory by specification,
+so that conforms; it is recorded here because "every binding maps it to its
+own integrator" is what this comment used to claim, and it is not true yet.
 
 ``cse`` is the one exception, and it is deliberately ONE line rather than a
 table — see ``CSE_FALSE_FILENAMES``.
