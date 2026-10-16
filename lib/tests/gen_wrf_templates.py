@@ -23,6 +23,9 @@ ttp, theta_m, alpha_d, rho = (IN[k] for k in ("ttp", "theta_m", "alpha_d", "rho"
 V = {}   # name -> (expected, units, description, rhs)
 def tpl(name, **b):
     return {"op": "apply_expression_template", "args": [], "name": name, "bindings": b}
+def c(value, units):
+    """A literal that declares its units (esm 1.2.0, spec 4.8.5)."""
+    return {"op": "const", "args": [], "value": value, "units": units}
 def add(var, expected, units, desc, rhs):
     V[var] = (expected, units, desc, rhs)
 
@@ -74,7 +77,7 @@ add("qsat_bolton", ep_2 * es_b / (p - es_b), "kg/kg", "saturation_mixing_ratio f
 # YSU rvls = 100.*6.112*exp(17.67*(t-273.16)/(t-29.65))*(ep2/p)
 add("rvls", 100. * 6.112 * math.exp(17.67 * (T - 273.16) / (T - 29.65)) * (ep_2 / p), "kg/kg",
     "bolton_saturation_mixing_ratio against bl_ysu.F90's rvls with T0 = 273.16 and es0 = 611.2 Pa.",
-    tpl("bolton_saturation_mixing_ratio", T="T", T0=273.16, p="p", es0=611.2, a=17.67, b=29.65, ep_2="wrf.ep_2"))
+    tpl("bolton_saturation_mixing_ratio", T="T", T0=c(273.16, "K"), p="p", es0=c(611.2, "Pa"), a=c(17.67, "1"), b=c(29.65, "K"), ep_2="wrf.ep_2"))
 add("rho_dry", p / (r_d * T), "kg/m^3", "dry_air_density.",
     tpl("dry_air_density", p="p", T="T", r_d="wrf.r_d"))
 add("theta_dry", theta_m / (1 + rvovrd * qv), "K", "moist_theta_to_dry_theta.",
@@ -87,11 +90,11 @@ add("rho_total", (1 + qv) / alpha_d, "kg/m^3", "moist_density_from_inverse_dry_d
 # WSM6 statement functions
 nu = 1.496e-6 * T ** 1.5 / (T + 120.) / rho
 add("nu", nu, "m^2/s", "kinematic_viscosity_of_air against WSM6 viscos(t, den) = 1.496e-6 t**1.5/(t + 120)/den.",
-    tpl("kinematic_viscosity_of_air", T="T", rho="rho", coef=1.496e-6, T_sutherland=120.0))
+    tpl("kinematic_viscosity_of_air", T="T", rho="rho", coef=c(1.496e-6, "kg/(m*s*K^(1/2))"), T_sutherland=c(120.0, "K")))
 add("Dv", 8.794e-5 * T ** 1.81 / p, "m^2/s", "diffusivity_of_water_vapor against WSM6 diffus(t, p) = 8.794e-5 t**1.81/p.",
-    tpl("diffusivity_of_water_vapor", T="T", p="p", coef=8.794e-5, expn=1.81))
+    tpl("diffusivity_of_water_vapor", T="T", p="p", coef=c(8.794e-5, "m^2*Pa/(s*K^1.81)"), expn=1.81))
 add("ka", 1.414e3 * nu * rho, "J/(m*s*K)", "thermal_conductivity_of_air against WSM6 xka(t, den) = 1.414e3 viscos(t, den) den.",
-    tpl("thermal_conductivity_of_air", nu="nu", rho="rho", coef=1.414e3))
+    tpl("thermal_conductivity_of_air", nu="nu", rho="rho", coef=c(1.414e3, "J/(kg*K)")))
 
 units_in = dict(T="K", p="Pa", qv="kg/kg", qc="kg/kg", qi="kg/kg", theta="K", ttp="K",
                 theta_m="K", alpha_d="m^3/kg", rho="kg/m^3")
@@ -100,10 +103,10 @@ variables = {k: {"type": "parameter", "units": units_in[k], "default": v,
 for k, (e, u, d, _) in V.items():
     variables[k] = {"type": "unknown", "units": u, "description": d}
 doc = {
-  "esm": "1.0.0",
+  "esm": "1.2.0",
   "metadata": {
     "name": "WRFTemplateChecks",
-    "description": "Checks for the expression templates of lib/wrf_thermo.esm and lib/wrf_air_properties.esm. A template-library file cannot carry inline tests, so this 0-D component mounts lib/wrf_constants.esm, imports both libraries and applies every template once to fixed inputs (T = 283 K, p = 850 hPa, qv = 8 g/kg, ...), binding the constants the way the WRF schemes do. The expected values are the WRF Fortran expressions (WSM6 fpvs, xlcal, cpmcal, viscos, diffus, xka; YSU thlix and rvls; calc_p_rho_phi; Bolton e_s) written out independently in Python and evaluated in binary64, plus the identities that anchor each fit: fpvs(ttp) = psat, L(T_ref) = xlv and theta -> T -> theta. Tolerance 1e-10 relative, to allow libm differences in exp, log and pow.",
+    "description": "Checks for the expression templates of lib/wrf_thermo.esm and lib/wrf_air_properties.esm. A template-library file cannot carry inline tests, so this 0-D component mounts lib/wrf_constants.esm, imports both libraries and applies every template once to fixed inputs (T = 283 K, p = 850 hPa, qv = 8 g/kg, ...), binding the constants the way the WRF schemes do. The expected values are the WRF Fortran expressions (WSM6 fpvs, xlcal, cpmcal, viscos, diffus, xka; YSU thlix and rvls; calc_p_rho_phi; Bolton e_s) written out independently in Python and evaluated in binary64, plus the identities that anchor each fit: fpvs(ttp) = psat, L(T_ref) = xlv and theta -> T -> theta. Every literal bound to a template carries its units (esm 1.2.0 const), so each equation is dimensionally checked. Tolerance 1e-10 relative, to allow libm differences in exp, log and pow.",
     "tags": ["wrf", "thermodynamics", "expression-templates", "tests"],
     "created": "2026-10-15T00:00:00Z",
     "authors": ["EqWeFiC"]
