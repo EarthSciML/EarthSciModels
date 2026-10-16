@@ -2,7 +2,7 @@
   "esm": "1.0.0",
   "metadata": {
     "name": "WRFConstants",
-    "description": "Physical and model constants of the WRF model, transcribed from share/module_model_constants.F (WRF v4.8.0, commit 06d4240). Every EqWeFiC component takes its constants from this file by mounting it as a subsystem (esm-spec 4.7) and referencing e.g. `<Model>.wrf.cp`, so that no physical constant is ever written inline in a component and every scheme agrees with the Fortran to the digit. Base constants are parameters carrying WRF's exact literal values (single-precision literals in the Fortran, written here as the same decimal strings). Constants that WRF defines as expressions of other constants (cp = 7 r_d / 2, ep_1 = r_v/r_d - 1, ...) are observed unknowns defined by the same expressions, so the derivation is not repeated. Only constants used by more than one scheme are here; scheme-private constants live with their scheme. The inline tests pin the derived values against the Fortran expressions evaluated in double precision.",
+    "description": "Physical and model constants of the WRF model, transcribed from share/module_model_constants.F (WRF v4.8.0, commit 06d4240). A component takes its constants from this file by mounting it as a subsystem (esm-spec 4.7) and referencing e.g. `<Model>.wrf.cp`, so that no physical constant is written inline in a component. Base constants are parameters carrying WRF's literal values (the same decimal strings as the Fortran literals, held here in binary64). Constants that WRF defines as expressions of other constants (cp = 7 r_d / 2, ep_1 = r_v/r_d - 1, ...) are unknowns defined by those expressions with a bare-variable left-hand side, which makes them observed quantities (esm-spec 6.3.1) that a binding eliminates rather than solves for, so the derivation is not repeated and mounting this file adds no algebraic unknowns to a system. One derived constant is not in the Fortran: svp1_pa = 1000 svp1, the Bolton prefactor in Pa, for consumers whose pressures are in Pa (WRF's svp1 is in kPa). Only constants used by more than one scheme are here; scheme-private constants live with their scheme. Precision: WRF declares these constants as default REAL and evaluates the derived expressions in single precision, so WRF's derived values differ from the binary64 values here by up to about 1e-7 relative (ep_1 is 0.60836244 in float32 against 0.6083623693379792 here); a comparison with WRF output must allow for that. The inline tests pin every derived value against its expression evaluated in binary64.",
     "tags": [
       "wrf",
       "constants",
@@ -157,7 +157,7 @@
           "type": "parameter",
           "units": "kPa",
           "default": 0.6112,
-          "description": "Saturation vapor pressure (Bolton 1980) prefactor: e_s = svp1 exp(svp2 (T - svpt0)/(T - svp3)), giving e_s in kPa."
+          "description": "Saturation vapor pressure (Bolton 1980) prefactor: e_s = svp1 exp(svp2 (T - svpt0)/(T - svp3)), giving e_s in kPa. WRF's value is in kPa; use svp1_pa where pressures are in Pa."
         },
         "svp2": {
           "type": "parameter",
@@ -298,6 +298,11 @@
           "type": "unknown",
           "units": "1",
           "description": "Radians per degree, pi/180."
+        },
+        "svp1_pa": {
+          "type": "unknown",
+          "units": "Pa",
+          "description": "Bolton saturation vapor pressure prefactor in Pa, svp1_pa = 1000 svp1 (not a WRF constant: WRF's svp1 is in kPa and its schemes convert pressures to kPa or multiply by 1000 at the call site). Bind this, not svp1, wherever the pressures are in Pa."
         }
       },
       "equations": [
@@ -471,12 +476,22 @@
               180
             ]
           }
+        },
+        {
+          "lhs": "svp1_pa",
+          "rhs": {
+            "op": "*",
+            "args": [
+              1000,
+              "svp1"
+            ]
+          }
         }
       ],
       "tests": [
         {
           "id": "derived_constants_match_fortran",
-          "description": "Derived constants evaluated from the WRF Fortran expressions in double precision (r_d = 287, r_v = 461.6, g = 9.81) by tools/ (python, binary64). Values are exact to binary64 rounding; tolerance 1e-12 relative.",
+          "description": "Every derived constant, evaluated from the WRF Fortran expressions in binary64 with r_d = 287, r_v = 461.6, g = 9.81 (Python floats: cp = 7*287.0/2, cv = cp - 287.0, cvpm = -(cv/cp), c2 = cp*(287.0/cv), cvovcp = 1/(cp/cv), rvovrd = 461.6/287.0, ep_1 = rvovrd - 1, svp1_pa = 1000*0.6112, ...). Values are exact to binary64 rounding; tolerance 1e-12 relative.",
           "time_span": {
             "start": 0.0,
             "end": 1.0
@@ -506,6 +521,11 @@
               "expected": 1384.8000000000002
             },
             {
+              "variable": "cvpm",
+              "time": 0.0,
+              "expected": -0.7142857142857143
+            },
+            {
               "variable": "rcp",
               "time": 0.0,
               "expected": 0.2857142857142857
@@ -521,9 +541,24 @@
               "expected": 29.25586136595311
             },
             {
+              "variable": "c2",
+              "time": 0.0,
+              "expected": 401.8
+            },
+            {
               "variable": "cpovcv",
               "time": 0.0,
               "expected": 1.4
+            },
+            {
+              "variable": "cvovcp",
+              "time": 0.0,
+              "expected": 0.7142857142857143
+            },
+            {
+              "variable": "rvovrd",
+              "time": 0.0,
+              "expected": 1.6083623693379792
             },
             {
               "variable": "ep_1",
@@ -544,6 +579,11 @@
               "variable": "degrad",
               "time": 0.0,
               "expected": 0.017453292519943295
+            },
+            {
+              "variable": "svp1_pa",
+              "time": 0.0,
+              "expected": 611.1999999999999
             }
           ]
         }
