@@ -168,8 +168,8 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    less the four slowest) through `EarthSciAST.run_inline_tests` takes
    about 40 minutes and returns 7,562 passes, 30 failures and 457 errors,
    with 17 documents carrying at least one non-pass row. Measured with
-   `${ESD_ROOT}` unset, which also errors the two `surface_runoff`
-   documents that need it; CI sets it, so those are not in these figures.
+   `${ESD_ROOT}` unset, which also errors the documents that need it; CI
+   sets it, so those are not in these figures.
 
    Those figures predate the stiffness declarations. Two documents
    dominated them: `stratospheric_ozone_system.esm` errored all 176 of its
