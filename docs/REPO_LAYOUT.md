@@ -39,10 +39,12 @@ its `.esm` files use.
 
 ## Per-domain subdirs
 
-Inside `components/`, each subdir corresponds to one **science domain**. For
-now this is 1:1 with an upstream `earthsciml/*.jl` repo — domain and source
-repo coincide. If a domain later spans multiple repos, or a repo crosses
-domains, revisit this convention.
+Inside `components/`, each subdir corresponds to one **science domain**. Where
+an upstream `earthsciml/*.jl` repo exists the two are 1:1 — domain and source
+repo coincide. A domain transcribed from another model with no `.jl` repo
+behind it (so far `land_surface/`, from WRF) is named for the domain alone. If
+a domain later spans multiple repos, or a repo crosses domains, revisit this
+convention.
 
 ```
 components/
@@ -55,14 +57,15 @@ components/
   environmental_transport/   # EnvironmentalTransport.jl
   gaschem/                   # GasChem.jl (atmospheric chemistry)
   geodynamics/               # Geodynamics.jl
+  land_surface/              # land-surface schemes transcribed from WRF (no upstream .jl repo)
   urban_canopy/              # UrbanCanopy.jl
   vegetation/                # Vegetation.jl
   wildland_fire/             # WildlandFire.jl
-  land_surface/              # land-surface schemes transcribed from WRF (no upstream .jl repo yet; EqWeFiC)
 ```
 
 Subdir names are lowercase snake_case forms of the upstream repo name (with
-`.jl` dropped, hyphens and capitalization normalized).
+`.jl` dropped, hyphens and capitalization normalized), or of the domain name
+where there is no upstream repo.
 
 ## File naming
 
