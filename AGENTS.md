@@ -188,10 +188,11 @@ EarthSciModels is the **model-content rig**. Its job, and only its job, is:
    measured when it landed, the Rust sweep leaves
    96 of the 322 files with inline tests carrying at least one non-pass
    row (diffsol failing the first step, algebraic unknowns with no
-   `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs, a few numeric
-   divergences). Closing that is upstream work on EarthSciAST, not corpus
-   work here — but it is upstream work with a red job attached to it,
-   which is the point.
+   `D(x,t)` equation, unexpanded §4.7 `${VAR}` refs — since fixed
+   upstream by EarthSciAST#400 — and a few numeric divergences).
+   Closing that is upstream work on EarthSciAST, not corpus work here —
+   but it is upstream work with a red job attached to it, which is the
+   point.
 
 What does **not** belong in this rig:
 
