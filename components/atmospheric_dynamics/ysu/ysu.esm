@@ -1,5 +1,5 @@
 {
- "esm": "1.0.0",
+ "esm": "1.2.0",
  "metadata": {
   "name": "YSU",
   "description": "The YSU (Yonsei University) nonlocal boundary-layer scheme of Hong, Noh and Dudhia (2006), with the stable-regime (Hong 2010) and top-down (theta_li) boundary-layer-top diagnostics of WRF 4.8, written as a single-column PDE component on the EarthSciDiscretizations grids/column_nonuniform_1d grid (layer index `lev`, layer 1 at the surface; interface index `lev_nodes`, interface 1 the surface). The physics is transcribed from the CCPP kernel bl_ysu_run in phys/physics_mmm/bl_ysu.F90 (NCAR/MMM-physics, the WRF 4.8 submodule). Prognostic column fields theta (potential temperature), u, v, qv, qc and qi obey the density-weighted flux-form vertical diffusion  d(c)/dt = (1/rho) d/dz[ rho K_c dc/dz - Phi_c ],  where K_c is the interface eddy diffusivity of the field (K_h for theta, K_m for u and v, K_q for water) and Phi_c is the prescribed (non-gradient) part of the turbulent flux: the surface flux on interface 1 (-hfx/cp for theta, -qfx for qv, rho_s u_*^2 u_1/|U| for momentum -- the sign convention of the ESD flux rule, Phi = rho K dc/dz on the face) and, inside the boundary layer, the YSU nonlocal (counter-gradient) flux rho K_c gamma_c plus the entrainment flux (w'c')_h ((z - z_1)/(h - z_1))^3, zero on the top interface. The gradient term is lowered by the ESD rule varcoeff_face_laplacian_lev_flux_bc applied to (rho K) on the interfaces (its own prescribed face fluxes kdudz_bot/kdudz_top are zero here because every prescribed flux is carried by Phi so that the six prognostic fields can share one rule instance), the prescribed-flux term by face_flux_D_lev_supplied_faces. The density weighting is exactly the hydrostatic sigma-coordinate form of the Fortran: rho on an interface is (p[k] - p[k+1])/(g (zc[k+1] - zc[k])) and in a layer (p_int[k] - p_int[k+1])/(g dz[k]), so with WRF's pressures and heights the lowered operator reproduces bl_ysu_run's tridiagonal coefficients term by term (dsig xkzh rdz / del). Boundary-layer height: the bulk-Richardson search of components/atmospheric_dynamics/ysu/bulk_richardson.esm is applied (1) with the lowest-level theta_v, (2) with the thermal excess of the surface heat and moisture fluxes when the surface layer is unstable and the buoyancy flux positive, (3) the top-down theta_li scan that raises the top to just above the highest theta_li-unstable level (ysu_topdown_pblmix; it starts at the previous kpbl and evaluates the bulk Richardson number from theta_li at every level it visits, level 1 included -- brli1 -- rather than seeding level 1 with the surface-layer br), and (4) the stable-regime search with the Hong (2010) critical value (0.25 over land, Rossby-number dependent over water) when the surface layer is stable and no boundary layer was found; each search is an aggregate over the level index and never a recurrence (see bulk_richardson.esm). Diffusivities: inside the boundary layer the K-profile K_m = k w_s z (1 - z/h)^p with the surface-layer velocity scale w_s = (u_*^3 + phifac k w_*^3 (1 - z/h))^(1/3) (or u_*/phi_m(z) when stable), K_h = K_m / Pr with the height-tapered Prandtl number of Hong et al. (2006, their eq. A10), K_q likewise; above the boundary layer the local Ri-dependent mixing-length diffusivity of Louis type with the in-cloud moist Richardson number; in the entrainment zone ((z - h)/delta)^2 < 4.6 the geometric mean of the local value and the entrainment-flux value -w_e dz_h exp(-((z - h)/delta)^2). Every diffusivity is floored by the background values and capped by xkzmax. Consumer-supplied inputs: the column fields (p, p_int, exner, ze and the initial theta, u, v, qv, qc, qi) are REWRITE-TARGET ops `input_<name>` (esm-spec 4.2 open tier) that the consumer lowers -- in the inline tests through a per-test `expression_template_imports` library (tests/<test id>_inputs.esm) because esm-spec 6.6 `parameter_overrides` admit scalars only; surface-layer scalars (hfx, qfx, u_*, psi_m, psi_h, br, |U|, U10, land mask, z0, psfc) are ordinary parameters. NOT transcribed (inactive in every test regime): the BEP/BEP+BEM urban forcing terms, the optional ocean-current (uox/vox) surface drag, the topo_wind corrections (ctopo = ctopo2 = 1), the extra passive-tracer mixing (nmix = 0), and the WRF diagnostic outputs u10/v10 (pass-through), dusfc/dvsfc/dtsfc/dqsfc (column sums) and the TKE/hybrid-PBLH diagnostics. The cloud-top radiative-entrainment branch (ysu_topdown_pblmix, WRF cloudflg: a cloud layer at kpbl-1 whose integrated radiative cooling radsum drives top-down thermals wstar3_2, extra entrainment we_rad, a counter-gradient term hgamt2 and a second K-profile term wscalek2) is transcribed (exercised by synthetic_cloudtop_call120, and switched off by topdown = 0 in synthetic_notopdown_cloudtop_call120); radsum is the cumulative column integral of the radiative cooling. Fractional powers of quantities that vanish identically outside their regime (w_*^3 in a stable column, wstar3_2 below a cloud-free top) are gated with ifelse, so that a Jacobian of the right-hand side never evaluates the derivative of a root at zero. Tendencies are observed variables (`dthdt`, `dudt`, `dvdt`, `dqvdt`, `dqcdt`, `dqidt`) so that the inline tests assert the instantaneous right-hand side at time 0 against the real64 kernel's tendency extrapolated to dt -> 0 (Richardson extrapolation of the implicit step over dt = 0.04, 0.02, 0.01 s; the Fortran solves the diffusion implicitly, so its finite-step tendency differs from the derivative by O(dt K / dz^2)). Test provenance: the inputs and expected values come from a WRF v4.8.0 em_scm_xy single-column run of the instrumented fork ctessum-claude/WRF (branch earthsciml-instrumented, module_esm_dump; physics_mmm at ctessum-claude/MMM-physics 52cfbd7) and from replays of the dumped kernel calls through that fork's real64 kernels/ysu_driver; the synthetic_* tests replay a dumped column after the modification their description states. The numbers were transcribed by tools/fill_tests.py of EarthSciML/EqWeFiC. The dumps, the driver and the generator are not part of this repository, so the values are recorded data rather than regenerable output.",
@@ -1614,7 +1614,7 @@
     {
      "lhs": "dzc",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -1696,7 +1696,7 @@
       "values": [
        0.0,
        {
-        "op": "aggregate",
+        "op": "faq",
         "output_idx": [
          "kn"
         ],
@@ -1761,7 +1761,7 @@
     {
      "lhs": "rho_c",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -3021,7 +3021,7 @@
     {
      "lhs": "unstable_li",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -3100,7 +3100,7 @@
     {
      "lhs": "n_li",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [],
       "args": [
        "unstable_li"
@@ -3122,7 +3122,7 @@
     {
      "lhs": "m_li",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [],
       "reduce": "max",
       "args": [
@@ -3164,7 +3164,7 @@
     {
      "lhs": "unstable_li2",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -3207,7 +3207,7 @@
     {
      "lhs": "n_li2",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [],
       "args": [
        "unstable_li2"
@@ -3229,7 +3229,7 @@
     {
      "lhs": "m_li2",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [],
       "reduce": "max",
       "args": [
@@ -4765,7 +4765,7 @@
         "op": ">",
         "args": [
          "dux",
-         "par.tmin"
+         "par.dux_min"
         ]
        },
        {
@@ -4802,7 +4802,7 @@
            {
             "op": "-",
             "args": [
-             "par.tmin"
+             "par.dux_min"
             ]
            }
           ]
@@ -4841,7 +4841,7 @@
         "op": ">",
         "args": [
          "dvx",
-         "par.tmin"
+         "par.dux_min"
         ]
        },
        {
@@ -4878,7 +4878,7 @@
            {
             "op": "-",
             "args": [
-             "par.tmin"
+             "par.dux_min"
             ]
            }
           ]
@@ -4969,7 +4969,7 @@
     {
      "lhs": "is_sfc",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -4998,7 +4998,7 @@
     {
      "lhs": "mask",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5039,7 +5039,7 @@
     {
      "lhs": "in_pbl",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5080,7 +5080,7 @@
     {
      "lhs": "is_top",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5661,7 +5661,7 @@
     {
      "lhs": "ss",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5763,7 +5763,7 @@
     {
      "lhs": "ri0",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5865,7 +5865,7 @@
     {
      "lhs": "cloudy",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5949,7 +5949,7 @@
     {
      "lhs": "qmean",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -5993,7 +5993,7 @@
     {
      "lhs": "tmean",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -6503,7 +6503,7 @@
     {
      "lhs": "ez",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "kn"
       ],
@@ -7394,7 +7394,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7427,7 +7427,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7460,7 +7460,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7493,7 +7493,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7526,7 +7526,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7559,7 +7559,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7592,7 +7592,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7625,7 +7625,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7955,7 +7955,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -7988,7 +7988,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8021,7 +8021,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8054,7 +8054,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8087,7 +8087,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8120,7 +8120,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8153,7 +8153,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8186,7 +8186,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8518,7 +8518,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8551,7 +8551,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8584,7 +8584,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8617,7 +8617,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8650,7 +8650,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8683,7 +8683,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8716,7 +8716,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -8749,7 +8749,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9081,7 +9081,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9114,7 +9114,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9147,7 +9147,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9180,7 +9180,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9213,7 +9213,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9246,7 +9246,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9279,7 +9279,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9312,7 +9312,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9606,7 +9606,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9639,7 +9639,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9672,7 +9672,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9705,7 +9705,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9738,7 +9738,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9771,7 +9771,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9804,7 +9804,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -9837,7 +9837,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10168,7 +10168,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10201,7 +10201,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10234,7 +10234,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10267,7 +10267,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10300,7 +10300,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10333,7 +10333,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10366,7 +10366,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10399,7 +10399,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10703,7 +10703,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10736,7 +10736,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10769,7 +10769,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10802,7 +10802,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10835,7 +10835,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10868,7 +10868,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10901,7 +10901,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -10934,7 +10934,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11272,7 +11272,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11305,7 +11305,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11338,7 +11338,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11371,7 +11371,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11404,7 +11404,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11437,7 +11437,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11470,7 +11470,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11503,7 +11503,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11835,7 +11835,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11868,7 +11868,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11901,7 +11901,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11934,7 +11934,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -11967,7 +11967,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12000,7 +12000,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12033,7 +12033,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12066,7 +12066,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12378,7 +12378,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12411,7 +12411,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12444,7 +12444,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12477,7 +12477,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12510,7 +12510,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12543,7 +12543,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12576,7 +12576,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
@@ -12609,7 +12609,7 @@
            "reduce": "Linf_error",
            "expected": 0.0,
            "reference": {
-             "op": "aggregate",
+             "op": "faq",
              "output_idx": [
                "k"
              ],
