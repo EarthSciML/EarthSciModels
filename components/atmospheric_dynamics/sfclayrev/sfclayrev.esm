@@ -14,7 +14,7 @@
   ]
  },
  "index_sets": {
-  "secant_steps": {"kind": "interval", "size": 33}
+  "secant_steps": {"kind": "interval", "size": 55}
  },
  "models": {
   "SfclayRev": {
@@ -59,12 +59,11 @@
     "scm_force_flux": {"type": "parameter", "units": "1", "default": 0.0, "description": "1: keep the prescribed hfx_in, qfx_in (single-column forcing)."},
     "isftcflx": {"type": "parameter", "units": "1", "default": 0.0, "description": "Sea-surface flux option: 0 Fairall z0t/z0q and Charnock z0; 1 z0q = 1e-4 m and AHW z0; 2 Garratt z0t/z0q and AHW z0."},
     "iz0tlnd": {"type": "parameter", "units": "1", "default": 0.0, "description": "Land thermal-roughness option: 0 none; 1 Zilitinkevich with the Chen-Zhang C_zil; 2 Zilitinkevich with C_zil = 0.1."},
-    "is_water": {"type": "unknown", "units": "1", "description": "1 over water (xland >= 1.5), 0 over land."},
+    "is_water": {"type": "unknown", "units": "1", "description": "1 over water (xland >= 1.5), 0 over land. Every land/water branch of the scheme tests this flag; the kernel writes the test as xland >= 1.5, > 1.5 or < 1.5 in different places, which agree for the mask values 1 and 2."},
     "exner1": {"type": "unknown", "units": "1", "description": "Exner function (p1/p1000mb)^(R_d/c_p) at the first level."},
     "exner_sfc": {"type": "unknown", "units": "1", "description": "Exner function at the surface."},
     "thgb": {"type": "unknown", "units": "K", "description": "Skin potential temperature tsk/exner_sfc (WRF thgb)."},
     "thx": {"type": "unknown", "units": "K", "description": "First-level potential temperature (WRF thx)."},
-    "tvx": {"type": "unknown", "units": "K", "description": "First-level virtual temperature (WRF scr4)."},
     "thvx": {"type": "unknown", "units": "K", "description": "First-level virtual potential temperature (WRF thvx)."},
     "psfc_kpa": {"type": "unknown", "units": "kPa", "description": "Surface pressure in kPa (WRF psfc)."},
     "p1_kpa": {"type": "unknown", "units": "kPa", "description": "First-level pressure in kPa (WRF pl)."},
@@ -73,7 +72,7 @@
     "es_air": {"type": "unknown", "units": "kPa", "description": "Saturation vapour pressure at the first-level temperature."},
     "qgh": {"type": "unknown", "units": "kg/kg", "description": "Saturation mixing ratio at the first level (WRF qgh, the LSM's q2sat)."},
     "cpm": {"type": "unknown", "units": "J/(kg*K)", "description": "Moist heat capacity cp (1 + 0.8 qv1) (WRF cpm)."},
-    "rhox": {"type": "unknown", "units": "kg/m^3", "description": "Surface air density psfc/(R_d T_v1) (WRF rhox)."},
+    "rhox": {"type": "unknown", "units": "kg/m^3", "description": "Surface air density psfc/(R_d T_v1) with the first-level virtual temperature T_v1 = t1 (1 + ep_1 qv1) (WRF rhox, scr4)."},
     "za": {"type": "unknown", "units": "m", "description": "Height of the first level above ground, dz1/2 (WRF za)."},
     "govrth": {"type": "unknown", "units": "m/(s^2*K)", "description": "g/theta_1 (WRF govrth)."},
     "gz1oz0": {"type": "unknown", "units": "1", "description": "ln((za + z0)/z0) (WRF gz1oz0)."},
@@ -89,14 +88,13 @@
     "br0": {"type": "unknown", "units": "1", "description": "Bulk Richardson number of the surface layer g za dthvdz/(theta_1 wspd^2) before the hysteresis clip."},
     "br": {"type": "unknown", "units": "1", "description": "Bulk Richardson number (WRF br): br0, but not allowed to become positive when the previous step was unstable (mol_in < 0)."},
     "ri_solve": {"type": "unknown", "units": "1", "description": "Bulk Richardson number passed to the zol solver, clamped to [-250, 250]."},
-    "secant": {"type": "unknown", "units": "1", "shape": ["secant_steps"], "description": "The kernel's secant iteration for zol = za/L (function zolri), cell by cell: cells 1-3 hold the initial bracket x1_0, x2_0 (-5 and 0 for Ri_b < 0, 0 and 5 for Ri_b > 0) and r_0 = 0; cells 3n+1, 3n+2, 3n+3 hold x1_n, x2_n and the running return value r_n after update n = 1..10. An esm-spec 4.3.1.1 recurrence (each cell reads earlier cells only); the per-cell rules are the secant_* templates of bulk_richardson_zol.esm. Justification: the kernel does not converge this iteration (it stops when the bracket is narrower than 0.01), so the result depends on the iteration path and cannot be written as the root of the equation without an O(1e-4) discrepancy; the sweep is genuinely sequential."},
+    "secant": {"type": "unknown", "units": "1", "shape": ["secant_steps"], "description": "The kernel's secant iteration for zol = za/L (function zolri), cell by cell: cells 1-5 hold the initial bracket x1_0, x2_0 (-5 and 0 for Ri_b < 0, 0 and 5 for Ri_b > 0), their residuals f1_0, f2_0 and r_0 = 0; cells 5n+1 to 5n+5 hold x1_n, x2_n, the residuals f1_n = zolri_residual(x1_n), f2_n = zolri_residual(x2_n) (the kernel's fx1, fx2) and the running return value r_n after update n = 1..10. An esm-spec 4.3.1.1 recurrence (each cell reads earlier cells only); the per-cell rules are the secant_* templates of bulk_richardson_zol.esm. Justification: the kernel does not converge this iteration (it stops when the bracket is narrower than 0.01), so the result depends on the iteration path and cannot be written as the root of the equation without an O(1e-4) discrepancy; the sweep is genuinely sequential."},
     "zol_secant": {"type": "unknown", "units": "1", "description": "Return value of the kernel's zolri: the last cell of the secant recurrence."},
     "zol": {"type": "unknown", "units": "1", "description": "Stability parameter za/L (WRF zol): the secant result for Ri_b /= 0 (the first-guess Ri_b ln((za+z0)/z0) instead when the previous u* is below 1 mm/s in the unstable regime), 0 in the neutral regime."},
     "regime": {"type": "unknown", "units": "1", "description": "Stability regime: 1 stable (Ri_b > 0), 3 forced convection (Ri_b = 0), 4 free convection (Ri_b < 0) (WRF regime)."},
     "rmol": {"type": "unknown", "units": "1/m", "description": "Inverse Monin-Obukhov length zol/za (WRF rmol)."},
     "psim": {"type": "unknown", "units": "1", "description": "Integrated momentum stability correction between z0 and za, capped at 0.9 ln((za+z0)/z0) (WRF psim)."},
     "psim10": {"type": "unknown", "units": "1", "description": "Integrated momentum correction between z0 and 10 m, capped at 0.9 ln((10+z0)/z0) (WRF psim10)."},
-    "psim2": {"type": "unknown", "units": "1", "description": "Integrated momentum correction between z0 and 2 m (WRF psim2)."},
     "psih_z0": {"type": "unknown", "units": "1", "description": "Integrated heat correction between z0 and za, capped at 0.9 ln((za+z0)/z0) (WRF psih before any thermal-roughness recomputation)."},
     "psih2_z0": {"type": "unknown", "units": "1", "description": "Integrated heat correction between z0 and 2 m, capped (WRF psih2)."},
     "psih10_z0": {"type": "unknown", "units": "1", "description": "Integrated heat correction between z0 and 10 m, capped (WRF psih10)."},
@@ -160,16 +158,15 @@
     {"lhs": "exner_sfc", "rhs": {"op": "apply_expression_template", "args": [], "name": "exner_function", "bindings": {"p": "psfc", "p0": "wrf.p1000mb", "kappa": "wrf.rcp"}}},
     {"lhs": "thgb", "rhs": {"op": "apply_expression_template", "args": [], "name": "theta_from_temperature", "bindings": {"T": "tsk", "exner": "exner_sfc"}}},
     {"lhs": "thx", "rhs": {"op": "apply_expression_template", "args": [], "name": "theta_from_temperature", "bindings": {"T": "t1", "exner": "exner1"}}},
-    {"lhs": "tvx", "rhs": {"op": "apply_expression_template", "args": [], "name": "virtual_potential_temperature", "bindings": {"theta": "t1", "qv": "qv1", "ep_1": "wrf.ep_1"}}},
     {"lhs": "thvx", "rhs": {"op": "apply_expression_template", "args": [], "name": "virtual_potential_temperature", "bindings": {"theta": "thx", "qv": "qv1", "ep_1": "wrf.ep_1"}}},
     {"lhs": "psfc_kpa", "rhs": {"op": "/", "args": ["psfc", 1000]}},
     {"lhs": "p1_kpa", "rhs": {"op": "/", "args": ["p1", 1000]}},
-    {"lhs": "es_sfc", "rhs": {"op": "*", "args": [{"op": "apply_expression_template", "args": [], "name": "bolton_saturation_vapor_pressure", "bindings": {"T": "tsk", "svp1": "wrf.svp1", "svp2": "wrf.svp2", "svp3": "wrf.svp3", "svpt0": "wrf.svpt0"}}, {"op": "ifelse", "args": [{"op": "and", "args": [{"op": ">", "args": ["xland", 1.5]}, {"op": "==", "args": ["lakemask", 0]}]}, "par.salinity_factor", 1]}]}},
-    {"lhs": "qsfc", "rhs": {"op": "ifelse", "args": [{"op": "or", "args": [{"op": ">", "args": ["xland", 1.5]}, {"op": "<=", "args": ["qsfc_in", 0]}]}, {"op": "apply_expression_template", "args": [], "name": "saturation_mixing_ratio", "bindings": {"es": "es_sfc", "p": "psfc_kpa", "ep_2": "wrf.ep_2"}}, "qsfc_in"]}},
+    {"lhs": "es_sfc", "rhs": {"op": "*", "args": [{"op": "apply_expression_template", "args": [], "name": "bolton_saturation_vapor_pressure", "bindings": {"T": "tsk", "svp1": "wrf.svp1", "svp2": "wrf.svp2", "svp3": "wrf.svp3", "svpt0": "wrf.svpt0"}}, {"op": "ifelse", "args": [{"op": "and", "args": [{"op": ">", "args": ["is_water", 0.5]}, {"op": "==", "args": ["lakemask", 0]}]}, "par.salinity_factor", 1]}]}},
+    {"lhs": "qsfc", "rhs": {"op": "ifelse", "args": [{"op": "or", "args": [{"op": ">", "args": ["is_water", 0.5]}, {"op": "<=", "args": ["qsfc_in", 0]}]}, {"op": "apply_expression_template", "args": [], "name": "saturation_mixing_ratio", "bindings": {"es": "es_sfc", "p": "psfc_kpa", "ep_2": "wrf.ep_2"}}, "qsfc_in"]}},
     {"lhs": "es_air", "rhs": {"op": "apply_expression_template", "args": [], "name": "bolton_saturation_vapor_pressure", "bindings": {"T": "t1", "svp1": "wrf.svp1", "svp2": "wrf.svp2", "svp3": "wrf.svp3", "svpt0": "wrf.svpt0"}}},
     {"lhs": "qgh", "rhs": {"op": "apply_expression_template", "args": [], "name": "saturation_mixing_ratio", "bindings": {"es": "es_air", "p": "p1_kpa", "ep_2": "wrf.ep_2"}}},
     {"lhs": "cpm", "rhs": {"op": "*", "args": ["wrf.cp", {"op": "+", "args": [1, {"op": "*", "args": ["par.cpm_qfac", "qv1"]}]}]}},
-    {"lhs": "rhox", "rhs": {"op": "/", "args": ["psfc", {"op": "*", "args": ["wrf.r_d", "tvx"]}]}},
+    {"lhs": "rhox", "rhs": {"op": "apply_expression_template", "args": [], "name": "moist_air_density", "bindings": {"p": "psfc", "T": "t1", "qv": "qv1", "r_d": "wrf.r_d", "ep_1": "wrf.ep_1"}}},
     {"lhs": "za", "rhs": {"op": "*", "args": [0.5, "dz1"]}},
     {"lhs": "govrth", "rhs": {"op": "/", "args": ["wrf.g", "thx"]}},
     {"lhs": "gz1oz0", "rhs": {"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["za", "znt_in"]}, "znt_in"]}]}},
@@ -179,8 +176,8 @@
     {"lhs": "tskv", "rhs": {"op": "apply_expression_template", "args": [], "name": "virtual_potential_temperature", "bindings": {"theta": "thgb", "qv": "qsfc", "ep_1": "wrf.ep_1"}}},
     {"lhs": "dthvdz", "rhs": {"op": "-", "args": ["thvx", "tskv"]}},
     {"lhs": "fluxc", "rhs": {"op": "max", "args": [{"op": "+", "args": [{"op": "/", "args": ["hfx_in", {"op": "*", "args": ["rhox", "wrf.cp"]}]}, {"op": "/", "args": [{"op": "*", "args": ["wrf.ep_1", "tskv", "qfx_in"]}, "rhox"]}]}, 0]}},
-    {"lhs": "vconv", "rhs": {"op": "ifelse", "args": [{"op": "<", "args": ["xland", 1.5]},
-       {"op": "apply_expression_template", "args": [], "name": "beljaars_convective_velocity", "bindings": {"g": "wrf.g", "T_sfc": "tsk", "h": "pblh", "buoyancy_flux": "fluxc", "coef": "par.vconvc", "expo": "par.vsgd_exp", "unit_velocity": "par.unit_velocity"}},
+    {"lhs": "vconv", "rhs": {"op": "ifelse", "args": [{"op": "<", "args": ["is_water", 0.5]},
+       {"op": "apply_expression_template", "args": [], "name": "beljaars_convective_velocity", "bindings": {"g": "wrf.g", "T_sfc": "tsk", "h": "pblh", "buoyancy_flux": "fluxc", "coef": "par.vconvc", "expo": "par.vconv_exp", "unit_velocity": "par.unit_velocity"}},
        {"op": "*", "args": ["par.unit_velocity", {"op": "sqrt", "args": [{"op": "/", "args": [{"op": "max", "args": [{"op": "-", "args": ["dthvdz"]}, 0]}, "par.unit_kelvin"]}]}]}]}},
     {"lhs": "vsgd", "rhs": {"op": "*", "args": ["par.vsgd_coef", {"op": "^", "args": [{"op": "max", "args": [{"op": "-", "args": [{"op": "/", "args": ["dx", "par.dx_ref"]}, 1]}, 0]}, "par.vsgd_exp"]}]}},
     {"lhs": "wspd", "rhs": {"op": "max", "args": [{"op": "sqrt", "args": [{"op": "+", "args": [{"op": "*", "args": ["wspd0", "wspd0"]}, {"op": "*", "args": ["vconv", "vconv"]}, {"op": "*", "args": ["vsgd", "vsgd"]}]}]}, "par.wspd_min"]}},
@@ -188,26 +185,25 @@
     {"lhs": "br", "rhs": {"op": "ifelse", "args": [{"op": "<", "args": ["mol_in", 0]}, {"op": "min", "args": ["br0", 0]}, "br0"]}},
     {"lhs": "ri_solve", "rhs": {"op": "max", "args": [{"op": "min", "args": ["br", "par.br_max"]}, {"op": "-", "args": ["par.br_max"]}]}},
     {"lhs": "secant", "rhs": {"op": "aggregate", "args": [], "output_idx": ["k"], "ranges": {"k": {"from": "secant_steps"}},
-      "expr": {"op": "ifelse", "args": [{"op": "<=", "args": ["k", 3]},
-        {"op": "ifelse", "args": [{"op": "==", "args": ["k", 1]},
-           {"op": "ifelse", "args": [{"op": "<", "args": ["ri_solve", 0]}, {"op": "-", "args": ["par.secant_bracket"]}, 0]},
-           {"op": "ifelse", "args": [{"op": "==", "args": ["k", 2]}, {"op": "ifelse", "args": [{"op": "<", "args": ["ri_solve", 0]}, 0, "par.secant_bracket"]}, 0]}]},
-        {"op": "ifelse", "args": [{"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [3, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 3]}]}]}]}, 1]},
-           {"op": "apply_expression_template", "args": [], "name": "secant_x1_next", "bindings": {"x1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "x2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 2]}]}, "ri": "ri_solve", "z": "za", "z0": "znt_in", "tol": "par.secant_tol"}},
-           {"op": "ifelse", "args": [{"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [3, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 3]}]}]}]}, 2]},
-              {"op": "apply_expression_template", "args": [], "name": "secant_x2_next", "bindings": {"x1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 4]}]}, "x2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "ri": "ri_solve", "z": "za", "z0": "znt_in", "tol": "par.secant_tol"}},
-              {"op": "apply_expression_template", "args": [], "name": "secant_result_next", "bindings": {"x1_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 5]}]}, "x2_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 4]}]}, "x1_new": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 2]}]}, "x2_new": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 1]}]}, "r_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "ri": "ri_solve", "z": "za", "z0": "znt_in", "tol": "par.secant_tol"}}]}]}]}}},
-    {"lhs": "zol_secant", "rhs": {"op": "index", "args": ["secant", 33]}},
+      "expr": {"op": "ifelse", "args": [{"op": "or", "args": [{"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [5, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 5]}]}]}]}, 3]}, {"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [5, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 5]}]}]}]}, 4]}]},
+        {"op": "apply_expression_template", "args": [], "name": "zolri_residual", "bindings": {"x": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 2]}]}, "ri": "ri_solve", "z": "za", "z0": "znt_in"}},
+        {"op": "ifelse", "args": [{"op": "<=", "args": ["k", 5]},
+          {"op": "ifelse", "args": [{"op": "==", "args": ["k", 1]}, {"op": "ifelse", "args": [{"op": "<", "args": ["ri_solve", 0]}, {"op": "-", "args": ["par.secant_bracket"]}, 0]}, {"op": "ifelse", "args": [{"op": "==", "args": ["k", 2]}, {"op": "ifelse", "args": [{"op": "<", "args": ["ri_solve", 0]}, 0, "par.secant_bracket"]}, 0]}]},
+          {"op": "ifelse", "args": [{"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [5, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 5]}]}]}]}, 1]},
+             {"op": "apply_expression_template", "args": [], "name": "secant_x1_next", "bindings": {"x1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 5]}]}, "x2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 4]}]}, "f1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "f2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 2]}]}, "ri": "ri_solve", "tol": "par.secant_tol"}},
+             {"op": "ifelse", "args": [{"op": "==", "args": [{"op": "-", "args": ["k", {"op": "*", "args": [5, {"op": "floor", "args": [{"op": "/", "args": [{"op": "-", "args": ["k", 1]}, 5]}]}]}]}, 2]},
+                {"op": "apply_expression_template", "args": [], "name": "secant_x2_next", "bindings": {"x1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 6]}]}, "x2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 5]}]}, "f1": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 4]}]}, "f2": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "ri": "ri_solve", "tol": "par.secant_tol"}},
+                {"op": "apply_expression_template", "args": [], "name": "secant_result_next", "bindings": {"x1_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 9]}]}, "x2_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 8]}]}, "f1_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 7]}]}, "f2_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 6]}]}, "x1_new": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 4]}]}, "x2_new": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 3]}]}, "r_prev": {"op": "index", "args": ["secant", {"op": "-", "args": ["k", 5]}]}, "tol": "par.secant_tol"}}]}]}]}]}}},
+    {"lhs": "zol_secant", "rhs": {"op": "index", "args": ["secant", 55]}},
     {"lhs": "zol", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["br", 0]}, "zol_secant", {"op": "ifelse", "args": [{"op": "<", "args": ["br", 0]}, {"op": "ifelse", "args": [{"op": "<", "args": ["ust_in", "par.ust_min_land"]}, {"op": "*", "args": ["br", "gz1oz0"]}, "zol_secant"]}, 0]}]}},
     {"lhs": "regime", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["br", 0]}, 1, {"op": "ifelse", "args": [{"op": "<", "args": ["br", 0]}, 4, 3]}]}},
     {"lhs": "rmol", "rhs": {"op": "/", "args": ["zol", "za"]}},
     {"lhs": "psim", "rhs": {"op": "min", "args": [{"op": "apply_expression_template", "args": [], "name": "psi_m_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["za", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}, {"op": "*", "args": ["par.psi_limit_frac", "gz1oz0"]}]}},
     {"lhs": "psim10", "rhs": {"op": "min", "args": [{"op": "apply_expression_template", "args": [], "name": "psi_m_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["par.z_10m", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}, {"op": "*", "args": ["par.psi_limit_frac", "gz10oz0"]}]}},
-    {"lhs": "psim2", "rhs": {"op": "apply_expression_template", "args": [], "name": "psi_m_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["par.z_2m", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}},
     {"lhs": "psih_z0", "rhs": {"op": "min", "args": [{"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["za", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}, {"op": "*", "args": ["par.psi_limit_frac", "gz1oz0"]}]}},
     {"lhs": "psih2_z0", "rhs": {"op": "min", "args": [{"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["par.z_2m", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}, {"op": "*", "args": ["par.psi_limit_frac", "gz2oz0"]}]}},
     {"lhs": "psih10_z0", "rhs": {"op": "min", "args": [{"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["par.z_10m", "znt_in"]}, "z_lo": "znt_in", "za": "za"}}, {"op": "*", "args": ["par.psi_limit_frac", "gz10oz0"]}]}},
-    {"lhs": "zl_r", "rhs": {"op": "ifelse", "args": [{"op": ">=", "args": ["xland", 1.5]}, "znt_in", "par.z_landsub"]}},
+    {"lhs": "zl_r", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["is_water", 0.5]}, "znt_in", "par.z_landsub"]}},
     {"lhs": "pq", "rhs": {"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": "za", "z_lo": "zl_r", "za": "za"}}},
     {"lhs": "pq2", "rhs": {"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": "par.z_2m", "z_lo": "zl_r", "za": "za"}}},
     {"lhs": "pq10", "rhs": {"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": "par.z_10m", "z_lo": "zl_r", "za": "za"}}},
@@ -221,11 +217,11 @@
     {"lhs": "z0q_garratt", "rhs": {"op": "apply_expression_template", "args": [], "name": "garratt_scalar_roughness", "bindings": {"z0": "znt_in", "restar": "restar", "k": "par.garratt_k", "a": "par.garratt_a", "b": "par.garratt_b", "ratio": "par.schmidt_garratt"}}},
     {"lhs": "czil", "rhs": {"op": "ifelse", "args": [{"op": "==", "args": ["iz0tlnd", 1]}, {"op": "apply_expression_template", "args": [], "name": "chen_zhang_czil", "bindings": {"z0": "znt_in", "expo": "par.czil_cz_exp", "z0_ref": "par.czil_cz_z0ref"}}, "par.czil_ref"]}},
     {"lhs": "z0t_land", "rhs": {"op": "apply_expression_template", "args": [], "name": "zilitinkevich_thermal_roughness", "bindings": {"z0": "znt_in", "restar": "restar", "czil": "czil", "karman": "wrf.karman"}}},
-    {"lhs": "thermal_roughness_active", "rhs": {"op": "ifelse", "args": [{"op": "or", "args": [{"op": ">=", "args": ["xland", 1.5]}, {"op": ">=", "args": ["iz0tlnd", 1]}]}, 1, 0]}},
-    {"lhs": "z0t_eff", "rhs": {"op": "ifelse", "args": [{"op": ">=", "args": ["xland", 1.5]},
+    {"lhs": "thermal_roughness_active", "rhs": {"op": "ifelse", "args": [{"op": "or", "args": [{"op": ">", "args": ["is_water", 0.5]}, {"op": ">=", "args": ["iz0tlnd", 1]}]}, 1, 0]}},
+    {"lhs": "z0t_eff", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["is_water", 0.5]},
        {"op": "ifelse", "args": [{"op": "==", "args": ["isftcflx", 2]}, "z0t_garratt", {"op": "ifelse", "args": [{"op": "==", "args": ["isftcflx", 1]}, "par.z0q_isftcflx1", "z0t_fairall"]}]},
        {"op": "ifelse", "args": [{"op": ">=", "args": ["iz0tlnd", 1]}, "z0t_land", "znt_in"]}]}},
-    {"lhs": "z0q_eff", "rhs": {"op": "ifelse", "args": [{"op": ">=", "args": ["xland", 1.5]},
+    {"lhs": "z0q_eff", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["is_water", 0.5]},
        {"op": "ifelse", "args": [{"op": "==", "args": ["isftcflx", 2]}, "z0q_garratt", {"op": "ifelse", "args": [{"op": "==", "args": ["isftcflx", 1]}, "par.z0q_isftcflx1", "z0t_fairall"]}]},
        {"op": "ifelse", "args": [{"op": ">=", "args": ["iz0tlnd", 1]}, "z0t_land", "znt_in"]}]}},
     {"lhs": "psih_t", "rhs": {"op": "apply_expression_template", "args": [], "name": "psi_h_profile", "bindings": {"zol": "zol", "z_hi": {"op": "+", "args": ["za", "z0t_eff"]}, "z_lo": "z0t_eff", "za": "za"}}},
@@ -236,18 +232,18 @@
     {"lhs": "psih", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["thermal_roughness_active", 0.5]}, "psih_q", "psih_z0"]}},
     {"lhs": "psit", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["thermal_roughness_active", 0.5]}, {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["za", "z0t_eff"]}, "z0t_eff"]}]}, "psih_t"]}, {"op": "-", "args": ["gz1oz0", "psih_z0"]}]}},
     {"lhs": "psit2", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["thermal_roughness_active", 0.5]}, {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["par.z_2m", "z0t_eff"]}, "z0t_eff"]}]}, "psih2_t"]}, {"op": "-", "args": ["gz2oz0", "psih2_z0"]}]}},
-    {"lhs": "psiq_pre", "rhs": {"op": "ifelse", "args": [{"op": ">=", "args": ["xland", 1.5]},
+    {"lhs": "psiq_pre", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["is_water", 0.5]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["za", "z0q_eff"]}, "z0q_eff"]}]}, "psih_q"]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "+", "args": [{"op": "/", "args": [{"op": "*", "args": ["wrf.karman", "ust_in", "za"]}, "par.xka"]}, {"op": "/", "args": ["za", "zl_r"]}]}]}, "pq"]}]}},
     {"lhs": "psiq", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["thermal_roughness_active", 0.5]}, {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["za", "z0q_eff"]}, "z0q_eff"]}]}, "psih_q"]}, "psiq_pre"]}},
     {"lhs": "psiq2", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["thermal_roughness_active", 0.5]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["par.z_2m", "z0q_eff"]}, "z0q_eff"]}]}, "psih2_q"]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "+", "args": [{"op": "/", "args": [{"op": "*", "args": ["wrf.karman", "ust_in", "par.z_2m"]}, "par.xka"]}, {"op": "/", "args": ["par.z_2m", "zl_r"]}]}]}, "pq2"]}]}},
-    {"lhs": "psiq10", "rhs": {"op": "ifelse", "args": [{"op": ">=", "args": ["xland", 1.5]},
+    {"lhs": "psiq10", "rhs": {"op": "ifelse", "args": [{"op": ">", "args": ["is_water", 0.5]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "/", "args": [{"op": "+", "args": ["par.z_10m", "z0q_eff"]}, "z0q_eff"]}]}, "psih10_q"]},
        {"op": "-", "args": [{"op": "log", "args": [{"op": "+", "args": [{"op": "/", "args": [{"op": "*", "args": ["wrf.karman", "ust_in", "par.z_10m"]}, "par.xka"]}, {"op": "/", "args": ["par.z_10m", "zl_r"]}]}]}, "pq10"]}]}},
     {"lhs": "ust_raw", "rhs": {"op": "+", "args": [{"op": "*", "args": [0.5, "ust_in"]}, {"op": "/", "args": [{"op": "*", "args": [0.5, "wrf.karman", "wspd"]}, "psix"]}]}},
-    {"lhs": "ust", "rhs": {"op": "ifelse", "args": [{"op": "<", "args": ["xland", 1.5]}, {"op": "max", "args": ["ust_raw", "par.ust_min_land"]}, "ust_raw"]}},
+    {"lhs": "ust", "rhs": {"op": "ifelse", "args": [{"op": "<", "args": ["is_water", 0.5]}, {"op": "max", "args": ["ust_raw", "par.ust_min_land"]}, "ust_raw"]}},
     {"lhs": "ustm", "rhs": {"op": "+", "args": [{"op": "*", "args": [0.5, "ustm_in"]}, {"op": "/", "args": [{"op": "*", "args": [0.5, "wrf.karman", "wspd0"]}, "psix"]}]}},
     {"lhs": "mol", "rhs": {"op": "/", "args": [{"op": "*", "args": ["wrf.karman", "dtg"]}, {"op": "*", "args": ["psit", "par.prt"]}]}},
     {"lhs": "u10", "rhs": {"op": "/", "args": [{"op": "*", "args": ["u1", "psix10"]}, "psix"]}},
@@ -261,7 +257,7 @@
     {"lhs": "cka", "rhs": {"op": "*", "args": [{"op": "/", "args": ["wrf.karman", "psix"]}, {"op": "/", "args": ["wrf.karman", "psiq_pre"]}]}},
     {"lhs": "cd", "rhs": {"op": "*", "args": [{"op": "/", "args": ["wrf.karman", "psix10"]}, {"op": "/", "args": ["wrf.karman", "psix10"]}]}},
     {"lhs": "cda", "rhs": {"op": "*", "args": [{"op": "/", "args": ["wrf.karman", "psix"]}, {"op": "/", "args": ["wrf.karman", "psix"]}]}},
-    {"lhs": "znt", "rhs": {"op": "ifelse", "args": [{"op": "and", "args": [{"op": ">", "args": ["isfflx", 0.5]}, {"op": ">=", "args": ["xland", 1.5]}]},
+    {"lhs": "znt", "rhs": {"op": "ifelse", "args": [{"op": "and", "args": [{"op": ">", "args": ["isfflx", 0.5]}, {"op": ">", "args": ["is_water", 0.5]}]},
        {"op": "ifelse", "args": [{"op": "!=", "args": ["isftcflx", 0]},
           {"op": "apply_expression_template", "args": [], "name": "sea_roughness_ahw", "bindings": {"ust": "ust", "g": "wrf.g", "u_ref": "par.ahw_ust_ref", "zw_exp": "par.ahw_zw_exp", "charnock": "par.ahw_charnock", "ozo": "par.ozo", "zn2_coef": "par.ahw_zn2_coef", "zn2_exp": "par.ahw_zn2_exp", "zn2_ust_exp": "par.ahw_zn2_ust_exp", "unit_velocity": "par.unit_velocity", "c_smooth": "par.z0_smooth_coef", "nu": "par.nu_sea", "ust_min": "par.ahw_ust_min", "z0_min": "par.z0_water_min_ahw", "z0_max": "par.z0_water_max"}},
           {"op": "ifelse", "args": [{"op": ">", "args": ["shalwater_z0", 0.5]},
@@ -312,11 +308,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call1_first_step_unstable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -630,11 +621,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call120_unstable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -948,11 +934,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call600_stable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -1266,11 +1247,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call1440_stable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -1584,11 +1560,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call2400_unstable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -1902,11 +1873,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/scm_call2820_unstable_land_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -2220,11 +2186,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_water_120_unstable_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -2538,11 +2499,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_water_600_stable_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -2856,11 +2812,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_lake_120_no_salinity_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -3174,11 +3125,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_shalwater_120_depth_clamped_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -3492,11 +3438,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_shalwater_120_depth30_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -3810,11 +3751,6 @@
          "isftcflx": 1.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_isftcflx1_120_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -4128,11 +4064,6 @@
          "isftcflx": 2.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_isftcflx2_120_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -4446,11 +4377,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 1.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_iz0tlnd1_120_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -4764,11 +4690,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 2.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_iz0tlnd2_600_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -5082,11 +5003,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_forceflux_120_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -5392,11 +5308,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_noflux_120_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
@@ -5669,6 +5580,111 @@
        ]
      },
      {
+       "id": "syn_noflux_120_passthrough",
+       "description": "Hand-written companion of syn_noflux_120 (not from a kernel dump): the same land column with isfflx = 0, but with nonzero previous-step exchange coefficients chs_in = 0.018 m/s and chs2_in = 0.057 m/s (syn_noflux_120 dumps them as 0, so it cannot tell passing them through from zeroing them). With isfflx off the kernel jumps past the whole flux section (sf_sfclayrev.F90 line 819, if(.not. isfflx) goto 410), so its inout chs, chs2, cqs2 and znt come back exactly as they went in and hfx, qfx, flhc, flqc are 0. Every assertion is exact.",
+       "parameter_overrides": {
+         "u1": 2.452289581298828,
+         "v1": -6.628586292266846,
+         "t1": 283.92919921875,
+         "qv1": 0.0032298772130161524,
+         "p1": 96827.421875,
+         "dz1": 51.330345153808594,
+         "psfc": 97126.0078125,
+         "mavail": 0.6000000238418579,
+         "pblh": 858.6150512695312,
+         "tsk": 285.68798828125,
+         "xland": 1.0,
+         "lakemask": 0.0,
+         "water_depth": 0.0,
+         "dx": 4000.0,
+         "znt_in": 0.05000000074505806,
+         "ust_in": 0.507398247718811,
+         "mol_in": -0.11642391979694366,
+         "qsfc_in": 0.009433679282665253,
+         "hfx_in": 70.83717346191406,
+         "qfx_in": 7.970282604219392e-05,
+         "ustm_in": 0.4993705749511719,
+         "chs_in": 0.018,
+         "chs2_in": 0.057,
+         "cqs2_in": 0.01268723513931036,
+         "isfflx": 0.0,
+         "shalwater_z0": 0.0,
+         "scm_force_flux": 0.0,
+         "isftcflx": 0.0,
+         "iz0tlnd": 0.0
+       },
+       "time_span": {
+         "start": 0.0,
+         "end": 1.0
+       },
+       "assertions": [
+         {
+           "variable": "chs",
+           "time": 0.0,
+           "expected": 0.018,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "chs2",
+           "time": 0.0,
+           "expected": 0.057,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "cqs2",
+           "time": 0.0,
+           "expected": 0.01268723513931036,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "znt",
+           "time": 0.0,
+           "expected": 0.05000000074505806,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "hfx",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "qfx",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "flhc",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0
+           }
+         },
+         {
+           "variable": "flqc",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0
+           }
+         }
+       ]
+     },
+     {
        "id": "syn_water_2400_unstable",
        "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, mp=6 ra_lw=1 ra_sw=1 sf_sfclay_physics=1 sf_surface=1 bl_pbl=1, `data/eqwefic/scm_ref`) dumped around the sf_sfclayrev_run call by the instrumented ctessum-claude/WRF fork (e42a269, module_esm_dump) and replayed through the real64 (kind_phys = real64) standalone kernels/sfclayrev_driver of that fork against the ctessum-claude/MMM-physics kernel 52cfbd7 (NCAR/MMM-physics 550b5b4 plus kind-generic fixes). Inputs are the dumped kernel arguments (real32 values widened to real64 exactly as the driver read them); every expected value is the real64 replay's output. The scheme is diagnostic (no time step), so the values are pointwise. Tolerances: measured against the real64 replay with zero tolerances, the mismatch of this component is <= 4e-6 relative and is concentrated in the quantities that pass through the small virtual-temperature difference theta_v1 - theta_vs (Ri_b, zol, rmol, psi_m, psi_h, theta*, hfx: 2.7e-6 to 3.9e-6) and in what they feed (exchange and drag coefficients, fluxes, 10 m/2 m diagnostics: 1e-6 to 2e-6); the direct thermodynamic quantities (cpm, qgh, gz1oz0, wspd, znt) agree to better than 1e-6. Cause: the kernel receives real32 copies of the WRF constants (svpt0 = 273.1499939 K, whose 6e-6 K offset moves the skin saturation mixing ratio by 4e-7 relative and hence theta_vs by 6e-7 K, which is 2e-6 of the 0.3 K virtual-temperature difference; g = 9.8100004, karman = 0.40000001, ep1 = 0.60836244, svp1 = 0.61119998) and evaluates its default-real literals (1/2.5, sqrt(3), atan(1), the table nodes n*0.01) in single precision, while this component uses the nominal values from lib/wrf_constants.esm; the real32 in-model dump differs from the real64 replay by up to 1.7e-5 (zol). Tolerances are therefore rel 2e-5 (5x the measured floor) on every quantity downstream of theta_v1 - theta_vs and rel 1e-6 on the rest; regime is exact. Regime: SYNTHETIC, Fortran-generated -- the call-2400 column over water: strongly unstable water surface layer, Ri_b = -0.077, zol = -0.83.",
        "parameter_overrides": {
@@ -5702,11 +5718,6 @@
          "isftcflx": 0.0,
          "iz0tlnd": 0.0
        },
-       "expression_template_imports": [
-         {
-           "ref": "./tests/syn_water_2400_unstable_inputs.esm"
-         }
-       ],
        "time_span": {
          "start": 0.0,
          "end": 1.0
