@@ -2,8 +2,11 @@
     water_equilibrium.jl
 
 Standalone MTK module for the `WaterEquilibrium` component migrated from
-Aerosol.jl@c8c640bb (`src/aqueous_equilibria.jl:76`). Constants and
-equations mirror the upstream definition verbatim.
+Aerosol.jl@c8c640bb (`src/aqueous_equilibria.jl:76`). Constants mirror
+the upstream definition verbatim. Upstream's ion product
+`K_w ~ H_plus * OH_minus` is a second definition of `K_w` that leaves
+`OH_minus` implicit; with `H_plus` an input it is written here solved for
+`OH_minus`, as in `components/aerosol/aq_eq/water.esm`.
 
 Upstream, `WaterEquilibrium` is a subsystem intended for composition: its
 `T` and `H_plus` are `@variables` because they are wired to a parent
@@ -56,7 +59,7 @@ end
 
 eqs = [
     K_w ~ K_w_298 * exp((-dH_Kw / R_gas) * (1 / T - 1 / T_ref)),
-    K_w ~ H_plus * OH_minus,
+    OH_minus ~ K_w / H_plus,
     pH ~ -log10(H_plus / C_ref),
 ]
 
