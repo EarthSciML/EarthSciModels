@@ -1,0 +1,2193 @@
+{
+  "esm": "1.2.0",
+  "metadata": {
+    "name": "WSM6Sedimentation",
+    "description": "Sedimentation (fallout) of the precipitating hydrometeors of the WRF single-moment 6-class microphysics scheme (WSM6; Hong and Lim 2006), written as the flux-form continuity law of each falling category, dq/dt = -(1/rho) d/dz(rho v_t q), with the mass-weighted terminal fall speeds v_t of hydrometeor_slopes.esm (mounted as subsystem sd) and lowered on the column_nonuniform_1d grid by EarthSciDiscretizations sedimentation_jh2010_flux_D_lev (PR #42), the dt -> 0 limit of WSM6's own forward semi-Lagrangian fallout (nislfv_rain_plm, Juang and Hong 2010): the flux through a layer's lower face is a third-order interpolated interface fall speed times the monotone average-slope face value of the layer above (FORTRAN_BUGS N77), nothing enters through the model top, and the outflow through the lowest face is the surface precipitation rate. Rain falls at its own speed v_r; snow and graupel fall TOGETHER at the mixing-ratio-weighted speed v_sg (WSM6 sediments the two categories jointly since V3.0, nislfv_rain_plm6 with the combined worka), so the snow and graupel fluxes both use W_sg; cloud ice falls at v_i (Heymsfield-Donner power law of the mean crystal diameter); cloud water does not fall. Negative input mixing ratios (round-off in the kernel inputs) are advected as zero mass; WSM6 advects den*q with the negatives in it, which in these tests changes the tendencies by <= 1.1e-9 of the column maximum. THIS IS THE METHOD-OF-LINES (INSTANTANEOUS DERIVATIVE) FORM: WSM6 integrates fallout with that semi-Lagrangian scheme, whose increment over one WRF step is not dt times this derivative, but as dt -> 0 its tendency converges to exactly the operator written here (measured against the verbatim Fortran routine in every test, to <= 1.14e-7 of the column maximum for rain, snow and graupel and 6.4e-6 for ice; the ice gap is the one branch the rule omits, the upwind side of a face whose interpolated speed overshoots below zero). The fall speeds are set to zero where WSM6 zeroes them (rain where q_r <= 0, ice where q_i <= 0, the joint snow/graupel speed where q_s + q_g <= 1e-15): with donor-cell that was immaterial, because the flux of an empty layer is zero either way, but the jh2010 interface speed reads the NEIGHBOURS' speeds and switches to the layer above wherever a speed is exactly zero, and without the zero the early-storm rain tendency was 16 % off. The kernel's `fall` flux DIAGNOSTIC converges (linearly in dt) to the layer-centred fluxes rho v_t q, which is what the FLUX assertions pin; they do not depend on the rule. Until 2026-09-22 this component imported the first-order donor-cell rule sedimentation_upwind1_flux_D_lev, which differs from WRF's converged fallout by 16-112 % of the column maximum in these tests. Transcribed from the fallout block of mp_wsm6_run in phys/physics_mmm/mp_wsm6.F90 (WRF 4.8, NCAR/MMM-physics fork ctessum-claude/MMM-physics@52cfbd7): slope_wsm6 -> workr/worka -> nislfv_rain_plm/plm6 -> fall, and the ice fallout work1c -> nislfv_rain_plm -> fallc. EqWeFiC, cited here for FORTRAN_BUGS.md and couplings/, is https://github.com/EarthSciML/EqWeFiC, where these components were developed and are coupled into a WRF column.",
+    "license": "MIT",
+    "tags": [
+      "wrf",
+      "wsm6",
+      "microphysics",
+      "sedimentation",
+      "column",
+      "eqweather"
+    ],
+    "references": [
+      {
+        "citation": "Hong, S.-Y., & Lim, J.-O. J. (2006). The WRF single-moment 6-class microphysics scheme (WSM6). Journal of the Korean Meteorological Society, 42(2), 129-151."
+      },
+      {
+        "citation": "Juang, H.-M. H., & Hong, S.-Y. (2010). Forward semi-Lagrangian advection with mass conservation and positive definiteness for falling hydrometeors. Monthly Weather Review, 138(5), 1778-1791.",
+        "doi": "10.1175/2009MWR3109.1"
+      },
+      {
+        "citation": "Hong, S.-Y., Dudhia, J., & Chen, S.-H. (2004). A revised approach to ice microphysical processes for the bulk parameterization of clouds and precipitation. Monthly Weather Review, 132(1), 103-120.",
+        "doi": "10.1175/1520-0493(2004)132<0103:ARATIM>2.0.CO;2"
+      }
+    ]
+  },
+  "metaparameters": {
+    "NLEV": {
+      "type": "integer",
+      "default": 40,
+      "description": "Number of model layers (WRF kte); 40 is the em_quarter_ss supercell reference column. This component declares no index set of its own -- `lev` merges in from the hydrometeor_slopes.esm (`sd`) subsystem it mounts (esm-spec 4.7) -- so NLEV exists only to be bound at the mount edge and passed down to it, which is what lets a 59-layer assembly such as EqWeFiC couplings/eqweather_scm.esm mount this stage beside the rest of the column."
+    }
+  },
+  "models": {
+    "WSM6Sedimentation": {
+      "expression_template_imports": [
+        {
+          "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/grid.esm",
+          "bindings": {
+            "NLEV": "NLEV"
+          }
+        },
+        {
+          "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/sedimentation_jh2010_flux_D_lev.esm",
+          "bindings": {
+            "NLEV": "NLEV"
+          }
+        }
+      ],
+      "subsystems": {
+        "wrf": {
+          "ref": "../../../lib/wrf_constants.esm"
+        },
+        "par": {
+          "ref": "./wsm6_parameters.esm"
+        },
+        "sd": {
+          "ref": "./hydrometeor_slopes.esm"
+        ,
+          "bindings": {
+           "NLEV": "NLEV"
+          }
+}
+      },
+      "variables": {
+        "T_in": {
+          "type": "parameter",
+          "units": "K",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the layer temperature from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_T` to it. Unused in the component's own inline tests, which lower `input_T` to a dumped profile instead."
+        },
+        "qi_in": {
+          "type": "parameter",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the cloud-ice mixing ratio from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_qi` to it. Unused in the component's own inline tests, which lower `input_qi` to a dumped profile instead."
+        },
+        "qr_in": {
+          "type": "parameter",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the rain mixing ratio from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_qr` to it. Unused in the component's own inline tests, which lower `input_qr` to a dumped profile instead."
+        },
+        "qs_in": {
+          "type": "parameter",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the snow mixing ratio from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_qs` to it. Unused in the component's own inline tests, which lower `input_qs` to a dumped profile instead."
+        },
+        "qg_in": {
+          "type": "parameter",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the graupel mixing ratio from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_qg` to it. Unused in the component's own inline tests, which lower `input_qg` to a dumped profile instead."
+        },
+        "rho_in": {
+          "type": "parameter",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the air density from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_rho` to it. Unused in the component's own inline tests, which lower `input_rho` to a dumped profile instead."
+        },
+        "ze_in": {
+          "type": "parameter",
+          "units": "m",
+          "shape": [
+            "lev_nodes"
+          ],
+          "default": 0.0,
+          "description": "Coupling target (assembly input path): a shaped parameter that receives the layer interface heights above the surface from the EqWeather-SCM state document (EqWeFiC couplings/eqweather_scm.esm) through a document-level `coupling.variable_map` (`param_to_var`), when that document's mount-edge library EqWeFiC couplings/tests/scmstate_couple_wsm6_inputs.esm lowers `input_ze` to it. Unused in the component's own inline tests, which lower `input_ze` to a dumped profile instead."
+        },
+        "T": {
+          "type": "unknown",
+          "units": "K",
+          "shape": [
+            "lev"
+          ],
+          "description": "Absolute temperature (kernel input; enters only the snow intercept of the snow fall speed through sd)."
+        },
+        "qi": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "description": "Cloud-ice mixing ratio at the start of the fallout step (kernel input)."
+        },
+        "qr": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "description": "Rain mixing ratio at the start of the fallout step (kernel input)."
+        },
+        "qs": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "description": "Snow mixing ratio at the start of the fallout step (kernel input)."
+        },
+        "qg": {
+          "type": "unknown",
+          "units": "kg/kg",
+          "shape": [
+            "lev"
+          ],
+          "description": "Graupel mixing ratio at the start of the fallout step (kernel input)."
+        },
+        "rho": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "description": "Dry-air density (WSM6 den)."
+        },
+        "ze": {
+          "type": "unknown",
+          "units": "m",
+          "shape": [
+            "lev_nodes"
+          ],
+          "description": "Layer interface heights above the surface, ze[1] = 0, ze[k+1] = ze[k] + delz[k] (the grid's single geometry input, from WSM6 delz)."
+        },
+        "zc": {
+          "type": "unknown",
+          "units": "m",
+          "shape": [
+            "lev"
+          ],
+          "description": "Layer centre heights, grid-derived (column_cell_center)."
+        },
+        "dz": {
+          "type": "unknown",
+          "units": "m",
+          "shape": [
+            "lev"
+          ],
+          "description": "Layer thicknesses, grid-derived (column_cell_thickness); equals WSM6 delz. Read by the sedimentation rule by bare name."
+        },
+        "m_r": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "description": "Rain mass density rho max(q_r, 0) (WSM6 denqrs1 before the fallout)."
+        },
+        "m_s": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "description": "Snow mass density rho max(q_s, 0) (WSM6 denqrs2)."
+        },
+        "m_g": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "description": "Graupel mass density rho max(q_g, 0) (WSM6 denqrs3)."
+        },
+        "m_i": {
+          "type": "unknown",
+          "units": "kg/m^3",
+          "shape": [
+            "lev"
+          ],
+          "description": "Cloud-ice mass density rho max(q_i, 0) (WSM6 denqci)."
+        },
+        "W_r": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Signed vertical velocity of rain along +lev (upward), W_r = -v_r <= 0 with the mass-weighted rain fall speed of sd, set to zero where q_r <= 0 exactly as WSM6 sets workr = 0 there (mp_wsm6.F90:635). The zero matters to the jh2010 lowering: its interface speed reads the neighbouring layers' speeds and switches to the layer above wherever a layer's speed is exactly zero."
+        },
+        "W_sg": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Signed vertical velocity of the combined snow/graupel category, W_sg = -v_sg <= 0 with the mixing-ratio-weighted snow/graupel fall speed of sd (WSM6 worka); applied to both snow and graupel."
+        },
+        "W_i": {
+          "type": "unknown",
+          "units": "m/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Signed vertical velocity of cloud ice, W_i = -v_i <= 0 with the ice crystal fall speed of sd, set to zero where q_i <= 0 exactly as WSM6 sets work1c = 0 there (mp_wsm6.F90:712-713; see W_r for why the zero matters)."
+        },
+        "F_r": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "shape": [
+            "lev"
+          ],
+          "description": "Downward rain mass flux through the LOWER face of each layer, rho v_r q_r: the donor-cell face flux of the rule (WSM6 fall(:,:,1) delz as dt -> 0; F_r[1] is the surface rain rate)."
+        },
+        "F_s": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "shape": [
+            "lev"
+          ],
+          "description": "Downward snow mass flux through the lower face of each layer, rho v_sg q_s (WSM6 fall(:,:,2) delz as dt -> 0)."
+        },
+        "F_g": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "shape": [
+            "lev"
+          ],
+          "description": "Downward graupel mass flux through the lower face of each layer, rho v_sg q_g (WSM6 fall(:,:,3) delz as dt -> 0)."
+        },
+        "F_i": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "shape": [
+            "lev"
+          ],
+          "description": "Downward cloud-ice mass flux through the lower face of each layer, rho v_i q_i (the kernel dumps only its surface value fallc(:,1))."
+        },
+        "dqr_dt": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Sedimentation tendency of the rain mixing ratio, -(1/rho) d/dz(rho v_r q_r), lowered by sedimentation_upwind1_flux_D_lev: (F_r[k+1] - F_r[k])/(rho[k] dz[k]) with F_r[NLEV+1] = 0."
+        },
+        "dqs_dt": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Sedimentation tendency of the snow mixing ratio, -(1/rho) d/dz(rho v_sg q_s)."
+        },
+        "dqg_dt": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Sedimentation tendency of the graupel mixing ratio, -(1/rho) d/dz(rho v_sg q_g)."
+        },
+        "dqi_dt": {
+          "type": "unknown",
+          "units": "kg/kg/s",
+          "shape": [
+            "lev"
+          ],
+          "description": "Sedimentation tendency of the cloud-ice mixing ratio, -(1/rho) d/dz(rho v_i q_i)."
+        },
+        "P_r": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "description": "Surface rain precipitation rate, the layer-1 rain flux F_r[1] (WSM6 fall(:,1,1) delz(:,1); 1 kg/(m^2 s) = 1 mm/s of liquid water)."
+        },
+        "P_s": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "description": "Surface snow precipitation rate (liquid-water equivalent), F_s[1] (WSM6 fall(:,1,2) delz(:,1))."
+        },
+        "P_g": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "description": "Surface graupel precipitation rate (liquid-water equivalent), F_g[1] (WSM6 fall(:,1,3) delz(:,1))."
+        },
+        "P_i": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "description": "Surface cloud-ice precipitation rate (liquid-water equivalent), F_i[1] (WSM6 fallc(:,1) delz(:,1))."
+        },
+        "P_total": {
+          "type": "unknown",
+          "units": "kg/(m^2 s)",
+          "description": "Total surface precipitation rate, P_r + P_s + P_g + P_i (WSM6 fallsum delz(:,1); rainncv = P_total dtcld in mm per step)."
+        },
+        "precip_rate": {
+          "type": "unknown",
+          "units": "m/s",
+          "description": "Total surface precipitation as a liquid-water-equivalent depth rate, P_total / rho_water."
+        }
+      },
+      "equations": [
+        {
+          "lhs": "T",
+          "rhs": {
+            "op": "input_T",
+            "args": []
+          }
+        },
+        {
+          "lhs": "qi",
+          "rhs": {
+            "op": "input_qi",
+            "args": []
+          }
+        },
+        {
+          "lhs": "qr",
+          "rhs": {
+            "op": "input_qr",
+            "args": []
+          }
+        },
+        {
+          "lhs": "qs",
+          "rhs": {
+            "op": "input_qs",
+            "args": []
+          }
+        },
+        {
+          "lhs": "qg",
+          "rhs": {
+            "op": "input_qg",
+            "args": []
+          }
+        },
+        {
+          "lhs": "rho",
+          "rhs": {
+            "op": "input_rho",
+            "args": []
+          }
+        },
+        {
+          "lhs": "ze",
+          "rhs": {
+            "op": "input_ze",
+            "args": []
+          }
+        },
+        {
+          "lhs": "zc",
+          "rhs": {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "column_cell_center",
+            "bindings": {
+              "ze": "ze"
+            }
+          }
+        },
+        {
+          "lhs": "dz",
+          "rhs": {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "column_cell_thickness",
+            "bindings": {
+              "ze": "ze"
+            }
+          }
+        },
+        {
+          "lhs": "m_r",
+          "rhs": {
+            "op": "*",
+            "args": [
+              "rho",
+              {
+                "op": "max",
+                "args": [
+                  "qr",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "m_s",
+          "rhs": {
+            "op": "*",
+            "args": [
+              "rho",
+              {
+                "op": "max",
+                "args": [
+                  "qs",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "m_g",
+          "rhs": {
+            "op": "*",
+            "args": [
+              "rho",
+              {
+                "op": "max",
+                "args": [
+                  "qg",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "m_i",
+          "rhs": {
+            "op": "*",
+            "args": [
+              "rho",
+              {
+                "op": "max",
+                "args": [
+                  "qi",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "W_r",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "qr",
+                      0
+                    ]
+                  },
+                  "sd.vt_r",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "W_sg",
+          "rhs": {
+            "op": "-",
+            "args": [
+              "sd.vt_sg"
+            ]
+          }
+        },
+        {
+          "lhs": "W_i",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "qi",
+                      0
+                    ]
+                  },
+                  "sd.vt_i",
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "F_r",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "W_r",
+                  "m_r"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "F_s",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "W_sg",
+                  "m_s"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "F_g",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "W_sg",
+                  "m_g"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "F_i",
+          "rhs": {
+            "op": "-",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "W_i",
+                  "m_i"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "lhs": "dqr_dt",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "W_r",
+                          "m_r"
+                        ]
+                      }
+                    ],
+                    "wrt": "lev"
+                  }
+                ]
+              },
+              "rho"
+            ]
+          }
+        },
+        {
+          "lhs": "dqs_dt",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "W_sg",
+                          "m_s"
+                        ]
+                      }
+                    ],
+                    "wrt": "lev"
+                  }
+                ]
+              },
+              "rho"
+            ]
+          }
+        },
+        {
+          "lhs": "dqg_dt",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "W_sg",
+                          "m_g"
+                        ]
+                      }
+                    ],
+                    "wrt": "lev"
+                  }
+                ]
+              },
+              "rho"
+            ]
+          }
+        },
+        {
+          "lhs": "dqi_dt",
+          "rhs": {
+            "op": "/",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          "W_i",
+                          "m_i"
+                        ]
+                      }
+                    ],
+                    "wrt": "lev"
+                  }
+                ]
+              },
+              "rho"
+            ]
+          }
+        },
+        {
+          "lhs": "P_r",
+          "rhs": {
+            "op": "index",
+            "args": [
+              "F_r",
+              1
+            ]
+          }
+        },
+        {
+          "lhs": "P_s",
+          "rhs": {
+            "op": "index",
+            "args": [
+              "F_s",
+              1
+            ]
+          }
+        },
+        {
+          "lhs": "P_g",
+          "rhs": {
+            "op": "index",
+            "args": [
+              "F_g",
+              1
+            ]
+          }
+        },
+        {
+          "lhs": "P_i",
+          "rhs": {
+            "op": "index",
+            "args": [
+              "F_i",
+              1
+            ]
+          }
+        },
+        {
+          "lhs": "P_total",
+          "rhs": {
+            "op": "+",
+            "args": [
+              "P_r",
+              "P_s",
+              "P_g",
+              "P_i"
+            ]
+          }
+        },
+        {
+          "lhs": "precip_rate",
+          "rhs": {
+            "op": "/",
+            "args": [
+              "P_total",
+              "wrf.rhowater"
+            ]
+          }
+        }
+      ],
+      "tests": [
+        {
+          "id": "qss_step250_row23_col24_mature_storm_fallout",
+          "description": "Reference: WRF 4.8 em_quarter_ss idealized supercell (GNU real32 build, dx = 2 km, dt = 12 s, 40 layers, WSM6 only), step 250 row 23 dumped by the instrumented ctessum-claude/WRF fork (module_esm_dump with esm_dump_inner hooks inside mp_wsm6_run of the ctessum-claude/MMM-physics fork, commit 52cfbd7) and replayed through the real64 (kind_phys = real64) standalone kernels/wsm6_driver. INPUTS are the kernel's input state (t, qi, qr, qs, qg, den, delz of tile column 24), i.e. the state the fallout block sees at the start of the sub-step. REFERENCE FLUXES are Fortran-derived: the kernel's fall arrays (fall(:,k,:) = post-fallout density x fall speed / delz for k >= 2, and the semi-Lagrangian surface precipitation / delz / dtcld at k = 1), multiplied by delz, from three real64 replays at ESM_DT = 0.04, 0.02, 0.01 s and Richardson-extrapolated to dt -> 0 (second order; the kernel's fluxes converge linearly in dt to the donor-cell fluxes rho v_t q, so the extrapolation removes the residual to ~1e-12 relative). REFERENCE TENDENCIES are WRF's own fallout operator in the dt -> 0 limit: nislfv_rain_plm, extracted verbatim from mp_wsm6.F90 (lines 1879-2122) into a real64 harness (not part of this repository), run on this test's input column -- the falling density den*q with the round-off negatives WRF keeps, and fall speeds v = F/(rho max(q,0)) from the reference fluxes above, zeroed where WRF zeroes them (workr where q_r <= 0, worka where q_s + q_g <= 1e-15, work1c where q_i <= 0) -- at dt = 2e-3, 1e-3 and 5e-4 s, Richardson-extrapolated to dt -> 0 (it agrees with the extrapolation from 4e-3 .. 1e-3 s to <= 6e-8 of each column's peak) and divided by rho. Each category is replayed on its own, so melting and the rest of the sub-step cannot contaminate it, which the kernel's whole-sub-step rain increment could not guarantee. nislfv_rain_plm6, which sediments snow and graupel, is nislfv_rain_plm applied to each at the shared speed (checked by diff: only its mean-speed iteration differs, and that vanishes as dt -> 0). The exception is the top two layers of the column: WRF empties them on every call by a dt-independent amount (FORTRAN_BUGS B16), so they have no dt -> 0 limit, and their reference is the rule's conservative value (every category carries < 1e-12 kg m^-3 there in this column). This replaced, on 2026-09-22, the donor-cell FORMULA the tendencies used to pin, which is 36-45 % away from WRF's operator (Linf over the column maximum) in this column. Cloud-ice fluxes have no kernel counterpart above the surface (fallc is dumped only at k = 1), so F_i is checked against the same formulae evaluated by the filler on the input state (N_i = min(max(5.38e7 (rho q_i)^0.75, 1e3), 1e6), D = min(dicon sqrt(rho q_i/N_i), dimax), v_i = 1.49e4 D^1.31) -- a wiring check, not an independent reference. The ice TENDENCY is WRF's operator applied to those formula speeds: the operator is the Fortran's, the speeds are not. Real64 replay fluxes agree with the real32 in-model fall arrays to ~2e-6 relative (the dumped pvtr/pvts/pvtg are real32). Residual esm-vs-extrapolated mismatch (real32 constants and default-real literals of the kernel, EqWeFiC FORTRAN_BUGS.md N2; measured with zero tolerances): fluxes and tendencies <= 1.1e-7 of each column's maximum (rain 8.8e-8, snow 1.1e-7, graupel 1.1e-7, ice 1.0e-7), surface rates 1.1-1.3e-7 relative -- the same floor as the rate models (the kernel's real32 pvtr/pvts/pvtg, bvtr = 0.800000011920929, den0, 1.49e4, 1.31 and 5.38e7 versus the exact esm constants); column tolerances are 1e-6 of each reference column's maximum (Linf_error), scalar tolerances rel 2e-6, i.e. 5-10x above. Measured again with zero tolerances after the switch to the jh2010 rule: the rain, snow and graupel tendencies agree with WRF's operator to <= 1.14e-7 of the column maximum, the same real32 floor, and their tolerance is 1e-6 of the maximum. The ICE tendency agrees to <= 2.7e-7 of its maximum and carries the same 1e-6 tolerance. That needed the upwind choice of donor side added to EarthSciDiscretizations PR #42 on 2026-09-22 (commit 14b5db5): where the third-order interface speed overshoots below zero at the edge of an ice layer (3-12 faces per column in these tests), WRF's arrival-point remap takes the mass crossing that face from the TOP face of the layer below; before it the ice residual reached 6.4e-6 and the tolerance was 3e-5. What remains is not the operator (driven with the kernel's own fall speeds, it matches WRF's fallout to 1e-8 - 4e-8 of the ice maximum) but this component's ice fall flux F_i, which differs from the kernel's by 4e-8 - 6e-8 of its peak. Regime: mature storm column (i = 24): rain up to 1.4e-2, snow 3e-3, graupel 1e-2, ice 3e-4 kg/kg; all four categories fall, rain and graupel reach the surface.",
+          "parameter_overrides": {},
+          "expression_template_imports": [
+            {
+              "ref": "./tests/qss_step250_row23_col24_mature_storm_fallout_inputs.esm"
+            }
+          ],
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-06
+          },
+          "assertions": [
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [1.4153434731389997e-06, 2.5109378268306587e-06, 8.126313043108227e-05, 0.0027394231251255817, 0.007447829313500874, 0.013390767579409851, 0.02188289747488794, 0.03397504134101705, 0.04828030998634736, 0.06364366793763573, 0.08179135210987461, 0.09771720907774682, 0.039041733949365526, 0.006003512022540229, 8.617590203558548e-06, 9.468098626784994e-08, 6.161171920953979e-06, 1.1246221655528848e-08, 1.1884062031541613e-06, 9.814443006101117e-12, 1.0917495352779375e-10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 9.771720907774682e-08
+              }
+            },
+            {
+              "variable": "F_s",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 5.657558073960662e-27, 3.9264364204717645e-11, 2.2925343550321598e-09, 9.040047421066648e-08, 5.952244301253931e-08, 1.2954869118402144e-07, 2.687282402017232e-07, 0.0, 0.0001498127229846692, 0.0006016956359277935, 0.0012074512391215923, 0.0018750261727967475, 0.0024335336317792716, 0.002904793125314364, 0.0032550281225502543, 0.003384515581738196, 0.00365715302006027, 0.003878303285876061, 0.0038807763091773975, 0.0037501264047497714, 0.0034787094496627415, 0.003167576491618898, 0.0027428810685781336, 0.0019066940445940713, 0.0005503321038542763, 2.6816419023054707e-05, 1.1223597357697625e-09, 1.1421986597914292e-10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 3.880776309177398e-09
+              }
+            },
+            {
+              "variable": "F_g",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 5.895096755641004e-16, 3.124531578950274e-12, 4.760096291519063e-10, 3.695353833379134e-08, 2.9750791377781018e-08, 1.5886365087611197e-07, 1.940373524162445e-06, 5.826397461425834e-06, 1.105846040560253e-05, 0.0, 0.011771816583080826, 0.027814289864296248, 0.03062866069068495, 0.03075645901955443, 0.028348920045915656, 0.026868222878257852, 0.025103515987255704, 0.023266339819644884, 0.021206044797405045, 0.018911972607600178, 0.016786292707814954, 0.014765021509853721, 0.012892651806082669, 0.011061008547747197, 0.009107222779865679, 0.006071488654061505, 0.0016970806273918658, 8.160218312078111e-05, 8.137966011913674e-09, 4.0325957773148633e-10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 3.075645901955443e-08
+              }
+            },
+            {
+              "variable": "F_i",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 4.9884395096114754e-21, 2.2664741113211366e-14, 1.4401830622683588e-17, 5.123127704314664e-08, 1.6525956298756697e-07, 2.2352401969873998e-07, 3.4722657576540823e-07, 7.34727810641796e-07, 1.1027800281992662e-06, 1.8777614476097772e-06, 3.263951770810389e-06, 5.446935934141628e-06, 9.266755169525004e-06, 1.5016919822167327e-05, 3.1527021178319344e-05, 3.785973216179845e-05, 5.949811326568908e-05, 6.709391373887543e-05, 5.926958722547542e-05, 5.102765707969705e-05, 3.755058897508584e-05, 2.7281855188318434e-05, 1.7082132805077262e-05, 7.109418380624515e-06, 5.078005386275961e-07, 2.038670196430423e-12, 7.074595252566609e-15, 0.0, 8.066572343196101e-28, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 6.709391373887543e-11
+              }
+            },
+            {
+              "variable": "dqr_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [1.5377534849262119e-09, 9.644033356710132e-08, 1.6285753950702084e-06, 7.682788236308165e-06, 1.0406977303527164e-05, 1.533741501299042e-05, 2.461719593134009e-05, 3.337866612279915e-05, 3.8324931351845914e-05, 4.985452042391461e-05, 6.913517501196383e-05, -0.0001041108898223352, -0.00019156353827294353, -2.5890631608732635e-05, -6.337287980406345e-08, 1.846161043043892e-08, -2.0063151863847958e-08, 3.870232277244835e-09, -4.225846084893262e-09, 3.7162789789326696e-13, -5.356541801839967e-13, 2.320830565865259e-16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.9156353827294352e-10
+              }
+            },
+            {
+              "variable": "dqs_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, -7.520126647665026e-18, 6.02572142251141e-14, 5.061759313673625e-12, 1.7059346774271378e-10, -6.643823837428069e-11, 8.577965583049045e-11, 5.368545632364862e-10, -8.145932534103665e-10, 3.205124435583021e-08, 1.1319061189394771e-06, 1.983582863744836e-06, 2.5749208163911723e-06, 2.5282690740197823e-06, 2.2464512281992684e-06, 2.0382573151782516e-06, 6.908847540441903e-07, 1.3325430259378515e-06, 1.65381863140646e-06, 4.764869126823966e-07, -3.3540634788038693e-07, -1.5542814888646079e-06, -1.949840461910124e-06, -2.270219350851265e-06, -4.707813367325793e-06, -1.2384708201389387e-05, -9.317862852050256e-06, -3.429387053016977e-07, -2.6534486168490657e-11, -1.346674510759972e-12, -3.875718221093106e-24, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.2384708201389386e-11
+              }
+            },
+            {
+              "variable": "dqg_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 5.009111377377374e-19, 5.8090641925812876e-15, 7.270483584177217e-13, 5.592284077021488e-11, 6.159693244663493e-12, 2.385679593306199e-10, 1.3297124511020837e-09, 7.886649439244028e-09, 2.1215157740863752e-08, -3.352140153061627e-08, 8.756004079218485e-06, 6.967366476273452e-05, 2.5918562217460902e-05, 3.0724072952882507e-06, -7.730068432764123e-06, -7.494847916363699e-06, -7.622905431734536e-06, -8.939074648798214e-06, -1.0043672921824401e-05, -1.2592847830120006e-05, -1.3175725351345331e-05, -1.3159965069552354e-05, -1.304345962848905e-05, -1.2974332171164049e-05, -1.2714062098342089e-05, -1.9144054975202638e-05, -4.0894076001253697e-05, -2.9164943547511672e-05, -1.0434502918045913e-06, -1.9710170718358582e-10, -4.754609944344426e-12, 1.0732955430055511e-16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 6.967366476273452e-11
+              }
+            },
+            {
+              "variable": "dqi_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 2.781258211179926e-17, -1.0786183134670234e-15, 2.8422081811628967e-11, 2.6860316604564725e-10, 2.0013384904265143e-10, 1.458964138646332e-10, 9.839000784298073e-10, 1.0052591323202277e-09, 1.9038622928756803e-09, 4.008254401970307e-09, 6.613910301580012e-09, 1.2787102890190732e-08, 1.4157123929651904e-08, 7.505038515071916e-08, 3.3332246666989116e-08, 1.106061359865736e-07, 9.512801101248266e-08, -2.659137781459654e-08, -4.528469859219893e-08, -9.177357896135904e-08, -8.547677279228821e-08, -8.297432689813714e-08, -9.295574944005124e-08, -1.0027100116553393e-07, -6.351918271388416e-09, -1.1395536468008348e-12, 1.279394126648713e-13, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.106061359865736e-13
+              }
+            },
+            {
+              "variable": "P_r",
+              "time": 0.0,
+              "expected": 1.4153434731389997e-06,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_s",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_g",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_i",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_total",
+              "time": 0.0,
+              "expected": 1.4153434731389997e-06,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "precip_rate",
+              "time": 0.0,
+              "expected": 1.4153434731389996e-09,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 10
+              },
+              "expected": 0.06364366793763573,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 11
+              },
+              "expected": 0.08179135210987461,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 12
+              },
+              "expected": 0.09771720907774682,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            }
+          ]
+        },
+        {
+          "id": "qss_step250_row22_col25_heavy_graupel_fallout",
+          "description": "Reference: WRF 4.8 em_quarter_ss idealized supercell (GNU real32 build, dx = 2 km, dt = 12 s, 40 layers, WSM6 only), step 250 row 22 dumped by the instrumented ctessum-claude/WRF fork (module_esm_dump with esm_dump_inner hooks inside mp_wsm6_run of the ctessum-claude/MMM-physics fork, commit 52cfbd7) and replayed through the real64 (kind_phys = real64) standalone kernels/wsm6_driver. INPUTS are the kernel's input state (t, qi, qr, qs, qg, den, delz of tile column 25), i.e. the state the fallout block sees at the start of the sub-step. REFERENCE FLUXES are Fortran-derived: the kernel's fall arrays (fall(:,k,:) = post-fallout density x fall speed / delz for k >= 2, and the semi-Lagrangian surface precipitation / delz / dtcld at k = 1), multiplied by delz, from three real64 replays at ESM_DT = 0.04, 0.02, 0.01 s and Richardson-extrapolated to dt -> 0 (second order; the kernel's fluxes converge linearly in dt to the donor-cell fluxes rho v_t q, so the extrapolation removes the residual to ~1e-12 relative). REFERENCE TENDENCIES are WRF's own fallout operator in the dt -> 0 limit: nislfv_rain_plm, extracted verbatim from mp_wsm6.F90 (lines 1879-2122) into a real64 harness (not part of this repository), run on this test's input column -- the falling density den*q with the round-off negatives WRF keeps, and fall speeds v = F/(rho max(q,0)) from the reference fluxes above, zeroed where WRF zeroes them (workr where q_r <= 0, worka where q_s + q_g <= 1e-15, work1c where q_i <= 0) -- at dt = 2e-3, 1e-3 and 5e-4 s, Richardson-extrapolated to dt -> 0 (it agrees with the extrapolation from 4e-3 .. 1e-3 s to <= 6e-8 of each column's peak) and divided by rho. Each category is replayed on its own, so melting and the rest of the sub-step cannot contaminate it, which the kernel's whole-sub-step rain increment could not guarantee. nislfv_rain_plm6, which sediments snow and graupel, is nislfv_rain_plm applied to each at the shared speed (checked by diff: only its mean-speed iteration differs, and that vanishes as dt -> 0). The exception is the top two layers of the column: WRF empties them on every call by a dt-independent amount (FORTRAN_BUGS B16), so they have no dt -> 0 limit, and their reference is the rule's conservative value (every category carries < 1e-12 kg m^-3 there in this column). This replaced, on 2026-09-22, the donor-cell FORMULA the tendencies used to pin, which is 39-51 % away from WRF's operator (Linf over the column maximum) in this column. Cloud-ice fluxes have no kernel counterpart above the surface (fallc is dumped only at k = 1), so F_i is checked against the same formulae evaluated by the filler on the input state (N_i = min(max(5.38e7 (rho q_i)^0.75, 1e3), 1e6), D = min(dicon sqrt(rho q_i/N_i), dimax), v_i = 1.49e4 D^1.31) -- a wiring check, not an independent reference. The ice TENDENCY is WRF's operator applied to those formula speeds: the operator is the Fortran's, the speeds are not. Real64 replay fluxes agree with the real32 in-model fall arrays to ~2e-6 relative (the dumped pvtr/pvts/pvtg are real32). Residual esm-vs-extrapolated mismatch (real32 constants and default-real literals of the kernel, EqWeFiC FORTRAN_BUGS.md N2; measured with zero tolerances): fluxes and tendencies <= 1.1e-7 of each column's maximum (rain 8.8e-8, snow 1.1e-7, graupel 1.1e-7, ice 1.0e-7), surface rates 1.1-1.3e-7 relative -- the same floor as the rate models (the kernel's real32 pvtr/pvts/pvtg, bvtr = 0.800000011920929, den0, 1.49e4, 1.31 and 5.38e7 versus the exact esm constants); column tolerances are 1e-6 of each reference column's maximum (Linf_error), scalar tolerances rel 2e-6, i.e. 5-10x above. Measured again with zero tolerances after the switch to the jh2010 rule: the rain, snow and graupel tendencies agree with WRF's operator to <= 1.14e-7 of the column maximum, the same real32 floor, and their tolerance is 1e-6 of the maximum. The ICE tendency agrees to <= 2.7e-7 of its maximum and carries the same 1e-6 tolerance. That needed the upwind choice of donor side added to EarthSciDiscretizations PR #42 on 2026-09-22 (commit 14b5db5): where the third-order interface speed overshoots below zero at the edge of an ice layer (3-12 faces per column in these tests), WRF's arrival-point remap takes the mass crossing that face from the TOP face of the layer below; before it the ice residual reached 6.4e-6 and the tolerance was 3e-5. What remains is not the operator (driven with the kernel's own fall speeds, it matches WRF's fallout to 1e-8 - 4e-8 of the ice maximum) but this component's ice fall flux F_i, which differs from the kernel's by 4e-8 - 6e-8 of its peak. Regime: heavy graupel column (i = 25): graupel up to 9.5e-3, snow 3.3e-3, rain 3.5e-3, ice 2.5e-4 kg/kg; the combined snow/graupel speed v_sg is dominated by graupel.",
+          "parameter_overrides": {},
+          "expression_template_imports": [
+            {
+              "ref": "./tests/qss_step250_row22_col25_heavy_graupel_fallout_inputs.esm"
+            }
+          ],
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-06
+          },
+          "assertions": [
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [1.2213443333954149e-05, 3.2605830863304513e-06, 1.1551779433338713e-05, 0.00019139890338137178, 0.0012135435884672798, 0.0037933806449968223, 0.008267050289633888, 0.014157095421846668, 0.02037281550941941, 0.02654453869995079, 0.0376071835200425, 0.055405163315152585, 0.029625101661607315, 0.007639855671954574, 7.471042367548332e-05, 2.4795416130695706e-07, 1.7276564929087304e-05, 2.698107169230732e-08, 2.6279368350941576e-06, 1.9597725542059235e-06, 4.451515441810626e-07, 6.902725885242519e-13, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 5.5405163315152585e-08
+              }
+            },
+            {
+              "variable": "F_s",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 7.559155778530094e-33, 3.9953642841628626e-17, 6.409170437002077e-18, 3.154544116153394e-11, 2.3694752519401154e-08, 3.218754823411197e-08, 1.2028112478298695e-07, 9.464649794191898e-07, 6.476753439813068e-07, 0.0001491656937755783, 0.0010105260448203504, 0.001849830174905403, 0.002660238820179521, 0.003237833224303431, 0.0037575555848527835, 0.004212139656711742, 0.00440983796564779, 0.00477647008736284, 0.005102579422507902, 0.005220036086371612, 0.0051717542562387635, 0.004847077393041003, 0.004486500406991719, 0.003940417204020693, 0.0029373756369699103, 0.0012465254589924069, 0.00015674572271321245, 1.440443296722377e-09, 1.2463089478526744e-12, 3.499527028386452e-13, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 5.220036086371612e-09
+              }
+            },
+            {
+              "variable": "F_g",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 9.613058943566717e-16, 8.415996779142114e-16, 1.943501134988669e-08, 8.408622068844847e-08, 3.6650192307657585e-07, 8.67433515740805e-07, 3.7052498344531913e-06, 2.8020121862713933e-05, 4.963018292237263e-05, 0.006799320269279331, 0.01949267173022415, 0.02358001544977392, 0.025379033414463764, 0.024184803159982123, 0.024271757247061064, 0.023964251307961232, 0.02351400056290275, 0.022867768679662642, 0.021647340922908622, 0.020351736896011403, 0.018879993005330425, 0.017337539730336502, 0.015528821370300207, 0.013118435413697074, 0.009438169894401103, 0.003861868207336417, 0.00046716772113875526, 1.0101174945019454e-08, 6.776178500295922e-10, 2.8443682139029194e-12, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 2.5379033414463762e-08
+              }
+            },
+            {
+              "variable": "F_i",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 5.275194528475832e-18, 2.2672200803512866e-11, 9.969046561740633e-12, 6.932098885342263e-08, 2.5026021964746814e-07, 3.56756356857671e-07, 5.111355962128323e-07, 9.593780608321863e-07, 1.4241586286080398e-06, 2.2258509875866914e-06, 3.663535817996886e-06, 5.847278792423397e-06, 9.648926728968263e-06, 1.4196184734618161e-05, 2.997328608833718e-05, 3.337367143422609e-05, 5.428217776950599e-05, 6.655147759970889e-05, 6.168779803358589e-05, 5.710779065280132e-05, 4.138412204942889e-05, 3.2086966646287325e-05, 2.177417448643019e-05, 1.114723604139851e-05, 2.2496903373533045e-06, 3.2019046929866435e-08, 8.461407838279608e-18, 1.6094811748864085e-16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 6.655147759970889e-11
+              }
+            },
+            {
+              "variable": "dqr_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [-1.3759788872298541e-08, 1.0471060177326745e-08, 2.5659253580975384e-07, 5.612152704407769e-07, 3.5614304159924272e-06, 7.910978788306555e-06, 1.2587634403327761e-05, 1.5227526972523401e-05, 1.3794971012996055e-05, 2.317070896004541e-05, 6.831293539811786e-05, -3.562223168988917e-05, -9.121569298509509e-05, -5.566196067524592e-05, -4.479140941788346e-07, 5.044251528183409e-08, -5.51096469697104e-08, 7.994039268547342e-09, 4.115994134312292e-09, -8.594726018864807e-09, -5.452386073879704e-09, -8.72934642881248e-15, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 9.121569298509508e-11
+              }
+            },
+            {
+              "variable": "dqs_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 7.320277991822308e-20, -6.893949049296426e-20, 6.173250298086758e-14, 3.4959317376454157e-11, -8.939132463166804e-13, 2.360583582006561e-10, 1.973974613532092e-09, -7.159963877311656e-10, 3.342480292533665e-07, 1.5969074420140474e-06, 3.136707348766862e-06, 3.300628277136482e-06, 2.7518924201535373e-06, 2.321204063535504e-06, 2.5175465025822745e-06, 1.0338549821572431e-06, 1.7652083427790194e-06, 2.219429771301015e-06, 1.3450249320644415e-06, 3.024327637714133e-07, -1.734752985382514e-06, -2.1829379508272125e-06, -2.941714296956267e-06, -5.6876989385655715e-06, -1.4214580885570122e-05, -1.6523965400220978e-05, -1.8653276174904497e-06, -4.407229396510777e-11, -4.311733651614834e-15, -8.151505389023022e-15, -7.49279337392209e-30, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.6523965400220976e-11
+              }
+            },
+            {
+              "variable": "dqg_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 8.683985254915247e-19, 6.175655740433183e-19, 4.627254864160832e-12, 3.265407736202431e-11, 3.9504859102311796e-10, 1.3219424143438785e-10, 7.831345598366909e-09, 3.5079538843731774e-08, 8.30787302223372e-08, 6.065059095141065e-06, 4.421389191662812e-05, 2.6029594992558895e-05, 1.1533234926670742e-05, -2.642308018573572e-06, -1.118513200624712e-06, -5.645367369484719e-07, -2.069531381201004e-06, -2.296767317940143e-06, -5.716155053353125e-06, -7.467717079895385e-06, -8.810256378952206e-06, -1.0075264418026993e-05, -1.1382758423033393e-05, -1.4819387215038335e-05, -2.3029107942132645e-05, -4.822801296559589e-05, -5.220072412513297e-05, -5.559288404079214e-06, -3.030243895793032e-10, -6.472635061461686e-12, -3.736301325876212e-14, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 5.220072412513297e-11
+              }
+            },
+            {
+              "variable": "dqi_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 2.5748469589953337e-14, -5.5338429325092936e-14, 3.197812248547467e-11, 4.097854706503952e-10, 3.6632620688823513e-10, 2.288932902659942e-10, 1.1288746290322704e-09, 1.3413769057184574e-09, 2.0584450733658784e-09, 4.212588674435632e-09, 6.6938143823401834e-09, 1.377051044461425e-08, 9.752686453859932e-09, 7.295704503403014e-08, 1.9158097602794193e-08, 9.540079131834244e-08, 1.2718699685575463e-07, -1.5760895350858974e-08, -1.462352381432597e-08, -1.0060929865865408e-07, -8.326368968320155e-08, -8.035130740619737e-08, -9.420307300498789e-08, -1.0185993430606442e-07, -5.033711217713038e-08, -6.254135381432127e-10, -2.649057579968929e-16, 3.841970974692484e-17, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.2718699685575462e-13
+              }
+            },
+            {
+              "variable": "P_r",
+              "time": 0.0,
+              "expected": 1.2213443333954149e-05,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_s",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_g",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_i",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_total",
+              "time": 0.0,
+              "expected": 1.2213443333954149e-05,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "precip_rate",
+              "time": 0.0,
+              "expected": 1.2213443333954148e-08,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 11
+              },
+              "expected": 0.0376071835200425,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 12
+              },
+              "expected": 0.055405163315152585,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 13
+              },
+              "expected": 0.029625101661607315,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            }
+          ]
+        },
+        {
+          "id": "qss_step200_row20_col20_early_storm_light_fallout",
+          "description": "Reference: WRF 4.8 em_quarter_ss idealized supercell (GNU real32 build, dx = 2 km, dt = 12 s, 40 layers, WSM6 only), step 200 row 20 dumped by the instrumented ctessum-claude/WRF fork (module_esm_dump with esm_dump_inner hooks inside mp_wsm6_run of the ctessum-claude/MMM-physics fork, commit 52cfbd7) and replayed through the real64 (kind_phys = real64) standalone kernels/wsm6_driver. INPUTS are the kernel's input state (t, qi, qr, qs, qg, den, delz of tile column 20), i.e. the state the fallout block sees at the start of the sub-step. REFERENCE FLUXES are Fortran-derived: the kernel's fall arrays (fall(:,k,:) = post-fallout density x fall speed / delz for k >= 2, and the semi-Lagrangian surface precipitation / delz / dtcld at k = 1), multiplied by delz, from three real64 replays at ESM_DT = 0.04, 0.02, 0.01 s and Richardson-extrapolated to dt -> 0 (second order; the kernel's fluxes converge linearly in dt to the donor-cell fluxes rho v_t q, so the extrapolation removes the residual to ~1e-12 relative). REFERENCE TENDENCIES are WRF's own fallout operator in the dt -> 0 limit: nislfv_rain_plm, extracted verbatim from mp_wsm6.F90 (lines 1879-2122) into a real64 harness (not part of this repository), run on this test's input column -- the falling density den*q with the round-off negatives WRF keeps, and fall speeds v = F/(rho max(q,0)) from the reference fluxes above, zeroed where WRF zeroes them (workr where q_r <= 0, worka where q_s + q_g <= 1e-15, work1c where q_i <= 0) -- at dt = 2e-3, 1e-3 and 5e-4 s, Richardson-extrapolated to dt -> 0 (it agrees with the extrapolation from 4e-3 .. 1e-3 s to <= 6e-8 of each column's peak) and divided by rho. Each category is replayed on its own, so melting and the rest of the sub-step cannot contaminate it, which the kernel's whole-sub-step rain increment could not guarantee. nislfv_rain_plm6, which sediments snow and graupel, is nislfv_rain_plm applied to each at the shared speed (checked by diff: only its mean-speed iteration differs, and that vanishes as dt -> 0). The exception is the top two layers of the column: WRF empties them on every call by a dt-independent amount (FORTRAN_BUGS B16), so they have no dt -> 0 limit, and their reference is the rule's conservative value (every category carries < 1e-12 kg m^-3 there in this column). This replaced, on 2026-09-22, the donor-cell FORMULA the tendencies used to pin, which is 16-112 % away from WRF's operator (Linf over the column maximum) in this column. Cloud-ice fluxes have no kernel counterpart above the surface (fallc is dumped only at k = 1), so F_i is checked against the same formulae evaluated by the filler on the input state (N_i = min(max(5.38e7 (rho q_i)^0.75, 1e3), 1e6), D = min(dicon sqrt(rho q_i/N_i), dimax), v_i = 1.49e4 D^1.31) -- a wiring check, not an independent reference. The ice TENDENCY is WRF's operator applied to those formula speeds: the operator is the Fortran's, the speeds are not. Real64 replay fluxes agree with the real32 in-model fall arrays to ~2e-6 relative (the dumped pvtr/pvts/pvtg are real32). Residual esm-vs-extrapolated mismatch (real32 constants and default-real literals of the kernel, EqWeFiC FORTRAN_BUGS.md N2; measured with zero tolerances): fluxes and tendencies <= 1.1e-7 of each column's maximum (rain 8.8e-8, snow 1.1e-7, graupel 1.1e-7, ice 1.0e-7), surface rates 1.1-1.3e-7 relative -- the same floor as the rate models (the kernel's real32 pvtr/pvts/pvtg, bvtr = 0.800000011920929, den0, 1.49e4, 1.31 and 5.38e7 versus the exact esm constants); column tolerances are 1e-6 of each reference column's maximum (Linf_error), scalar tolerances rel 2e-6, i.e. 5-10x above. Measured again with zero tolerances after the switch to the jh2010 rule: the rain, snow and graupel tendencies agree with WRF's operator to <= 1.14e-7 of the column maximum, the same real32 floor, and their tolerance is 1e-6 of the maximum. The ICE tendency agrees to <= 2.7e-7 of its maximum and carries the same 1e-6 tolerance. That needed the upwind choice of donor side added to EarthSciDiscretizations PR #42 on 2026-09-22 (commit 14b5db5): where the third-order interface speed overshoots below zero at the edge of an ice layer (3-12 faces per column in these tests), WRF's arrival-point remap takes the mass crossing that face from the TOP face of the layer below; before it the ice residual reached 6.4e-6 and the tolerance was 3e-5. What remains is not the operator (driven with the kernel's own fall speeds, it matches WRF's fallout to 1e-8 - 4e-8 of the ice maximum) but this component's ice fall flux F_i, which differs from the kernel's by 4e-8 - 6e-8 of its peak. Regime: early storm column (i = 20): light rain (3.5e-4 kg/kg) with traces of snow and graupel (< 3e-5) and ice 5.5e-6; exercises the small-q branches of the fall speeds (slope caps).",
+          "parameter_overrides": {},
+          "expression_template_imports": [
+            {
+              "ref": "./tests/qss_step200_row20_col20_early_storm_light_fallout_inputs.esm"
+            }
+          ],
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-06
+          },
+          "assertions": [
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [1.92084394460214e-11, 1.0505359248967566e-09, 1.0538083212678506e-08, 0.0, 2.940262529152886e-05, 2.941444916541959e-06, 5.033571837265822e-07, 1.3637958582462121e-06, 2.3891751440147587e-06, 1.7140436385502694e-06, 4.352135696307505e-07, 2.7878906127007567e-07, 1.022354861390147e-06, 1.0669053423490629e-10, 1.9733555913698028e-12, 2.800768329035038e-11, 9.83647752184118e-15, 3.9902630427582053e-25, 4.058789095631816e-22, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 2.940262529152886e-11
+              }
+            },
+            {
+              "variable": "F_s",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 1.7696700122654462e-17, 1.166658072282871e-12, 2.422844194585279e-10, 3.931531683598589e-10, 2.5209737247752407e-07, 1.3041337470520795e-06, 1.260499410257374e-06, 9.13562135715693e-07, 8.450986652480936e-07, 4.126701806391887e-07, 1.1182072279739077e-07, 4.924593075745394e-11, 2.1410450088310098e-11, 9.291493965411683e-12, 3.5779849402594606e-13, 1.4775950865421631e-13, 2.625903266924193e-13, -1.2460508872008484e-24, 1.146987068942542e-09, 1.2521179924614882e-09, 4.305657687008411e-10, 3.5044627809786488e-12, 4.45868746389266e-25, 2.661829179546225e-22, 8.263019973360074e-21, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.3041337470520793e-12
+              }
+            },
+            {
+              "variable": "F_g",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 2.2210968944890717e-14, 9.202906915122339e-11, 7.732326064512617e-09, 6.033616161993061e-06, 3.828568029098854e-05, 7.29016028103373e-05, 5.6566567616841774e-05, 2.469073190304995e-05, 1.743385386309581e-05, 9.548824520898613e-06, 1.8484099924658903e-06, 6.241375503284792e-10, 1.943308146650581e-10, 2.7161969545989393e-11, 1.193023435824819e-12, 1.1363108242353237e-12, 2.98276320943365e-12, 2.2742873335034705e-12, 1.7070334628691204e-10, 2.0498745030525484e-08, 9.257281542719912e-09, 2.848768497267361e-09, 1.921306300745622e-15, 1.258853455318544e-15, 2.625689209822833e-16, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 7.29016028103373e-11
+              }
+            },
+            {
+              "variable": "F_i",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.3171565979466637e-12, 1.5734008811015388e-09, 0.0, 3.416972947089164e-14, 1.5557679864095621e-13, 3.2058091873311453e-12, 1.0728978107010158e-11, 1.1940885583981913e-12, 3.223668464929173e-13, 4.03194999791758e-15, 1.824334215229405e-08, 1.1328477486007925e-07, 2.168591502728154e-08, 1.1030373778043628e-14, 1.0347232704961436e-15, 3.2888407418698577e-18, 4.0182722001974414e-19, 2.3315153571451238e-20, 5.562010068343647e-17, 3.256197801970655e-13, 1.4477734022310554e-14, 2.2351502088711942e-31, 2.684667586329894e-29, 4.686378290553824e-34, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.1328477486007925e-13
+              }
+            },
+            {
+              "variable": "dqr_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [1.4194251794063859e-12, 1.4585608024840934e-11, -1.7169242919962327e-11, 2.8282771743271463e-08, -2.2186426656910934e-08, -7.222779493085112e-09, 7.328639903372496e-10, 3.4677428097058858e-09, -1.3399358259323497e-10, -4.022131372003932e-09, -1.5205646276817603e-09, 2.1474541672398193e-09, -3.216170972423694e-09, -9.377703176541611e-13, 9.904640648221803e-14, -1.1188036749495834e-13, -4.183751485024179e-17, 1.9547851204640797e-24, -2.0827802751903757e-24, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 2.8282771743271463e-14
+              }
+            },
+            {
+              "variable": "dqs_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 1.7947169354034577e-20, 2.4688954942674606e-15, 3.345496490719457e-13, 2.6482916881217453e-13, 5.816732194707343e-10, 2.8604933020329694e-09, 3.1097118880518655e-10, -1.0075711486946588e-09, -2.232815609082498e-10, -1.316339950751104e-09, -1.4237065239575717e-09, -9.183233636136206e-10, -3.6521986280408435e-13, -5.5144381505326536e-14, -6.859559996101794e-14, -1.0708526570646503e-15, 6.21592193920344e-16, -1.5305808414859812e-15, 6.192313235709612e-12, 2.07007596916594e-12, -3.674267039442374e-12, -5.874835686380243e-12, -3.08735360864727e-14, 2.1510728777986522e-24, 7.655165199616086e-23, -8.393119526317478e-23, -3.0868767353539766e-30, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 2.8604933020329694e-15
+              }
+            },
+            {
+              "variable": "dqg_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 2.2525330619672772e-17, 1.947305243635521e-13, 1.055346182443166e-11, 9.561102475221126e-09, 4.584553712561369e-08, 1.3490560424208995e-07, -2.1858556059412673e-09, -1.084324562590124e-07, -4.582935440158492e-08, -2.674721553269728e-08, -3.528796926756122e-08, -1.7699662179012034e-08, -4.837359372587506e-12, -1.1902435146021065e-12, -1.2607834774304018e-13, -2.305634361090401e-16, 1.0055211924629169e-14, -4.1964718257371525e-15, 9.075474631035711e-13, 1.0323677253796355e-10, -9.2637929815586e-12, -6.809532703134217e-11, -4.27266213197806e-11, -7.10072063390328e-18, -1.2099299862517445e-17, -2.6666073304171186e-18, -4.5018234232049915e-22, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.3490560424208994e-13
+              }
+            },
+            {
+              "variable": "dqi_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 3.9577836388154274e-19, 2.1961529440913735e-12, -2.337787287568809e-12, 2.064237346123281e-20, 2.8754818301035143e-16, 2.7684591591596953e-15, 2.6269769777467938e-14, -1.8464819667905063e-14, -1.1620258864352243e-14, -4.741413902781549e-15, 7.871662463900975e-12, 3.8365226435113096e-10, -1.5254752887093025e-10, -2.8183532346981403e-10, -8.947082455896742e-15, 1.1335664714319173e-15, -8.451656510342901e-20, -1.9530973043178533e-21, -4.66166476391757e-21, 1.3010325547980026e-15, -1.1129335901296046e-15, -2.8955268694715366e-16, -3.5424429289897215e-27, 5.737715863462417e-28, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 3.8365226435113096e-16
+              }
+            },
+            {
+              "variable": "P_r",
+              "time": 0.0,
+              "expected": 1.92084394460214e-11,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_s",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_g",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_i",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_total",
+              "time": 0.0,
+              "expected": 1.92084394460214e-11,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "precip_rate",
+              "time": 0.0,
+              "expected": 1.92084394460214e-14,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 5
+              },
+              "expected": 2.940262529152886e-05,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 6
+              },
+              "expected": 2.941444916541959e-06,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            },
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "coords": {
+                "lev": 9
+              },
+              "expected": 2.3891751440147587e-06,
+              "tolerance": {
+                "rel": 2e-06
+              }
+            }
+          ]
+        },
+        {
+          "id": "scm_call120_cirrus_ice_only_layers_20_59",
+          "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp = 6), call 120 (20:00 UTC) dumped by the instrumented ctessum-claude/WRF fork (module_esm_dump with esm_dump_inner hooks inside mp_wsm6_run of the ctessum-claude/MMM-physics fork, commit 52cfbd7) and replayed through the real64 (kind_phys = real64) standalone kernels/wsm6_driver. INPUTS are the kernel's input state (t, qi, qr, qs, qg, den, delz of tile column 1), i.e. the state the fallout block sees at the start of the sub-step. REFERENCE FLUXES are Fortran-derived: the kernel's fall arrays (fall(:,k,:) = post-fallout density x fall speed / delz for k >= 2, and the semi-Lagrangian surface precipitation / delz / dtcld at k = 1), multiplied by delz, from three real64 replays at ESM_DT = 0.04, 0.02, 0.01 s and Richardson-extrapolated to dt -> 0 (second order; the kernel's fluxes converge linearly in dt to the donor-cell fluxes rho v_t q, so the extrapolation removes the residual to ~1e-12 relative). REFERENCE TENDENCIES are WRF's own fallout operator in the dt -> 0 limit: nislfv_rain_plm, extracted verbatim from mp_wsm6.F90 (lines 1879-2122) into a real64 harness (not part of this repository), run on this test's input column -- the falling density den*q with the round-off negatives WRF keeps, and fall speeds v = F/(rho max(q,0)) from the reference fluxes above, zeroed where WRF zeroes them (workr where q_r <= 0, worka where q_s + q_g <= 1e-15, work1c where q_i <= 0) -- at dt = 2e-3, 1e-3 and 5e-4 s, Richardson-extrapolated to dt -> 0 (it agrees with the extrapolation from 4e-3 .. 1e-3 s to <= 6e-8 of each column's peak) and divided by rho. Each category is replayed on its own, so melting and the rest of the sub-step cannot contaminate it, which the kernel's whole-sub-step rain increment could not guarantee. nislfv_rain_plm6, which sediments snow and graupel, is nislfv_rain_plm applied to each at the shared speed (checked by diff: only its mean-speed iteration differs, and that vanishes as dt -> 0). The exception is the top two layers of the column: WRF empties them on every call by a dt-independent amount (FORTRAN_BUGS B16), so they have no dt -> 0 limit, and their reference is the rule's conservative value (every category carries < 1e-12 kg m^-3 there in this column). This replaced, on 2026-09-22, the donor-cell FORMULA the tendencies used to pin, which is 59 % (ice) away from WRF's operator (Linf over the column maximum) in this column. Cloud-ice fluxes have no kernel counterpart above the surface (fallc is dumped only at k = 1), so F_i is checked against the same formulae evaluated by the filler on the input state (N_i = min(max(5.38e7 (rho q_i)^0.75, 1e3), 1e6), D = min(dicon sqrt(rho q_i/N_i), dimax), v_i = 1.49e4 D^1.31) -- a wiring check, not an independent reference. The ice TENDENCY is WRF's operator applied to those formula speeds, and on this column it is also checked against the whole kernel: it agrees with the Richardson extrapolation to dtcld -> 0 of (qi_rates - qi_in)/dtcld from the dtcld = 0.01, 0.02 and 0.04 s real64 wsm6_driver replays of the same column (replays not part of this repository; nothing melts or freezes here, so that is the fallout alone; TENDENCY_ERROR_BUDGET.md) to 4.5e-7 of the peak below the top two layers. Real64 replay fluxes agree with the real32 in-model fall arrays to ~2e-6 relative (the dumped pvtr/pvts/pvtg are real32). Residual esm-vs-extrapolated mismatch (real32 constants and default-real literals of the kernel, EqWeFiC FORTRAN_BUGS.md N2; measured with zero tolerances): fluxes and tendencies <= 1.1e-7 of each column's maximum (rain 8.8e-8, snow 1.1e-7, graupel 1.1e-7, ice 1.0e-7), surface rates 1.1-1.3e-7 relative -- the same floor as the rate models (the kernel's real32 pvtr/pvts/pvtg, bvtr = 0.800000011920929, den0, 1.49e4, 1.31 and 5.38e7 versus the exact esm constants); column tolerances are 1e-6 of each reference column's maximum (Linf_error), scalar tolerances rel 2e-6, i.e. 5-10x above. Measured again with zero tolerances after the switch to the jh2010 rule: the rain, snow and graupel tendencies agree with WRF's operator to <= 1.14e-7 of the column maximum, the same real32 floor, and their tolerance is 1e-6 of the maximum. The ICE tendency agrees to <= 2.7e-7 of its maximum and carries the same 1e-6 tolerance. That needed the upwind choice of donor side added to EarthSciDiscretizations PR #42 on 2026-09-22 (commit 14b5db5): where the third-order interface speed overshoots below zero at the edge of an ice layer (3-12 faces per column in these tests), WRF's arrival-point remap takes the mass crossing that face from the TOP face of the layer below; before it the ice residual reached 6.4e-6 and the tolerance was 3e-5. What remains is not the operator (driven with the kernel's own fall speeds, it matches WRF's fallout to 1e-8 - 4e-8 of the ice maximum) but this component's ice fall flux F_i, which differs from the kernel's by 4e-8 - 6e-8 of its peak. Regime: SCM cirrus column, WRF layers 20-59 (the component's 40-layer window; the window's lowest face is the top of layer 19, where the kernel's interior flux fall(:,20,:) delz applies as the donor flux): only cloud ice (<= 4.6e-5 kg/kg in layers 50-57) is present, so the rain, snow and graupel fluxes, tendencies and precipitation are exactly zero and the ice tendency is checked by the formula.",
+          "parameter_overrides": {},
+          "expression_template_imports": [
+            {
+              "ref": "./tests/scm_call120_cirrus_ice_only_layers_20_59_inputs.esm"
+            }
+          ],
+          "time_span": {
+            "start": 0.0,
+            "end": 1.0
+          },
+          "tolerance": {
+            "rel": 1e-06
+          },
+          "assertions": [
+            {
+              "variable": "F_r",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_s",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_g",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "F_i",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.3622374517893273e-68, 6.298060190997929e-65, 5.517010807561029e-61, 5.587154990304508e-57, 6.565975810701999e-53, 8.992166807061583e-49, 1.4415230203645623e-44, 2.7184082999655907e-40, 6.063238576803373e-36, 7.436276515872493e-28, 1.092623132473021e-19, 1.94462017479951e-11, 7.35959517424033e-07, 1.1970115283506698e-05, 1.355284353092494e-05, 7.066714569807597e-06, 2.8802940382553245e-06, 7.89678219446171e-07, 1.6434516994483276e-07, 3.189077900643398e-17, 1.2894171558107149e-26]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1.355284353092494e-11
+              }
+            },
+            {
+              "variable": "dqr_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "dqs_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "dqg_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -0.0]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "dqi_dt",
+              "time": 0.0,
+              "reduce": "Linf_error",
+              "expected": 0.0,
+              "reference": {
+                "op": "faq",
+                "output_idx": [
+                  "k"
+                ],
+                "args": [],
+                "ranges": {
+                  "k": {
+                    "from": "lev"
+                  }
+                },
+                "expr": {
+                  "op": "index",
+                  "args": [
+                    {
+                      "op": "const",
+                      "args": [],
+                      "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -5.336656496547207e-33, -7.401713337975635e-25, -2.138853487615779e-18, 1.7207878714542501e-09, 3.493443170688006e-08, 2.7749449411216083e-08, -1.7509811407052752e-08, -2.3522280799909418e-08, -1.2922840883643072e-08, -4.605726525180479e-09, -1.550700108382009e-09, -4.180977894877321e-16, -1.3009724566129875e-25]
+                    },
+                    "k"
+                  ]
+                }
+              },
+              "tolerance": {
+                "abs": 3.4934431706880056e-14
+              }
+            },
+            {
+              "variable": "P_r",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_s",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_g",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_i",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "P_total",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            },
+            {
+              "variable": "precip_rate",
+              "time": 0.0,
+              "expected": 0.0,
+              "tolerance": {
+                "rel": 2e-06,
+                "abs": 1e-30
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

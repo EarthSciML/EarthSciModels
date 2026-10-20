@@ -22,7 +22,10 @@ and CI exist to load and validate those files.
 
 `lib/` is reserved for reusable, low-dependency subsystems that components
 include rather than redefine — currently `lib/solar.esm` (NOAA Spencer-Fourier
-solar declination, equation of time, zenith angle). Stdlib files use the same
+solar declination, equation of time, zenith angle) and the WRF shared files
+`lib/wrf_constants.esm` (WRF's physical constants), `lib/wrf_thermo.esm`
+(thermodynamic identities) and `lib/wrf_air_properties.esm` (transport
+properties of moist air). Stdlib files use the same
 `.esm` schema as components and are validated by the same inline-test
 machinery; they are *not* organized by science domain because they cut across
 domains.
@@ -39,29 +42,34 @@ its `.esm` files use.
 
 ## Per-domain subdirs
 
-Inside `components/`, each subdir corresponds to one **science domain**. For
-now this is 1:1 with an upstream `earthsciml/*.jl` repo — domain and source
-repo coincide. If a domain later spans multiple repos, or a repo crosses
-domains, revisit this convention.
+Inside `components/`, each subdir corresponds to one **science domain**. Where
+an upstream `earthsciml/*.jl` repo exists the two are 1:1 — domain and source
+repo coincide. A domain transcribed from another model with no `.jl` repo
+behind it (so far `atmospheric_radiation/` and `land_surface/`, both from
+WRF) is named for the domain alone. If a domain later spans multiple repos, or
+a repo crosses domains, revisit this convention.
 
 ```
 components/
   aerosol/                   # Aerosol.jl
   atmospheric_deposition/    # AtmosphericDeposition.jl
   atmospheric_dynamics/      # AtmosphericDynamics.jl
+  atmospheric_radiation/     # radiation schemes transcribed from WRF (no upstream .jl repo)
   earthsci_data/             # EarthSciData.jl (DataLoaders, ERA5/GEOSFP/...)
   earthsci_discretizations/  # EarthSciDiscretizations.jl (framework primitives)
   earthsci_ml_base/          # EarthSciMLBase.jl (framework primitives)
   environmental_transport/   # EnvironmentalTransport.jl
   gaschem/                   # GasChem.jl (atmospheric chemistry)
   geodynamics/               # Geodynamics.jl
+  land_surface/              # land-surface schemes transcribed from WRF (no upstream .jl repo)
   urban_canopy/              # UrbanCanopy.jl
   vegetation/                # Vegetation.jl
   wildland_fire/             # WildlandFire.jl
 ```
 
 Subdir names are lowercase snake_case forms of the upstream repo name (with
-`.jl` dropped, hyphens and capitalization normalized).
+`.jl` dropped, hyphens and capitalization normalized), or of the domain name
+where there is no upstream repo.
 
 ## File naming
 

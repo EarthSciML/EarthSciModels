@@ -26,15 +26,16 @@
         },
         "CGRATE": {
           "type": "unknown",
-          "description": "Cloud-to-ground lightning discharge rate (dimensionless)"
+          "description": "Cloud-to-ground lightning discharge rate, strikes/min (dimensionless)"
         },
         "LGTDUR": {
           "type": "unknown",
-          "description": "Duration of lightning at a point (dimensionless)"
+          "description": "Duration of lightning at a point within the affected area, in minutes (dimensionless number of minutes)"
         },
         "IC": {
           "type": "parameter",
-          "description": "Ignition component 0-100 (dimensionless)"
+          "description": "Ignition component 0-100 (dimensionless). An input from IgnitionComponent; the default is a mid-range value so the model builds standalone",
+          "default": 50.0
         },
         "TOTWID": {
           "type": "unknown",
@@ -80,11 +81,12 @@
         },
         "MC1": {
           "type": "parameter",
-          "description": "1-hour fuel moisture content (dimensionless)"
+          "description": "1-hour fuel moisture content, as a fraction (dimensionless; the same convention as IgnitionComponent.MC1)",
+          "default": 0.1
         },
         "RAIDUR": {
           "type": "unknown",
-          "description": "Rain duration at a point"
+          "description": "Rain duration at a point within the rain-lightning corridor, STMDIA/STMSPD"
         },
         "V_ref": {
           "default": 1.0,
@@ -127,12 +129,12 @@
         "STMSPD": {
           "default": 13.4112,
           "type": "parameter",
-          "description": "Storm translational speed"
+          "description": "Storm translational speed (m/s; NFDRS uses a constant 30 mph = 13.4112 m/s)"
         }
       },
       "reference": {
         "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station (Lightning Fire Occurrence Index).",
-        "notes": "TODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[11].rhs"
+        "notes": "TODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[11].rhs\n\nEquations checked against PSW-82 (pp. 13-14) and Fuquay, Baughman & Latham (1979), A model for predicting lightning fire ignition in wildland fuels, USDA FS Res. Pap. INT-217 (Fig. 3):\n- CGRATE follows the PSW-82 LAL table (LAL 2/3/4/5 -> 12.5/25/50/100 strikes/min); LAL 6 sets LRISK = LOI = 100.\n- FINSID is the racetrack-area ratio FI = (4DUS + pi S^2)/(4DUL + pi L^2) of Fuquay et al., with S = STMDIA, L = TOTWID and the swept distance D*U = STMSPD*LGTDUR (LGTDUR in minutes, so 60 s/min). PSW-82 prints the denominator's first term as STMDIA*STMSPD*TOTWID, which has no duration in it and returns fractions above 1 (15.9 at LAL 3); that is a typo for TOTWID*STMSPD*LGTDUR. FINSID is a ratio of areas, so it is evaluated in metres directly.\n- LOI keeps only the carry-over 0.25*YLOI when there is no lightning OR when it is raining at the observation time; otherwise LOI = 10*LRISK*ICBAR + 0.25*YLOI, limited to 100. IRND rounding is not applied.\n- MC1 is a fraction, the convention of IgnitionComponent, so FMF's 76 percent wetted-surface moisture appears as (76 + 2.7*RAIDUR_h)/100.\n- Simplification kept from the original transcription: PSW-82 evaluates ICR with the full IC function at FMF; here ICR = IC*max(0, 1 - 10*(FMF - MC1))."
       },
       "equations": [
         {
@@ -141,7 +143,7 @@
               {
                 "args": [
                   "LAL",
-                  2.5
+                  1.5
                 ],
                 "op": "<"
               },
@@ -151,7 +153,7 @@
                   {
                     "args": [
                       "LAL",
-                      3.5
+                      2.5
                     ],
                     "op": "<"
                   },
@@ -161,7 +163,7 @@
                       {
                         "args": [
                           "LAL",
-                          4.5
+                          3.5
                         ],
                         "op": "<"
                       },
@@ -171,7 +173,7 @@
                           {
                             "args": [
                               "LAL",
-                              5.5
+                              4.5
                             ],
                             "op": "<"
                           },
@@ -456,22 +458,43 @@
                     "args": [
                       {
                         "args": [
+                          "STMDIA",
+                          {
+                            "args": [
+                              60.0,
+                              "STMSPD",
+                              "LGTDUR",
+                              "s_ref"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
                           0.7854,
                           {
                             "args": [
-                              {
-                                "args": [
-                                  {
-                                    "args": [
-                                      "m_to_mi",
-                                      "STMDIA"
-                                    ],
-                                    "op": "*"
-                                  },
-                                  "L_ref"
-                                ],
-                                "op": "/"
-                              },
+                              "STMDIA",
+                              2
+                            ],
+                            "op": "^"
+                          }
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "+"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1e-10,
+                          {
+                            "args": [
+                              "L_ref",
                               2
                             ],
                             "op": "^"
@@ -483,84 +506,25 @@
                         "args": [
                           {
                             "args": [
-                              "m_to_mi",
-                              "STMDIA",
-                              "STMSPD",
-                              "ms_to_mph",
-                              "LGTDUR"
-                            ],
-                            "op": "*"
-                          },
-                          {
-                            "args": [
-                              "V_ref",
-                              "L_ref"
-                            ],
-                            "op": "*"
-                          }
-                        ],
-                        "op": "/"
-                      }
-                    ],
-                    "op": "+"
-                  },
-                  {
-                    "args": [
-                      1e-10,
-                      {
-                        "args": [
-                          {
-                            "args": [
+                              "TOTWID",
                               {
                                 "args": [
-                                  {
-                                    "args": [
-                                      "m_to_mi",
-                                      2
-                                    ],
-                                    "op": "^"
-                                  },
-                                  "STMDIA",
+                                  60.0,
                                   "STMSPD",
-                                  "ms_to_mph",
-                                  "TOTWID"
-                                ],
-                                "op": "*"
-                              },
-                              {
-                                "args": [
-                                  "V_ref",
-                                  {
-                                    "args": [
-                                      "L_ref",
-                                      2
-                                    ],
-                                    "op": "^"
-                                  }
+                                  "LGTDUR",
+                                  "s_ref"
                                 ],
                                 "op": "*"
                               }
                             ],
-                            "op": "/"
+                            "op": "*"
                           },
                           {
                             "args": [
                               0.7854,
                               {
                                 "args": [
-                                  {
-                                    "args": [
-                                      {
-                                        "args": [
-                                          "m_to_mi",
-                                          "TOTWID"
-                                        ],
-                                        "op": "*"
-                                      },
-                                      "L_ref"
-                                    ],
-                                    "op": "/"
-                                  },
+                                  "TOTWID",
                                   2
                                 ],
                                 "op": "^"
@@ -814,16 +778,29 @@
         {
           "rhs": {
             "args": [
+              {
+                "args": [
+                  "LAL",
+                  5.5
+                ],
+                "op": ">="
+              },
               100.0,
               {
                 "args": [
-                  "CGRATE",
-                  "LRSF"
+                  100.0,
+                  {
+                    "args": [
+                      "CGRATE",
+                      "LRSF"
+                    ],
+                    "op": "*"
+                  }
                 ],
-                "op": "*"
+                "op": "min"
               }
             ],
-            "op": "min"
+            "op": "ifelse"
           },
           "lhs": "LRISK"
         },
@@ -867,7 +844,7 @@
                           "is_raining",
                           0.5
                         ],
-                        "op": "<"
+                        "op": ">="
                       },
                       {
                         "args": [
@@ -941,7 +918,7 @@
         },
         {
           "id": "cgrate_lal_mid",
-          "description": "LAL = 3.0 (in [2.5, 3.5)): CGRATE = 12.5 (moderate lightning activity).",
+          "description": "LAL = 3.0 (in [2.5, 3.5)): CGRATE = 25 strikes/min (PSW-82 LAL table).",
           "parameter_overrides": {
             "LAL": 3.0
           },
@@ -953,13 +930,13 @@
             {
               "variable": "CGRATE",
               "time": 0.0,
-              "expected": 12.5
+              "expected": 25.0
             }
           ]
         },
         {
           "id": "cgrate_lal_high",
-          "description": "LAL = 5.0 (in [4.5, 5.5)): CGRATE = 50 (high lightning activity).",
+          "description": "LAL = 5.0 (>= 4.5): CGRATE = 100 strikes/min (PSW-82 LAL table).",
           "parameter_overrides": {
             "LAL": 5.0
           },
@@ -971,13 +948,13 @@
             {
               "variable": "CGRATE",
               "time": 0.0,
-              "expected": 50.0
+              "expected": 100.0
             }
           ]
         },
         {
           "id": "cgrate_lal_max",
-          "description": "LAL = 6.0 (>= 5.5): CGRATE = 100 (maximum lightning activity).",
+          "description": "LAL = 6.0: CGRATE stays at the LAL 5 value of 100 strikes/min (LAL 6 forces LRISK and LOI to 100 separately).",
           "parameter_overrides": {
             "LAL": 6.0
           },
@@ -1115,7 +1092,7 @@
         },
         {
           "id": "lgtdur_cgrate_positive",
-          "description": "LAL = 3.0 gives CGRATE = 12.5 (> 0): LGTDUR = -86.83 + 153.41 * 12.5^0.1437 = 133.70607391862598.",
+          "description": "LAL = 3.0 gives CGRATE = 25 (> 0): LGTDUR = -86.83 + 153.41 * 25^0.1437 = 156.80386179214958 min.",
           "parameter_overrides": {
             "LAL": 3.0
           },
@@ -1127,7 +1104,7 @@
             {
               "variable": "LGTDUR",
               "time": 0.0,
-              "expected": 133.70607391862598
+              "expected": 156.80386179214958
             }
           ]
         },
@@ -1151,7 +1128,7 @@
         },
         {
           "id": "lrisk_cgrate_low",
-          "description": "LAL = 3.0 (CGRATE = 12.5), LRSF = 1: LRISK = min(100, 12.5 * 1) = 12.5.",
+          "description": "LAL = 3.0 (CGRATE = 25), LRSF = 1: LRISK = min(100, 25 * 1) = 25.",
           "parameter_overrides": {
             "LAL": 3.0,
             "LRSF": 1.0
@@ -1164,13 +1141,13 @@
             {
               "variable": "LRISK",
               "time": 0.0,
-              "expected": 12.5
+              "expected": 25.0
             }
           ]
         },
         {
           "id": "lrisk_cgrate_high",
-          "description": "LAL = 6.0 (CGRATE = 100), LRSF = 1: LRISK = min(100, 100 * 1) = 100 (clamped).",
+          "description": "LAL = 6.0, LRSF = 1: LAL 6 sets LRISK = 100.",
           "parameter_overrides": {
             "LAL": 6.0,
             "LRSF": 1.0
@@ -1189,7 +1166,7 @@
         },
         {
           "id": "fotsid_finsid_complement",
-          "description": "FOTSID = 1 - FINSID, so FOTSID + FINSID = 1 (verified by checking the algebraic relationship).",
+          "description": "LAL = 3: STMDIA = 4 mi, TOTWID = 8 mi, LGTDUR = 156.804 min, STMSPD = 13.4112 m/s (30 mph), so the swept distance is 60*STMSPD*LGTDUR = 126,173 m. FINSID = (STMDIA*sweep + 0.7854*STMDIA^2)/(TOTWID*sweep + 0.7854*TOTWID^2) = 0.4814512892242243 (Fuquay et al. 1979 racetrack geometry) and FOTSID = 1 - FINSID. Both lie in [0, 1], as a fraction of the corridor must.",
           "parameter_overrides": {
             "LAL": 3.0,
             "mi_to_m": 1609.344,
@@ -1203,12 +1180,12 @@
             {
               "variable": "FOTSID",
               "time": 0.0,
-              "expected": -14.894138667655566
+              "expected": 0.5185487107757758
             },
             {
               "variable": "FINSID",
               "time": 0.0,
-              "expected": 15.894138667655566
+              "expected": 0.48145128922422425
             }
           ]
         },
@@ -1255,16 +1232,106 @@
           ]
         },
         {
-          "id": "loi_with_lightning_rain",
-          "description": "is_lightning = 0.6 (> 0.5), is_raining = 0.3 (< 0.5), LAL = 5.0: LOI = min(100, 0.25*YLOI + 10*ICBAR*LRISK).",
+          "id": "loi_with_lightning_no_rain",
+          "description": "Lightning, no rain at the observation time, LAL = 3, IC = 50, MC1 = 0.10, YLOI = 0: the ICBAR*LRISK branch. RAIDUR = 480 s, FMF = 0.18283483228597777, ICR = 50*max(0, 1 - 10*(FMF - MC1)) = 8.582583857011116, ICBAR = (FOTSID*IC + FINSID*ICR)/100 = 0.3005953160162181, LRISK = 25, LOI = 10*ICBAR*LRISK = 75.14882900405452.",
           "parameter_overrides": {
-            "LAL": 5.0,
-            "is_lightning": 0.6,
-            "is_raining": 0.3,
+            "LAL": 3.0,
+            "is_lightning": 1.0,
+            "is_raining": 0.0,
             "YLOI": 0.0,
             "IC": 50.0,
-            "MC1": 10.0,
+            "MC1": 0.1,
             "STMSPD": 13.4112
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "FMF",
+              "time": 0.0,
+              "expected": 0.18283483228597777
+            },
+            {
+              "variable": "ICR",
+              "time": 0.0,
+              "expected": 8.582583857011116
+            },
+            {
+              "variable": "ICBAR",
+              "time": 0.0,
+              "expected": 0.3005953160162181
+            },
+            {
+              "variable": "LOI",
+              "time": 0.0,
+              "expected": 75.14882900405452
+            }
+          ]
+        },
+        {
+          "id": "finsid_lal5",
+          "description": "LAL = 5: STMDIA = 7 mi, TOTWID = 11 mi, LGTDUR = 210.510 min. FINSID = 0.6188105521031806, between the LAL 3 value and 1, growing with storm size.",
+          "parameter_overrides": {
+            "LAL": 5.0
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "FINSID",
+              "time": 0.0,
+              "expected": 0.6188105521031806
+            },
+            {
+              "variable": "FOTSID",
+              "time": 0.0,
+              "expected": 0.3811894478968194
+            }
+          ]
+        },
+        {
+          "id": "loi_lightning_carryover",
+          "description": "As loi_with_lightning_no_rain but IC = 40, LRSF = 0.5 and YLOI = 20: ICR = 6.8660670856088934, ICBAR = 0.2404762528129745, LRISK = 12.5, LOI = 0.25*20 + 10*ICBAR*LRISK = 35.05953160162181.",
+          "parameter_overrides": {
+            "LAL": 3.0,
+            "is_lightning": 1.0,
+            "is_raining": 0.0,
+            "YLOI": 20.0,
+            "IC": 40.0,
+            "MC1": 0.1,
+            "LRSF": 0.5
+          },
+          "time_span": {
+            "start": 0.0,
+            "end": 0.0
+          },
+          "assertions": [
+            {
+              "variable": "ICBAR",
+              "time": 0.0,
+              "expected": 0.2404762528129745
+            },
+            {
+              "variable": "LOI",
+              "time": 0.0,
+              "expected": 35.05953160162181
+            }
+          ]
+        },
+        {
+          "id": "loi_raining_at_observation",
+          "description": "Lightning, but raining at the afternoon observation: PSW-82 keeps only the carry-over, LOI = 0.25*YLOI = 5 for YLOI = 20.",
+          "parameter_overrides": {
+            "LAL": 3.0,
+            "is_lightning": 1.0,
+            "is_raining": 1.0,
+            "YLOI": 20.0,
+            "IC": 50.0,
+            "MC1": 0.1
           },
           "time_span": {
             "start": 0.0,
@@ -1274,7 +1341,7 @@
             {
               "variable": "LOI",
               "time": 0.0,
-              "expected": 0.0
+              "expected": 5.0
             }
           ]
         }
@@ -1296,7 +1363,7 @@
             "is_lightning": 1.0,
             "is_raining": 0.0,
             "IC": 50.0,
-            "MC1": 10.0,
+            "MC1": 0.1,
             "YLOI": 0.0,
             "STMSPD": 13.4112
           }
