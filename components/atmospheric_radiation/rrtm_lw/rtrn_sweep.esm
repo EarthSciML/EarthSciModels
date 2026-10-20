@@ -2,7 +2,7 @@
  "esm": "1.2.0",
  "metadata": {
   "name": "rtrn_sweep",
-  "description": "RRTM longwave radiative transfer (SUBROUTINE RTRN of phys/module_ra_rrtm.F, WRF 4.8; Mlawer et al. 1997, Iacono's CCM revision): from the quantised gas optical depths ITR and Planck fractions PFRAC of GASABS, the cloud optical depths and fractions, and the layer/level temperatures of the extended RRTM column, compute the Planck sources, the one-angle (diffusivity-angle, secant 1.66) downward and upward radiance sweeps for all 140 g-points with the RRTM cloud-fraction overlap, the clear-sky sweeps, the band-summed and total up/down fluxes, and RRTM's heating rates HTR/HTRC. The two sweeps are esm-spec 4.3.1.1 recurrences over the level index (one per g-point): each level's radiance is the previous level's radiance transmitted through the intervening layer plus that layer's emission, a genuinely sequential integration of the Schwarzschild equation that has no closed form once the layer sources vary (CLAUDE.md: recurrences are reserved for sequential sweeps such as two-stream up/down passes). Layer 1 of rlay is the lowest RRTM layer (surface), level 1 of rlev the surface; the downward sweep is written on a top-counted index and gathered back so that the recurrence reads strictly earlier cells. Gas optics (GASABS/TAUGB1-16) are NOT transcribed: ITR and PFRAC are inputs (stage 3 of PLAN.md).",
+  "description": "RRTM longwave radiative transfer (SUBROUTINE RTRN of phys/module_ra_rrtm.F, WRF 4.8; Mlawer et al. 1997, Iacono's CCM revision): from the quantised gas optical depths ITR and Planck fractions PFRAC of GASABS, the cloud optical depths and fractions, and the layer/level temperatures of the extended RRTM column, compute the Planck sources, the one-angle (diffusivity-angle, secant 1.66) downward and upward radiance sweeps for all 140 g-points with the RRTM cloud-fraction overlap, the clear-sky sweeps, the band-summed and total up/down fluxes, and RRTM's heating rates HTR/HTRC. The two sweeps are esm-spec 4.3.1.1 recurrences over the level index (one per g-point): each level's radiance is the previous level's radiance transmitted through the intervening layer plus that layer's emission, a genuinely sequential integration of the Schwarzschild equation that has no closed form once the layer sources vary (EqWeFiC CLAUDE.md: recurrences are reserved for sequential sweeps such as two-stream up/down passes). Layer 1 of rlay is the lowest RRTM layer (surface), level 1 of rlev the surface; the downward sweep is written on a top-counted index and gathered back so that the recurrence reads strictly earlier cells. Gas optics (GASABS/TAUGB1-16) are not part of this component: ITR and PFRAC are inputs, computed by rrtm_gas_optics.esm. EqWeFiC, cited here for CLAUDE.md, FORTRAN_BUGS.md, couplings/ and components/atmospheric_dynamics/wrf_arw/, is https://github.com/EarthSciML/EqWeFiC, where these components were developed and are coupled into a WRF column.",
   "license": "MIT",
   "tags": [
    "wrf",
@@ -61,8 +61,13 @@
    "size": {
     "op": "+",
     "args": [
-     "NLEV",
-     "NBUF",
+     {
+      "op": "+",
+      "args": [
+       "NLEV",
+       "NBUF"
+      ]
+     },
      1
     ]
    }
@@ -109,6 +114,44 @@
    "expression_template_imports": [
     {
      "ref": "./rrtm_spectral_tables.esm"
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/grid.esm",
+     "bindings": {
+      "NLEV": {
+       "op": "+",
+       "args": [
+        "NLEV",
+        "NBUF"
+       ]
+      }
+     },
+     "rename": {
+      "lev": "rlay",
+      "lev_nodes": "rlev"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/face_flux_D_lev_supplied_faces.esm",
+     "bindings": {
+      "NLEV": {
+       "op": "+",
+       "args": [
+        "NLEV",
+        "NBUF"
+       ]
+      }
+     },
+     "rename": {
+      "lev": "rlay",
+      "lev_nodes": "rlev"
+     }
+    },
+    {
+     "ref": "./rrtm_flux_diagnostics.esm",
+     "bindings": {
+      "NLEV": "NLEV"
+     }
     }
    ],
    "expression_templates": {
@@ -384,49 +427,20 @@
       "g",
       "l"
      ],
-     "description": "The value of a per-band level/layer field at the band NGB(g) of g-point g (RTRN's PLVL(NGB(IPR), LEV)), written as a sum over bands with the band-membership indicator so that no index is taken from a table value.",
+     "description": "The value of a per-band level/layer field at the band NGB(g) of g-point g (RTRN's PLVL(NGB(IPR), LEV)), read by indexing the field with the g-point's band.",
      "body": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [],
-      "ranges": {
-       "b": {
-        "from": "bands"
-       }
-      },
-      "expr": {
-       "op": "*",
-       "args": [
-        {
-         "op": "ifelse",
-         "args": [
-          {
-           "op": "==",
-           "args": [
-            {
-             "op": "index",
-             "args": [
-              "ngb",
-              "g"
-             ]
-            },
-            "b"
-           ]
-          },
-          1.0,
-          0.0
-         ]
-        },
-        {
-         "op": "index",
-         "args": [
-          "field",
-          "b",
-          "l"
-         ]
-        }
-       ]
-      }
+      "op": "index",
+      "args": [
+       "field",
+       {
+        "op": "index",
+        "args": [
+         "ngb",
+         "g"
+        ]
+       },
+       "l"
+      ]
      }
     },
     "band_scalar_at_gpoint": {
@@ -437,46 +451,17 @@
      ],
      "description": "The value of a per-band scalar field (SEMISS, PLANKBND) at the band of g-point g.",
      "body": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [],
-      "ranges": {
-       "b": {
-        "from": "bands"
+      "op": "index",
+      "args": [
+       "field",
+       {
+        "op": "index",
+        "args": [
+         "ngb",
+         "g"
+        ]
        }
-      },
-      "expr": {
-       "op": "*",
-       "args": [
-        {
-         "op": "ifelse",
-         "args": [
-          {
-           "op": "==",
-           "args": [
-            {
-             "op": "index",
-             "args": [
-              "ngb",
-              "g"
-             ]
-            },
-            "b"
-           ]
-          },
-          1.0,
-          0.0
-         ]
-        },
-        {
-         "op": "index",
-         "args": [
-          "field",
-          "b"
-         ]
-        }
-       ]
-      }
+      ]
      }
     },
     "clear_layer_transfer": {
@@ -595,7 +580,7 @@
       "rlay"
      ],
      "default": 250.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `tavel` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_tavel` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_tavel` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `tavel` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_tavel` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_tavel` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "tz_in": {
      "type": "parameter",
@@ -604,7 +589,7 @@
       "rlev"
      ],
      "default": 250.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `tz` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_tz` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_tz` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `tz` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_tz` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_tz` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "pz_in": {
      "type": "parameter",
@@ -613,7 +598,7 @@
       "rlev"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `pz` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_pz` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_pz` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `pz` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_pz` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_pz` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "cldfrac_in": {
      "type": "parameter",
@@ -622,7 +607,7 @@
       "rlay"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `cldfrac` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_cldfrac` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_cldfrac` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `cldfrac` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_cldfrac` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_cldfrac` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "taucloud_in": {
      "type": "parameter",
@@ -631,7 +616,7 @@
       "rlay"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `taucloud` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_taucloud` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_taucloud` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `taucloud` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_taucloud` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_taucloud` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "semiss_in": {
      "type": "parameter",
@@ -640,7 +625,7 @@
       "bands"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `semiss` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_semiss` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_semiss` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `semiss` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_semiss` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_semiss` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "pfrac_flat_in": {
      "type": "parameter",
@@ -649,7 +634,7 @@
       "gl"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `pfrac_flat` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_pfrac_flat` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_pfrac_flat` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `pfrac_flat` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_pfrac_flat` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_pfrac_flat` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "itr_flat_in": {
      "type": "parameter",
@@ -658,7 +643,7 @@
       "gl"
      ],
      "default": 0.0,
-     "description": "Coupling target (assembly input path): a shaped parameter that receives `itr_flat` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_itr_flat` to this parameter (see couplings/rrtm_lw_column.esm). Standalone, `input_itr_flat` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
+     "description": "Coupling target (assembly input path): a shaped parameter that receives `itr_flat` from the upstream component through a document-level `coupling.variable_map` (`param_to_var`) when the assembly's mount-edge template library lowers `input_itr_flat` to this parameter (see EqWeFiC couplings/rrtm_lw_column.esm). Standalone, `input_itr_flat` is lowered to a dumped column by the test's library and this parameter is unused (default 0)."
     },
     "tavel": {
      "type": "unknown",
@@ -683,6 +668,22 @@
       "rlev"
      ],
      "description": "RRTM level pressures PZ(0:NLAYERS) in hPa."
+    },
+    "ze": {
+     "type": "unknown",
+     "units": "hPa",
+     "shape": [
+      "rlev"
+     ],
+     "description": "Pressure distance above the surface of each RRTM level, pz[1] - pz (hPa, increasing upward): the interface coordinate of the EarthSciDiscretizations column_nonuniform_1d grid this component imports on the extended RRTM column (lev -> rlay, lev_nodes -> rlev, NLEV + NBUF layers), so that D(F, wrt: rlay) lowers to (F[l+1] - F[l]) / (pz[l] - pz[l+1])."
+    },
+    "dz": {
+     "type": "unknown",
+     "units": "hPa",
+     "shape": [
+      "rlay"
+     ],
+     "description": "RRTM layer pressure thickness pz[l] - pz[l+1] (hPa), the grid's layer measure (column_cell_thickness of ze) that the face-flux divergence rule divides by."
     },
     "cldfrac": {
      "type": "unknown",
@@ -771,7 +772,7 @@
       "tnodes",
       "bands"
      ],
-     "description": "Band-integrated Planck function per unit wavenumber at T = PLANCK_T0 + i (RRTM TOTPLNK table, in the units that make DELWAVE TOTPLNK x WTNUM FLUXFAC a flux in W/m^2). Spelled as an aggregate over the const table rather than the bare const: the Rust CLI folds a gather from a bare const array at interpreter-build time, before document-level couplings are applied, so with the temperatures coupled in (couplings/rrtm_lw_column.esm) the fold saw T = 0 and failed with E_TREEWALK_CONSTARRAY_OOB."
+     "description": "Band-integrated Planck function per unit wavenumber at T = PLANCK_T0 + i (RRTM TOTPLNK table, in the units that make DELWAVE TOTPLNK x WTNUM FLUXFAC a flux in W/m^2). Spelled as an aggregate over the const table rather than the bare const: the Rust CLI folds a gather from a bare const array at interpreter-build time, before document-level couplings are applied, so with the temperatures coupled in (EqWeFiC couplings/rrtm_lw_column.esm) the fold saw T = 0 and failed with E_TREEWALK_CONSTARRAY_OOB."
     },
     "tau_gas": {
      "type": "unknown",
@@ -1074,31 +1075,13 @@
      ],
      "description": "Clear-sky upward flux (TOTUCLFL)."
     },
-    "F_dn_band": {
-     "type": "unknown",
-     "units": "W/m^2",
-     "shape": [
-      "bands",
-      "rlev"
-     ],
-     "description": "Downward flux per band (sum over the band's g-points)."
-    },
-    "F_up_band": {
-     "type": "unknown",
-     "units": "W/m^2",
-     "shape": [
-      "bands",
-      "rlev"
-     ],
-     "description": "Upward flux per band."
-    },
     "F_dn_band_sfc": {
      "type": "unknown",
      "units": "W/m^2",
      "shape": [
       "bands"
      ],
-     "description": "Per-band downward flux at the surface (rank-1 view)."
+     "description": "Per-band downward flux at the surface (sum over the band's g-points)."
     },
     "F_up_band_sfc": {
      "type": "unknown",
@@ -1106,7 +1089,7 @@
      "shape": [
       "bands"
      ],
-     "description": "Per-band upward flux at the surface (rank-1 view)."
+     "description": "Per-band upward flux at the surface (sum over the band's g-points)."
     },
     "F_up_band_toa": {
      "type": "unknown",
@@ -1114,7 +1097,7 @@
      "shape": [
       "bands"
      ],
-     "description": "Per-band upward flux at the top of the RRTM column (rank-1 view)."
+     "description": "Per-band upward flux at the top of the RRTM column (sum over the band's g-points)."
     },
     "F_dn_band_mtop": {
      "type": "unknown",
@@ -1122,7 +1105,7 @@
      "shape": [
       "bands"
      ],
-     "description": "Per-band downward flux at the model top (level NLEV + 1; rank-1 view)."
+     "description": "Per-band downward flux at the model top (level NLEV + 1; sum over the band's g-points)."
     },
     "F_net": {
      "type": "unknown",
@@ -1146,7 +1129,7 @@
      "shape": [
       "rlay"
      ],
-     "description": "RRTM heating rate of each layer, HEATFAC (FNET(L-1) - FNET(L))/(PZ(L-1) - PZ(L)) (HTR(L-1) is layer L; K/day)."
+     "description": "RRTM heating rate of each layer of the extended column, -HEATFAC dF_net/ds with s = ze the pressure distance above the surface, lowered by the EarthSciDiscretizations face_flux_D_lev_supplied_faces rule to HEATFAC (FNET(L-1) - FNET(L))/(PZ(L-1) - PZ(L)) (RTRN loop 7000: HTR(L-1) is layer L; K/day). The same rule gives rrtm_lw_heating.esm its dTdt on the model layers."
     },
     "htrc": {
      "type": "unknown",
@@ -1154,17 +1137,17 @@
      "shape": [
       "rlay"
      ],
-     "description": "Clear-sky heating rate (HTRC)."
+     "description": "Clear-sky heating rate (HTRC), the htr divergence applied to the clear-sky net flux."
     },
     "glw": {
      "type": "unknown",
      "units": "W/m^2",
-     "description": "Downward longwave flux at the surface, TOTDFLUX(0) (WRF GLW)."
+     "description": "Downward longwave flux at the surface, TOTDFLUX(0) (WRF GLW; template wrf_glw of rrtm_flux_diagnostics.esm, shared with rrtm_lw_heating.esm)."
     },
     "olr": {
      "type": "unknown",
      "units": "W/m^2",
-     "description": "Upward flux at the MODEL top, TOTUFLUX(kte) -- WRF's OLR (FORTRAN_BUGS.md N14)."
+     "description": "Upward flux at the MODEL top, TOTUFLUX(kte) -- WRF's OLR (EqWeFiC FORTRAN_BUGS.md N14; template wrf_olr of rrtm_flux_diagnostics.esm, shared with rrtm_lw_heating.esm)."
     },
     "olr_toa": {
      "type": "unknown",
@@ -1192,6 +1175,53 @@
      "rhs": {
       "op": "input_pz",
       "args": []
+     }
+    },
+    {
+     "lhs": "ze",
+     "rhs": {
+      "op": "aggregate",
+      "output_idx": [
+       "kn"
+      ],
+      "args": [
+       "pz"
+      ],
+      "ranges": {
+       "kn": {
+        "from": "rlev"
+       }
+      },
+      "expr": {
+       "op": "-",
+       "args": [
+        {
+         "op": "index",
+         "args": [
+          "pz",
+          1
+         ]
+        },
+        {
+         "op": "index",
+         "args": [
+          "pz",
+          "kn"
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "lhs": "dz",
+     "rhs": {
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "column_cell_thickness",
+      "bindings": {
+       "ze": "ze"
+      }
      }
     },
     {
@@ -3303,20 +3333,16 @@
      }
     },
     {
-     "lhs": "F_dn_band",
+     "lhs": "F_dn_band_sfc",
      "rhs": {
       "op": "aggregate",
       "args": [],
       "output_idx": [
-       "b",
-       "l"
+       "b"
       ],
       "ranges": {
        "b": {
         "from": "bands"
-       },
-       "l": {
-        "from": "rlev"
        },
        "g": {
         "from": "gpts"
@@ -3352,7 +3378,7 @@
          "args": [
           "rad_dn",
           "g",
-          "l"
+          1
          ]
         }
        ]
@@ -3360,20 +3386,16 @@
      }
     },
     {
-     "lhs": "F_up_band",
+     "lhs": "F_up_band_sfc",
      "rhs": {
       "op": "aggregate",
       "args": [],
       "output_idx": [
-       "b",
-       "l"
+       "b"
       ],
       "ranges": {
        "b": {
         "from": "bands"
-       },
-       "l": {
-        "from": "rlev"
        },
        "g": {
         "from": "gpts"
@@ -3409,55 +3431,9 @@
          "args": [
           "rad_up",
           "g",
-          "l"
+          1
          ]
         }
-       ]
-      }
-     }
-    },
-    {
-     "lhs": "F_dn_band_sfc",
-     "rhs": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [
-       "b"
-      ],
-      "ranges": {
-       "b": {
-        "from": "bands"
-       }
-      },
-      "expr": {
-       "op": "index",
-       "args": [
-        "F_dn_band",
-        "b",
-        1
-       ]
-      }
-     }
-    },
-    {
-     "lhs": "F_up_band_sfc",
-     "rhs": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [
-       "b"
-      ],
-      "ranges": {
-       "b": {
-        "from": "bands"
-       }
-      },
-      "expr": {
-       "op": "index",
-       "args": [
-        "F_up_band",
-        "b",
-        1
        ]
       }
      }
@@ -3473,19 +3449,49 @@
       "ranges": {
        "b": {
         "from": "bands"
+       },
+       "g": {
+        "from": "gpts"
        }
       },
       "expr": {
-       "op": "index",
+       "op": "*",
        "args": [
-        "F_up_band",
-        "b",
         {
-         "op": "+",
+         "op": "ifelse",
          "args": [
-          "NLEV",
-          "NBUF",
-          1
+          {
+           "op": "==",
+           "args": [
+            {
+             "op": "index",
+             "args": [
+              "ngb",
+              "g"
+             ]
+            },
+            "b"
+           ]
+          },
+          1.0,
+          0.0
+         ]
+        },
+        "par.wtnum",
+        "par.fluxfac",
+        {
+         "op": "index",
+         "args": [
+          "rad_up",
+          "g",
+          {
+           "op": "+",
+           "args": [
+            "NLEV",
+            "NBUF",
+            1
+           ]
+          }
          ]
         }
        ]
@@ -3503,18 +3509,48 @@
       "ranges": {
        "b": {
         "from": "bands"
+       },
+       "g": {
+        "from": "gpts"
        }
       },
       "expr": {
-       "op": "index",
+       "op": "*",
        "args": [
-        "F_dn_band",
-        "b",
         {
-         "op": "+",
+         "op": "ifelse",
          "args": [
-          "NLEV",
-          1
+          {
+           "op": "==",
+           "args": [
+            {
+             "op": "index",
+             "args": [
+              "ngb",
+              "g"
+             ]
+            },
+            "b"
+           ]
+          },
+          1.0,
+          0.0
+         ]
+        },
+        "par.wtnum",
+        "par.fluxfac",
+        {
+         "op": "index",
+         "args": [
+          "rad_dn",
+          "g",
+          {
+           "op": "+",
+           "args": [
+            "NLEV",
+            1
+           ]
+          }
          ]
         }
        ]
@@ -3544,179 +3580,57 @@
     {
      "lhs": "htr",
      "rhs": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [
-       "l"
-      ],
-      "ranges": {
-       "l": {
-        "from": "rlay"
+      "op": "*",
+      "args": [
+       -1.0,
+       "par.heatfac",
+       {
+        "op": "D",
+        "args": [
+         "F_net"
+        ],
+        "wrt": "rlay"
        }
-      },
-      "expr": {
-       "op": "/",
-       "args": [
-        {
-         "op": "*",
-         "args": [
-          "par.heatfac",
-          {
-           "op": "-",
-           "args": [
-            {
-             "op": "index",
-             "args": [
-              "F_net",
-              "l"
-             ]
-            },
-            {
-             "op": "index",
-             "args": [
-              "F_net",
-              {
-               "op": "+",
-               "args": [
-                "l",
-                1
-               ]
-              }
-             ]
-            }
-           ]
-          }
-         ]
-        },
-        {
-         "op": "-",
-         "args": [
-          {
-           "op": "index",
-           "args": [
-            "pz",
-            "l"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "pz",
-            {
-             "op": "+",
-             "args": [
-              "l",
-              1
-             ]
-            }
-           ]
-          }
-         ]
-        }
-       ]
-      }
+      ]
      }
     },
     {
      "lhs": "htrc",
      "rhs": {
-      "op": "aggregate",
-      "args": [],
-      "output_idx": [
-       "l"
-      ],
-      "ranges": {
-       "l": {
-        "from": "rlay"
+      "op": "*",
+      "args": [
+       -1.0,
+       "par.heatfac",
+       {
+        "op": "D",
+        "args": [
+         "F_net_clr"
+        ],
+        "wrt": "rlay"
        }
-      },
-      "expr": {
-       "op": "/",
-       "args": [
-        {
-         "op": "*",
-         "args": [
-          "par.heatfac",
-          {
-           "op": "-",
-           "args": [
-            {
-             "op": "index",
-             "args": [
-              "F_net_clr",
-              "l"
-             ]
-            },
-            {
-             "op": "index",
-             "args": [
-              "F_net_clr",
-              {
-               "op": "+",
-               "args": [
-                "l",
-                1
-               ]
-              }
-             ]
-            }
-           ]
-          }
-         ]
-        },
-        {
-         "op": "-",
-         "args": [
-          {
-           "op": "index",
-           "args": [
-            "pz",
-            "l"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "pz",
-            {
-             "op": "+",
-             "args": [
-              "l",
-              1
-             ]
-            }
-           ]
-          }
-         ]
-        }
-       ]
-      }
+      ]
      }
     },
     {
      "lhs": "glw",
      "rhs": {
-      "op": "index",
-      "args": [
-       "F_dn",
-       1
-      ]
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "wrf_glw",
+      "bindings": {
+       "F_dn": "F_dn"
+      }
      }
     },
     {
      "lhs": "olr",
      "rhs": {
-      "op": "index",
-      "args": [
-       "F_up",
-       {
-        "op": "+",
-        "args": [
-         "NLEV",
-         1
-        ]
-       }
-      ]
+      "op": "apply_expression_template",
+      "args": [],
+      "name": "wrf_olr",
+      "bindings": {
+       "F_up": "F_up"
+      }
      }
     },
     {
