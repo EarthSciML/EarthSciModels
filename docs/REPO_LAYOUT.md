@@ -22,7 +22,10 @@ and CI exist to load and validate those files.
 
 `lib/` is reserved for reusable, low-dependency subsystems that components
 include rather than redefine — currently `lib/solar.esm` (NOAA Spencer-Fourier
-solar declination, equation of time, zenith angle). Stdlib files use the same
+solar declination, equation of time, zenith angle) and the WRF shared files
+`lib/wrf_constants.esm` (WRF's physical constants), `lib/wrf_thermo.esm`
+(thermodynamic identities) and `lib/wrf_air_properties.esm` (transport
+properties of moist air). Stdlib files use the same
 `.esm` schema as components and are validated by the same inline-test
 machinery; they are *not* organized by science domain because they cut across
 domains.
