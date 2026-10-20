@@ -1,8 +1,8 @@
 {
- "esm": "1.0.0",
+ "esm": "1.2.0",
  "metadata": {
   "name": "DudhiaSW",
-  "description": "The Dudhia (1989) shortwave radiation scheme of WRF (ra_sw_physics = 1, SUBROUTINE SWPARA of phys/module_ra_sw.F, WRF 4.8) as a single-column component on the EarthSciDiscretizations grids/column_nonuniform_1d grid (layer index `lev`, layer 1 at the surface; interface index `lev_nodes`, interface 1 the surface, interface NLEV+1 the top of the atmosphere). The scheme is a single downward pass of the direct solar beam S(z) that is depleted by four processes: absorption by water vapour, absorption by cloud, reflection by cloud, and Rayleigh/aerosol scattering. The first three are functions of CUMULATIVE slant paths from the top of the atmosphere, written here as the integrals W(z) = int_z^top rho q_l,eff dz (effective liquid water path, q_l,eff = qc + 0.1 qi + 0.05 qr + 0.02 qs + 0.05 qg) and U(z) = int_z^top rho qv dz (water-vapour path), lowered by the grid's integral_lev_nodes_cumulative_to_top rule: the vapour absorptance A_v(U/mu) is the Lacis-Hansen (1974) fit, the cloud reflectance R_c(mu, alw) and absorptance A_c(mu, alw) are Stephens (1978) tables in alw = log10(W/(mu 1 g/m^2) + 1), and a layer's fractional contribution is the downward increment of each cumulative function across the layer (SWPARA: TOTABS-OLDABS, ALBA-OLDALB, ABSC-OLDABC, clamped at 0). Scattering is a per-layer fraction cssca rho dz / mu. The beam itself is a genuinely sequential sweep (esm-spec 4.3.1.1 recurrence), because SWPARA applies each layer's fraction not to S but to partial beams -- vapour absorption to the beam depleted only by cloud and scattering, cloud reflection/absorption to the beam depleted only by scattering and vapour -- which SWPARA bookkeeps with the running sums DABS, DSCLD, DSCA. Using SWPARA's exact identity S_top(k) = S_toa - DSCLD - DSCA - DABS these partial beams are S_top + D_vap and S_top + D_cld, so the running sums obey the LINEAR recurrences D_vap(n) = (1 + a_n) D_vap(n-1) + a_n S(n) and D_cld(n) = (1 + c_n) D_cld(n-1) + c_n S(n), whose variation-of-constants solutions D(n) = G(n) sum_{j<n} x_j S(j)/G(j+1), G(n) = prod_{i<n} (1 + x_i), are substituted into the S recurrence. This leaves ONE causal self-reference (S_dn) with two non-recursive growth factors, which is what the format admits: the esm-spec forbids an edge between two distinct recurrence variables (a cycle), so the three coupled Fortran accumulators cannot be written as three mutually-referencing recurrences (see the Spike B report). The sweep runs top-down, i.e. against the lev index, and a recurrence folds only ascending, so the sweep variables live on the reversed index sets lev_down / lev_down_nodes (m = 1 the top layer, n = 1 the top of the atmosphere) and are mapped back by the reversal templates; all physics fields stay on lev / lev_nodes (lev_down: m = 1 the top layer, lev = NLEV + 1 - m; lev_down_nodes: n = 1 the top of the atmosphere, lev_nodes = NLEV + 2 - n; layer m lies between nodes m and m + 1). The heating rate is written as the flux divergence of the cumulative ABSORBED flux Phi_abs(z) (vapour + cloud absorption above z, an interface field that is 0 at the top): rho cp dT/dt = -d Phi_abs/dz, lowered by face_flux_D_lev_supplied_faces; the reflected and scattered parts leave the column without heating it, exactly as in SWPARA, and the surface absorbs (1 - albedo) S(surface). The theta tendency is dT/dt divided by the Exner function (SWRAD: RTHRATEN = RTHRATEN + TTEN1D/PI3D). Night: SWPARA returns all-zero when cos(zenith) <= 1e-9 or the top-of-atmosphere irradiance <= 1e-9 W/m^2; here the sweep is evaluated with the formal value mu = 1 at night (a near-zero mu would overflow the 1/mu slant paths) and the outputs gsw, dT/dt, dtheta/dt carry the factor `daylight`, so a night column yields exactly zero heating and surface flux while the internals are formal. NOT transcribed (all asserted inactive or absent in the reference regimes): the renormalisation applied when a single layer would deplete more than 99 % of the beam (TRANS0 < 1: FF = 99/(...), a numerical guard that couples the four fractions to the beam and cannot be expressed without a second self-reference), the 1e-9 W/m^2 floor on S (SDOWN = AMAX1(1.E-9, ...)), the WRF-Chem aerosol optical depth terms (aer_dry1, aer_water1, zero without chemistry; the aerosol absorption XABSA is identically 0 in SWPARA), and the slope_rad/shadow topographic correction of the surface flux. Reference tests: WRF 4.8 em_scm_xy single-column dumps replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork, tolerances documented per test. Transcribed guards: negative increments clipped to 0, the table argument clamp alw_max, the renormalisation of a layer whose raw depletion exceeds 1 - tau_min (ff, tau) and the beam floor S_min. Validity of the closed forms below a renormalised layer: see S_dn and n_renorm. Not transcribed: the slope-dependent radiation option (slope_rad) and aerosol absorption (XABSA = 0 in WRF 4.8).",
+  "description": "The Dudhia (1989) shortwave radiation scheme of WRF (ra_sw_physics = 1, SUBROUTINE SWPARA of phys/module_ra_sw.F, WRF 4.8) as a single-column component on the EarthSciDiscretizations grids/column_nonuniform_1d grid (layer index `lev`, layer 1 at the surface; interface index `lev_nodes`, interface 1 the surface, interface NLEV+1 the top of the atmosphere). The scheme is a single downward pass of the direct solar beam S(z) that is depleted by four processes: absorption by water vapour, absorption by cloud, reflection by cloud, and Rayleigh/aerosol scattering. The first three are functions of CUMULATIVE slant paths from the top of the atmosphere, written here as the integrals W(z) = int_z^top rho q_l,eff dz (effective liquid water path, q_l,eff = qc + 0.1 qi + 0.05 qr + 0.02 qs + 0.05 qg) and U(z) = int_z^top rho qv dz (water-vapour path), lowered by the grid's integral_lev_nodes_cumulative_to_top rule: the vapour absorptance A_v(U/mu) is the Lacis-Hansen (1974) fit, the cloud reflectance R_c(mu, alw) and absorptance A_c(mu, alw) are Stephens (1978) tables in alw = log10(W/(mu 1 g/m^2) + 1), and a layer's fractional contribution is the downward increment of each cumulative function across the layer (SWPARA: TOTABS-OLDABS, ALBA-OLDALB, ABSC-OLDABC, clamped at 0). Scattering is a per-layer fraction cssca rho dz / mu. The beam itself is a genuinely sequential sweep, because SWPARA applies each layer's fraction not to S but to partial beams -- vapour absorption to the beam depleted only by cloud and scattering, cloud reflection and absorption to the beam depleted only by scattering and vapour -- which SWPARA bookkeeps with the running sums DABS, DSCLD, DSCA of the raw (unrenormalised) layer fluxes. The beam S and the two partial beams P_vap = SDOWN(1) - DSCLD - DSCA and P_cld = SDOWN(1) - DSCA - DABS are carried as three interleaved cells of ONE causal recurrence V_sweep (esm-spec 4.3.1.1), each step reading the previous triple at a fixed lag; one recurrence because the format forbids an edge between two distinct recurrence variables. The sweep runs top-down, i.e. against the lev index, and a recurrence folds only ascending, so the sweep variables live on the reversed index sets lev_down / lev_down_nodes / sweep (m = 1 the top layer, n = 1 the top of the atmosphere) and are mapped back by the reversal templates; all physics fields stay on lev / lev_nodes (lev_down: m = 1 the top layer, lev = NLEV + 1 - m; lev_down_nodes: n = 1 the top of the atmosphere, lev_nodes = NLEV + 2 - n; layer m lies between nodes m and m + 1). The heating rate is the applied (renormalised) vapour plus cloud absorption of each layer per unit volume, q_abs, divided by rho cp (SWPARA TTEN); the reflected and scattered parts leave the column without heating it, exactly as in SWPARA, and the surface absorbs (1 - albedo) S(surface). The theta tendency is dT/dt divided by the Exner function (SWRAD: RTHRATEN = RTHRATEN + TTEN1D/PI3D). Night: SWPARA returns all-zero when cos(zenith) <= 1e-9 or the top-of-atmosphere irradiance <= 1e-9 W/m^2; here the sweep is evaluated with the formal value mu = 1 at night (a near-zero mu would overflow the 1/mu slant paths) and the outputs gsw, dT/dt, dtheta/dt carry the factor `daylight`, so a night column yields exactly zero heating and surface flux while the internals are formal. Transcribed guards: negative increments clipped to 0, the table argument clamp alw_max, the renormalisation of a layer whose raw depletion exceeds 1 - tau_min (ff, tau; TRANS0 < 1: FF = 99/(...)), and the beam floor S_min (SDOWN = AMAX1(1.E-9, ...)). Not transcribed: the slope-dependent radiation option (slope_rad and its shadow correction of the surface flux) and the WRF-Chem aerosol optical depth terms (aer_dry1, aer_water1, zero without chemistry; the aerosol absorption XABSA is identically 0 in SWPARA). Reference tests: WRF v4.8.0 em_scm_xy single-column dumps from the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e), replayed through that commit's real64 (-fdefault-real-8) standalone kernels/sw_driver; tolerances documented per test.",
   "license": "MIT",
   "tags": [
    "wrf",
@@ -55,25 +55,35 @@
      1
     ]
    }
+  },
+  "sweep": {
+   "kind": "interval",
+   "size": {
+    "op": "*",
+    "args": [
+     3,
+     {
+      "op": "+",
+      "args": [
+       "NLEV",
+       1
+      ]
+     }
+    ]
+   }
   }
  },
  "models": {
   "DudhiaSW": {
    "expression_template_imports": [
     {
-     "ref": "../../../../EarthSciDiscretizations/grids/column_nonuniform_1d/grid.esm",
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/grid.esm",
      "bindings": {
       "NLEV": "NLEV"
      }
     },
     {
-     "ref": "../../../../EarthSciDiscretizations/grids/column_nonuniform_1d/rules/integral_lev_nodes_cumulative_to_top.esm",
-     "bindings": {
-      "NLEV": "NLEV"
-     }
-    },
-    {
-     "ref": "../../../../EarthSciDiscretizations/grids/column_nonuniform_1d/rules/face_flux_D_lev_supplied_faces.esm",
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/integral_lev_nodes_cumulative_to_top.esm",
      "bindings": {
       "NLEV": "NLEV"
      }
@@ -259,128 +269,6 @@
       }
      }
     },
-    "growth_factor": {
-     "params": [
-      "x"
-     ],
-     "description": "Homogeneous solution of the linear depletion recurrence D(n) = (1 + x_n) D(n-1) + x_n S(n): G[n] = prod_{i<n} (1 + x[i]) over the layers above node n (G[1] = 1 at the top of the atmosphere).",
-     "body": {
-      "op": "aggregate",
-      "output_idx": [
-       "n"
-      ],
-      "reduce": "*",
-      "args": [
-       "x"
-      ],
-      "ranges": {
-       "n": {
-        "from": "lev_down_nodes"
-       },
-       "i": {
-        "from": "lev_down"
-       }
-      },
-      "filter": {
-       "op": "<",
-       "args": [
-        "i",
-        "n"
-       ]
-      },
-      "expr": {
-       "op": "+",
-       "args": [
-        1.0,
-        {
-         "op": "index",
-         "args": [
-          "x",
-          "i"
-         ]
-        }
-       ]
-      }
-     }
-    },
-    "accumulated_depletion": {
-     "params": [
-      "G",
-      "x"
-     ],
-     "description": "Variation-of-constants solution of D(n) = (1 + x_n) D(n-1) + x_n S(n), D(1) = 0: the flux removed from the beam above node n by the process with layer fractions x, D[n] = G[n] sum_{j<n} x[j] S_dn[j] / G[j+1], reading the swept beam S_dn.",
-     "body": {
-      "op": "aggregate",
-      "output_idx": [
-       "n"
-      ],
-      "reduce": "+",
-      "args": [
-       "G",
-       "x",
-       "S_dn"
-      ],
-      "ranges": {
-       "n": {
-        "from": "lev_down_nodes"
-       },
-       "j": {
-        "from": "lev_down"
-       }
-      },
-      "filter": {
-       "op": "<",
-       "args": [
-        "j",
-        "n"
-       ]
-      },
-      "expr": {
-       "op": "/",
-       "args": [
-        {
-         "op": "*",
-         "args": [
-          {
-           "op": "index",
-           "args": [
-            "G",
-            "n"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "x",
-            "j"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "S_dn",
-            "j"
-           ]
-          }
-         ]
-        },
-        {
-         "op": "index",
-         "args": [
-          "G",
-          {
-           "op": "+",
-           "args": [
-            "j",
-            1
-           ]
-          }
-         ]
-        }
-       ]
-      }
-     }
-    },
     "cumulative_from_top": {
      "params": [
       "F"
@@ -482,7 +370,7 @@
      "type": "parameter",
      "units": "1",
      "default": 1.0,
-     "description": "Cloud switch (namelist icloud): 1 includes the condensate in the effective liquid water path, 0 sets it to zero."
+     "description": "Cloud switch (namelist icloud): 0 drops the condensate from the effective liquid water path, any other value includes it with unit weight (SWPARA: IF (ICLOUD.EQ.0) XLWP = 0, ELSE the full path; WRF's icloud = 1, 2 and 3 select the cloud fraction scheme elsewhere and all give the same path here)."
     },
     "ze": {
      "type": "unknown",
@@ -507,6 +395,11 @@
       "lev"
      ],
      "description": "Layer thicknesses (WRF dz8w), grid-derived from ze; the measure of the column integrals and of the flux divergence."
+    },
+    "z_top": {
+     "type": "unknown",
+     "units": "m",
+     "description": "Height of the top of the atmosphere, ze[NLEV+1]: the upper bound of the to-the-top integrals W and U, spelled as the free name the grid's integral_lev_nodes_cumulative_to_top rule matches."
     },
     "T": {
      "type": "unknown",
@@ -614,7 +507,7 @@
      "shape": [
       "lev"
      ],
-     "description": "Effective condensed-water content rho (qc + w_ice qi + w_rain qr + w_snow qs + w_graupel qg), switched by icloud; the integrand of the liquid water path (SWPARA XLWP / DZ, in kg/m^3 instead of g/m^3)."
+     "description": "Effective condensed-water content rho (qc + w_ice qi + w_rain qr + w_snow qs + w_graupel qg), zero when icloud = 0; the integrand of the liquid water path (SWPARA XLWP / DZ, in kg/m^3 instead of g/m^3)."
     },
     "wvc": {
      "type": "unknown",
@@ -760,21 +653,13 @@
      ],
      "description": "f_sca in sweep order."
     },
-    "G_vap": {
+    "V_sweep": {
      "type": "unknown",
-     "units": "1",
+     "units": "W/m^2",
      "shape": [
-      "lev_down_nodes"
+      "sweep"
      ],
-     "description": "Growth factor prod_{i<n} (1 + a_dn[i]) of the vapour-absorption bookkeeping recurrence."
-    },
-    "G_cld": {
-     "type": "unknown",
-     "units": "1",
-     "shape": [
-      "lev_down_nodes"
-     ],
-     "description": "Growth factor prod_{i<n} (1 + c_dn[i]) of the cloud-depletion bookkeeping recurrence."
+     "description": "SWPARA's downward pass as ONE causal recurrence (esm-spec 4.3.1.1) over the interleaved triple (S, P_vap, P_cld) of each top-down interface n: cell q = 3n - 2 holds the beam S_dn[n], q = 3n - 1 the partial beam P_vap_dn[n] that vapour absorption acts on, q = 3n the partial beam P_cld_dn[n] that cloud reflection and absorption act on, all S_toa at n = 1. For n > 1, with layer m = n - 1 = floor((q - 1)/3) and its raw fractions a = a_dn[m], c = c_dn[m], s = s_dn[m] read at the previous triple: S = max(S_min, max(tau_min S, S (1 - s) - a P_vap - c P_cld)), P_vap = P_vap - s S - c P_cld, P_cld = P_cld - s S - a P_vap. This is SWPARA term for term: P_vap = SDOWN(1) - DSCLD - DSCA (- DABSA, identically 0) and P_cld = SDOWN(1) - DSCA - DABS, where DSCLD, DSCA and DABS accumulate the RAW fractions (before the TRANS0 < 1 renormalisation) applied to the partial beams, while SDOWN(K+1) = AMAX1(1.E-9, SDOWN(K) TRANS0/100) with TRANS0 floored at 1 % gives the inner max (tau_min) and the outer max (S_min). Because the three sequences are carried separately, the bookkeeping stays exact below a renormalised or floored layer, where S is no longer SDOWN(1) - DSCLD - DSCA - DABS. They are interleaved on one axis because the format admits a causal self-read of the array being defined only (a recurrence that reads another recurrence is a cycle), and each self-read is at a fixed lag 1..5 along that axis."
     },
     "S_dn": {
      "type": "unknown",
@@ -782,7 +667,23 @@
      "shape": [
       "lev_down_nodes"
      ],
-     "description": "The swept downward beam at each interface, top-down: S_dn[1] = S_toa, S_dn[n] = max(S_min, max(tau_min S_dn[n-1], S_dn[n-1] (1 - a - c - s)_{n-1} - a_{n-1} D_vap[n-1] - c_{n-1} D_cld[n-1])), with the depletions above node n-1 in closed form (SWPARA SDOWN(K+1) = AMAX1(1.E-9, SDOWN(K)*TRANS0*0.01) with TRANS0 floored at 1 %: the inner max is the layer transmissivity floor tau_min, the outer max the beam floor S_min). The one causal self-reference of the component (esm-spec 4.3.1.1): a two-stream-like downward pass whose next value depends on the whole beam history through the partial-beam bookkeeping. VALIDITY: the closed forms of D_vap and D_cld assume SWPARA's bookkeeping identity SDOWN(K) = SDOWN(1) - DSCLD - DSCA - DABS, which holds down to and including the first renormalised layer (SWPARA keeps accumulating the RAW, unrescaled fractions in DSCLD/DSCA/DABS, so below a renormalised layer the identity is off by the renormalisation deficit and the per-layer fractions there depend on a coupled four-component sweep S, DSCLD, DSCA, DABS that esm-spec 4.3.1.1 cannot express (only the array being defined may be read causally; see data/eqwefic/esm-repro/spikeB/probe_vector_recurrence.esm). The component is therefore exact when every renormalised layer has no cloud- or vapour-depleting layer below it; n_renorm and the test regimes make this explicit."
+     "description": "The swept downward beam at each interface, top-down (n = 1 the top of the atmosphere): V_sweep[3n - 2] (SWPARA SDOWN)."
+    },
+    "P_vap_dn": {
+     "type": "unknown",
+     "units": "W/m^2",
+     "shape": [
+      "lev_down_nodes"
+     ],
+     "description": "Partial beam that vapour absorption acts on at each top-down interface, V_sweep[3n - 1]: the TOA beam less the cloud and scattering depletion above (SWPARA SDOWN(1) - DSCLD - DSCA - DABSA)."
+    },
+    "P_cld_dn": {
+     "type": "unknown",
+     "units": "W/m^2",
+     "shape": [
+      "lev_down_nodes"
+     ],
+     "description": "Partial beam that cloud reflection and absorption act on at each top-down interface, V_sweep[3n]: the TOA beam less the scattering and vapour depletion above (SWPARA SDOWN(1) - DSCA - DABS)."
     },
     "D_vap_dn": {
      "type": "unknown",
@@ -790,7 +691,7 @@
      "shape": [
       "lev_down_nodes"
      ],
-     "description": "Flux absorbed by water vapour above node n (SWPARA DABS), closed form of its bookkeeping recurrence."
+     "description": "Flux absorbed by water vapour above node n, the sum of the raw F_vap_dn of the layers above (SWPARA DABS)."
     },
     "D_cld_dn": {
      "type": "unknown",
@@ -798,7 +699,7 @@
      "shape": [
       "lev_down_nodes"
      ],
-     "description": "Flux removed by cloud (reflection + absorption) above node n (SWPARA DSCLD)."
+     "description": "Flux removed by cloud (reflection + absorption) above node n, the sum of the raw F_cabs_dn + F_cref_dn of the layers above (SWPARA DSCLD)."
     },
     "D_sca_dn": {
      "type": "unknown",
@@ -814,7 +715,7 @@
      "shape": [
       "lev_down"
      ],
-     "description": "Flux absorbed by water vapour in layer m: a_dn (S_dn + D_vap_dn), the absorptance increment times the beam depleted only by cloud and scattering (SWPARA XABS*SDOWN)."
+     "description": "Flux absorbed by water vapour in layer m: a_dn P_vap_dn, the absorptance increment times the beam depleted only by cloud and scattering (SWPARA XABS*SDOWN, raw)."
     },
     "F_cabs_dn": {
      "type": "unknown",
@@ -822,7 +723,7 @@
      "shape": [
       "lev_down"
      ],
-     "description": "Flux absorbed by cloud in layer m: b_dn (S_dn + D_cld_dn) (SWPARA XABSC*SDOWN/100)."
+     "description": "Flux absorbed by cloud in layer m: b_dn P_cld_dn, the absorptance increment times the beam depleted only by scattering and vapour (SWPARA XABSC*SDOWN/100, raw)."
     },
     "F_cref_dn": {
      "type": "unknown",
@@ -830,7 +731,7 @@
      "shape": [
       "lev_down"
      ],
-     "description": "Flux reflected by cloud in layer m: r_dn (S_dn + D_cld_dn) (SWPARA XALB*SDOWN/100)."
+     "description": "Flux reflected by cloud in layer m: r_dn P_cld_dn (SWPARA XALB*SDOWN/100, raw)."
     },
     "F_sca_dn": {
      "type": "unknown",
@@ -847,14 +748,6 @@
       "lev_nodes"
      ],
      "description": "Downward solar beam at each interface (SWPARA SDOWN, reversed): S[NLEV+1] = S_toa, S[1] the flux reaching the surface."
-    },
-    "Phi_abs": {
-     "type": "unknown",
-     "units": "W/m^2",
-     "shape": [
-      "lev_nodes"
-     ],
-     "description": "Cumulative absorbed flux above each interface, Phi_abs(z) = int_z^top q_abs dz' (vapour + cloud absorption after the renormalisation), 0 at the top of the atmosphere; the layer heating is its downward increment, so rho cp dT/dt = -d Phi_abs/dz."
     },
     "D_vap": {
      "type": "unknown",
@@ -918,7 +811,7 @@
      "shape": [
       "lev"
      ],
-     "description": "Beam entering each layer from above, S[k+1] (SWPARA SDOWN(K) for the layer being processed)."
+     "description": "Beam entering each layer from above, S[k+1] (SWPARA SDOWN(K) for the layer being processed), floored at S_min. The floor changes nothing by day, where every S is at least S_min below the top and S_toa > soltop_min mu above it, and keeps the fractions below finite (0) during a total eclipse, when S_toa = 0."
     },
     "f_raw": {
      "type": "unknown",
@@ -998,7 +891,7 @@
      "shape": [
       "lev"
      ],
-     "description": "Shortwave heating rate, -daylight D(Phi_abs, lev)/(rho cp) (SWPARA TTEN)."
+     "description": "Shortwave heating rate, daylight q_abs/(rho cp) (SWPARA TTEN)."
     },
     "dthdt": {
      "type": "unknown",
@@ -1016,12 +909,12 @@
     "n_renorm": {
      "type": "unknown",
      "units": "1",
-     "description": "Number of layers whose depletion fractions were renormalised (tau_raw < tau_min) while the scheme is active (0 at night). The component is exact only when no depleting layer lies below a renormalised one (see S_dn); the tests assert n_renorm = 0 for the SCM regimes and 1, in the lowest layer, for the fog regime."
+     "description": "Number of layers whose depletion fractions were renormalised (tau_raw < tau_min) while the scheme is active (0 at night). A diagnostic of how often SWPARA's numerical guard acts."
     },
     "n_floor": {
      "type": "unknown",
      "units": "1",
-     "description": "Number of interfaces at which the daytime beam sits on its floor S_min (SWPARA AMAX1(1.E-9, ...); 0 at night); reached only below about six consecutive renormalised layers, a regime outside the component's validity (see S_dn), so the tests assert n_floor = 0."
+     "description": "Number of interfaces at which the daytime beam sits on its floor S_min (SWPARA AMAX1(1.E-9, ...); 0 at night); reached only below several consecutive renormalised layers, each of which leaves 1 % of the beam."
     }
    },
    "equations": [
@@ -1052,6 +945,22 @@
       "bindings": {
        "ze": "ze"
       }
+     }
+    },
+    {
+     "lhs": "z_top",
+     "rhs": {
+      "op": "index",
+      "args": [
+       "ze",
+       {
+        "op": "+",
+        "args": [
+         "NLEV",
+         1
+        ]
+       }
+      ]
      }
     },
     {
@@ -1222,7 +1131,20 @@
      "rhs": {
       "op": "*",
       "args": [
-       "icloud",
+       {
+        "op": "ifelse",
+        "args": [
+         {
+          "op": "==",
+          "args": [
+           "icloud",
+           0
+          ]
+         },
+         0.0,
+         1.0
+        ]
+       },
        "rho",
        {
         "op": "+",
@@ -1290,19 +1212,7 @@
       ],
       "var": "lev",
       "lower": "lev_nodes",
-      "upper": {
-       "op": "index",
-       "args": [
-        "ze",
-        {
-         "op": "+",
-         "args": [
-          "NLEV",
-          1
-         ]
-        }
-       ]
-      }
+      "upper": "z_top"
      }
     },
     {
@@ -1314,19 +1224,7 @@
       ],
       "var": "lev",
       "lower": "lev_nodes",
-      "upper": {
-       "op": "index",
-       "args": [
-        "ze",
-        {
-         "op": "+",
-         "args": [
-          "NLEV",
-          1
-         ]
-        }
-       ]
-      }
+      "upper": "z_top"
      }
     },
     {
@@ -1586,38 +1484,16 @@
      }
     },
     {
-     "lhs": "G_vap",
-     "rhs": {
-      "op": "apply_expression_template",
-      "args": [],
-      "name": "growth_factor",
-      "bindings": {
-       "x": "a_dn"
-      }
-     }
-    },
-    {
-     "lhs": "G_cld",
-     "rhs": {
-      "op": "apply_expression_template",
-      "args": [],
-      "name": "growth_factor",
-      "bindings": {
-       "x": "c_dn"
-      }
-     }
-    },
-    {
-     "lhs": "S_dn",
+     "lhs": "V_sweep",
      "rhs": {
       "op": "aggregate",
-      "output_idx": [
-       "n"
-      ],
       "args": [],
+      "output_idx": [
+       "q"
+      ],
       "ranges": {
-       "n": {
-        "from": "lev_down_nodes"
+       "q": {
+        "from": "sweep"
        }
       },
       "expr": {
@@ -1626,85 +1502,195 @@
         {
          "op": "<=",
          "args": [
-          "n",
-          1
+          "q",
+          3
          ]
         },
         "S_toa",
         {
-         "op": "max",
+         "op": "ifelse",
          "args": [
-          "par.S_min",
           {
-           "op": "max",
+           "op": "==",
            "args": [
             {
-             "op": "*",
+             "op": "-",
              "args": [
-              "par.tau_min",
+              "q",
               {
-               "op": "index",
+               "op": "*",
                "args": [
-                "S_dn",
+                3,
                 {
-                 "op": "-",
+                 "op": "floor",
                  "args": [
-                  "n",
-                  1
+                  {
+                   "op": "/",
+                   "args": [
+                    {
+                     "op": "-",
+                     "args": [
+                      "q",
+                      1
+                     ]
+                    },
+                    3
+                   ]
+                  }
                  ]
                 }
                ]
               }
              ]
             },
+            1
+           ]
+          },
+          {
+           "op": "max",
+           "args": [
+            "par.S_min",
             {
-             "op": "-",
+             "op": "max",
              "args": [
               {
                "op": "*",
                "args": [
+                "par.tau_min",
                 {
                  "op": "index",
                  "args": [
-                  "S_dn",
+                  "V_sweep",
                   {
                    "op": "-",
                    "args": [
-                    "n",
-                    1
+                    "q",
+                    3
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "V_sweep",
+                    {
+                     "op": "-",
+                     "args": [
+                      "q",
+                      3
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "-",
+                   "args": [
+                    1.0,
+                    {
+                     "op": "index",
+                     "args": [
+                      "s_dn",
+                      {
+                       "op": "floor",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          {
+                           "op": "-",
+                           "args": [
+                            "q",
+                            1
+                           ]
+                          },
+                          3
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
                    ]
                   }
                  ]
                 },
                 {
-                 "op": "-",
+                 "op": "+",
                  "args": [
-                  1.0,
                   {
-                   "op": "+",
+                   "op": "*",
                    "args": [
                     {
                      "op": "index",
                      "args": [
                       "a_dn",
                       {
-                       "op": "-",
+                       "op": "floor",
                        "args": [
-                        "n",
-                        1
+                        {
+                         "op": "/",
+                         "args": [
+                          {
+                           "op": "-",
+                           "args": [
+                            "q",
+                            1
+                           ]
+                          },
+                          3
+                         ]
+                        }
                        ]
                       }
                      ]
                     },
+                    {
+                     "op": "index",
+                     "args": [
+                      "V_sweep",
+                      {
+                       "op": "-",
+                       "args": [
+                        "q",
+                        2
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "*",
+                   "args": [
                     {
                      "op": "index",
                      "args": [
                       "c_dn",
                       {
-                       "op": "-",
+                       "op": "floor",
                        "args": [
-                        "n",
-                        1
+                        {
+                         "op": "/",
+                         "args": [
+                          {
+                           "op": "-",
+                           "args": [
+                            "q",
+                            1
+                           ]
+                          },
+                          3
+                         ]
+                        }
                        ]
                       }
                      ]
@@ -1712,11 +1698,11 @@
                     {
                      "op": "index",
                      "args": [
-                      "s_dn",
+                      "V_sweep",
                       {
                        "op": "-",
                        "args": [
-                        "n",
+                        "q",
                         1
                        ]
                       }
@@ -1724,6 +1710,65 @@
                     }
                    ]
                   }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "ifelse",
+           "args": [
+            {
+             "op": "==",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                "q",
+                {
+                 "op": "*",
+                 "args": [
+                  3,
+                  {
+                   "op": "floor",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      {
+                       "op": "-",
+                       "args": [
+                        "q",
+                        1
+                       ]
+                      },
+                      3
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              2
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "V_sweep",
+                {
+                 "op": "-",
+                 "args": [
+                  "q",
+                  3
                  ]
                 }
                ]
@@ -1737,12 +1782,23 @@
                   {
                    "op": "index",
                    "args": [
-                    "a_dn",
+                    "s_dn",
                     {
-                     "op": "-",
+                     "op": "floor",
                      "args": [
-                      "n",
-                      1
+                      {
+                       "op": "/",
+                       "args": [
+                        {
+                         "op": "-",
+                         "args": [
+                          "q",
+                          1
+                         ]
+                        },
+                        3
+                       ]
+                      }
                      ]
                     }
                    ]
@@ -1750,106 +1806,15 @@
                   {
                    "op": "index",
                    "args": [
-                    "G_vap",
+                    "V_sweep",
                     {
                      "op": "-",
                      "args": [
-                      "n",
-                      1
+                      "q",
+                      4
                      ]
                     }
                    ]
-                  },
-                  {
-                   "op": "aggregate",
-                   "output_idx": [],
-                   "reduce": "+",
-                   "args": [],
-                   "ranges": {
-                    "a": {
-                     "from": "lev_down"
-                    }
-                   },
-                   "filter": {
-                    "op": "and",
-                    "args": [
-                     {
-                      "op": ">=",
-                      "args": [
-                       "a",
-                       2
-                      ]
-                     },
-                     {
-                      "op": "<=",
-                      "args": [
-                       "a",
-                       {
-                        "op": "-",
-                        "args": [
-                         "n",
-                         1
-                        ]
-                       }
-                      ]
-                     }
-                    ]
-                   },
-                   "expr": {
-                    "op": "/",
-                    "args": [
-                     {
-                      "op": "*",
-                      "args": [
-                       {
-                        "op": "index",
-                        "args": [
-                         "a_dn",
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         }
-                        ]
-                       },
-                       {
-                        "op": "index",
-                        "args": [
-                         "S_dn",
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         }
-                        ]
-                       }
-                      ]
-                     },
-                     {
-                      "op": "index",
-                      "args": [
-                       "G_vap",
-                       {
-                        "op": "+",
-                        "args": [
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         },
-                         1
-                        ]
-                       }
-                      ]
-                     }
-                    ]
-                   }
                   }
                  ]
                 },
@@ -1861,10 +1826,21 @@
                    "args": [
                     "c_dn",
                     {
-                     "op": "-",
+                     "op": "floor",
                      "args": [
-                      "n",
-                      1
+                      {
+                       "op": "/",
+                       "args": [
+                        {
+                         "op": "-",
+                         "args": [
+                          "q",
+                          1
+                         ]
+                        },
+                        3
+                       ]
+                      }
                      ]
                     }
                    ]
@@ -1872,106 +1848,122 @@
                   {
                    "op": "index",
                    "args": [
-                    "G_cld",
+                    "V_sweep",
                     {
                      "op": "-",
                      "args": [
-                      "n",
-                      1
+                      "q",
+                      2
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            {
+             "op": "-",
+             "args": [
+              {
+               "op": "index",
+               "args": [
+                "V_sweep",
+                {
+                 "op": "-",
+                 "args": [
+                  "q",
+                  3
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "s_dn",
+                    {
+                     "op": "floor",
+                     "args": [
+                      {
+                       "op": "/",
+                       "args": [
+                        {
+                         "op": "-",
+                         "args": [
+                          "q",
+                          1
+                         ]
+                        },
+                        3
+                       ]
+                      }
                      ]
                     }
                    ]
                   },
                   {
-                   "op": "aggregate",
-                   "output_idx": [],
-                   "reduce": "+",
-                   "args": [],
-                   "ranges": {
-                    "a": {
-                     "from": "lev_down"
+                   "op": "index",
+                   "args": [
+                    "V_sweep",
+                    {
+                     "op": "-",
+                     "args": [
+                      "q",
+                      5
+                     ]
                     }
-                   },
-                   "filter": {
-                    "op": "and",
-                    "args": [
-                     {
-                      "op": ">=",
-                      "args": [
-                       "a",
-                       2
-                      ]
-                     },
-                     {
-                      "op": "<=",
-                      "args": [
-                       "a",
-                       {
-                        "op": "-",
-                        "args": [
-                         "n",
-                         1
-                        ]
-                       }
-                      ]
-                     }
-                    ]
-                   },
-                   "expr": {
-                    "op": "/",
-                    "args": [
-                     {
-                      "op": "*",
-                      "args": [
-                       {
-                        "op": "index",
-                        "args": [
-                         "c_dn",
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         }
-                        ]
-                       },
-                       {
-                        "op": "index",
-                        "args": [
-                         "S_dn",
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         }
-                        ]
-                       }
-                      ]
-                     },
-                     {
-                      "op": "index",
-                      "args": [
-                       "G_cld",
-                       {
-                        "op": "+",
-                        "args": [
-                         {
-                          "op": "-",
-                          "args": [
-                           "n",
-                           "a"
-                          ]
-                         },
-                         1
-                        ]
-                       }
-                      ]
-                     }
-                    ]
-                   }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  {
+                   "op": "index",
+                   "args": [
+                    "a_dn",
+                    {
+                     "op": "floor",
+                     "args": [
+                      {
+                       "op": "/",
+                       "args": [
+                        {
+                         "op": "-",
+                         "args": [
+                          "q",
+                          1
+                         ]
+                        },
+                        3
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "index",
+                   "args": [
+                    "V_sweep",
+                    {
+                     "op": "-",
+                     "args": [
+                      "q",
+                      4
+                     ]
+                    }
+                   ]
                   }
                  ]
                 }
@@ -1988,26 +1980,157 @@
      }
     },
     {
+     "lhs": "S_dn",
+     "rhs": {
+      "op": "aggregate",
+      "args": [],
+      "output_idx": [
+       "n"
+      ],
+      "ranges": {
+       "n": {
+        "from": "lev_down_nodes"
+       }
+      },
+      "expr": {
+       "op": "index",
+       "args": [
+        "V_sweep",
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            3,
+            "n"
+           ]
+          },
+          2
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "lhs": "P_vap_dn",
+     "rhs": {
+      "op": "aggregate",
+      "args": [],
+      "output_idx": [
+       "n"
+      ],
+      "ranges": {
+       "n": {
+        "from": "lev_down_nodes"
+       }
+      },
+      "expr": {
+       "op": "index",
+       "args": [
+        "V_sweep",
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "*",
+           "args": [
+            3,
+            "n"
+           ]
+          },
+          1
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
+     "lhs": "P_cld_dn",
+     "rhs": {
+      "op": "aggregate",
+      "args": [],
+      "output_idx": [
+       "n"
+      ],
+      "ranges": {
+       "n": {
+        "from": "lev_down_nodes"
+       }
+      },
+      "expr": {
+       "op": "index",
+       "args": [
+        "V_sweep",
+        {
+         "op": "*",
+         "args": [
+          3,
+          "n"
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
      "lhs": "D_vap_dn",
      "rhs": {
       "op": "apply_expression_template",
       "args": [],
-      "name": "accumulated_depletion",
+      "name": "cumulative_from_top",
       "bindings": {
-       "G": "G_vap",
-       "x": "a_dn"
+       "F": "F_vap_dn"
       }
      }
     },
     {
      "lhs": "D_cld_dn",
      "rhs": {
-      "op": "apply_expression_template",
-      "args": [],
-      "name": "accumulated_depletion",
-      "bindings": {
-       "G": "G_cld",
-       "x": "c_dn"
+      "op": "aggregate",
+      "args": [
+       "F_cabs_dn",
+       "F_cref_dn"
+      ],
+      "output_idx": [
+       "n"
+      ],
+      "reduce": "+",
+      "ranges": {
+       "n": {
+        "from": "lev_down_nodes"
+       },
+       "j": {
+        "from": "lev_down"
+       }
+      },
+      "filter": {
+       "op": "<",
+       "args": [
+        "j",
+        "n"
+       ]
+      },
+      "expr": {
+       "op": "+",
+       "args": [
+        {
+         "op": "index",
+         "args": [
+          "F_cabs_dn",
+          "j"
+         ]
+        },
+        {
+         "op": "index",
+         "args": [
+          "F_cref_dn",
+          "j"
+         ]
+        }
+       ]
       }
      }
     },
@@ -2015,13 +2138,12 @@
      "lhs": "F_vap_dn",
      "rhs": {
       "op": "aggregate",
-      "output_idx": [
-       "m"
-      ],
       "args": [
        "a_dn",
-       "S_dn",
-       "D_vap_dn"
+       "P_vap_dn"
+      ],
+      "output_idx": [
+       "m"
       ],
       "ranges": {
        "m": {
@@ -2039,22 +2161,10 @@
          ]
         },
         {
-         "op": "+",
+         "op": "index",
          "args": [
-          {
-           "op": "index",
-           "args": [
-            "S_dn",
-            "m"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "D_vap_dn",
-            "m"
-           ]
-          }
+          "P_vap_dn",
+          "m"
          ]
         }
        ]
@@ -2065,13 +2175,12 @@
      "lhs": "F_cabs_dn",
      "rhs": {
       "op": "aggregate",
-      "output_idx": [
-       "m"
-      ],
       "args": [
        "b_dn",
-       "S_dn",
-       "D_cld_dn"
+       "P_cld_dn"
+      ],
+      "output_idx": [
+       "m"
       ],
       "ranges": {
        "m": {
@@ -2089,22 +2198,10 @@
          ]
         },
         {
-         "op": "+",
+         "op": "index",
          "args": [
-          {
-           "op": "index",
-           "args": [
-            "S_dn",
-            "m"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "D_cld_dn",
-            "m"
-           ]
-          }
+          "P_cld_dn",
+          "m"
          ]
         }
        ]
@@ -2115,13 +2212,12 @@
      "lhs": "F_cref_dn",
      "rhs": {
       "op": "aggregate",
-      "output_idx": [
-       "m"
-      ],
       "args": [
        "r_dn",
-       "S_dn",
-       "D_cld_dn"
+       "P_cld_dn"
+      ],
+      "output_idx": [
+       "m"
       ],
       "ranges": {
        "m": {
@@ -2139,22 +2235,10 @@
          ]
         },
         {
-         "op": "+",
+         "op": "index",
          "args": [
-          {
-           "op": "index",
-           "args": [
-            "S_dn",
-            "m"
-           ]
-          },
-          {
-           "op": "index",
-           "args": [
-            "D_cld_dn",
-            "m"
-           ]
-          }
+          "P_cld_dn",
+          "m"
          ]
         }
        ]
@@ -2313,16 +2397,22 @@
        }
       },
       "expr": {
-       "op": "index",
+       "op": "max",
        "args": [
-        "S",
         {
-         "op": "+",
+         "op": "index",
          "args": [
-          "k",
-          1
+          "S",
+          {
+           "op": "+",
+           "args": [
+            "k",
+            1
+           ]
+          }
          ]
-        }
+        },
+        "par.S_min"
        ]
       }
      }
@@ -2481,30 +2571,6 @@
      }
     },
     {
-     "lhs": "Phi_abs",
-     "rhs": {
-      "op": "integral",
-      "args": [
-       "q_abs"
-      ],
-      "var": "lev",
-      "lower": "lev_nodes",
-      "upper": {
-       "op": "index",
-       "args": [
-        "ze",
-        {
-         "op": "+",
-         "args": [
-          "NLEV",
-          1
-         ]
-        }
-       ]
-      }
-     }
-    },
-    {
      "lhs": "dTdt",
      "rhs": {
       "op": "/",
@@ -2512,15 +2578,8 @@
        {
         "op": "*",
         "args": [
-         -1.0,
          "daylight",
-         {
-          "op": "D",
-          "args": [
-           "Phi_abs"
-          ],
-          "wrt": "lev"
-         }
+         "q_abs"
         ]
        },
        {
@@ -2654,7 +2713,7 @@
    "tests": [
      {
        "id": "scm_call1_morning_clear",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: first radiation call of the run (call 1, 19:00 UTC = 12:34 LST, cos zenith 0.629), no condensate at all (qc = qr = qs = qg = 0, qi = 0): pure clear-sky vapour absorption and scattering, the cloud tables return 0 everywhere, gsw = 542 W/m^2.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: first radiation call of the run (call 1, 19:00 UTC = 12:34 LST, cos zenith 0.629), no condensate at all (qc = qr = qs = qg = 0, qi = 0): pure clear-sky vapour absorption and scattering, the cloud tables return 0 everywhere, gsw = 542 W/m^2.",
        "parameter_overrides": {
          "csza": 0.6286112070083618,
          "albedo": 0.20000000298023224,
@@ -3436,7 +3495,7 @@
      },
      {
        "id": "scm_call120_noon_ice_cloud",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: 1 h into the run (call 120, 20:00 UTC = 13:34 LST, cos zenith 0.562) with a thin cirrus layer (qi up to 4.6e-5 kg/kg, effective liquid water path 3.1 g/m^2 through the 0.1 ice weight), so the Stephens cloud tables are exercised inside their first alw interval (cumulative cloud albedo up to 30 %, layer reflection up to 9.6 %, minimum layer transmissivity 0.88); gsw = 315 W/m^2.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: 1 h into the run (call 120, 20:00 UTC = 13:34 LST, cos zenith 0.562) with a thin cirrus layer (qi up to 4.6e-5 kg/kg, effective liquid water path 3.1 g/m^2 through the 0.1 ice weight), so the Stephens cloud tables are exercised inside their first alw interval (cumulative cloud albedo up to 30 %, layer reflection up to 9.6 %, minimum layer transmissivity 0.88); gsw = 315 W/m^2.",
        "parameter_overrides": {
          "csza": 0.5617246031761169,
          "albedo": 0.20000000298023224,
@@ -4218,7 +4277,7 @@
      },
      {
        "id": "scm_call2400_afternoon_low_sun",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: day 2, 15:00 UTC = 08:34 LST (call 2400), low sun (cos zenith 0.386): long slant paths (large Lacis-Hansen argument and scattering fraction), a trace of ice (effective path 0.9 g/m^2); gsw = 300 W/m^2.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: day 2, 15:00 UTC = 08:34 LST (call 2400), low sun (cos zenith 0.386): long slant paths (large Lacis-Hansen argument and scattering fraction), a trace of ice (effective path 0.9 g/m^2); gsw = 300 W/m^2.",
        "parameter_overrides": {
          "csza": 0.3863790035247803,
          "albedo": 0.20000000298023224,
@@ -5000,7 +5059,7 @@
      },
      {
        "id": "scm_call2820_midday_clear",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: day 2, 18:30 UTC = 12:04 LST (call 2820), cos zenith 0.639, essentially clear (effective path 0.08 g/m^2); gsw = 550 W/m^2.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: day 2, 18:30 UTC = 12:04 LST (call 2820), cos zenith 0.639, essentially clear (effective path 0.08 g/m^2); gsw = 550 W/m^2.",
        "parameter_overrides": {
          "csza": 0.6393358707427979,
          "albedo": 0.20000000298023224,
@@ -5782,7 +5841,7 @@
      },
      {
        "id": "scm_call600_night_zero",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: night (call 600, 00:00 UTC = 17:34 LST, sunset, cos zenith -0.088): SWPARA returns before computing and WRF's heating and surface flux are exactly zero; this component evaluates the sweep for the formal mu = 1e-9 and masks the outputs with daylight = 0, so gsw, dT/dt and dtheta/dt must be exactly 0 (absolute tolerance 0). Internals are not compared at night (WRF leaves them at their zero initialisation).",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: night (call 600, 00:00 UTC = 17:34 LST, sunset, cos zenith -0.088): SWPARA returns before computing and WRF's heating and surface flux are exactly zero; this component evaluates the sweep for the formal mu = 1 (WRF's 1e-9 threshold would overflow the 1/mu slant paths) and masks the outputs with daylight = 0, so gsw, dT/dt and dtheta/dt must be exactly 0 (absolute tolerance 0). Internals are not compared at night (WRF leaves them at their zero initialisation).",
        "parameter_overrides": {
          "csza": -0.08831901103258133,
          "albedo": 0.20000000298023224,
@@ -5901,7 +5960,7 @@
      },
      {
        "id": "synthetic_stratus_call120",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC, Fortran-generated -- the call-120 column with a liquid stratus deck inserted (qc = 3e-4 kg/kg in the layers whose tops lie between 600 and 1500 m, about 250 g/m^2 of liquid water path on top of the cirrus), replayed through the real64 sw_driver; the SCM run itself has no liquid cloud (qc = qr = 0 throughout), so this is the only regime that drives the Stephens tables beyond their first alw interval (alw > 2, cumulative cloud albedo above 80 %) and exercises the partial-beam bookkeeping with large cloud depletion (minimum layer transmissivity well below the clear-sky values but above the 1 % renormalisation threshold tau_min, so the renormalisation factor ff is 1 everywhere and n_renorm = 0). Inputs are the modified dump synthetic_stratus_120.json; expected values are the driver output.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC, Fortran-generated -- the call-120 column with a liquid stratus deck inserted (qc = 3e-4 kg/kg in the layers whose tops lie between 600 and 1500 m, about 250 g/m^2 of liquid water path on top of the cirrus), replayed through the real64 sw_driver; the SCM run itself has no liquid cloud (qc = qr = 0 throughout), so this is the only regime that drives the Stephens tables beyond their first alw interval (alw > 2, cumulative cloud albedo above 80 %) and exercises the partial-beam bookkeeping with large cloud depletion (minimum layer transmissivity well below the clear-sky values but above the 1 % renormalisation threshold tau_min, so the renormalisation factor ff is 1 everywhere and n_renorm = 0). Inputs are the modified dump synthetic_stratus_120.json; expected values are the driver output.",
        "parameter_overrides": {
          "csza": 0.5617246031761169,
          "albedo": 0.20000000298023224,
@@ -6683,7 +6742,7 @@
      },
      {
        "id": "synthetic_fog_2400_renormalised",
-       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork (module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of the ctessum-claude/WRF fork; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC, Fortran-generated -- the call-2400 column with the sun 2.9 degrees above the horizon (coszen = 0.05), swrad_scat = 3 (cssca = 3e-5 m^2/kg) and a surface fog of qc = 8.2e-3 kg/kg in the lowest layer (about 500 g/m^2 of liquid water, slant path 1e4 g/m^2, so the Stephens table argument sits at its clamp alw_max), replayed through the real64 sw_driver. The lowest layer's raw depletion is 95.9 % cloud + 2.3 % scattering + 1.3 % vapour = 99.5 % of the entering beam (tau_raw = 0.005 < tau_min), so SWPARA renormalises it: ff = 0.99/0.995, the applied fractions sum to 0.99, tau = 0.01 (TRANS0 = 1.), the beam reaching the surface is 1 % of the beam entering the layer and gsw = 1.9 mW/m^2. This is the only regime with n_renorm = 1; the renormalised layer is the LOWEST layer, so no depleting layer lies below it and the closed-form bookkeeping stays exact (see the S_dn description for the coupled-sweep format gap that keeps a renormalised layer with cloud or vapour below it out of the component's validity). The beam floor S_min is not reached (n_floor = 0; the bottom beam is 2.3 mW/m^2). Inputs are the modified dump synthetic_fog_2400.json; expected values are the driver output.",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC, Fortran-generated -- the call-2400 column with the sun 2.9 degrees above the horizon (coszen = 0.05), swrad_scat = 3 (cssca = 3e-5 m^2/kg) and a surface fog of qc = 8.2e-3 kg/kg in the lowest layer (about 500 g/m^2 of liquid water, slant path 1e4 g/m^2, so the Stephens table argument sits at its clamp alw_max), replayed through the real64 sw_driver. The lowest layer's raw depletion is 95.9 % cloud + 2.3 % scattering + 1.3 % vapour = 99.5 % of the entering beam (tau_raw = 0.005 < tau_min), so SWPARA renormalises it: ff = 0.99/0.995, the applied fractions sum to 0.99, tau = 0.01 (TRANS0 = 1.), the beam reaching the surface is 1 % of the beam entering the layer and gsw = 1.9 mW/m^2. This is the only regime with n_renorm = 1; the renormalised layer is the LOWEST layer, so this regime checks the rescaling itself; synthetic_elevated_fog_2400 checks the bookkeeping below a renormalised layer. The beam floor S_min is not reached (n_floor = 0; the bottom beam is 2.3 mW/m^2). Inputs are the modified dump synthetic_fog_2400.json; expected values are the driver output.",
        "parameter_overrides": {
          "csza": 0.05,
          "albedo": 0.20000000298023224,
@@ -7459,6 +7518,1818 @@
            "expected": 0.0,
            "tolerance": {
              "abs": 0.0
+           }
+         }
+       ]
+     },
+     {
+       "id": "synthetic_elevated_fog_2400",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC, Fortran-generated -- the synthetic_fog_2400 column (coszen = 0.05, swrad_scat = 3) with its liquid water moved from the lowest layer up to layer 6 (about 500 g/m^2, so the Stephens argument sits at its clamp alw_max) and a thin cloud, qc = 2e-4 kg/kg, left in layer 1 below it, replayed through the real64 sw_driver. Layer 6 is renormalised (tau = 0.01), and so is every layer below it: SWPARA keeps accumulating the raw fractions in DABS, DSCLD and DSCA, so the partial beams the vapour and cloud fractions act on stay near their values above the deck while the beam itself drops to 1 % per layer, and each raw depletion F/S then exceeds 99 %. The beam reaches its floor S_min at the two lowest interfaces (gsw = 8e-10 W/m^2). This is the regime in which the beam is no longer SDOWN(1) - DSCLD - DSCA - DABS, so it checks that the sweep carries the partial beams separately: n_renorm = 6, n_floor = 2. Inputs are the modified dump; expected values are the driver output.",
+       "parameter_overrides": {
+         "csza": 0.05,
+         "albedo": 0.20000000298023224,
+         "solcon": 1384.9686279296875,
+         "obscur": 0.0,
+         "cssca": 3e-05,
+         "icloud": 1.0
+       },
+       "expression_template_imports": [
+         {
+           "ref": "./tests/synthetic_elevated_fog_2400_inputs.esm"
+         }
+       ],
+       "time_span": {
+         "start": 0,
+         "end": 1
+       },
+       "assertions": [
+         {
+           "variable": "daylight",
+           "time": 0.0,
+           "expected": 1.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S_toa",
+           "time": 0.0,
+           "expected": 69.24843139648438,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "gsw",
+           "time": 0.0,
+           "expected": 7.999999970197679e-10,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "rho",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.2062918376615348, 1.2011383728086538, 1.195425533346902, 1.1894288346478339, 1.1791871515726131, 1.1672895278781696, 1.1584851934370717, 1.150896234448783, 1.1437007781008806, 1.1365275204261491, 1.1291595458060688, 1.1214426231156818, 1.1131779561799748, 1.1037272479540579, 1.0917728785169984, 1.07678398621358, 1.064257615851101, 1.0528270231211154, 1.0416341023388809, 1.0304217673389482, 1.0191110207508651, 1.0076381047275602, 0.9959576778467848, 0.9840744481280359, 0.9720181366074299, 0.959741718911561, 0.9470063495647675, 0.9339110458968173, 0.9205418779451703, 0.906898608228577, 0.8929018813396441, 0.8786391788780796, 0.864078479818929, 0.8492044684806399, 0.8340664543394866, 0.8187168495088628, 0.803357473231926, 0.7878340993213567, 0.7722288934381548, 0.7568275514034879, 0.7416767062148807, 0.7260523468604505, 0.7099095482422286, 0.6932645686648368, 0.6761203956125887, 0.6574803721635206, 0.6371081007064419, 0.6171554891265252, 0.5971142202301917, 0.576434155615519, 0.554399234110138, 0.5314600443311969, 0.5079012003431846, 0.4834019606429198, 0.4577982526952479, 0.43095800803242545, 0.40273634474194464, 0.3729601558276223, 0.3414110876322399]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "m_air",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [61.17798805051432, 62.71770149230121, 64.2978910875508, 65.91482252667794, 67.52165327308421, 69.16842350821472, 70.89124723098715, 72.67371642836797, 74.50801506426866, 76.39006297218792, 78.3184895566859, 80.29382704017225, 82.31449566681101, 84.37726693271928, 86.44570224972556, 88.39973279201723, 90.62987648519703, 92.95580974342724, 95.34448732911297, 97.79598153465497, 100.31003288110902, 102.89224916467566, 105.53978229000163, 108.25731889101482, 111.04630879761045, 113.90407324459629, 116.77621766301199, 119.71481017339251, 122.72715557865638, 125.81579749303124, 128.98072312890378, 132.2248998682735, 135.55020195499338, 138.95895951691284, 142.45207498291086, 146.03282145188663, 149.68907235302052, 153.4304985005248, 157.25943689214049, 161.15733627168305, 165.2207993015577, 169.37617162977693, 173.62973277076773, 177.98721530244262, 182.4646903968282, 186.99505848434896, 191.672478875422, 196.5164107051176, 201.50010051636133, 206.60576648378597, 211.8552213893571, 217.21171644857162, 222.68962848855548, 228.31065159720558, 234.07707494402663, 239.99437015478384, 246.06640047636492, 252.29370509910385, 258.6772455028432]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-07,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "W",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.49767612674360096, 0.4854405291334981, 0.4854405291334981, 0.4854405291334981, 0.4854405291334981, 0.4854405291334981, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.826239458825359e-07, 8.631460252290011e-07, 3.056449170843556e-07, 1.7746698947371257e-07, 6.196472527779594e-08, 1.5127738580836344e-08, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-12,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "U",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [11.204529265486517, 10.891013690626702, 10.575425801798117, 10.25624202311608, 9.9360946226339, 9.646837077786534, 9.38939647762924, 9.143426768121875, 8.898703516594297, 8.651383006883538, 8.400579447846454, 8.146651794001198, 7.8908285720535165, 7.6354172045602455, 7.387340689376523, 7.175812906091537, 7.105186358859538, 7.037286154662941, 6.947870809692554, 6.834037571222329, 6.693970663577088, 6.525787433161684, 6.327492268141233, 6.096975484095336, 5.832002575498873, 5.530265170109668, 5.191139398427396, 4.850872279671052, 4.512658167941186, 4.177169946747115, 3.8450492162363363, 3.5169887985741872, 3.193725457127657, 2.8760486894967285, 2.5647989565287443, 2.2608782083112104, 1.965412697960151, 1.6879956092290385, 1.4331361797238842, 1.2067927977620925, 1.0259807317983203, 0.8504425092156616, 0.6876414285080289, 0.5435603881778535, 0.4190194957310855, 0.3074671054227933, 0.24855286227809015, 0.2236733201042535, 0.20396181048705775, 0.17752049737302153, 0.14791023516913424, 0.10554553656824502, 0.06568626989457256, 0.038538317954657474, 0.021120029493881233, 0.010634184019109684, 0.004789873238157499, 0.001826280404736324, 0.0005089617428796051, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-08,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "A_vap",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.21661210319419671, 0.21536136687113833, 0.2140670794797185, 0.21271997746295268, 0.2113280694032613, 0.2100332917764834, 0.2088495654247653, 0.20768950937002545, 0.20650567509552434, 0.20527764415085611, 0.20399807897965472, 0.20266545926653728, 0.20128289708129682, 0.19986006039656268, 0.19843487869640777, 0.1971839915760292, 0.19675868805654517, 0.1963460818839298, 0.195797059472368, 0.19508854396013725, 0.19420158299672002, 0.1931135997307658, 0.1917970406530919, 0.1902178719744317, 0.18833336459483438, 0.1860893307112751, 0.18342966494520957, 0.18059719958568962, 0.17759759989441176, 0.1744149401359212, 0.1710299729651136, 0.16742010688812559, 0.1635583769017461, 0.15941221080530796, 0.15494151617801, 0.1500960463587705, 0.14481427468881536, 0.1391973710034218, 0.1333009743183821, 0.12727515687293056, 0.12174536864293671, 0.11554962028924017, 0.10879147218373435, 0.10163414910732409, 0.09410478472285032, 0.08567761680615468, 0.0802130801794331, 0.07759991052772344, 0.07536555982503428, 0.07209163414532563, 0.0679475911665014, 0.060739787174259104, 0.05154043074409059, 0.04235396368417871, 0.03325353391268484, 0.024270778275570448, 0.015609852852913497, 0.007997320030190753, 0.0026952913829865286, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "R_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.9499604086816567, 0.949744215156958, 0.949744215156958, 0.949744215156958, 0.949744215156958, 0.949744215156958, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.005034665332798785, 0.004924504699359389, 0.0017534498004378811, 0.0010194083338090714, 0.00035634916675332805, 8.703792120327847e-05, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "A_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.009248020434082838, 0.009237210757847902, 0.009237210757847902, 0.009237210757847902, 0.009237210757847902, 0.009237210757847902, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.749684276225269e-05, 4.6457591503390463e-05, 1.6541979249413975e-05, 9.617059752915768e-06, 3.361784592012529e-06, 8.211124641818723e-07, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1e-09, 1e-09, 3.1400852192451504e-09, 3.1400852192451505e-07, 3.1400852192451505e-05, 0.00314008521924515, 0.314008521924515, 0.3326856416546651, 0.3527023629813359, 0.37426488701814253, 0.39754302374811823, 0.4226994202620551, 0.44989534213150356, 0.47928264539385496, 0.5109106328789914, 0.5442315456046254, 0.576556660963445, 0.611515904439399, 0.6500624675913097, 0.6926716552065021, 0.7398584839667476, 0.792219921659349, 0.8504565631278623, 0.9153912492331278, 0.988003313304677, 1.0694658610371042, 1.1611280451442607, 1.262977648040666, 1.3762769923277187, 1.502599308582684, 1.6437804258036832, 1.8019636255373472, 1.9796658154064022, 2.1798549139152663, 2.406050917217545, 2.6624525479960655, 2.954091458833545, 3.285735938567119, 3.6633232257562685, 4.093090260755099, 4.578199465464232, 5.138255378745714, 5.785470288421704, 6.533779986866041, 7.401281593961401, 8.416803708144165, 9.555786080791691, 10.837344054062397, 12.323808244504049, 14.080619288479605, 16.161266093172166, 18.688256685858143, 21.743922050610124, 25.48149395760618, 29.883538842010907, 35.174313313648625, 41.53360109000683, 49.17646690942663, 58.31399060263499, 69.24843139648438]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_vap",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [3.600946668125658, 3.5966488505298173, 3.592201381448958, 3.5875724291550797, 3.5827895112660535, 3.5783401912859905, 3.5737381630861385, 3.5692117433996327, 3.5645743369795144, 3.5597432532466926, 3.5546861184876803, 3.54939283005259, 3.543871199455513, 3.538155041735632, 3.5323925999600125, 3.5272995741221256, 3.5255549316244816, 3.5238486546813736, 3.5215583413647193, 3.5185746080613702, 3.5148008912828868, 3.510120017424717, 3.504386609114455, 3.4974180389017318, 3.4889811286824646, 3.4787747227019747, 3.4664668669350984, 3.4531087156773626, 3.438665814719822, 3.422989341934942, 3.405896351819498, 3.3871642949701064, 3.366518773629905, 3.343617539409321, 3.3180269353078002, 3.2891884385326264, 3.256386114031377, 3.2198448930824584, 3.1794969111111104, 3.135936117845311, 3.0935131716009727, 3.042825254734628, 2.983562830177052, 2.91592821559424, 2.8388267088459282, 2.744766284305603, 2.6779147778830197, 2.6426891641730887, 2.6093233111882776, 2.5548599883894747, 2.4776196448138665, 2.32615190666606, 2.1067411547441006, 1.8556097520023862, 1.569374721013218, 1.2422535992916504, 0.8749562469141066, 0.49681674468476633, 0.18664470042827813, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.5839860143937897, 0.5838898851278699, 0.5838898851278699, 0.5838898851278699, 0.5838898851278699, 0.5838898851278699, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.14553328952692934, 0.1430994552590884, 0.061337604656363544, 0.039165886270754006, 0.015612760528770928, 0.004320596861842064, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_sca",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [65.22831157498973, 65.22831157495303, 65.22831157483486, 65.2283115627208, 65.22831032085185, 65.22818310660459, 65.21515142194679, 65.20100072190314, 65.18562140699659, 65.1688899666926, 65.15066896472165, 65.1308058566428, 65.10913156537042, 65.08546041982795, 65.05959487411843, 65.03136698723068, 65.00078651436951, 64.96753354783667, 64.9312772980014, 64.89165184368956, 64.8482387317078, 64.80055816787336, 64.74805493471511, 64.69008881882257, 64.6259136649703, 64.55465752321837, 64.47530319487808, 64.3868117432394, 64.2879552999099, 64.17730945643981, 64.05322132933426, 63.91377018644999, 63.756713517921135, 63.57942565363285, 63.37882025443209, 63.151257120428745, 62.892420534092516, 62.59731727530786, 62.26007797009006, 61.87387172835703, 61.431185469892235, 60.9218174734771, 60.333864988358684, 59.65318990449716, 58.86278980415011, 57.94132811450767, 56.86919724828273, 55.622864888721956, 54.16976655126511, 52.467418830088356, 50.4640123689714, 48.088489514433235, 45.25466873587105, 41.849990082219435, 37.756351947189486, 32.81625172301533, 26.835553462701583, 19.575147742372977, 10.747796093421114, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabs",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.9683411106689638, 0.9899999736970134, 0.9899974091589665, 0.9897430164684567, 0.9624808996229417, 0.009991457786140693, 0.01360569594766083, 0.013148214774970694, 0.012908193903286843, 0.01272097472955856, 0.01252258267070415, 0.012273144618294063, 0.011926485915600032, 0.01127876658809754, 0.009358196670184876, 0.0030259688522694824, 0.0027902413178808707, 0.0035232203531773833, 0.004307572398728464, 0.005100592694768886, 0.0059085535849257975, 0.0067415651296466525, 0.0076126685923218656, 0.008539354175895866, 0.009543461228946965, 0.010599912574971308, 0.010576712326191265, 0.010494181794838338, 0.010432902967103716, 0.010398584778795426, 0.010395357921725726, 0.010428791152290095, 0.010505852510822042, 0.010635936221630088, 0.010831553334867655, 0.011104031462249355, 0.011121167869884756, 0.01101403820652991, 0.010642519585620751, 0.009266294875170238, 0.009864810744131971, 0.010243320180241223, 0.010351529240159437, 0.010417318375133539, 0.011175314026785722, 0.006995919106745502, 0.0032503917504332325, 0.0027074303918750817, 0.0038679635947094495, 0.0047793497817748805, 0.008104968841873098, 0.010090670460060928, 0.009855442665941178, 0.009578351228830134, 0.009300000224727501, 0.008843378439099927, 0.007689440213868938, 0.005318998769438919, 0.0026952913829865286]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabsc",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0010313752886014797, 0.0, 0.0, 0.0, 0.0, 0.009168675570318996, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0460907006462071e-06, 2.9987623416294546e-05, 6.933995416551314e-06, 6.258051678876965e-06, 2.5409364251642473e-06, 8.211124641818724e-07, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xalb",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.020627505772028744, 0.0, 0.0, 0.0, 0.0, 0.9425467920498473, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0001108856142684974, 0.003178688082127222, 0.0007350035141544392, 0.0006633534779609583, 0.0002693392610674102, 8.703792120327848e-05, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xsca",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [8.270406024861968e-09, 2.6302986634660492e-08, 2.5908410336780515e-06, 0.00025698353154326444, 0.027519100377058254, 0.028293074593693162, 0.04253474833859229, 0.04360422985702079, 0.044704809038561194, 0.045834037783312756, 0.046991093734011544, 0.048176296224103354, 0.04938869740008661, 0.050626360159631574, 0.05186742134983534, 0.053039839675210344, 0.05437792589111822, 0.05577348584605635, 0.05720669239746779, 0.058677588920792986, 0.06018601972866541, 0.0617353494988054, 0.06332386937400097, 0.0649543913346089, 0.06662778527856628, 0.06834244394675779, 0.0700657305978072, 0.07182888610403551, 0.07363629334719383, 0.07548947849581875, 0.07738843387734227, 0.07933493992096409, 0.08133012117299604, 0.0833753757101477, 0.08547124498974652, 0.08761969287113199, 0.08981344341181233, 0.09205829910031489, 0.0943556621352843, 0.09669440176300984, 0.09913247958093462, 0.10162570297786618, 0.10417783966246065, 0.10679232918146558, 0.10947881423809692, 0.11219703509060938, 0.11500348732525321, 0.11790984642307056, 0.1209000603098168, 0.12396345989027159, 0.12711313283361428, 0.130327029869143, 0.1336137770931333, 0.13698639095832335, 0.140446244966416, 0.1439966220928703, 0.14763984028581895, 0.15137622305946233, 0.15520634730170596]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.9438595557137469, 0.9432475553680086, 0.9423869970581521, 0.9414449874871288, 0.9404863235952843, 0.9395505591576025, 0.9386848166843135, 0.9380948732522708, 0.9387743819799798, 0.9439341914725202, 0.9428318327910009, 0.9407032938007663, 0.9384857352038037, 0.9362218183844382, 0.9339054266864087, 0.9315230853715479, 0.9290634620336772, 0.9265062544894953, 0.9238287534924868, 0.9210576434782709, 0.9193575570760015, 0.9176769321011261, 0.9159308036857026, 0.9141119367253857, 0.9122162082009321, 0.9102362689267457, 0.9081640263161819, 0.9059886880682222, 0.9036972016753857, 0.9012762756666186, 0.8990653887183029, 0.8969276626931552, 0.8950018182790949, 0.89403930336182, 0.8910027096749334, 0.8881309768418926, 0.8854706310973799, 0.882790352443401, 0.8793458717351175, 0.8808070458026451, 0.8817461209243135, 0.8793827231850544, 0.8752319760954737, 0.8712571903279536, 0.8647818983245125, 0.859470367965827, 0.8533221045353819, 0.8526933203032755, 0.8495841432792166, 0.8468881192705373, 0.8445828604666445, 0.8433047781710986, 0.8420983613153075]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.577413514855101e-14, 4.934424891839913e-14, 4.8131436426422885e-12, 4.693867786440103e-10, 4.4559524293210696e-08, 8.659287194034338e-08, 6.35641524631454e-08, 6.352546429310049e-08, 6.454931382967302e-08, 6.590490182789121e-08, 6.72839245989174e-08, 6.845974060689465e-08, 6.91318120543223e-08, 6.798782613922711e-08, 5.865196026425616e-08, 1.9647421120978337e-08, 1.8742529065034273e-08, 2.452835475370075e-08, 3.1154047146486276e-08, 3.8414780131579196e-08, 4.64550170608871e-08, 5.5472823274887354e-08, 6.573210572942279e-08, 7.758472398340833e-08, 9.14995105863915e-08, 1.0757050370941973e-07, 1.1387857163010914e-07, 1.201037619400422e-07, 1.271621151017474e-07, 1.3524864588881193e-07, 1.445808316625068e-07, 1.5543995657064694e-07, 1.6819333361545651e-07, 1.8333443456878234e-07, 2.015365862979094e-07, 2.236166841650949e-07, 2.4302055940115266e-07, 2.6179429664523707e-07, 2.757586362223576e-07, 2.620600413203042e-07, 3.0541459238687104e-07, 3.4831899769244986e-07, 3.8778854985300584e-07, 4.3124504278933255e-07, 5.131899690673547e-07, 3.559025723008822e-07, 1.829569314129461e-07, 1.6902598189574346e-07, 2.6907845529017684e-07, 3.7217895922336245e-07, 7.117558199334979e-07, 1.0057029818150016e-06, 1.1260833386231272e-06, 1.248995724426519e-06, 1.3921688308650936e-06, 1.5240231675876317e-06, 1.5300166754924086e-06, 1.2239010195760909e-06, 7.183026923707021e-07]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-13,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.5919660052341203e-14, 4.988885622096356e-14, 4.875277420864446e-12, 4.763548083176139e-10, 4.531018861959195e-08, 8.823086739652597e-08, 6.490262567376283e-08, 6.500389743550918e-08, 6.61996959446314e-08, 6.774658209482589e-08, 6.932984994114713e-08, 7.071618897971434e-08, 7.159340813041983e-08, 7.059536930985775e-08, 6.106851630255754e-08, 2.05149756396543e-08, 1.9627596262003972e-08, 2.57648036966672e-08, 3.2827729079898624e-08, 4.0610978671477565e-08, 4.9277628044915914e-08, 5.905075978448965e-08, 7.022790191654519e-08, 8.320650398049141e-08, 9.851763143691948e-08, 1.162977556350222e-07, 1.2364467258288686e-07, 1.3098492706443528e-07, 1.393266344574203e-07, 1.4890397750982745e-07, 1.599820712319308e-07, 1.729045437938718e-07, 1.8812117206114157e-07, 2.0623709000542896e-07, 2.2807958584277416e-07, 2.5466572390141525e-07, 2.785967026901943e-07, 3.0220535269578715e-07, 3.2065152734836573e-07, 3.0706638531377327e-07, 3.6076741029857906e-07, 4.149684784965567e-07, 4.6617044589632473e-07, 5.233792957382614e-07, 6.291673847547905e-07, 4.4105510785678996e-07, 2.2934619110814395e-07, 2.144959242597347e-07, 3.4597929876685437e-07, 4.853543784189851e-07, 9.424570273296948e-07, 1.3538783809458603e-06, 1.543475283666809e-06, 1.7460383805991955e-06, 1.9889552492756573e-06, 2.2305521268452614e-06, 2.300793379188728e-06, 1.8978772204055026e-06, 1.1539348177670324e-06]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-13,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 1
+           },
+           "expected": 1e-09,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 2
+           },
+           "expected": 1e-09,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 3
+           },
+           "expected": 3.1400852192451504e-09,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 6
+           },
+           "expected": 0.00314008521924515,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 7
+           },
+           "expected": 0.314008521924515,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 8
+           },
+           "expected": 0.3326856416546651,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 1.577413514855101e-14,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 10
+           },
+           "expected": 6.590490182789121e-08,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 30
+           },
+           "expected": 1.3524864588881193e-07,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 7.183026923707021e-07,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 1.5919660052341203e-14,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 30
+           },
+           "expected": 1.4890397750982745e-07,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 1.1539348177670324e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 0.01,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 20
+           },
+           "expected": 0.9362218183844382,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.8420983613153075,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "n_renorm",
+           "time": 0.0,
+           "expected": 6.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "n_floor",
+           "time": 0.0,
+           "expected": 2.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         }
+       ]
+     },
+     {
+       "id": "synthetic_stratus_call120_icloud3",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Column assertions are Linf_error of the whole field against the inline reference (WRF's top-down arrays reversed onto lev/lev_nodes, the top-of-atmosphere interface appended as 0 for the cumulative fields, per-cent quantities divided by 100, g/m^2 paths converted to kg/m^2); spot checks use a relative tolerance. Tolerances: measured Linf mismatch between this component and the real64 replay over all six regimes is at binary64 roundoff -- S and the cumulative depletions <= 1.2e-12 W/m^2 (1e-15 relative), U <= 4e-15 kg/m^2, W <= 1e-16 kg/m^2, the dimensionless absorptances/reflectances and layer fractions <= 4e-15, heating rates <= 1.3e-18 K/s -- so the column tolerances are set at about 1e-9 of each field's column maximum (S, D_*: abs 1e-6 W/m^2; U: 1e-8 kg/m^2; W: 1e-12 kg/m^2; rho: 1e-9 kg/m^3; m_air: 1e-7 kg/m^2; fractions: abs 1e-9; dT/dt, dtheta/dt: 1e-13 K/s), i.e. the 1e-9 relative contract for double-precision references, roughly a million times the measured error; scalar spot checks use rel 1e-9. Regime: SYNTHETIC -- the synthetic_stratus_call120 column with namelist icloud = 3, replayed through the real64 sw_driver. SWPARA tests only ICLOUD.EQ.0, so any non-zero icloud gives the full liquid water path and the driver output is identical, bit for bit, to the icloud = 1 regime (gsw = 41.71 W/m^2): this pins icloud as a switch, not a weight on the path.",
+       "parameter_overrides": {
+         "csza": 0.5617246031761169,
+         "albedo": 0.20000000298023224,
+         "solcon": 1384.34814453125,
+         "obscur": 0.0,
+         "cssca": 9.999999747378752e-06,
+         "icloud": 3.0
+       },
+       "expression_template_imports": [
+         {
+           "ref": "./tests/synthetic_stratus_call120_icloud3_inputs.esm"
+         }
+       ],
+       "time_span": {
+         "start": 0,
+         "end": 1
+       },
+       "assertions": [
+         {
+           "variable": "daylight",
+           "time": 0.0,
+           "expected": 1.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S_toa",
+           "time": 0.0,
+           "expected": 777.6224121444102,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "gsw",
+           "time": 0.0,
+           "expected": 41.70741612221927,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "rho",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.1882461455048003, 1.1833917601194026, 1.1780775474208702, 1.1725343400583939, 1.1668039528757117, 1.1608981426718805, 1.1548200123941375, 1.1485687612602415, 1.1421425608669449, 1.1355383023014927, 1.1287535535137803, 1.1217869701359786, 1.114645810179855, 1.1074133193610034, 1.0927540538207259, 1.071260767973995, 1.0606674681425088, 1.0499866438555263, 1.039091855556952, 1.0279625942791653, 1.01658613071161, 1.0049549719278756, 0.9930611172322815, 0.9808991863203149, 0.9684662522976394, 0.9557531867235668, 0.9428617409676621, 0.9296782046639335, 0.9161953299864448, 0.9024068961156496, 0.888300422877125, 0.873872634171112, 0.859114617397605, 0.8440173364448315, 0.8285745486494659, 0.8127820667284728, 0.7973383101753023, 0.7817139048046132, 0.766031659652959, 0.7514621566591547, 0.7364247639976375, 0.720890028503199, 0.704828672635759, 0.6882205064401412, 0.671035525000523, 0.6532358272278359, 0.6347615718009271, 0.6155804737790096, 0.5956690380589317, 0.5749817307816427, 0.5535838798090931, 0.5306443061147867, 0.5070629550241419, 0.48325956629626343, 0.45789663016355947, 0.4310167572831105, 0.4027497395886416, 0.3729621923440745, 0.34141283116931365]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "m_air",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [60.99308477644407, 62.518327025647004, 64.09230087128896, 65.710068946424, 67.3695218549805, 69.07110125419246, 70.81691963760801, 72.60627931536509, 74.44153248664655, 76.32281171308841, 78.25099166337174, 80.22728187097789, 82.25111852564723, 84.3219135064156, 86.4039376463457, 88.36044414044098, 90.6277685139275, 92.95586103064815, 95.3444151256693, 97.79585886402121, 100.31007285113621, 102.89195658934653, 105.53989772085423, 108.25716859648836, 111.04614690499214, 113.90694946629472, 116.77605079458885, 119.71490754457008, 122.72700388159001, 125.81548178355771, 128.9807442872736, 132.22465274085025, 135.5500807784695, 138.9587175474322, 142.4519105794684, 146.03288729674927, 149.68878263768343, 153.43024778191307, 157.26259674167898, 161.20661192256657, 165.2442959820773, 169.3824049198503, 173.6249760052356, 177.9691855420861, 182.42009004001034, 186.98333317626154, 191.66638058215943, 196.5162512674653, 201.48970578779347, 206.59110432152318, 211.83016907116777, 217.20867527855208, 222.6919977196627, 228.30994135209096, 234.07684677254719, 239.99383450549382, 246.0659317181276, 252.29362584334604, 258.6778997082085]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-07,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "W",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.26603359321116576, 0.24255829571215423, 0.21849011115086087, 0.1938147755931667, 0.168518201541242, 0.14259702024733828, 0.116088887005206, 0.08890055645102775, 0.0610137981418333, 0.03241047360413252, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.0030717159449261578, 0.002997985434091424, 0.0021324950417247693, 0.001098682913044643, 0.0004636966184857311, 0.00014627035408090532, 3.242280484117975e-05, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-12,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "U",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [10.135266425135013, 9.938266250464014, 9.748262015406992, 9.558539152799575, 9.367298554268983, 9.173749243995234, 8.977465852017167, 8.77819955433473, 8.575819023231645, 8.370279533970228, 8.161633519637014, 7.950063691332471, 7.735983563609426, 7.520375523274632, 7.306877507317923, 7.121521081385254, 7.075256393779865, 7.008624900329904, 6.919209603419082, 6.8053336623854275, 6.665221527307166, 6.496994228569019, 6.298656529838755, 6.0681014793614745, 5.803094154920062, 5.501269567017426, 5.160227203116742, 4.819887975843153, 4.481673589023628, 4.146185668211795, 3.8140657710912826, 3.4860052996131565, 3.1627425623435754, 2.8450656368601477, 2.533816478225719, 2.2298960807620603, 1.934271176826828, 1.6568175946278345, 1.4019052646143306, 1.173452398159749, 0.9617905398768669, 0.7714924322705835, 0.6046561579327767, 0.4633167513622003, 0.34962982259888287, 0.26587006607515923, 0.21423100381747587, 0.19291516786620616, 0.17326308997538048, 0.15311410817736246, 0.1322170664545722, 0.1053088045083876, 0.0669868653030319, 0.038632287091019304, 0.02104175258308007, 0.010605521084507423, 0.004780489879454269, 0.0018244372202235472, 0.0005088791576718286, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-08,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "A_vap",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.11747577353357176, 0.11683296162447797, 0.11620306543613844, 0.11556405103334862, 0.11490940121570245, 0.11423570064404995, 0.11354060111350947, 0.11282222353913346, 0.1120789782297004, 0.1113094726745832, 0.11051256963493652, 0.10968754303373614, 0.1088345280181847, 0.10795601482192256, 0.10706593459294275, 0.10627609848980782, 0.10607639097654553, 0.1057869220233543, 0.10539499162992837, 0.10488993555074291, 0.1042591655737956, 0.10348768189635223, 0.10255737654821023, 0.10144616632623575, 0.10012665309574566, 0.09856426585231785, 0.09671500652668472, 0.09477074570783037, 0.09272845344816322, 0.09057941107119259, 0.08831346616614245, 0.08591871171656723, 0.0833809434459319, 0.08068294125183507, 0.0778034366482043, 0.07471557322809728, 0.07138452070704292, 0.06788226525617123, 0.06424424620741492, 0.06052618779607888, 0.05655100860201262, 0.052359288095987326, 0.04797389823542091, 0.043459372691290396, 0.038977165849098695, 0.03488251242865872, 0.031826017884192606, 0.030394980442163454, 0.02896254585096872, 0.027356964513718527, 0.025509894366202653, 0.022771141423362323, 0.01778925662756073, 0.012619804370765186, 0.008154037867564032, 0.004666049730382505, 0.0022853728898061423, 0.0009136932605246258, 0.00026046260337021175, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "R_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7738241051796044, 0.7687237762676624, 0.7629555760428797, 0.7563427553030578, 0.7486280466218609, 0.739419815216094, 0.7280894051331209, 0.7134061293618146, 0.6927366625148342, 0.6139579469977401, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.29929485709324594, 0.2960082634715171, 0.25134938498407466, 0.17374988267006658, 0.09648478896722949, 0.03710081866701993, 0.008996166525229282, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "A_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09482827120868588, 0.09357789844688522, 0.09216379348028322, 0.09054262530181856, 0.08865132343349984, 0.0863938765250916, 0.08361616622593622, 0.0800164830691379, 0.0749492533291316, 0.06619094731733624, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03343270400871434, 0.03306557537570226, 0.02807695953267548, 0.019408714387121585, 0.010777824324190315, 0.004144343477940278, 0.001004915939993551, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [52.13427034698938, 52.2607574037043, 52.38743992833878, 52.516766024677075, 52.649498393912495, 52.7860628995831, 52.92677152555977, 53.071888817900664, 53.2216487386199, 53.376267583468724, 53.53593553984054, 57.89595947703327, 62.821836554210286, 68.46121002044386, 75.02720156136355, 82.83062333723409, 92.31882237750948, 104.60731511718656, 121.88102519641161, 180.17328306429314, 411.2022656204223, 412.29834750118346, 413.49034236994044, 414.78964707282506, 416.21028547584154, 417.7698064594325, 419.490370832286, 421.282479824281, 423.14864990134254, 425.0941632972141, 427.1250749140547, 429.24835603628344, 431.47217861060193, 433.80628523913805, 436.26249918257105, 438.8554934999388, 441.6039991649984, 444.4753027834594, 447.45418492793266, 450.51550340839214, 453.7473860785774, 457.1325963662525, 460.6624928956342, 464.3079691909315, 467.99184763708195, 471.54027913953234, 474.6307162633209, 476.9677267857017, 479.35737318464936, 481.88745315469083, 484.5951056287182, 490.52855126168333, 532.2109397453206, 602.3769069306296, 672.9784816935509, 728.7682711821238, 757.7288379337921, 769.8576118063417, 773.8388679720447, 777.6224121444102]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_vap",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [56.30319658655554, 56.23345521461673, 56.16507839708889, 56.095673483920756, 56.024530051016406, 55.951273645226195, 55.87564513648274, 55.7974358551002, 55.716468110733445, 55.632585192965024, 55.54565773971105, 55.45214254035113, 55.351339047127794, 55.24266356175709, 55.1268160439643, 55.017938273239125, 54.98851989022956, 54.94233521996444, 54.8730599218444, 54.75440826317046, 54.46068205639913, 54.100862678572966, 53.66626438888537, 53.146289193277276, 52.527783110143695, 51.794142386493235, 50.924223810436246, 50.007912366597026, 49.043557875579076, 48.026800874141635, 46.95256705671978, 45.814907193271075, 44.606729246592366, 43.31944298498364, 41.94244963338906, 40.46238150057156, 38.86192427501599, 37.175061660727, 35.41836213638554, 33.61832428611367, 31.68862913837282, 29.648180175404242, 27.507365030222047, 25.297030751448155, 23.09587400538595, 21.078769731950448, 19.568253277667644, 18.858707086049378, 18.146065950593712, 17.344508430114345, 16.41910004732874, 15.034487786344652, 12.321688962566952, 9.160376174305531, 6.127646773677961, 3.573248241562648, 1.7651385212588595, 0.7081691365181356, 0.20254155790615683, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_cld",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 605.4071168986293, 601.221260069264, 596.4859106140572, 591.05545768078, 584.7179389015021, 577.1508041604832, 567.8372429202699, 555.7637066519542, 538.7609642177779, 480.8931754102639, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 250.87381929902833, 248.17480241604426, 211.26317549480927, 146.64660437980623, 81.81304376267846, 31.614510612915417, 7.69940946215473, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "D_sca",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev_nodes"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [63.77782831223666, 63.72108262746056, 63.66277692035391, 63.60285573718375, 63.54126680085267, 63.477958700972266, 63.41287858373905, 63.34597057278069, 63.27717839642821, 63.2064424693478, 63.13370196622996, 63.05305005776242, 62.96332592901556, 62.86308088142978, 62.75045563758083, 62.623046373454365, 62.47782695640188, 62.309055155305636, 62.10736280837687, 61.80154540668323, 61.08564516856095, 60.34938266562591, 59.59198608655654, 58.81265657927994, 58.01052425939703, 57.184643999456455, 56.33399820265997, 55.45820065450418, 54.556385068460536, 53.6276286740264, 52.67095087460764, 51.68532961582759, 50.669684988187846, 49.62286462126044, 48.54364402942198, 47.43071784487174, 46.28266940536774, 45.09822840119567, 43.87604578106391, 42.614765150876295, 41.31257762843189, 39.967816303725364, 38.57873491952586, 37.143592903002464, 35.66087120291415, 34.12954397389927, 32.54962330439348, 30.922158973630964, 29.245153710138858, 27.516631260576677, 25.734387169334948, 23.884570680338058, 21.826607941713494, 19.438524659668975, 16.70323991450295, 13.66638210780834, 10.429026227204627, 7.056631201550438, 3.5810026144592544, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-06,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabs",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.001334488350409309, 0.0013052139524545692, 0.0013215762969014373, 0.001351265160630142, 0.0013877982513976561, 0.001428927300183644, 0.0014736479730520738, 0.001521331005065219, 0.0015715395917716242, 0.0016237215690251027, 0.001615228423617601, 0.0016045932235099773, 0.0015874023456239567, 0.0015440735544166861, 0.001314462771599458, 0.00031866072651218626, 0.00044150516828946496, 0.0005683846030044523, 0.00065854191396179, 0.0007143107694899349, 0.0008727160319873169, 0.0010510482232708985, 0.0012535876902366359, 0.0014860422837135302, 0.0017560884302961226, 0.0020737510001267293, 0.002175052340703608, 0.002278996970078456, 0.0023918394775196083, 0.002515033371988321, 0.002650353454941448, 0.0028001294326072236, 0.002967421877945135, 0.003156341317841117, 0.003372563759003527, 0.003624190968790543, 0.003795177378192357, 0.003925987472045663, 0.003995507006204264, 0.004252796174580447, 0.0044635822936017, 0.004647252984990054, 0.004760491797341872, 0.004703408311866906, 0.004277692410744467, 0.0031825088485103094, 0.0014876188718258106, 0.0014866593804976397, 0.0016633708041824849, 0.0019096527637953976, 0.0028226945351554782, 0.005097224842983981, 0.005248064379442557, 0.004506428486384444, 0.0035050902092264016, 0.002386222656160508, 0.0013729413966054357, 0.0006534016311910619, 0.00026046260337021175]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabsc",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.014234883152448747, 0.014840864433902567, 0.015617419477759766, 0.01663099770222766, 0.017986983232587173, 0.019862929946496584, 0.022724285023825487, 0.027466332276593466, 0.03213474405851803, 0.05274399314383058, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0005528712890199714, 0.0069688660513856715, 0.010778499874614423, 0.009680135180921541, 0.006921246188001494, 0.0031713277862695016, 0.001004915939993551, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xalb",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.05806475342280763, 0.06053657938088594, 0.06370418368489897, 0.06783861661618196, 0.07336974494523052, 0.08102181923421106, 0.09269342027518078, 0.1120364525644126, 0.2890437782136459, 0.5066385184388382, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.004949391272541362, 0.06238639173211334, 0.09649083660153362, 0.08665810204469387, 0.061960091179138234, 0.028390228213068504, 0.008996166525229282, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xsca",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0010858182620230726, 0.0011129711088460178, 0.0011409914910222735, 0.0011697915119777303, 0.001199333619573735, 0.0012296256763326048, 0.0012607052895352527, 0.0012925600386852207, 0.0013252317983792439, 0.0013587229285216586, 0.001393049000242054, 0.0014282315460395225, 0.0014642605287847983, 0.0015011254785617344, 0.0015381903333956072, 0.0015730206832433305, 0.0016133843116724418, 0.0016548297538828156, 0.001697351552308161, 0.0017409929321331183, 0.001785751767857683, 0.0018317152819780885, 0.001878854770788851, 0.0019272284897184837, 0.001976878767136969, 0.002027807682709778, 0.0020788843355676375, 0.002131202796591465, 0.0021848250919991596, 0.0022398071562791154, 0.002296156164420428, 0.0023539052527332205, 0.002413105578565651, 0.0024737872126543146, 0.0025359741441869452, 0.002599723828757821, 0.0026648072384555135, 0.0027314139889620284, 0.0027996386820106087, 0.0028698512925844208, 0.0029417314262776984, 0.003015399355541216, 0.0030909269531258776, 0.003168263950696278, 0.0032475003658420367, 0.003328736669097624, 0.0034121057660023205, 0.003498444703897609, 0.0035869837204649292, 0.003677800436984253, 0.0037710679311917677, 0.0038668178065061217, 0.003964433653695053, 0.004064446070077421, 0.004167110351509364, 0.004272446445923156, 0.004380543848545485, 0.004491411236811567, 0.00460506610732078]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.9975796933875675, 0.9975818149386995, 0.9975374322120762, 0.9974789433273922, 0.9974128681290285, 0.9973414470234837, 0.9972656467374128, 0.9971861089562496, 0.9971032286098491, 0.9970175555024532, 0.9246920860008839, 0.921589731415662, 0.9176267339629325, 0.9124851866486121, 0.9057906187171872, 0.8972235694095368, 0.8825274052210318, 0.8582740008021067, 0.6764655842615661, 0.43816218471570806, 0.997341532200155, 0.997117236494751, 0.9968675575389746, 0.9965867292265679, 0.9962670328025669, 0.9958984413171634, 0.9957460633237288, 0.9955898002333301, 0.9954233354304813, 0.9952451594717325, 0.9950534903806382, 0.9948459653146595, 0.9946194725434893, 0.9943698714695046, 0.9940914620968095, 0.9937760852024516, 0.9935400153833521, 0.9933425985389923, 0.9932048543117851, 0.9928773525328352, 0.9925946862801206, 0.9923373476594688, 0.9921485812495322, 0.9921283277374369, 0.9924748072234135, 0.9934887544823922, 0.9951002753621718, 0.9950148959156049, 0.9947496454753526, 0.9944125467992202, 0.9879039749720913, 0.9216806995670107, 0.8835181654907143, 0.8950908882179229, 0.9234464620721244, 0.9617797748985782, 0.9842454322896264, 0.9948551871319974, 0.9951344712893089]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-09,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.1383084157102531e-06, 1.0888087304171463e-06, 1.078038848237523e-06, 1.0778366663202976e-06, 1.0825107074051935e-06, 1.0900319193342369e-06, 1.0994394652832289e-06, 1.1101659874166734e-06, 1.1217815226054927e-06, 1.1338422965180642e-06, 1.167456717202194e-05, 1.2819898093601136e-05, 1.4256174298475948e-05, 1.609920667719207e-05, 1.84203254879907e-05, 2.0991226664602932e-05, 2.6619380641530587e-05, 3.659363518085067e-05, 6.169218161329374e-05, 0.00022376917891923912, 3.571001736368824e-06, 4.20490943039191e-06, 4.904740299485903e-06, 5.687709020857938e-06, 6.577032615909098e-06, 7.602885367902371e-06, 7.811589005766712e-06, 8.019338244455979e-06, 8.247590668798008e-06, 8.499919134490767e-06, 8.780871398509457e-06, 9.096378602539358e-06, 9.45421365181053e-06, 9.864977634407547e-06, 1.0343404011492928e-05, 1.0910469974296953e-05, 1.1218647843042382e-05, 1.1398207430199707e-05, 1.1394788109482905e-05, 1.1916697447681552e-05, 1.229275760806951e-05, 1.2582325982065201e-05, 1.267347811300953e-05, 1.231278273130599e-05, 1.1007932115048061e-05, 8.042158387186452e-06, 3.6854013497470556e-06, 3.6101269595002623e-06, 3.96033468480368e-06, 4.459353192666861e-06, 7.781675524595763e-06, 2.9432237674877496e-05, 4.315729247547336e-05, 4.162973303920195e-05, 3.231564210235598e-05, 1.7468161701531752e-05, 7.406188696647129e-06, 1.995145322895855e-06, 7.794798249701869e-07]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-13,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [1.148842267313846e-06, 1.1008531967213394e-06, 1.0919787271742363e-06, 1.093856499341685e-06, 1.1007631822328457e-06, 1.1106647825847896e-06, 1.1226026409509483e-06, 1.1360137768885988e-06, 1.1504724001829738e-06, 1.165535106308309e-06, 1.2029628445618058e-05, 1.3242502692547022e-05, 1.4763845336764756e-05, 1.6716690992954208e-05, 1.9179293055125465e-05, 2.1918121193697485e-05, 2.787640297108234e-05, 3.843826796664699e-05, 6.500643244339465e-05, 0.00023656212232788461, 3.787974683686243e-06, 4.476119507691328e-06, 5.2402009851359334e-06, 6.0998366298018745e-06, 7.081495627321185e-06, 8.219707775835243e-06, 8.481499535950388e-06, 8.745871708588325e-06, 9.036564657053636e-06, 9.35810738833429e-06, 9.716236978290691e-06, 1.0118406526551217e-05, 1.0574361789601415e-05, 1.1097332553733299e-05, 1.170565797346569e-05, 1.2425377835481264e-05, 1.2860957212953153e-05, 1.315765056246031e-05, 1.3249828697153345e-05, 1.3963283853145312e-05, 1.452070049077663e-05, 1.4989937950364068e-05, 1.52351453256777e-05, 1.4943402246317868e-05, 1.349566411935847e-05, 9.966310543747809e-06, 4.619844497174959e-06, 4.581291096966731e-06, 5.0921686411411565e-06, 5.815384915167537e-06, 1.0303927423746582e-05, 3.9621593956060915e-05, 5.915378750055176e-05, 5.819637765480245e-05, 4.6168482429467186e-05, 2.5566296542424814e-05, 1.1137201366417275e-05, 3.093828748563421e-06, 1.2522144291824598e-06]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 1e-13,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 1
+           },
+           "expected": 52.13427034698938,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 30
+           },
+           "expected": 425.0941632972141,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "S",
+           "time": 0.0,
+           "coords": {
+             "lev_nodes": 60
+           },
+           "expected": 777.6224121444102,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 1.1383084157102531e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 10
+           },
+           "expected": 1.1338422965180642e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 30
+           },
+           "expected": 8.499919134490767e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 7.794798249701869e-07,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 1.148842267313846e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 30
+           },
+           "expected": 9.35810738833429e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 1.2522144291824598e-06,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 1
+           },
+           "expected": 0.9975796933875675,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 20
+           },
+           "expected": 0.43816218471570806,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "tau",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.9951344712893089,
+           "tolerance": {
+             "rel": 1e-09
+           }
+         },
+         {
+           "variable": "n_renorm",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "n_floor",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         }
+       ]
+     },
+     {
+       "id": "synthetic_eclipse_call120",
+       "description": "Reference: WRF 4.8 em_scm_xy single-column run (GNU real32 build, dt = 60 s, 59 layers, mp=6 ra_lw=1 ra_sw=1 sf_sfclay=1 sf_surface=1 bl_pbl=1, swrad_scat = 1, icloud = 1) dumped by the instrumented fork ctessum-claude/WRF, commit e42a269 (v4.8.0-2-ge42a269e; module_esm_dump, SWRAD/SWPARA hooks) and replayed through the real64 (-fdefault-real-8) standalone kernels/sw_driver of that commit; inputs are the dumped SWRAD arguments (single-precision values widened) of tile column 1, and every expected value is the real64 replay (the same inputs through the same Fortran in binary64, so the scheme's constants and literals are exact and the only residual is evaluation-order roundoff). The scheme is diagnostic (no time step), so no small-dt replay is involved. Regime: SYNTHETIC -- the scm_call120_noon_ice_cloud column (cos zenith 0.562) with obscur = 1, a total eclipse: soltop = 0, so SWPARA returns before computing (SOLTOP .LE. 1.E-9) and WRF's heating and surface flux are exactly zero. Here daylight = 0 masks gsw, dT/dt and dtheta/dt, which must be exactly 0 (absolute tolerance 0). The beam at the top of the atmosphere is 0, so the top layer's fractions divide 0 by the floored S_top and must be 0, not 0/0 = NaN.",
+       "parameter_overrides": {
+         "csza": 0.5617246031761169,
+         "albedo": 0.20000000298023224,
+         "solcon": 1384.34814453125,
+         "obscur": 1.0,
+         "cssca": 9.999999747378752e-06,
+         "icloud": 1.0
+       },
+       "expression_template_imports": [
+         {
+           "ref": "./tests/synthetic_eclipse_call120_inputs.esm"
+         }
+       ],
+       "time_span": {
+         "start": 0,
+         "end": 1
+       },
+       "assertions": [
+         {
+           "variable": "daylight",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "gsw",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dTdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "dthdt",
+           "time": 0.0,
+           "reduce": "Linf_error",
+           "expected": 0.0,
+           "reference": {
+             "op": "faq",
+             "output_idx": [
+               "k"
+             ],
+             "args": [],
+             "ranges": {
+               "k": {
+                 "from": "lev"
+               }
+             },
+             "expr": {
+               "op": "index",
+               "args": [
+                 {
+                   "op": "const",
+                   "args": [],
+                   "value": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                 },
+                 "k"
+               ]
+             }
+           },
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "n_renorm",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "n_floor",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabs",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xabsc",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xalb",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
+           }
+         },
+         {
+           "variable": "xsca",
+           "time": 0.0,
+           "coords": {
+             "lev": 59
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 0.0,
+             "rel": 0.0
            }
          }
        ]
