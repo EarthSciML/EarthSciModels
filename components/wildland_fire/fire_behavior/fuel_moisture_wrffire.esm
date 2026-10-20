@@ -1,8 +1,8 @@
 {
- "esm": "1.0.0",
+ "esm": "1.2.0",
  "metadata": {
   "name": "FuelMoistureWRFFire",
-  "description": "Dead and live fuel moisture of the five WRF-SFIRE moisture classes (1-h, 10-h, 100-h, 1000-h dead fuel and live fuel) for one fire-grid cell, as advanced by fire_behavior's Advance_moisture_classes and averaged by Average_moisture_classes (physics/fmc_wrffire_mod.F90; Mandel et al. 2014). From the step-mean 2 m temperature, humidity and surface pressure the relative humidity follows Murphy & Koop (2005) eq. 10; without rain the Van Wagner & Pickett (1972) drying and wetting equilibrium moisture contents bracket the class moisture, which relaxes with its class time lag towards the nearer bracket (a class already between them does not move); with rain above 0.05 mm/h both brackets become the saturation moisture 2.5 and the rate is the wetting lag scaled by 1 - exp(-r/8 mm/h). The physics is the time-lag ODE d m_k/dt = (equi_k - m_k)/tau_k (dfmc_dt); fire_behavior integrates it exactly over its moisture step (exponential form, or the 2nd-order Taylor form when the step covers less than 1 % of the lag), reproduced as fmc_new so the Fortran step can be tested. The cell's ground fuel moisture fmc_g is the load-weighted mean of the classes (Anderson13FuelTable w_1h .. w_live). The assimilation adjustments deltae/deltas (fmep) and their decay are transcribed; the fmc_gc initialisation branches (from the equilibrium or from the namelist) are the consumer's initial condition and are not transcribed. The EarthSciModels wildland_fire/nfdrs moisture components (NFDRS 1-h/10-h/100-h/1000-h models) are a different formulation and are not reused. Tests: cells of the instrumented test7 run with the moisture model on (fmoist_run, fmoist_freq = 1, dt_moisture = 0.5 s, so every class is in the Taylor branch; the 10 s case has no rain, so the wetting branch is transcribed but untested), real32, rel 1e-5.",
+  "description": "Dead and live fuel moisture of the five WRF-SFIRE moisture classes (1-h, 10-h, 100-h, 1000-h dead fuel and live fuel) for one fire-grid cell, as advanced by fire_behavior's Advance_moisture_classes and averaged by Average_moisture_classes (physics/fmc_wrffire_mod.F90; Mandel et al. 2014). From the step-mean 2 m temperature, humidity and surface pressure the relative humidity follows Murphy & Koop (2005) eq. 10; without rain the Van Wagner & Pickett (1972) drying and wetting equilibrium moisture contents bracket the class moisture, which relaxes with its class time lag towards the nearer bracket (a class already between them does not move); with rain above 0.05 mm/h both brackets become the saturation moisture 2.5 and the rate is the wetting lag scaled by 1 - exp(-r/8 mm/h). Every coefficient and class table is a FireBehaviorParameters (par) entry. The physics is the time-lag ODE d m_k/dt = (equi_k - m_k)/tau_k (dfmc_dt); fire_behavior integrates it exactly over its moisture step (exponential form, or the 2nd-order Taylor form when the step covers less than 1 % of the lag), reproduced as fmc_new so the Fortran step can be tested. The cell's ground fuel moisture fmc_g is the load-weighted mean of the classes (Anderson13FuelTable w_1h .. w_live). The assimilation adjustments deltae/deltas (fmep) and their decay are transcribed; the fmc_gc initialisation branches (from the equilibrium or from the namelist) are the consumer's initial condition and are not transcribed. The EarthSciModels wildland_fire/nfdrs moisture components (NFDRS 1-h/10-h/100-h/1000-h models) are a different formulation and are not reused. Tests: cells of the instrumented test7 run with the moisture model on (fmoist_run, fmoist_freq = 1, dt_moisture = 0.5 s, so every class is in the Taylor branch; the 10 s case has no rain, so the wetting branch is transcribed but untested), real32, rel 1e-5.",
   "license": "MIT",
   "tags": [
    "wildland_fire",
@@ -110,7 +110,7 @@
     "rain_int": {
      "type": "unknown",
      "units": "mm/h",
-     "description": "Rain intensity from the accumulated rain difference over the moisture step (0 if dt_moisture = 0)."
+     "description": "Rain intensity from the accumulated rain difference over the moisture step, 3600 (rain - rain_old) / dt_moisture mm/h; 0 if dt_moisture = 0."
     },
     "pw": {
      "type": "unknown",
@@ -149,16 +149,16 @@
     },
     "drying_lag_h": {
      "type": "unknown",
-     "units": "1",
-     "description": "Drying time lag of each class, h (1, 10, 100, 1000, 1e9 for 1-h, 10-h, 100-h, 1000-h, live).",
+     "units": "h",
+     "description": "Drying time lag of each class (par.fmc_drying_lag_1 .. _5: 1, 10, 100, 1000 h and 1e9 h for 1-h, 10-h, 100-h, 1000-h, live).",
      "shape": [
       "fmc_class"
      ]
     },
     "wetting_lag_h": {
      "type": "unknown",
-     "units": "1",
-     "description": "Wetting time lag of each class in rain, h (1.4, 14, 140, 1400, 1e9).",
+     "units": "h",
+     "description": "Wetting time lag of each class in rain (par.fmc_wetting_lag_1 .. _5: 1.4, 14, 140, 1400 h and 1e9 h).",
      "shape": [
       "fmc_class"
      ]
@@ -269,8 +269,8 @@
     },
     "fmc_lag_h": {
      "type": "unknown",
-     "units": "1",
-     "description": "Diagnostic time lag 1/(3600 rlag), h (fmc_lag).",
+     "units": "h",
+     "description": "Diagnostic time lag 1/(3600 rlag) (fmc_lag).",
      "shape": [
       "fmc_class"
      ]
@@ -345,13 +345,7 @@
         "op": "*",
         "args": [
          0.0,
-         {
-          "op": "/",
-          "args": [
-           "rain",
-           "dt_moisture"
-          ]
-         }
+         "par.unit_rain_rate"
         ]
        }
       ]
@@ -451,11 +445,11 @@
          {
           "op": "+",
           "args": [
-           54.842763,
+           "par.mk_c0",
            {
             "op": "/",
             "args": [
-             -6763.22,
+             "par.mk_c1",
              {
               "op": "/",
               "args": [
@@ -468,7 +462,7 @@
            {
             "op": "*",
             "args": [
-             -4.21,
+             "par.mk_c2",
              {
               "op": "log",
               "args": [
@@ -486,7 +480,7 @@
            {
             "op": "*",
             "args": [
-             0.000367,
+             "par.mk_c3",
              {
               "op": "/",
               "args": [
@@ -505,7 +499,7 @@
                {
                 "op": "*",
                 "args": [
-                 0.0415,
+                 "par.mk_c_tanh",
                  {
                   "op": "-",
                   "args": [
@@ -516,7 +510,7 @@
                      "par.unit_kelvin"
                     ]
                    },
-                   218.8
+                   "par.mk_t_tanh"
                   ]
                  }
                 ]
@@ -526,11 +520,11 @@
              {
               "op": "+",
               "args": [
-               53.878,
+               "par.mk_c4",
                {
                 "op": "/",
                 "args": [
-                 -1331.22,
+                 "par.mk_c5",
                  {
                   "op": "/",
                   "args": [
@@ -543,7 +537,7 @@
                {
                 "op": "*",
                 "args": [
-                 -9.44523,
+                 "par.mk_c6",
                  {
                   "op": "log",
                   "args": [
@@ -561,7 +555,7 @@
                {
                 "op": "*",
                 "args": [
-                 0.014025,
+                 "par.mk_c7",
                  {
                   "op": "/",
                   "args": [
@@ -620,12 +614,12 @@
        {
         "op": "*",
         "args": [
-         0.942,
+         "par.vwp_drying_c1",
          {
           "op": "^",
           "args": [
            "hpct",
-           0.679
+           "par.vwp_drying_p1"
           ]
          }
         ]
@@ -633,14 +627,14 @@
        {
         "op": "*",
         "args": [
-         0.000499,
+         "par.vwp_drying_c2",
          {
           "op": "exp",
           "args": [
            {
             "op": "*",
             "args": [
-             0.1,
+             "par.vwp_exp_rh",
              "hpct"
             ]
            }
@@ -651,7 +645,7 @@
        {
         "op": "*",
         "args": [
-         0.18,
+         "par.vwp_temp_coef",
          {
           "op": "-",
           "args": [
@@ -675,7 +669,12 @@
              {
               "op": "*",
               "args": [
-               -0.115,
+               {
+                "op": "-",
+                "args": [
+                 "par.vwp_temp_rh"
+                ]
+               },
                "hpct"
               ]
              }
@@ -696,12 +695,12 @@
        {
         "op": "*",
         "args": [
-         0.618,
+         "par.vwp_wetting_c1",
          {
           "op": "^",
           "args": [
            "hpct",
-           0.753
+           "par.vwp_wetting_p1"
           ]
          }
         ]
@@ -709,14 +708,14 @@
        {
         "op": "*",
         "args": [
-         0.000454,
+         "par.vwp_wetting_c2",
          {
           "op": "exp",
           "args": [
            {
             "op": "*",
             "args": [
-             0.1,
+             "par.vwp_exp_rh",
              "hpct"
             ]
            }
@@ -727,7 +726,7 @@
        {
         "op": "*",
         "args": [
-         0.18,
+         "par.vwp_temp_coef",
          {
           "op": "-",
           "args": [
@@ -751,7 +750,12 @@
              {
               "op": "*",
               "args": [
-               -0.115,
+               {
+                "op": "-",
+                "args": [
+                 "par.vwp_temp_rh"
+                ]
+               },
                "hpct"
               ]
              }
@@ -767,71 +771,99 @@
     {
      "lhs": "drying_lag_h",
      "rhs": {
-      "op": "aggregate",
-      "output_idx": [
-       "k"
-      ],
+      "op": "makearray",
       "args": [],
-      "ranges": {
-       "k": {
-        "from": "fmc_class"
-       }
-      },
-      "expr": {
-       "op": "index",
-       "args": [
-        {
-         "op": "const",
-         "args": [],
-         "value": [
-          1.0,
-          10.0,
-          100.0,
-          1000.0,
-          1000000000.0
-         ]
-        },
-        "k"
+      "regions": [
+       [
+        [
+         1,
+         1
+        ]
+       ],
+       [
+        [
+         2,
+         2
+        ]
+       ],
+       [
+        [
+         3,
+         3
+        ]
+       ],
+       [
+        [
+         4,
+         4
+        ]
+       ],
+       [
+        [
+         5,
+         5
+        ]
        ]
-      }
+      ],
+      "values": [
+       "par.fmc_drying_lag_1",
+       "par.fmc_drying_lag_2",
+       "par.fmc_drying_lag_3",
+       "par.fmc_drying_lag_4",
+       "par.fmc_drying_lag_5"
+      ]
      }
     },
     {
      "lhs": "wetting_lag_h",
      "rhs": {
-      "op": "aggregate",
-      "output_idx": [
-       "k"
-      ],
+      "op": "makearray",
       "args": [],
-      "ranges": {
-       "k": {
-        "from": "fmc_class"
-       }
-      },
-      "expr": {
-       "op": "index",
-       "args": [
-        {
-         "op": "const",
-         "args": [],
-         "value": [
-          1.4,
-          14.0,
-          140.0,
-          1400.0,
-          1000000000.0
-         ]
-        },
-        "k"
+      "regions": [
+       [
+        [
+         1,
+         1
+        ]
+       ],
+       [
+        [
+         2,
+         2
+        ]
+       ],
+       [
+        [
+         3,
+         3
+        ]
+       ],
+       [
+        [
+         4,
+         4
+        ]
+       ],
+       [
+        [
+         5,
+         5
+        ]
        ]
-      }
+      ],
+      "values": [
+       "par.fmc_wetting_lag_1",
+       "par.fmc_wetting_lag_2",
+       "par.fmc_wetting_lag_3",
+       "par.fmc_wetting_lag_4",
+       "par.fmc_wetting_lag_5"
+      ]
      }
     },
     {
      "lhs": "saturation_moisture",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -841,29 +873,13 @@
         "from": "fmc_class"
        }
       },
-      "expr": {
-       "op": "index",
-       "args": [
-        {
-         "op": "const",
-         "args": [],
-         "value": [
-          2.5,
-          2.5,
-          2.5,
-          2.5,
-          2.5
-         ]
-        },
-        "k"
-       ]
-      }
+      "expr": "par.fmc_saturation_moisture"
      }
     },
     {
      "lhs": "saturation_rain",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -873,29 +889,13 @@
         "from": "fmc_class"
        }
       },
-      "expr": {
-       "op": "index",
-       "args": [
-        {
-         "op": "const",
-         "args": [],
-         "value": [
-          8.0,
-          8.0,
-          8.0,
-          8.0,
-          8.0
-         ]
-        },
-        "k"
-       ]
-      }
+      "expr": "par.fmc_saturation_rain"
      }
     },
     {
      "lhs": "rain_threshold",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [
        "k"
       ],
@@ -905,23 +905,7 @@
         "from": "fmc_class"
        }
       },
-      "expr": {
-       "op": "index",
-       "args": [
-        {
-         "op": "const",
-         "args": [],
-         "value": [
-          0.05,
-          0.05,
-          0.05,
-          0.05,
-          0.05
-         ]
-        },
-        "k"
-       ]
-      }
+      "expr": "par.fmc_rain_threshold"
      }
     },
     {
@@ -1370,7 +1354,7 @@
     {
      "lhs": "fmc_g",
      "rhs": {
-      "op": "aggregate",
+      "op": "faq",
       "output_idx": [],
       "args": [],
       "ranges": {
@@ -3122,6 +3106,236 @@
            "expected": 0.18165084719657898,
            "tolerance": {
              "rel": 1e-05
+           }
+         }
+       ]
+     },
+     {
+       "id": "zero_length_step_brush",
+       "description": "Regime: a moisture step of zero length (dt_moisture = 0, which Advance_fmc_model produces when the moisture model is called twice at the same time) with 1 mm of accumulated rain since the previous step. Advance_moisture_classes then takes rain_int = 0 instead of dividing by the step, so no class is wetted, change = dt_moisture rlag = 0 and every class keeps its moisture. The expected values follow from the Fortran's branch structure rather than from a dump: rain_int = 0, r = 0 - 0.05 mm/h, change = 0, fmc_new = fmc_old, fmc_g = sum_k w_k fmc_old_k and fmep_decay = 1. The forcing, class moistures and class weights are those of moisture_run_step20_brush.",
+       "parameter_overrides": {
+         "rain": 1.0,
+         "rain_old": 0.0,
+         "t2": 310.3646240234375,
+         "t2_old": 310.3646240234375,
+         "q2": 0.005284447688609362,
+         "q2_old": 0.005284447688609362,
+         "psfc": 84633.6796875,
+         "psfc_old": 84633.6796875,
+         "dt_moisture": 0.0,
+         "deltae": 0.0,
+         "deltas": 0.0
+       },
+       "expression_template_imports": [
+         {
+           "ref": "./tests/moisture_run_step20_brush_inputs.esm"
+         }
+       ],
+       "time_span": {
+         "start": 0,
+         "end": 1
+       },
+       "tolerance": {
+         "rel": 1e-05
+       },
+       "assertions": [
+         {
+           "variable": "rain_int",
+           "time": 0.0,
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "r",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 1
+           },
+           "expected": -0.05000000074505806,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "r",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 2
+           },
+           "expected": -0.05000000074505806,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "r",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 3
+           },
+           "expected": -0.05000000074505806,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "r",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 4
+           },
+           "expected": -0.05000000074505806,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "r",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 5
+           },
+           "expected": -0.05000000074505806,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "change",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 1
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "change",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 2
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "change",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 3
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "change",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 4
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "change",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 5
+           },
+           "expected": 0.0,
+           "tolerance": {
+             "abs": 1e-12
+           }
+         },
+         {
+           "variable": "fmc_new",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 1
+           },
+           "expected": 0.023851914331316948,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "fmc_new",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 2
+           },
+           "expected": 0.023851914331316948,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "fmc_new",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 3
+           },
+           "expected": 0.023851914331316948,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "fmc_new",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 4
+           },
+           "expected": 0.023851914331316948,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "fmc_new",
+           "time": 0.0,
+           "coords": {
+             "fmc_class": 5
+           },
+           "expected": 0.30000001192092896,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-09
+           }
+         },
+         {
+           "variable": "fmc_g",
+           "time": 0.0,
+           "expected": 0.18165083536009144,
+           "tolerance": {
+             "rel": 1e-05
+           }
+         },
+         {
+           "variable": "fmep_decay",
+           "time": 0.0,
+           "expected": 1.0,
+           "tolerance": {
+             "abs": 1e-12
            }
          }
        ]
