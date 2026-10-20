@@ -1,29 +1,33 @@
 """
     run_tests.jl
 
-Discovery + inline-test runner for `.esm` files in this repo.
+The Julia inline-test gate over this repo's `.esm` corpus: `EarthSciAST`'s
+tree-walk runner, sharded for CI.
 
-Each `Model` and `ReactionSystem` may carry a `tests` block (ESM spec §6.6) of
-scalar `(variable, time, expected, [tolerance])` assertions. This module walks
-`components/` (organized by science domain), parses every `.esm` file via
-`EarthSciAST.load_path`, simulates each Test on the resulting MTK system,
-samples each Assertion via the solution interpolant, and compares to the
-declared expected value with the tolerance resolved per spec §6.6.4 (assertion
-> test > model > default `rel=1e-6`).
+The run itself — discovery, `EarthSciAST.load_path`, the `esm_problem` build,
+integration of each esm-spec §6.6 test, §6.6.4 tolerance resolution, the §6.6.3
+pass predicate and the junit report — belongs to `EarthSciAST` and is not
+restated here. This file adds the two things that are facts about this REPO
+rather than about the ESM format: where its `.esm` files live, and that the
+corpus does not fit one GitHub Actions job, so the walk is split across a
+matrix.
 
-The runner requires `ModelingToolkit`, `OrdinaryDiffEqTsit5` /
-`OrdinaryDiffEqRosenbrock`, and (for `ReactionSystem` tests) `Catalyst` to be
-loaded at the call site so the EarthSciAST MTK / Catalyst extensions
-are active.
+The runner is `EarthSciAST.run_inline_tests` — the tree-walk pathway, the same
+one the Python gate drives — NOT `EarthSciAST.run_esm_tests`, which lowers each
+document to ModelingToolkit first. The two are not equivalent over this corpus:
+the MTK lowering has no arm for a long tail of ops the corpus uses (`and`,
+`or`, `floor`, `atan2`, `datetime.hour`, an unexpanded `apply_expression_template`
+in a reaction rate), and every document reaching one of them errors at compile
+time under that runner while the tree-walk runner integrates it. Loading a
+document as an MTK `System` is still what `load_esm` is for, and it is covered
+by this package's own tests; it is just not how the corpus gate runs.
 
 Public surface:
-- `discover_esm_files(roots)` — recursive `.esm` walk over directories and/or
-  explicit `.esm` files
 - `shard_esm_files(files; shard="i/n")` — select shard `i` of `n` (defaults to
-  the `ESM_TESTS_SHARD` env var), so the walk can be split across CI jobs
-- `run_esm_tests(roots; junit_xml=nothing, verbose=true)` — returns
-  `(results, exit_code)` where `exit_code == 0` iff every assertion passed
-- `write_junit_xml(results, path)` — emit a junit-compatible report
+  the `ESM_TESTS_SHARD` env var)
+- `run_esm_tests(roots; shard, junit_xml, …)` — run the inline tests of this
+  repo's corpus (or of one shard of it)
+- `discover_esm_files(roots)` — `EarthSciAST.discover_esm_files` rooted here
 """
 
 # Sweep roots, kept in parity with the Python gate's DEFAULT_ROOTS in
@@ -33,102 +37,18 @@ Public surface:
 # cross-runner divergence hides, so they walk the same three.
 const DEFAULT_ROOTS = ["components", "lib", "registered_functions"]
 
-@enum AssertionStatus PASS FAIL ERROR SKIP
-
 """
-    AssertionResult
+    discover_esm_files(roots=DEFAULT_ROOTS; exclude=nothing) -> Vector{String}
 
-Outcome of one `(file, container, test, assertion_idx)` evaluation.
-`message` carries the diff or error text for non-`PASS` results.
+[`EarthSciAST.discover_esm_files`](@ref) rooted at this repo: `roots` that are
+not absolute resolve against [`esm_root`](@ref) rather than against the
+toolkit's own package directory.
+
+`exclude` (or the `ESM_TESTS_EXCLUDE` env var) is passed straight through.
 """
-struct AssertionResult
-    file::String
-    container_kind::Symbol   # :model or :reaction_system
-    container_name::String
-    test_id::String
-    assertion_idx::Int
-    variable::String
-    time::Float64
-    expected::Float64
-    actual::Union{Float64,Nothing}
-    status::AssertionStatus
-    message::String
-    duration_s::Float64
-end
-
-# ---------------------------------------------------------------------------
-# Discovery
-# ---------------------------------------------------------------------------
-
-# Resolve exclude patterns: either an explicit kwarg vector, or the
-# ESM_TESTS_EXCLUDE env var (";" or ":" separated). Patterns are matched as
-# substrings against the absolute discovered path AND the path relative to
-# `esm_root()`, so users can write either "components/gaschem/geoschem_fullchem.esm"
-# or just "geoschem_fullchem.esm".
-function _resolve_exclude(exclude::Union{Nothing,AbstractVector{<:AbstractString}})
-    if exclude !== nothing
-        return collect(String, exclude)
-    end
-    raw = get(ENV, "ESM_TESTS_EXCLUDE", "")
-    isempty(raw) && return String[]
-    parts = split(raw, r"[;:]"; keepempty=false)
-    return String[String(strip(p)) for p in parts if !isempty(strip(p))]
-end
-
-function _is_excluded(path::AbstractString, base::AbstractString,
-                     patterns::Vector{String})
-    isempty(patterns) && return false
-    rel = startswith(path, base) ? relpath(path, base) : path
-    for pat in patterns
-        (occursin(pat, path) || occursin(pat, rel)) && return true
-    end
-    return false
-end
-
-"""
-    discover_esm_files(roots; exclude=nothing) -> Vector{String}
-
-Resolve `roots` (each relative to `esm_root()` when not absolute) to a
-deterministic, sorted, de-duplicated list of `*.esm` paths. A root that names a
-directory is walked recursively; a root that names a `.esm` file is taken as
-itself, so a caller can hand the runner an explicit file list — the same
-"files and/or directories" surface the Rust CLI's `esm test PATH...` and the
-Python gate's `--files` offer. Missing roots are skipped silently — empty
-top-level dirs are normal in the migration window.
-
-`exclude` (or the `ESM_TESTS_EXCLUDE` env var, ";"- or ":"-separated) is a list
-of substring patterns; any discovered file whose absolute or repo-relative
-path contains a pattern is dropped. This is the supported way to skip the
-OOM-prone full-chemistry inline test on memory-constrained CI runners
-(see bead mdl-lvu).
-"""
-function discover_esm_files(roots::AbstractVector{<:AbstractString};
-                            exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing)
-    base = esm_root()
-    patterns = _resolve_exclude(exclude)
-    found = String[]
-    for r in roots
-        path = isabspath(r) ? r : joinpath(base, r)
-        if isfile(path)
-            endswith(path, ".esm") || continue
-            _is_excluded(path, base, patterns) && continue
-            push!(found, path)
-            continue
-        end
-        isdir(path) || continue
-        for (root, _dirs, files) in walkdir(path)
-            for f in files
-                endswith(f, ".esm") || continue
-                full = joinpath(root, f)
-                _is_excluded(full, base, patterns) && continue
-                push!(found, full)
-            end
-        end
-    end
-    sort!(found)
-    unique!(found)
-    return found
-end
+discover_esm_files(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
+                   exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing) =
+    EarthSciAST.discover_esm_files(roots; root=esm_root(), exclude=exclude)
 
 """
     shard_esm_files(files; shard=nothing) -> Vector{String}
@@ -139,15 +59,12 @@ shards) and defaults to the `ESM_TESTS_SHARD` env var; when neither is set,
 
 Selection is by **stride** (`files[i:n:end]`), not by contiguous block: the
 sorted corpus is grouped by science domain, and per-file cost is dominated by
-the MTK build of whichever domain a file belongs to, so contiguous blocks would
-hand one shard every large chemistry mechanism and another only the cheap
-leaves. Striding interleaves the domains and keeps shard wall-times close.
+whichever domain a file belongs to, so contiguous blocks would hand one shard
+every large chemistry mechanism and another only the cheap leaves. Striding
+interleaves the domains and keeps shard wall-times close.
 
-This exists because the Julia walk builds every system IN-PROCESS, so its cost
-scales linearly with the corpus — measured at ~4 s/file, which puts the whole
-walk near 25 minutes in one process and growing. Sharding is what lets the walk
-back into CI (esm-g97l, esm-m0r2 removed it) without either raising the per-job
-budget or dropping coverage.
+The shards are a partition — every discovered `.esm` is walked by exactly one
+of them — so splitting the walk across CI jobs costs no coverage.
 """
 function shard_esm_files(files::AbstractVector{<:AbstractString};
                          shard::Union{Nothing,AbstractString}=nothing)
@@ -169,454 +86,128 @@ function shard_esm_files(files::AbstractVector{<:AbstractString};
     return collect(String, files[i:n:end])
 end
 
-discover_esm_files(; kwargs...) = discover_esm_files(DEFAULT_ROOTS; kwargs...)
-
-# ---------------------------------------------------------------------------
-# Tolerance resolution (spec §6.6.4)
-# ---------------------------------------------------------------------------
-
-const _DEFAULT_REL_TOL = 1.0e-6
-
-# Returns (rtol, atol) — the most-specific declared tolerance wins.
-function _resolve_tolerance(model_tol, test_tol, assertion_tol)
-    for candidate in (assertion_tol, test_tol, model_tol)
-        candidate === nothing && continue
-        rel = candidate.rel === nothing ? 0.0 : candidate.rel
-        atol = candidate.abs === nothing ? 0.0 : candidate.abs
-        return (Float64(rel), Float64(atol))
-    end
-    return (_DEFAULT_REL_TOL, 0.0)
-end
-
-# ---------------------------------------------------------------------------
-# Symbol lookup on a compiled MTK system
-# ---------------------------------------------------------------------------
-
-# Variable names in flattened ESM systems are dotted ("Sub.x"); the MTK
-# extension's `_san` rewrites dots to underscores when constructing symbolic
-# names. After mtkcompile, `getproperty(simp, Symbol(name))` returns the
-# symbolic handle for either form, prefixed by the wrapper system's name.
-function _resolve_handle(simp, sys_name::Symbol, var_spec::AbstractString)
-    MTK = _require_mtk()
-    sanitized = replace(String(var_spec), "." => "_")
-    qualified = Symbol(String(sys_name) * "_" * sanitized)
-    if hasproperty(simp, qualified)
-        return getproperty(simp, qualified)
-    end
-    bare = Symbol(sanitized)
-    if hasproperty(simp, bare)
-        return getproperty(simp, bare)
-    end
-    throw(ArgumentError("Variable '$(var_spec)' not found on compiled system " *
-                         "(tried '$(qualified)' and '$(bare)')."))
-end
-
-# Lazy module lookup so this file can `include` without a hard dep on MTK
-# being loaded at module-init time. Mirrors the pattern used by `_to_system`
-# in EarthSciModels.jl.
-function _require_mtk()
-    pkg = Base.PkgId(Base.UUID("961ee093-0014-501f-94e3-6117800e7a78"),
-                     "ModelingToolkit")
-    mod = get(Base.loaded_modules, pkg, nothing)
-    mod === nothing && throw(ArgumentError(
-        "run_esm_tests requires ModelingToolkit to be loaded. " *
-        "Call `using ModelingToolkit` first."))
-    return mod
-end
-
-function _try_require(uuid::AbstractString, name::AbstractString)
-    pkg = Base.PkgId(Base.UUID(uuid), name)
-    return get(Base.loaded_modules, pkg, nothing)
-end
-
-# Per-file stiff-solver override (esm-4sxf). .esm basenames listed here are
-# integrated with the stiff Rosenbrock23 solver instead of the default
-# non-stiff Tsit5. Mirrors SOLVER_METHOD_OVERRIDE_FILENAMES in
-# tools/run_esm_inline_tests.py — see that file and the pollu.esm reference
-# notes for the rationale: the POLLU stiff-ODE benchmark (rate constants
-# spanning ~8e-7 to ~7e9 1/s) cannot be integrated by an explicit non-stiff
-# method, and Rosenbrock23 is the solver the upstream GasChem.jl reference
-# values were generated with.
-const STIFF_SOLVER_OVERRIDE_FILENAMES = Set(["pollu.esm"])
-
-# Pick a solver: prefer Tsit5 (non-stiff, fast); fall back to Rosenbrock23.
-# `.esm` files in `STIFF_SOLVER_OVERRIDE_FILENAMES` force Rosenbrock23.
-function _pick_solver(file::AbstractString="")
-    rb = _try_require("43230ef6-c299-4910-a778-202eb28ce4ce",
-                      "OrdinaryDiffEqRosenbrock")
-    if rb !== nothing && basename(file) in STIFF_SOLVER_OVERRIDE_FILENAMES
-        return (rb.Rosenbrock23(), :rosenbrock23)
-    end
-    tsit = _try_require("b1df2697-797e-41e3-8120-5422d3b24e4a",
-                        "OrdinaryDiffEqTsit5")
-    tsit !== nothing && return (tsit.Tsit5(), :tsit5)
-    rb !== nothing && return (rb.Rosenbrock23(), :rosenbrock23)
-    throw(ArgumentError(
-        "run_esm_tests requires an OrdinaryDiffEq solver to be loaded " *
-        "(`using OrdinaryDiffEqTsit5` or `using OrdinaryDiffEqRosenbrock`)."))
-end
-
-# ---------------------------------------------------------------------------
-# Per-container test execution
-# ---------------------------------------------------------------------------
-
-function _check_assertion(actual::Real, expected::Float64,
-                          rtol::Float64, atol::Float64)
-    if rtol == 0.0 && atol == 0.0
-        return Float64(actual) == expected
-    end
-    return isapprox(Float64(actual), expected; rtol=rtol, atol=atol)
-end
-
-function _run_tests_on_compiled(file::AbstractString, container_kind::Symbol,
-                                container_name::AbstractString,
-                                container_tolerance, tests, simp,
-                                sys_name::Symbol, results::Vector{AssertionResult};
-                                esm_container=nothing)
-    isempty(tests) && return
-    MTK = _require_mtk()
-    solver, _solver_kind = _pick_solver(file)
-
-    # For reaction_system containers, species and parameter defaults declared
-    # in the ESM file are NOT propagated through the Catalyst.@species /
-    # @parameters metadata by the EarthSciAST Catalyst extension
-    # (the Core.eval path builds bare symbolics). Compensate by seeding u0
-    # and p from the ESM defaults here — a pure-Model path still works as
-    # before because `esm_container` is nothing and the maps stay empty.
-    defaults_u0 = Dict{Any,Float64}()
-    defaults_p  = Dict{Any,Float64}()
-    if container_kind === :reaction_system && esm_container !== nothing
-        for sp in esm_container.species
-            sp.default === nothing && continue
-            handle = try _resolve_handle(simp, sys_name, sp.name) catch; nothing end
-            handle === nothing && continue
-            defaults_u0[handle] = Float64(sp.default)
-        end
-        for pr in esm_container.parameters
-            pr.default === nothing && continue
-            handle = try _resolve_handle(simp, sys_name, pr.name) catch; nothing end
-            handle === nothing && continue
-            defaults_p[handle] = Float64(pr.default)
-        end
-    end
-
-    for t in tests
-        t_start = time()
-        local sol = nothing
-        local prob_err::Union{Nothing,Exception} = nothing
-        try
-            u0_map = copy(defaults_u0)
-            for (spec, val) in t.initial_conditions
-                handle = _resolve_handle(simp, sys_name, spec)
-                u0_map[handle] = Float64(val)
-            end
-            p_map = copy(defaults_p)
-            for (spec, val) in t.parameter_overrides
-                handle = _resolve_handle(simp, sys_name, spec)
-                p_map[handle] = Float64(val)
-            end
-            tspan = (t.time_span.start, t.time_span.stop)
-            # MTK11+ deprecated the (u0, tspan, p) form; merged Dict is the
-            # canonical shape and keeps both initial-condition + parameter
-            # overrides on a single map.
-            merged = isempty(p_map) ? u0_map : merge(u0_map, p_map)
-            prob = if container_kind === :reaction_system
-                # Catalyst.ReactionSystem → ODEProblem directly; disables
-                # combinatoric rate-law multipliers so macroscopic rate
-                # coefficients match the upstream SuperFast convention.
-                MTK.ODEProblem(simp, merged, tspan; combinatoric_ratelaws=false)
-            else
-                MTK.ODEProblem(simp, merged, tspan)
-            end
-            sol = MTK.SciMLBase.solve(prob, solver;
-                                       reltol=1e-10, abstol=1e-12)
-        catch err
-            prob_err = err
-        end
-
-        for (i, a) in enumerate(t.assertions)
-            if prob_err !== nothing
-                push!(results, AssertionResult(
-                    file, container_kind, String(container_name), t.id, i,
-                    a.variable, a.time, a.expected, nothing, ERROR,
-                    "Solve setup failed: $(prob_err)",
-                    time() - t_start))
-                continue
-            end
-
-            rtol, atol = _resolve_tolerance(container_tolerance, t.tolerance,
-                                             a.tolerance)
-            local actual_val::Union{Float64,Nothing} = nothing
-            local status::AssertionStatus = FAIL
-            local msg::String = ""
-            try
-                handle = _resolve_handle(simp, sys_name, a.variable)
-                raw = sol(a.time, idxs=handle)
-                actual_val = Float64(raw)
-                if _check_assertion(actual_val, a.expected, rtol, atol)
-                    status = PASS
-                else
-                    msg = "actual=$(actual_val) expected=$(a.expected) " *
-                          "(rtol=$(rtol), atol=$(atol))"
-                end
-            catch err
-                status = ERROR
-                msg = "Sample/compare failed: $(err)"
-            end
-
-            push!(results, AssertionResult(
-                file, container_kind, String(container_name), t.id, i,
-                a.variable, a.time, a.expected, actual_val, status, msg,
-                time() - t_start))
-        end
-    end
-end
-
-function _compile_model(model, name::Symbol)
-    MTK = _require_mtk()
-    sys = MTK.System(model; name=name)
-    return MTK.mtkcompile(sys)
-end
-
-function _compile_reaction_system(rs, name::Symbol)
-    MTK = _require_mtk()
-    cat = _try_require("479239e8-5488-4da2-87a7-35f2df7eef83", "Catalyst")
-    cat === nothing && throw(ArgumentError(
-        "ReactionSystem inline tests require Catalyst to be loaded."))
-    catalyst_rs = cat.ReactionSystem(rs; name=name)
-    return MTK.complete(catalyst_rs)
-end
-
-# ---------------------------------------------------------------------------
-# Per-file driver
-# ---------------------------------------------------------------------------
-
-function run_file_tests!(results::Vector{AssertionResult}, path::AbstractString)
-    local esm_file
-    try
-        esm_file = EarthSciAST.load_path(String(path))
-    catch err
-        push!(results, AssertionResult(
-            path, :file, "<parse>", "<load>", 0, "", NaN, NaN, nothing,
-            ERROR, "Parse failed: $(err)", 0.0))
-        return
-    end
-
-    if esm_file.models !== nothing
-        for (mname, model) in esm_file.models
-            isempty(model.tests) && continue
-            sys_name = Symbol(mname)
-            local simp
-            try
-                simp = _compile_model(model, sys_name)
-            catch err
-                # One synthetic ERROR row per test so we can see which tests were skipped.
-                for t in model.tests
-                    push!(results, AssertionResult(
-                        path, :model, String(mname), t.id, 0, "", NaN, NaN,
-                        nothing, ERROR, "Model compile failed: $(err)", 0.0))
-                end
-                continue
-            end
-            _run_tests_on_compiled(path, :model, String(mname),
-                                    model.tolerance, model.tests, simp,
-                                    sys_name, results)
-        end
-    end
-
-    if esm_file.reaction_systems !== nothing
-        for (rname, rs) in esm_file.reaction_systems
-            isempty(rs.tests) && continue
-            sys_name = Symbol(rname)
-            local simp
-            try
-                simp = _compile_reaction_system(rs, sys_name)
-            catch err
-                for t in rs.tests
-                    push!(results, AssertionResult(
-                        path, :reaction_system, String(rname), t.id, 0, "",
-                        NaN, NaN, nothing, ERROR,
-                        "ReactionSystem compile failed: $(err)", 0.0))
-                end
-                continue
-            end
-            _run_tests_on_compiled(path, :reaction_system, String(rname),
-                                    rs.tolerance, rs.tests, simp, sys_name,
-                                    results; esm_container=rs)
-        end
-    end
-end
-
-# ---------------------------------------------------------------------------
-# Top-level
-# ---------------------------------------------------------------------------
-
 """
-    run_esm_tests(roots=DEFAULT_ROOTS; junit_xml=nothing, verbose=true,
-                  exclude=nothing, io::IO=stdout) -> (results, exit_code)
+    run_esm_tests(roots=DEFAULT_ROOTS; shard=nothing, exclude=nothing,
+                  junit_xml=nothing, verbose=true, io=stdout, kwargs...)
+        -> (results, exit_code)
 
-Walk each directory in `roots` (default: `components/`, which holds all
-per-science-domain subdirs), run every inline test in every `.esm` file,
-and return `(results::Vector{AssertionResult}, exit_code::Int)` where
+Run every inline test of every `.esm` file under `roots` through
+[`EarthSciAST.run_inline_tests`](@ref), and return
+`(results::Vector{EarthSciAST.AssertionResult}, exit_code::Int)` where
 `exit_code == 0` iff every assertion passed.
 
-Prints a per-file summary table to `io` when `verbose=true`. When
-`junit_xml` is a path, emits a junit-compatible XML report there.
+`kwargs` go straight to the toolkit runner. In particular `alg` is NOT passed
+by default, which is deliberate: left unset, each document gets the algorithm
+its own `solver.stiffness` declaration asks for (esm-spec §2.2), and a single
+corpus-wide algorithm named here would override that for every document —
+which a stiff member of the corpus does not survive.
 
-`exclude` (or the `ESM_TESTS_EXCLUDE` env var) drops any `.esm` file whose
-path contains one of the listed substrings. See `discover_esm_files`.
+Documents are run ONE AT A TIME, each passed as its own one-element VECTOR:
+that selects the runner's batch semantics, where a document that fails to LOAD
+contributes an ERROR row naming it instead of throwing and ending the walk on
+the first unreadable file. Rows are attributed to their file by the runner, so
+a single batch call would summarize identically; what the loop does NOT buy is
+isolation from a throw raised past the loader — that still ends the walk, and
+the per-file subprocess of the Python gate is what this side does not have.
+
+`shard` is `nothing` by default rather than deferring to `ESM_TESTS_SHARD`: the
+CI matrix sets that variable for the WHOLE job, so an ambient fallback would
+also shard a run rooted at a fixture directory and silently find nothing there.
+The live-repo walk names the shard it wants; every other call gets the whole of
+what it asked for.
 """
 function run_esm_tests(roots::AbstractVector{<:AbstractString}=DEFAULT_ROOTS;
+                       shard::Union{Nothing,AbstractString}=nothing,
+                       exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing,
                        junit_xml::Union{AbstractString,Nothing}=nothing,
                        verbose::Bool=true,
-                       exclude::Union{Nothing,AbstractVector{<:AbstractString}}=nothing,
-                       io::IO=stdout)
+                       io::IO=stdout,
+                       kwargs...)
     files = discover_esm_files(roots; exclude=exclude)
-    results = AssertionResult[]
+    shard === nothing || (files = shard_esm_files(files; shard=shard))
+
+    results = EarthSciAST.AssertionResult[]
     if isempty(files)
-        verbose && println(io, "No .esm files discovered under: ",
-                            join(roots, ", "))
+        verbose && println(io, "No .esm files discovered under: ", join(roots, ", "))
     else
-        for f in files
-            run_file_tests!(results, f)
+        base = esm_root()
+        verbose && println(io, "Walking ", length(files), " .esm file(s) ...")
+        for (i, f) in enumerate(files)
+            t0 = time()
+            # A one-element VECTOR, not the path itself: that selects the
+            # runner's batch semantics, where a document that fails to LOAD
+            # contributes an ERROR row naming it instead of throwing and
+            # ending the walk on its first unreadable file.
+            rows = EarthSciAST.run_inline_tests([f]; kwargs...)
+            append!(results, rows)
+            # Printed per document, and FLUSHED, because the alternative is
+            # what a 60-minute job cap taught: a shard killed mid-walk had
+            # emitted nothing at all, so the log could not say which document
+            # it was on, how far it had got, or whether it was stuck. A
+            # summary that only exists at the end does not survive the run
+            # being cut short — which is exactly when it is most wanted.
+            if verbose
+                bad = count(r -> r.status != EarthSciAST.PASS, rows)
+                @printf(io, "  [%s] %4d/%d %s  (%d rows, %.1fs)\n",
+                        bad == 0 ? "OK " : "FAIL", i, length(files),
+                        startswith(f, base) ? relpath(f, base) : f,
+                        length(rows), time() - t0)
+                flush(io)
+            end
         end
     end
 
     verbose && _print_summary(io, files, results)
-    junit_xml !== nothing && write_junit_xml(results, String(junit_xml))
+    junit_xml === nothing || EarthSciAST.write_junit_xml(results, String(junit_xml))
 
-    n_fail = count(r -> r.status == FAIL || r.status == ERROR, results)
-    exit_code = n_fail == 0 ? 0 : 1
-    return results, exit_code
+    n_bad = count(r -> r.status != EarthSciAST.PASS, results)
+    return results, n_bad == 0 ? 0 : 1
 end
 
 run_esm_tests(roots::AbstractString...; kwargs...) =
     run_esm_tests(collect(String, roots); kwargs...)
 
+# Per-file pass/fail table plus the failure list. Deliberately the only
+# reporting this file owns: the junit report is the toolkit's, and this is what
+# a human reads in the CI log.
 function _print_summary(io::IO, files::Vector{String},
-                        results::Vector{AssertionResult})
+                        results::Vector{EarthSciAST.AssertionResult})
     base = esm_root()
-    rel(p) = startswith(p, base) ? relpath(p, base) : p
+    rel(p) = isempty(p) ? "(unattributed)" :
+             (startswith(p, base) ? relpath(p, base) : p)
+
+    by_file = Dict{String,Vector{EarthSciAST.AssertionResult}}()
+    for r in results
+        push!(get!(by_file, r.file, EarthSciAST.AssertionResult[]), r)
+    end
 
     println(io)
     println(io, "================ ESM inline-test summary ================")
     println(io, "Files discovered: ", length(files))
     println(io, "Assertions:       ", length(results))
 
-    by_file = Dict{String,Vector{AssertionResult}}()
-    for r in results
-        push!(get!(by_file, r.file, AssertionResult[]), r)
-    end
+    counts(rows) = (count(r -> r.status == EarthSciAST.PASS, rows),
+                    count(r -> r.status == EarthSciAST.FAIL, rows),
+                    count(r -> r.status == EarthSciAST.ERROR, rows))
 
-    if isempty(results)
-        println(io, "(no inline tests found)")
-        println(io, "=========================================================")
-        return
-    end
-
-    namepad = max(20, maximum(length(rel(p)) for p in keys(by_file); init=20))
-    @printf(io, "  %-*s  %5s  %5s  %5s\n", namepad, "file", "pass", "fail", "err")
-    println(io, "  ", repeat("-", namepad + 25))
     for f in sort!(collect(keys(by_file)))
-        rows = by_file[f]
-        np = count(r -> r.status == PASS, rows)
-        nf = count(r -> r.status == FAIL, rows)
-        ne = count(r -> r.status == ERROR, rows)
-        @printf(io, "  %-*s  %5d  %5d  %5d\n", namepad, rel(f), np, nf, ne)
+        p, fa, e = counts(by_file[f])
+        println(io, "  [", (fa + e == 0 ? "OK " : "FAIL"), "] ", rel(f),
+                ": ", p, "P / ", fa, "F / ", e, "E")
     end
-    println(io, "  ", repeat("-", namepad + 25))
 
-    total_pass = count(r -> r.status == PASS, results)
-    total_fail = count(r -> r.status == FAIL, results)
-    total_err = count(r -> r.status == ERROR, results)
-    @printf(io, "  %-*s  %5d  %5d  %5d\n", namepad, "TOTAL", total_pass,
-             total_fail, total_err)
+    p, fa, e = counts(results)
+    println(io, "  TOTAL: ", p, "P / ", fa, "F / ", e, "E")
 
-    if total_fail + total_err > 0
+    if fa + e > 0
         println(io)
-        println(io, "Failures:")
+        println(io, "Failures / errors:")
         for r in results
-            (r.status == PASS) && continue
-            println(io, "  - ", rel(r.file), " :: ", r.container_name, "/",
-                     r.test_id, "[", r.assertion_idx, "] (",
-                     r.variable, "@t=", r.time, ") — ",
-                     r.status == ERROR ? "ERROR" : "FAIL")
-            isempty(r.message) || println(io, "      ", r.message)
+            r.status == EarthSciAST.PASS && continue
+            println(io, "  - [", r.status, "] ", rel(r.file), " :: ",
+                    r.container_name, "/", r.test_id, "[", r.assertion_idx,
+                    "] (", r.variable, "@t=", r.time, ") — ", r.message)
         end
     end
     println(io, "=========================================================")
-end
-
-# ---------------------------------------------------------------------------
-# JUnit XML emission
-# ---------------------------------------------------------------------------
-
-function _xml_escape(s::AbstractString)
-    s = replace(String(s), '&' => "&amp;")
-    s = replace(s, '<' => "&lt;")
-    s = replace(s, '>' => "&gt;")
-    s = replace(s, '"' => "&quot;")
-    return s
-end
-
-"""
-    write_junit_xml(results, path)
-
-Emit a junit-compatible XML report covering every `AssertionResult`.
-
-Each unique `(file, container, test_id)` becomes a `<testcase>`; one or more
-failing assertions inside it produce `<failure>` / `<error>` children.
-"""
-function write_junit_xml(results::Vector{AssertionResult}, path::AbstractString)
-    by_test = Dict{Tuple{String,String,String},Vector{AssertionResult}}()
-    order = Tuple{String,String,String}[]
-    for r in results
-        key = (r.file, r.container_name, r.test_id)
-        if !haskey(by_test, key)
-            push!(order, key)
-            by_test[key] = AssertionResult[]
-        end
-        push!(by_test[key], r)
-    end
-
-    n_tests = length(order)
-    n_fail = sum(any(r -> r.status == FAIL, rs) for rs in values(by_test); init=0)
-    n_err = sum(any(r -> r.status == ERROR, rs) for rs in values(by_test); init=0)
-
-    open(path, "w") do io
-        println(io, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-        println(io, "<testsuites tests=\"", n_tests,
-                 "\" failures=\"", n_fail,
-                 "\" errors=\"", n_err, "\">")
-        println(io, "  <testsuite name=\"esm-inline-tests\" tests=\"",
-                 n_tests, "\" failures=\"", n_fail,
-                 "\" errors=\"", n_err, "\">")
-        for key in order
-            file, container, test_id = key
-            rs = by_test[key]
-            classname = _xml_escape(string(file, "::", container))
-            casename = _xml_escape(test_id)
-            duration = sum(r.duration_s for r in rs; init=0.0)
-            println(io, "    <testcase classname=\"", classname,
-                     "\" name=\"", casename,
-                     "\" time=\"", duration, "\">")
-            for r in rs
-                if r.status == FAIL
-                    println(io, "      <failure type=\"AssertionFailure\" ",
-                             "message=\"", _xml_escape(r.message), "\">",
-                             _xml_escape(string(r.variable, "@t=", r.time,
-                                                 " expected=", r.expected,
-                                                 " actual=", r.actual)),
-                             "</failure>")
-                elseif r.status == ERROR
-                    println(io, "      <error type=\"RunnerError\" ",
-                             "message=\"", _xml_escape(r.message), "\"/>")
-                end
-            end
-            println(io, "    </testcase>")
-        end
-        println(io, "  </testsuite>")
-        println(io, "</testsuites>")
-    end
-    return path
 end

@@ -51,7 +51,7 @@
                 },
                 "SCN": {
                     "type": "unknown",
-                    "description": "Normalized spread component (dimensionless)"
+                    "description": "Normalized spread component, capped at 100 (dimensionless)"
                 },
                 "PNORM3": {
                     "default": 1.85e-05,
@@ -75,7 +75,7 @@
                 }
             },
             "reference": {
-                "notes": "source_ref: WildlandFire.jl/src/nfdrs.jl:1291\nNFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire\n\nTODO_GAP: gt-p3ep - registered function needed for 'max' operator\nTODO_GAP: gt-p3ep - registered function needed for 'min' operator",
+                "notes": "source_ref: WildlandFire.jl/src/nfdrs.jl:1291\nNFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire\n\nTODO_GAP: gt-p3ep - registered function needed for 'max' operator\nTODO_GAP: gt-p3ep - registered function needed for 'min' operator\n\nTest inputs are parameters and go in `parameter_overrides`. They were previously written as `initial_conditions`, which do not set parameters (and which leave MC1, TMPPRM, SC and SCM, none of which has a default, without a value: esm-spec §10.10), and the stored expected values (IC = 0 in every test, the same P(I) for two different inputs) did not correspond to the inputs. They are now the closed-form values for the stated inputs.\n\nSCN is capped at 100, as in the NFDRS4 reference implementation (firelab/NFDRS4, nfdrs4.cpp: `if (SCN > 100.0) SCN = 100.0;`), so that P(F/I) = sqrt(SCN) <= 10 and IC <= P(I) <= 100. WildlandFire.jl omits the cap.",
                 "citation": "Cohen, J.D., and Deeming, J.E. (1985). The National Fire-Danger Rating System: The Ignition Component. General Technical Report INT-188. Ogden, UT: U.S. Department of Agriculture, Forest Service, Intermountain Forest and Range Experiment Station. 26 p."
             },
             "equations": [
@@ -315,34 +315,40 @@
                 {
                     "rhs": {
                         "args": [
-                            {
-                                "args": [
-                                    100,
-                                    "SC"
-                                ],
-                                "op": "*"
-                            },
+                            100,
                             {
                                 "args": [
                                     {
                                         "args": [
-                                            1e-10,
+                                            100,
+                                            "SC"
+                                        ],
+                                        "op": "*"
+                                    },
+                                    {
+                                        "args": [
                                             {
                                                 "args": [
-                                                    "SCM",
-                                                    "V_ref"
+                                                    1e-10,
+                                                    {
+                                                        "args": [
+                                                            "SCM",
+                                                            "V_ref"
+                                                        ],
+                                                        "op": "/"
+                                                    }
                                                 ],
-                                                "op": "/"
-                                            }
+                                                "op": "max"
+                                            },
+                                            "V_ref"
                                         ],
-                                        "op": "max"
-                                    },
-                                    "V_ref"
+                                        "op": "*"
+                                    }
                                 ],
-                                "op": "*"
+                                "op": "/"
                             }
                         ],
-                        "op": "/"
+                        "op": "min"
                     },
                     "lhs": "SCN"
                 },
@@ -376,8 +382,8 @@
             "tests": [
                 {
                     "id": "high_temperature_low_moisture",
-                    "description": "High temperature (40°C) and low fuel moisture (5%) should produce high IC",
-                    "initial_conditions": {
+                    "description": "High temperature (40°C) and low fuel moisture (5%) should produce high IC Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 172.758, CHI = 17.1242, P(I) = 50.9571, SCN = min(100, 100*SC/SCM) = 100 (uncapped 200), IC = 0.1*P(I)*sqrt(SCN) = P(I) = 50.9571.",
+                    "parameter_overrides": {
                         "TMPPRM": 313.15,
                         "MC1": 0.05,
                         "SC": 0.01,
@@ -391,15 +397,15 @@
                         {
                             "variable": "IC",
                             "time": 1.0,
-                            "expected": 0,
+                            "expected": 50.95706989270966,
                             "tolerance": {
-                                "abs": 1e-08
+                                "rel": 1e-06
                             }
                         },
                         {
                             "variable": "PI",
                             "time": 1.0,
-                            "expected": 49.75610703448953,
+                            "expected": 50.95706989270966,
                             "tolerance": {
                                 "rel": 1e-05
                             }
@@ -408,8 +414,8 @@
                 },
                 {
                     "id": "low_temperature_high_moisture",
-                    "description": "Low temperature (10°C) and high fuel moisture (20%) should produce low IC",
-                    "initial_conditions": {
+                    "description": "Low temperature (10°C) and high fuel moisture (20%) should produce low IC Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 285.417, CHI = 5.85828, P(I) = 0.844312, SCN = min(100, 100*SC/SCM) = 20, IC = 0.1*P(I)*sqrt(SCN) = 0.377588.",
+                    "parameter_overrides": {
                         "TMPPRM": 283.15,
                         "MC1": 0.2,
                         "SC": 0.001,
@@ -423,17 +429,17 @@
                         {
                             "variable": "IC",
                             "time": 1.0,
-                            "expected": 0,
+                            "expected": 0.37758762097684717,
                             "tolerance": {
-                                "abs": 1e-08
+                                "rel": 1e-06
                             }
                         }
                     ]
                 },
                 {
                     "id": "moderate_conditions",
-                    "description": "Moderate temperature (25°C) and moderate fuel moisture (10%)",
-                    "initial_conditions": {
+                    "description": "Moderate temperature (25°C) and moderate fuel moisture (10%) Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 213.432, CHI = 13.0568, P(I) = 19.0515, SCN = min(100, 100*SC/SCM) = 100, IC = 0.1*P(I)*sqrt(SCN) = 19.0515.",
+                    "parameter_overrides": {
                         "TMPPRM": 298.15,
                         "MC1": 0.1,
                         "SC": 0.005,
@@ -447,15 +453,15 @@
                         {
                             "variable": "IC",
                             "time": 1.0,
-                            "expected": 0,
+                            "expected": 19.051549041232047,
                             "tolerance": {
-                                "abs": 1e-08
+                                "rel": 1e-06
                             }
                         },
                         {
                             "variable": "QIGN",
                             "time": 1.0,
-                            "expected": 173.88356495,
+                            "expected": 213.43182900863312,
                             "tolerance": {
                                 "rel": 1e-05
                             }
@@ -464,8 +470,8 @@
                 },
                 {
                     "id": "boundary_ic_range",
-                    "description": "Verify IC and PI produce reasonable values across conditions",
-                    "initial_conditions": {
+                    "description": "Verify IC and PI produce reasonable values across conditions Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 197.798, CHI = 14.6202, P(I) = 28.7418, SCN = min(100, 100*SC/SCM) = 100 (uncapped 300), IC = 0.1*P(I)*sqrt(SCN) = P(I) = 28.7418.",
+                    "parameter_overrides": {
                         "TMPPRM": 303.15,
                         "MC1": 0.08,
                         "SC": 0.015,
@@ -479,15 +485,15 @@
                         {
                             "variable": "IC",
                             "time": 1.0,
-                            "expected": 0,
+                            "expected": 28.74175844715137,
                             "tolerance": {
-                                "abs": 1e-08
+                                "rel": 1e-06
                             }
                         },
                         {
                             "variable": "PI",
                             "time": 1.0,
-                            "expected": 49.75610703448953,
+                            "expected": 28.74175844715137,
                             "tolerance": {
                                 "rel": 1e-05
                             }
@@ -499,7 +505,7 @@
                 {
                     "id": "typical_summer_conditions",
                     "description": "Typical summer conditions with moderate temperature and fuel moisture",
-                    "initial_state": {
+                    "parameters": {
                         "TMPPRM": 298.15,
                         "MC1": 0.1,
                         "SC": 0.01,
@@ -513,7 +519,7 @@
                 {
                     "id": "high_risk_conditions",
                     "description": "High fire risk with high temperature and low fuel moisture",
-                    "initial_state": {
+                    "parameters": {
                         "TMPPRM": 313.15,
                         "MC1": 0.05,
                         "SC": 0.02,
@@ -527,7 +533,7 @@
                 {
                     "id": "low_risk_conditions",
                     "description": "Low fire risk with low temperature and high fuel moisture",
-                    "initial_state": {
+                    "parameters": {
                         "TMPPRM": 283.15,
                         "MC1": 0.2,
                         "SC": 0.001,
