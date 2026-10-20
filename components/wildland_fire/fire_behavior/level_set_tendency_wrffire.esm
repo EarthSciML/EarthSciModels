@@ -1,0 +1,1607 @@
+{
+ "esm": "1.2.0",
+ "metadata": {
+  "name": "LevelSetTendencyWRFFire",
+  "description": "The level-set propagation equation of fire_behavior (physics/level_set_mod.F90 Calc_tend_ls; Munoz-Esparza et al. 2018) as a PDE on a uniform 2-D grid: d psi/dt = -R |grad psi| + nu |R| (dx d2psi/dx2 + dy d2psi/dy2), the Hamilton-Jacobi front propagation with the rate of spread R normal to the front plus a grid-scaled artificial viscosity. |grad psi| is written as the compound sqrt(D(psi,x)^2 + D(psi,y)^2) and lowered by EarthSciDiscretizations' grids/cartesian_uniform_2d/rules/weno5_eno1_norm_D2_extrapolate_bc, which is fire_behavior's default scheme (fire_upwinding = 9): fifth-order WENO within fire_lsm_band_ngp = 4 cells of the front with the upwind side chosen by the mid-flame wind, first-order ENO (minmod of the one-sided differences) elsewhere and within BDY_ENO1 = 10 cells of the domain boundary. The second derivatives of the viscosity term are lowered by central_D2x_extrapolate_bc and central_D2y_extrapolate_bc. All three rules close the walls as fire_behavior does (Extrapol_var_at_bdys): each wall cell sees a ghost extrapolated linearly from the two innermost cells, max(2a - b, a, b), so the domain edge carries no prescribed level-set value and does not act as a fire front. R is supplied as an input field (it depends on the upwind normal, tested in ROSWRFFire); the propagation term and viscosity are what this component asserts. The viscosity coefficient is the single value fire_viscosity: fire_behavior blends it toward fire_viscosity_bg near the front, and test7 sets the two equal. Tests: the ls_tend dump of Runge-Kutta stage 1 of step 20 (t = 10 s) of test7 with the default scheme, checked at wall, corner, ENO1-band, WENO-band and far-field cells, real32.",
+  "license": "MIT",
+  "tags": [
+   "wildland_fire",
+   "fire_behavior",
+   "wrf-fire",
+   "level-set",
+   "pde"
+  ],
+  "references": [
+   {
+    "citation": "NCAR Community Fire Behavior Model (fire_behavior), develop @ eb77580; instrumented fork ctessum-claude/fire_behavior branch earthsciml-instrumented (c9dda02)."
+   },
+   {
+    "citation": "Munoz-Esparza, D., Kosovic, B., Jimenez, P.A., Coen, J.L. (2018). An accurate fire-spread algorithm in the Weather Research and Forecasting model using the level-set method. J. Adv. Model. Earth Syst. 10, 908-926.",
+    "doi": "10.1002/2017MS001108"
+   },
+   {
+    "citation": "Osher, S., Sethian, J.A. (1988). Fronts propagating with curvature-dependent speed. J. Comput. Phys. 79, 12-49.",
+    "doi": "10.1016/0021-9991(88)90002-2"
+   }
+  ]
+ },
+ "metaparameters": {
+  "NX": {
+   "type": "integer",
+   "default": 80,
+   "description": "Fire-grid cells along x (test7: 80)."
+  },
+  "NY": {
+   "type": "integer",
+   "default": 80,
+   "description": "Fire-grid cells along y."
+  }
+ },
+ "models": {
+  "LevelSetTendencyWRFFire": {
+   "expression_template_imports": [
+    {
+     "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/grid.esm",
+     "bindings": {
+      "NX": "NX",
+      "NY": "NY"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/weno5_eno1_norm_D2_extrapolate_bc.esm",
+     "bindings": {
+      "NX": "NX",
+      "NY": "NY"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/central_D2x_extrapolate_bc.esm",
+     "bindings": {
+      "NX": "NX",
+      "NY": "NY"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/central_D2y_extrapolate_bc.esm",
+     "bindings": {
+      "NX": "NX",
+      "NY": "NY"
+     }
+    }
+   ],
+   "variables": {
+    "psi": {
+     "type": "unknown",
+     "units": "m",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "Level-set function over the [x, y] fire grid (fire_behavior lfn; negative inside the burnt area, a signed distance after reinitialisation)."
+    },
+    "ros": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "Rate of spread normal to the front at each cell (ROSWRFFire ros, itself a function of the upwind normal); supplied as an input field here so that the operator assembly is tested independently of the normal computation."
+    },
+    "wind_u": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "x component of the mid-flame wind on the fire grid (fire_behavior uf), supplied as an input field. Free name of the WENO5 stencils: the sign of (grad psi . wind) (d psi/dx) picks the upwind side of the WENO reconstruction."
+    },
+    "wind_v": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "y component of the mid-flame wind on the fire grid (fire_behavior vf), supplied as an input field; free name of the WENO5 stencils."
+    },
+    "x0": {
+     "type": "parameter",
+     "units": "m",
+     "default": 0.0,
+     "description": "Left domain edge (grid free name)."
+    },
+    "y0": {
+     "type": "parameter",
+     "units": "m",
+     "default": 0.0,
+     "description": "Bottom domain edge (grid free name)."
+    },
+    "Lx": {
+     "type": "parameter",
+     "units": "m",
+     "default": 2000.0,
+     "description": "Domain width NX dx (test7: 80 x 25 m)."
+    },
+    "Ly": {
+     "type": "parameter",
+     "units": "m",
+     "default": 2000.0,
+     "description": "Domain height NY dy."
+    },
+    "dx": {
+     "type": "unknown",
+     "units": "m",
+     "description": "x spacing Lx/NX (grid free name)."
+    },
+    "dy": {
+     "type": "unknown",
+     "units": "m",
+     "description": "y spacing Ly/NY (grid free name)."
+    },
+    "fire_viscosity": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.4,
+     "description": "Artificial viscosity coefficient nu (namelist fire_viscosity = fire_viscosity_bg = 0.4 in test7, so the near-front band has the same value and the coefficient is uniform)."
+    },
+    "grad_mag": {
+     "type": "unknown",
+     "units": "1",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "|grad psi| by fire_behavior's default hybrid scheme (fire_upwinding = 9): sqrt(diff2x^2 + diff2y^2) with diff2x, diff2y the WENO5 upwind derivatives within weno_band_cells of the front and the ENO1 minmod of the one-sided differences elsewhere and within bdy_eno1_cells of the walls; the level-set gradient norm diagnostic grad_norm_ls."
+    },
+    "psi_xx": {
+     "type": "unknown",
+     "units": "1/m",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "d2 psi/dx2 by the centred second-difference rule; fire_behavior's (diffrx - difflx) = dx psi_xx."
+    },
+    "psi_yy": {
+     "type": "unknown",
+     "units": "1/m",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "d2 psi/dy2 by the centred second-difference rule."
+    },
+    "tend_adv": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "Hamilton-Jacobi propagation term -ros |grad psi|."
+    },
+    "tend_visc": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "Artificial viscosity nu |ros| (dx psi_xx + dy psi_yy): fire_behavior adds fire_viscosity |ros| ((diffrx - difflx) + (diffry - diffly)), a grid-scaled Laplacian that vanishes with the mesh."
+    },
+    "tend": {
+     "type": "unknown",
+     "units": "m/s",
+     "shape": [
+      "x",
+      "y"
+     ],
+     "description": "Level-set tendency d psi/dt = tend_adv + tend_visc (Calc_tend_ls tend)."
+    },
+    "bdy_eno1_cells": {
+     "type": "parameter",
+     "units": "1",
+     "default": 10,
+     "description": "Width in cells of the band along each wall where the scheme falls back to ENO1 (fire_behavior's compile-time BDY_ENO1 = 10; free name of the imported rule)."
+    },
+    "weno_band_cells": {
+     "type": "parameter",
+     "units": "1",
+     "default": 4,
+     "description": "Half-width in cells of the band around the front, |psi| < weno_band_cells dx, where WENO5 is used (namelist fire_lsm_band_ngp, default 4; free name of the imported rule). The band test is on psi itself, so psi must be close to a signed distance, which fire_behavior's reinitialisation maintains."
+    }
+   },
+   "equations": [
+    {
+     "lhs": "dx",
+     "rhs": {
+      "op": "/",
+      "args": [
+       "Lx",
+       "NX"
+      ]
+     }
+    },
+    {
+     "lhs": "dy",
+     "rhs": {
+      "op": "/",
+      "args": [
+       "Ly",
+       "NY"
+      ]
+     }
+    },
+    {
+     "lhs": {
+      "op": "ic",
+      "args": [
+       "psi"
+      ]
+     },
+     "rhs": {
+      "op": "input_psi",
+      "args": []
+     }
+    },
+    {
+     "lhs": "ros",
+     "rhs": {
+      "op": "input_ros",
+      "args": []
+     }
+    },
+    {
+     "lhs": "wind_u",
+     "rhs": {
+      "op": "input_wind_u",
+      "args": []
+     }
+    },
+    {
+     "lhs": "wind_v",
+     "rhs": {
+      "op": "input_wind_v",
+      "args": []
+     }
+    },
+    {
+     "lhs": "grad_mag",
+     "rhs": {
+      "op": "sqrt",
+      "args": [
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "^",
+          "args": [
+           {
+            "op": "D",
+            "args": [
+             "psi"
+            ],
+            "wrt": "x"
+           },
+           2
+          ]
+         },
+         {
+          "op": "^",
+          "args": [
+           {
+            "op": "D",
+            "args": [
+             "psi"
+            ],
+            "wrt": "y"
+           },
+           2
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "psi_xx",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "x"
+       }
+      ],
+      "wrt": "x"
+     }
+    },
+    {
+     "lhs": "psi_yy",
+     "rhs": {
+      "op": "D",
+      "args": [
+       {
+        "op": "D",
+        "args": [
+         "psi"
+        ],
+        "wrt": "y"
+       }
+      ],
+      "wrt": "y"
+     }
+    },
+    {
+     "lhs": "tend_adv",
+     "rhs": {
+      "op": "*",
+      "args": [
+       {
+        "op": "-",
+        "args": [
+         "ros"
+        ]
+       },
+       "grad_mag"
+      ]
+     }
+    },
+    {
+     "lhs": "tend_visc",
+     "rhs": {
+      "op": "*",
+      "args": [
+       "fire_viscosity",
+       {
+        "op": "abs",
+        "args": [
+         "ros"
+        ]
+       },
+       {
+        "op": "+",
+        "args": [
+         {
+          "op": "*",
+          "args": [
+           "dx",
+           "psi_xx"
+          ]
+         },
+         {
+          "op": "*",
+          "args": [
+           "dy",
+           "psi_yy"
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "lhs": "tend",
+     "rhs": {
+      "op": "+",
+      "args": [
+       "tend_adv",
+       "tend_visc"
+      ]
+     }
+    },
+    {
+     "lhs": {
+      "op": "D",
+      "args": [
+       "psi"
+      ],
+      "wrt": "t"
+     },
+     "rhs": "tend"
+    }
+   ],
+   "tests": [
+     {
+       "id": "weno5_step20_stage1",
+       "description": "Reference: NCAR fire_behavior test7 (80x80 fire cells of 25 m, dt = 0.5 s, num_tiles = 1) with its default level-set scheme (fire_upwinding = 9), default real32 build, dumped in-model by the ctessum-claude/fire_behavior fork (branch earthsciml-instrumented, commit c9dda02, based on NCAR fire_behavior eb77580, three commits before v1.0.0; -DESM_DUMP=ON): ls_tend dump call 58 = Runge-Kutta stage 1 of step 20 (t = 10 s). The inputs psi, ros, wind_u and wind_v are the full 80x80 dumped lfn, ros, uf and vf fields injected as [x, y] const fields. grad_mag, tend_adv and tend are checked at all four corners, cells on each wall, cells inside the 10-cell ENO1 wall band, cells within the WENO band of the front (|psi| < 100 m) and far-field ENO1 cells. The rules reproduce the dump over the whole field to the tolerances used here (checked offline). fire_viscosity = fire_viscosity_bg = 0.4 in test7, so the viscosity coefficient is uniform. Single precision: rel 1e-5 on grad_mag and the propagation term, 2e-5 on the total tendency (a sum of the two).",
+       "parameter_overrides": {
+         "Lx": 2000.0,
+         "Ly": 2000.0,
+         "fire_viscosity": 0.4,
+         "bdy_eno1_cells": 10,
+         "weno_band_cells": 4
+       },
+       "expression_template_imports": [
+         {
+           "ref": "./tests/weno5_step20_stage1_inputs.esm"
+         }
+       ],
+       "time_span": {
+         "start": 0.0,
+         "end": 1.0
+       },
+       "assertions": [
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 1
+           },
+           "expected": 0.9607469439506531,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 1
+           },
+           "expected": -0.01707698591053486,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 1
+           },
+           "expected": -0.01707698591053486,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 80
+           },
+           "expected": 0.956847608089447,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 80
+           },
+           "expected": -0.4924148619174957,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 80
+           },
+           "expected": -0.4924148619174957,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 1
+           },
+           "expected": 0.949800431728363,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 1
+           },
+           "expected": -0.017183275893330574,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 1
+           },
+           "expected": -0.017183275893330574,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 80
+           },
+           "expected": 1.0361480712890625,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 80
+           },
+           "expected": -0.5494412183761597,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 80
+           },
+           "expected": -0.5494412183761597,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 60
+           },
+           "expected": 0.9394055604934692,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 60
+           },
+           "expected": -0.016697648912668228,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 1,
+             "y": 60
+           },
+           "expected": -0.016350295394659042,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 40
+           },
+           "expected": 0.9431357979774475,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 40
+           },
+           "expected": -0.018146438524127007,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 80,
+             "y": 40
+           },
+           "expected": -0.01807500049471855,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 1
+           },
+           "expected": 0.9623169302940369,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 1
+           },
+           "expected": -0.01810791902244091,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 1
+           },
+           "expected": -0.01777046173810959,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 80
+           },
+           "expected": 0.9592926502227783,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 80
+           },
+           "expected": -0.8218752145767212,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 80
+           },
+           "expected": -0.7904891967773438,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 2,
+             "y": 60
+           },
+           "expected": 0.9394165873527527,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 2,
+             "y": 60
+           },
+           "expected": -0.016697846353054047,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 2,
+             "y": 60
+           },
+           "expected": -0.017075246199965477,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 3,
+             "y": 60
+           },
+           "expected": 1.0435833930969238,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 3,
+             "y": 60
+           },
+           "expected": -0.019534800201654434,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 3,
+             "y": 60
+           },
+           "expected": -0.019129078835248947,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 10,
+             "y": 60
+           },
+           "expected": 0.938305139541626,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 10,
+             "y": 60
+           },
+           "expected": -0.016678089275956154,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 10,
+             "y": 60
+           },
+           "expected": -0.016800178214907646,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 11,
+             "y": 60
+           },
+           "expected": 0.9374631643295288,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 11,
+             "y": 60
+           },
+           "expected": -0.016663124784827232,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 11,
+             "y": 60
+           },
+           "expected": -0.015242619439959526,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 70,
+             "y": 40
+           },
+           "expected": 0.946587085723877,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 70,
+             "y": 40
+           },
+           "expected": -0.016825299710035324,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 70,
+             "y": 40
+           },
+           "expected": -0.01742207072675228,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 71,
+             "y": 40
+           },
+           "expected": 0.9442129731178284,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 71,
+             "y": 40
+           },
+           "expected": -0.016783099621534348,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 71,
+             "y": 40
+           },
+           "expected": -0.0160024706274271,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 40
+           },
+           "expected": 0.9608290195465088,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 40
+           },
+           "expected": -0.017078444361686707,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 40,
+             "y": 40
+           },
+           "expected": -0.01639811135828495,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 60,
+             "y": 20
+           },
+           "expected": 1.0064423084259033,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 60,
+             "y": 20
+           },
+           "expected": -0.01788920722901821,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 60,
+             "y": 20
+           },
+           "expected": -0.01775367558002472,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 13,
+             "y": 62
+           },
+           "expected": 1.0745012760162354,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 13,
+             "y": 62
+           },
+           "expected": -0.019098935648798943,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 13,
+             "y": 62
+           },
+           "expected": -0.018266914412379265,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 15,
+             "y": 60
+           },
+           "expected": 0.9177594184875488,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 15,
+             "y": 60
+           },
+           "expected": -0.016312895342707634,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 15,
+             "y": 60
+           },
+           "expected": -0.01522440742701292,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 16,
+             "y": 61
+           },
+           "expected": 0.9846597909927368,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 16,
+             "y": 61
+           },
+           "expected": -0.017502030357718468,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 16,
+             "y": 61
+           },
+           "expected": -0.0169366467744112,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 58
+           },
+           "expected": 1.2361421585083008,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 58
+           },
+           "expected": -0.02197205275297165,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 58
+           },
+           "expected": -0.005636632442474365,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 62
+           },
+           "expected": 1.0679022073745728,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 62
+           },
+           "expected": -0.035334110260009766,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 17,
+             "y": 62
+           },
+           "expected": -0.032472554594278336,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 18,
+             "y": 62
+           },
+           "expected": 0.9711326360702515,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 18,
+             "y": 62
+           },
+           "expected": -0.09294385462999344,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 18,
+             "y": 62
+           },
+           "expected": -0.07872790843248367,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 19,
+             "y": 65
+           },
+           "expected": 0.9979144930839539,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 19,
+             "y": 65
+           },
+           "expected": -0.6892843842506409,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 19,
+             "y": 65
+           },
+           "expected": -0.6468188166618347,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 20,
+             "y": 64
+           },
+           "expected": 1.004002332687378,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 20,
+             "y": 64
+           },
+           "expected": -0.549563467502594,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 20,
+             "y": 64
+           },
+           "expected": -0.4792269468307495,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 21,
+             "y": 58
+           },
+           "expected": 0.7880091667175293,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 21,
+             "y": 58
+           },
+           "expected": -0.014409762807190418,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 21,
+             "y": 58
+           },
+           "expected": -0.03751404583454132,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 22,
+             "y": 66
+           },
+           "expected": 1.0010517835617065,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 22,
+             "y": 66
+           },
+           "expected": -0.940845787525177,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 22,
+             "y": 66
+           },
+           "expected": -0.8635289669036865,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 23,
+             "y": 60
+           },
+           "expected": 2.4502270221710205,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 23,
+             "y": 60
+           },
+           "expected": -0.04739733040332794,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 23,
+             "y": 60
+           },
+           "expected": -0.05745498090982437,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 24,
+             "y": 62
+           },
+           "expected": 2.600867986679077,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 24,
+             "y": 62
+           },
+           "expected": -0.04929045960307121,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 24,
+             "y": 62
+           },
+           "expected": -0.03891885280609131,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 25,
+             "y": 64
+           },
+           "expected": 0.8732550740242004,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 25,
+             "y": 64
+           },
+           "expected": -0.5849319696426392,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 25,
+             "y": 64
+           },
+           "expected": -0.38170430064201355,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "grad_mag",
+           "time": 0.0,
+           "coords": {
+             "x": 26,
+             "y": 64
+           },
+           "expected": 1.531110405921936,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-06
+           }
+         },
+         {
+           "variable": "tend_adv",
+           "time": 0.0,
+           "coords": {
+             "x": 26,
+             "y": 64
+           },
+           "expected": -0.028976095840334892,
+           "tolerance": {
+             "rel": 1e-05,
+             "abs": 1e-07
+           }
+         },
+         {
+           "variable": "tend",
+           "time": 0.0,
+           "coords": {
+             "x": 26,
+             "y": 64
+           },
+           "expected": -0.0016478244215250015,
+           "tolerance": {
+             "rel": 2e-05,
+             "abs": 1e-06
+           }
+         }
+       ]
+     }
+   ]
+  }
+ }
+}

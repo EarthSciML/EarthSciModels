@@ -1,0 +1,624 @@
+{
+ "esm": "1.0.0",
+ "metadata": {
+  "name": "FireBehaviorParameters",
+  "description": "Scheme constants and unit conversions of NCAR's Community Fire Behavior Model (fire_behavior, the WRF-Fire/SFIRE physics line: physics/ros_wrffire_mod.F90, fuel_anderson_mod.F90, fmc_wrffire_mod.F90, level_set_mod.F90, fire_physics_mod.F90, share/constants_mod.F90 and share/fuel_mod.F90), transcribed from the `parameter` declarations and in-line literals of the Fortran, including the fuel-moisture fits and class tables of fmc_wrffire_mod and the single-precision tiny and epsilon. Mounted by the fire_behavior components as subsystem `par` so that no tuning constant is written inline in the physics. The Rothermel (1972) fits are empirical formulae in US customary units (ft, lb, Btu, min); fire_behavior converts the SI fuel inputs to those units, evaluates the fits, and converts the spread rate back, so the conversion factors are scheme constants here (the Fortran literals 0.3048, 2.205, 196.850, 0.00508, 1055 -- note 196.850 ft/min per m/s and 0.00508 m/s per ft/min are each written independently in the source and are not exact reciprocals). The coefficients of the US-unit fits are dimensionless numbers whose implied units are recorded in their descriptions. Values are the nominal decimal values of the source; fire_behavior is a default-real (real32) code, so every test against it uses rel 1e-5 (the tolerance contract for a single-precision reference).",
+  "license": "MIT",
+  "tags": [
+   "wildland_fire",
+   "fire_behavior",
+   "wrf-fire",
+   "scheme-constants"
+  ],
+  "references": [
+   {
+    "citation": "NCAR Community Fire Behavior Model (fire_behavior), develop @ eb77580 (WRF 4.8 phys/fire_behavior submodule); instrumented fork ctessum-claude/fire_behavior branch earthsciml-instrumented."
+   },
+   {
+    "citation": "Mandel, J., Beezley, J.D., Kochanski, A.K. (2011). Coupled atmosphere-wildland fire modeling with WRF 3.3 and SFIRE 2011. Geosci. Model Dev. 4, 591-610.",
+    "doi": "10.5194/gmd-4-591-2011"
+   },
+   {
+    "citation": "Rothermel, R.C. (1972). A mathematical model for predicting fire spread in wildland fuels. USDA Forest Service Res. Pap. INT-115."
+   },
+   {
+    "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service GTR INT-122."
+   }
+  ]
+ },
+ "models": {
+  "FireBehaviorParameters": {
+   "variables": {
+    "m_per_ft": {
+     "type": "parameter",
+     "units": "m",
+     "default": 0.3048,
+     "description": "Metres per foot; fire_behavior divides SI depths by 0.3048 and multiplies SI loads by 0.3048**2 (ros_wrffire_mod)."
+    },
+    "lb_per_kg": {
+     "type": "parameter",
+     "units": "1/kg",
+     "default": 2.205,
+     "description": "Pounds per kilogram as written in ros_wrffire_mod (fuelload = fuelloadm * 0.3048**2 * 2.205, lb/ft^2 from kg/m^2)."
+    },
+    "ftmin_per_ms": {
+     "type": "parameter",
+     "units": "s/m",
+     "default": 196.85,
+     "description": "ft/min per m/s as written in Calc_ros_wrffire (umid = umidm * 196.850)."
+    },
+    "ms_per_ftmin": {
+     "type": "parameter",
+     "units": "m/s",
+     "default": 0.00508,
+     "description": "m/s per ft/min as written in Calc_ros_wrffire (ros_base = r_0 * 0.00508). Not the exact reciprocal of ftmin_per_ms."
+    },
+    "cmbcnst": {
+     "type": "parameter",
+     "units": "J/kg",
+     "default": 17433000.0,
+     "description": "CMBCNST: heat of combustion of dry fuel, J per kg (share/constants_mod.F90)."
+    },
+    "convert_j_per_kg_to_btu_per_pound": {
+     "type": "parameter",
+     "units": "kg/J",
+     "default": 0.00043,
+     "description": "CONVERT_J_PER_KG_TO_BTU_PER_POUND = 4.30e-4 (= 1/2326 rounded; share/constants_mod.F90); FUELHEAT = CMBCNST * this = 7496.19 Btu/lb."
+    },
+    "j_per_btu": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1055.0,
+     "description": "Joules per Btu as written in the iboros conversion (ir * 1055 / (0.3048**2 * 60) * 1e-3, kJ/m^2 per Btu/ft^2/min times seconds)."
+    },
+    "s_per_min": {
+     "type": "parameter",
+     "units": "1",
+     "default": 60.0,
+     "description": "Seconds per minute (dimensionless factor in the Btu/ft^2/min -> kJ/m^2 and residence-time conversions)."
+    },
+    "kj_per_j": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.001,
+     "description": "kJ per J: iboros is stored in kJ/m^2."
+    },
+    "residence_time_coef": {
+     "type": "parameter",
+     "units": "1",
+     "default": 384.0,
+     "description": "Anderson (1969) flame residence time t_r = 384/savr minutes (savr in 1/ft): iboros = I_R * t_r."
+    },
+    "c_betaop": {
+     "type": "parameter",
+     "units": "1",
+     "default": 3.348,
+     "description": "Optimum packing ratio beta_op = 3.348 savr^-0.8189 (savr in 1/ft)."
+    },
+    "e_betaop": {
+     "type": "parameter",
+     "units": "1",
+     "default": -0.8189,
+     "description": "Exponent of savr in beta_op."
+    },
+    "c_qig_dry": {
+     "type": "parameter",
+     "units": "1",
+     "default": 250.0,
+     "description": "Heat of preignition Q_ig = 250 + 1116 M_f, Btu/lb."
+    },
+    "c_qig_moist": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1116.0,
+     "description": "Moisture coefficient of Q_ig, Btu/lb per unit moisture fraction."
+    },
+    "c_epsilon": {
+     "type": "parameter",
+     "units": "1",
+     "default": 138.0,
+     "description": "Effective heating number epsilon = exp(-138/savr) (savr in 1/ft)."
+    },
+    "c_wind_c": {
+     "type": "parameter",
+     "units": "1",
+     "default": 7.47,
+     "description": "Wind coefficient C = 7.47 exp(-0.133 savr^0.55)."
+    },
+    "e_wind_c": {
+     "type": "parameter",
+     "units": "1",
+     "default": -0.133,
+     "description": "Exponential coefficient of C."
+    },
+    "p_wind_c": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.55,
+     "description": "Power of savr in C."
+    },
+    "c_wind_b": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.02526,
+     "description": "Wind exponent B = 0.02526 savr^0.54."
+    },
+    "p_wind_b": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.54,
+     "description": "Power of savr in B."
+    },
+    "c_wind_e": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.715,
+     "description": "Packing-ratio exponent E = 0.715 exp(-3.59e-4 savr)."
+    },
+    "e_wind_e": {
+     "type": "parameter",
+     "units": "1",
+     "default": -0.000359,
+     "description": "Exponential coefficient of E."
+    },
+    "p_gammax": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.5,
+     "description": "Maximum reaction velocity Gamma_max = savr^1.5 / (495 + 0.0594 savr^1.5), 1/min."
+    },
+    "c_gammax_1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 495.0,
+     "description": "Constant in the Gamma_max denominator."
+    },
+    "c_gammax_2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.0594,
+     "description": "Coefficient in the Gamma_max denominator."
+    },
+    "c_a_1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 4.774,
+     "description": "Reaction-velocity exponent A = 1/(4.774 savr^0.1 - 7.27) (Rothermel 1972 original form; Albini 1976 later replaced it by 133 savr^-0.7913)."
+    },
+    "p_a": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.1,
+     "description": "Power of savr in A."
+    },
+    "c_a_2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 7.27,
+     "description": "Constant in A."
+    },
+    "c_etam_1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 2.59,
+     "description": "Moisture damping eta_M = 1 - 2.59 r + 5.11 r^2 - 3.52 r^3, r = M_f/M_x (NOT capped at 1 in fire_behavior)."
+    },
+    "c_etam_2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 5.11,
+     "description": "Quadratic coefficient of eta_M."
+    },
+    "c_etam_3": {
+     "type": "parameter",
+     "units": "1",
+     "default": 3.52,
+     "description": "Cubic coefficient of eta_M."
+    },
+    "c_etas": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.174,
+     "description": "Mineral damping eta_s = 0.174 S_e^-0.19 (NOT capped at 1 in fire_behavior)."
+    },
+    "e_etas": {
+     "type": "parameter",
+     "units": "1",
+     "default": -0.19,
+     "description": "Exponent of S_e in eta_s."
+    },
+    "c_xifr_1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.792,
+     "description": "Propagating flux ratio xi = exp((0.792 + 0.681 savr^0.5)(beta + 0.1)) / (192 + 0.2595 savr)."
+    },
+    "c_xifr_2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.681,
+     "description": "Coefficient of savr^0.5 in the xi exponent."
+    },
+    "c_xifr_3": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.1,
+     "description": "Offset of the packing ratio in the xi exponent."
+    },
+    "c_xifr_4": {
+     "type": "parameter",
+     "units": "1",
+     "default": 192.0,
+     "description": "Constant in the xi denominator."
+    },
+    "c_xifr_5": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.2595,
+     "description": "Coefficient of savr in the xi denominator."
+    },
+    "c_phis": {
+     "type": "parameter",
+     "units": "1",
+     "default": 5.275,
+     "description": "Slope factor phi_s = 5.275 beta^-0.3 tan(phi)^2."
+    },
+    "e_phis": {
+     "type": "parameter",
+     "units": "1",
+     "default": -0.3,
+     "description": "Exponent of the packing ratio in phi_s."
+    },
+    "wind_speed_cap": {
+     "type": "parameter",
+     "units": "m/s",
+     "default": 30.0,
+     "description": "Midflame wind speed entering the wind factor is capped at 30 m/s (Calc_ros_wrffire umidm = min(spdms, 30))."
+    },
+    "ros_max": {
+     "type": "parameter",
+     "units": "m/s",
+     "default": 6.0,
+     "description": "ROS_MAX: the total spread rate is capped at 6 m/s."
+    },
+    "slope_factor": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.0,
+     "description": "SLOPE_FACTOR multiplying the slope contribution (declared integer 1 in the source)."
+    },
+    "c_chap_wind": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.2974,
+     "description": "Chaparral (ichap = 1) spread rate ros_wind = 1.2974 U^1.41 m/s with U in m/s (Clark et al. 2004 empirical fit)."
+    },
+    "p_chap_wind": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.41,
+     "description": "Wind exponent of the chaparral fit."
+    },
+    "ros_back_chap": {
+     "type": "parameter",
+     "units": "m/s",
+     "default": 0.03333,
+     "description": "Chaparral backing-fire spread rate floor, 0.033 m/s."
+    },
+    "tiny_real32": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.1754944e-38,
+     "description": "tiny(real32), the smallest normal single-precision number. fire_behavior adds it to the wind speed and the slope magnitude so the direction cosines are defined in calm air on flat ground (Calc_ros_wrffire), and floors the sum of |lfn| over a subcell's corners with it (Calc_fuel_left); multiply by a unit_* carrier where it is added to a dimensioned quantity."
+    },
+    "eps_real32": {
+     "type": "parameter",
+     "units": "1",
+     "default": 1.1920928955078125e-07,
+     "description": "epsilon(real32), the single-precision machine epsilon: Update_ignition_times nudges the step-end time up by |time_now| epsilon 2 so that cells the front has not reached carry tign > time_now."
+    },
+    "unit_speed": {
+     "type": "parameter",
+     "units": "m/s",
+     "default": 1.0,
+     "description": "One metre per second: makes the chaparral power law and the flame-length fit dimensionless."
+    },
+    "unit_length": {
+     "type": "parameter",
+     "units": "m",
+     "default": 1.0,
+     "description": "One metre: restores the length unit of the Byram flame-length fit."
+    },
+    "c_flame_length": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.0775,
+     "description": "Byram (1959) flame length L = 0.0775 (I_B)^0.46 with I_B = iboros * ros in kW/m (Calc_flame_length)."
+    },
+    "p_flame_length": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.46,
+     "description": "Exponent of the Byram flame-length fit."
+    },
+    "fuel_time_divisor": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.85,
+     "description": "fuel_time = weight / 0.85 s (state_mod Init_fuel_vars; the EarthSciModels FuelConsumption default uses 0.8514). Init_fuel_vars writes the no-fuel category's value as 7.0 / 0.85, which is weight(14) / 0.85."
+    },
+    "wind_ref_height": {
+     "type": "parameter",
+     "units": "m",
+     "default": 10.0,
+     "description": "Height of the input wind for the wind adjustment factor (fuel_mod Calc_wind_adjustment_factor, wh = 10 m)."
+    },
+    "waf_flame_ratio": {
+     "type": "parameter",
+     "units": "1",
+     "default": 2.0,
+     "description": "Assumed flame length = 2 x fuel bed height in the wind adjustment factor."
+    },
+    "waf_c1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.36,
+     "description": "Baughman & Albini (1980) constant 0.36 (zero-plane displacement fraction of the vegetation height)."
+    },
+    "waf_c2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.13,
+     "description": "Baughman & Albini (1980) constant 0.13 (roughness length fraction of the vegetation height)."
+    },
+    "waf_sheltered": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.15,
+     "description": "Wind adjustment factor when the assumed flame does not top the vegetation (flame length <= fuel bed height, i.e. waf_flame_ratio <= 1; Calc_wind_adjustment_factor's else branch). Not reached with the default ratio 2."
+    },
+    "fmc_eps_mw": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.622,
+     "description": "Ratio of the molecular weights of water and dry air used in the fuel-moisture RH (fmc_wrffire_mod)."
+    },
+    "fmc_tol": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.01,
+     "description": "TOL: relative change above which the moisture step switches from the 2nd-order Taylor form to the exponential form."
+    },
+    "fmep_decay_tlag_h": {
+     "type": "parameter",
+     "units": "h",
+     "default": 999999.0,
+     "description": "FMEP_DECAY_TLAG: decay time of the assimilated equilibrium adjustments, in hours."
+    },
+    "s_per_h": {
+     "type": "parameter",
+     "units": "s/h",
+     "default": 3600.0,
+     "description": "Seconds per hour: converts the moisture time lags (h) to seconds and the rain-rate difference (mm/s) to mm/h."
+    },
+    "unit_rain_rate": {
+     "type": "parameter",
+     "units": "mm/h",
+     "default": 1.0,
+     "description": "One millimetre per hour: units carrier of the zero rain rate used when the moisture step has zero length."
+    },
+    "unit_kelvin": {
+     "type": "parameter",
+     "units": "K",
+     "default": 1.0,
+     "description": "One kelvin: makes the Murphy-Koop and Van Wagner-Pickett fits dimensionless."
+    },
+    "unit_pressure": {
+     "type": "parameter",
+     "units": "Pa",
+     "default": 1.0,
+     "description": "One pascal: restores the unit of the saturation vapour pressure fit."
+    },
+    "t_ref_vwp": {
+     "type": "parameter",
+     "units": "1",
+     "default": 294.25,
+     "description": "21.1 + 273.15 K reference temperature of the Van Wagner & Pickett (1972) equilibrium moisture fits (written as 21.1 + 273.15 in the source)."
+    },
+    "mk_c0": {
+     "type": "parameter",
+     "units": "1",
+     "default": 54.842763,
+     "description": "Murphy & Koop (2005) eq. 10 saturation vapour pressure over liquid water, ln(e_s/Pa) = c0 + c1/T + c2 ln T + c3 T + tanh(c_tanh (T - T_tanh)) (c4 + c5/T + c6 ln T + c7 T), T in K: constant c0."
+    },
+    "mk_c1": {
+     "type": "parameter",
+     "units": "1",
+     "default": -6763.22,
+     "description": "Murphy-Koop c1, coefficient of 1/T (K)."
+    },
+    "mk_c2": {
+     "type": "parameter",
+     "units": "1",
+     "default": -4.21,
+     "description": "Murphy-Koop c2, coefficient of ln T (written -4.210 in the source)."
+    },
+    "mk_c3": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.000367,
+     "description": "Murphy-Koop c3, coefficient of T (1/K)."
+    },
+    "mk_c_tanh": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.0415,
+     "description": "Murphy-Koop coefficient of (T - T_tanh) in the tanh blending (1/K)."
+    },
+    "mk_t_tanh": {
+     "type": "parameter",
+     "units": "1",
+     "default": 218.8,
+     "description": "Murphy-Koop blending temperature T_tanh (K)."
+    },
+    "mk_c4": {
+     "type": "parameter",
+     "units": "1",
+     "default": 53.878,
+     "description": "Murphy-Koop c4, constant of the blended term."
+    },
+    "mk_c5": {
+     "type": "parameter",
+     "units": "1",
+     "default": -1331.22,
+     "description": "Murphy-Koop c5, coefficient of 1/T in the blended term (K)."
+    },
+    "mk_c6": {
+     "type": "parameter",
+     "units": "1",
+     "default": -9.44523,
+     "description": "Murphy-Koop c6, coefficient of ln T in the blended term."
+    },
+    "mk_c7": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.014025,
+     "description": "Murphy-Koop c7, coefficient of T in the blended term (1/K)."
+    },
+    "vwp_drying_c1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.942,
+     "description": "Van Wagner & Pickett (1972) drying (desorption) equilibrium moisture, per cent, per Viney (1991) eq. 7: d = 0.942 H^0.679 + 0.000499 e^{0.1 H} + 0.18 (21.1 + 273.15 - T) (1 - e^{-0.115 H}), H the relative humidity in per cent: coefficient 0.942."
+    },
+    "vwp_drying_p1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.679,
+     "description": "Exponent of H in the drying equilibrium."
+    },
+    "vwp_drying_c2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.000499,
+     "description": "Coefficient of e^{0.1 H} in the drying equilibrium."
+    },
+    "vwp_wetting_c1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.618,
+     "description": "Van Wagner & Pickett (1972) wetting (adsorption) equilibrium moisture, per cent, per Viney (1991) eq. 8: w = 0.618 H^0.753 + 0.000454 e^{0.1 H} + 0.18 (21.1 + 273.15 - T) (1 - e^{-0.115 H}): coefficient 0.618."
+    },
+    "vwp_wetting_p1": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.753,
+     "description": "Exponent of H in the wetting equilibrium."
+    },
+    "vwp_wetting_c2": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.000454,
+     "description": "Coefficient of e^{0.1 H} in the wetting equilibrium."
+    },
+    "vwp_exp_rh": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.1,
+     "description": "Coefficient of H in the e^{0.1 H} term of both equilibria."
+    },
+    "vwp_temp_coef": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.18,
+     "description": "Coefficient of the temperature correction (21.1 + 273.15 - T) of both equilibria (1/K)."
+    },
+    "vwp_temp_rh": {
+     "type": "parameter",
+     "units": "1",
+     "default": 0.115,
+     "description": "Coefficient of H in the (1 - e^{-0.115 H}) factor of the temperature correction."
+    },
+    "fmc_drying_lag_1": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1.0,
+     "description": "Drying time lag of moisture class 1 (1-h fuel; fmc_wrffire_mod drying_lag)."
+    },
+    "fmc_drying_lag_2": {
+     "type": "parameter",
+     "units": "h",
+     "default": 10.0,
+     "description": "Drying time lag of moisture class 2 (10-h fuel; fmc_wrffire_mod drying_lag)."
+    },
+    "fmc_drying_lag_3": {
+     "type": "parameter",
+     "units": "h",
+     "default": 100.0,
+     "description": "Drying time lag of moisture class 3 (100-h fuel; fmc_wrffire_mod drying_lag)."
+    },
+    "fmc_drying_lag_4": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1000.0,
+     "description": "Drying time lag of moisture class 4 (1000-h fuel; fmc_wrffire_mod drying_lag)."
+    },
+    "fmc_drying_lag_5": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1000000000.0,
+     "description": "Drying time lag of moisture class 5 (live fuel; fmc_wrffire_mod drying_lag)."
+    },
+    "fmc_wetting_lag_1": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1.4,
+     "description": "Wetting time lag in rain of moisture class 1 (1-h fuel; fmc_wrffire_mod wetting_lag)."
+    },
+    "fmc_wetting_lag_2": {
+     "type": "parameter",
+     "units": "h",
+     "default": 14.0,
+     "description": "Wetting time lag in rain of moisture class 2 (10-h fuel; fmc_wrffire_mod wetting_lag)."
+    },
+    "fmc_wetting_lag_3": {
+     "type": "parameter",
+     "units": "h",
+     "default": 140.0,
+     "description": "Wetting time lag in rain of moisture class 3 (100-h fuel; fmc_wrffire_mod wetting_lag)."
+    },
+    "fmc_wetting_lag_4": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1400.0,
+     "description": "Wetting time lag in rain of moisture class 4 (1000-h fuel; fmc_wrffire_mod wetting_lag)."
+    },
+    "fmc_wetting_lag_5": {
+     "type": "parameter",
+     "units": "h",
+     "default": 1000000000.0,
+     "description": "Wetting time lag in rain of moisture class 5 (live fuel; fmc_wrffire_mod wetting_lag)."
+    },
+    "fmc_saturation_moisture": {
+     "type": "parameter",
+     "units": "1",
+     "default": 2.5,
+     "description": "Saturation moisture content reached in rain (fmc_wrffire_mod saturation_moisture, 2.5 for every class)."
+    },
+    "fmc_saturation_rain": {
+     "type": "parameter",
+     "units": "mm/h",
+     "default": 8.0,
+     "description": "Rain intensity scale of the wetting rate 1 - exp(-r/8 mm/h) (fmc_wrffire_mod saturation_rain, the same for every class)."
+    },
+    "fmc_rain_threshold": {
+     "type": "parameter",
+     "units": "mm/h",
+     "default": 0.05,
+     "description": "Rain intensity below which a class sees no rain (fmc_wrffire_mod rain_threshold, the same for every class)."
+    }
+   },
+   "equations": []
+  }
+ }
+}
