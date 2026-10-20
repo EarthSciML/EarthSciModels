@@ -42,15 +42,16 @@ its `.esm` files use.
 Inside `components/`, each subdir corresponds to one **science domain**. Where
 an upstream `earthsciml/*.jl` repo exists the two are 1:1 — domain and source
 repo coincide. A domain transcribed from another model with no `.jl` repo
-behind it (so far `land_surface/`, from WRF) is named for the domain alone. If
-a domain later spans multiple repos, or a repo crosses domains, revisit this
-convention.
+behind it (so far `atmospheric_radiation/` and `land_surface/`, both from
+WRF) is named for the domain alone. If a domain later spans multiple repos, or
+a repo crosses domains, revisit this convention.
 
 ```
 components/
   aerosol/                   # Aerosol.jl
   atmospheric_deposition/    # AtmosphericDeposition.jl
   atmospheric_dynamics/      # AtmosphericDynamics.jl
+  atmospheric_radiation/     # radiation schemes transcribed from WRF (no upstream .jl repo)
   earthsci_data/             # EarthSciData.jl (DataLoaders, ERA5/GEOSFP/...)
   earthsci_discretizations/  # EarthSciDiscretizations.jl (framework primitives)
   earthsci_ml_base/          # EarthSciMLBase.jl (framework primitives)
@@ -61,7 +62,6 @@ components/
   urban_canopy/              # UrbanCanopy.jl
   vegetation/                # Vegetation.jl
   wildland_fire/             # WildlandFire.jl
-  atmospheric_radiation/     # radiation schemes transcribed from WRF (no upstream .jl repo yet; EqWeFiC)
 ```
 
 Subdir names are lowercase snake_case forms of the upstream repo name (with
