@@ -1,7 +1,7 @@
 # docs/ — EarthSciModels component catalog
 
 This directory is the source for the **auto-generated component documentation
-site** published at `https://earthsciml.github.io/EarthSciModels/`. The source
+site** published as part of [earthsci.dev](https://earthsci.dev/models/). The source
 of truth remains the `.esm` files under [`components/`](../components) — this
 site is a view over them.
 
@@ -11,10 +11,10 @@ site is a view over them.
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
 | [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via the canonical Python ESS runner (`earthsci_ast.simulation.simulate`) (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
-| [Hugo](https://gohugo.io) | Static site generator; renders taxonomies and markdown. |
-| [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded via CDN in `layouts/partials/head.html`). |
-| [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` in CI. Lazy-loads, no server required. |
-| `.github/workflows/docs.yml` | Generate plots → generate pages → build → index → deploy on every push to `main`. |
+| [Hugo](https://gohugo.io) | Static site generator. The Hugo config, layouts and CSS live in [EarthSciML/earthsci.dev](https://github.com/EarthSciML/earthsci.dev), not here. |
+| [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded by the earthsci.dev layouts). |
+| [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` by the earthsci.dev build. Lazy-loads, no server required. |
+| `.github/workflows/docs.yml` | Generate plots → generate pages → publish the `docs-bundle` branch → notify earthsci.dev, which builds, indexes and deploys the full site. |
 
 ## Adding a new component
 
@@ -48,7 +48,7 @@ Frontmatter fields set from the `.esm`:
 - `reference` — DOI / URL / citation (best match from the component reference)
 - `tags` — domain + subdomain + type + any author-supplied tags
 
-Taxonomies configured in `hugo.toml` (`domain`, `component_type`, `subdomain`,
+Taxonomies configured in earthsci.dev's `hugo.toml` (`domain`, `component_type`, `subdomain`,
 `tag`) auto-generate faceted landing pages such as
 `/domains/gaschem/` and `/component_types/model/`.
 
@@ -65,14 +65,12 @@ python tools/esm_to_docs.py
 python -m unittest tools/esm_to_docs_test.py
 python -m unittest tools/render_example_plots_test.py
 
-# Build the site (requires Hugo extended ≥ 0.131).
-hugo --source docs --minify --destination public
+# Preview: the site is built by earthsci.dev (Python 3.11+, Hugo extended >= 0.131).
+git clone https://github.com/EarthSciML/earthsci.dev ../earthsci.dev
+python ../earthsci.dev/tools/bundle.py --repo-root . --out ../earthsci.dev/build/bundles/models
+python ../earthsci.dev/tools/assemble.py --local models=../earthsci.dev/build/bundles/models --only models
+hugo server --source ../earthsci.dev
 
-# Serve locally with live reload.
-hugo server --source docs
-
-# Build Pagefind index (optional; the UI silently degrades without it).
-npx pagefind@1 --site docs/public
 ```
 
 Generated content (`docs/content/components/**/index.md`, `docs/data/components-index.json`,
@@ -83,7 +81,7 @@ every run.
 
 ```
 docs/
-├── hugo.toml                             # Hugo config + taxonomies
+├── site.toml                             # project metadata for earthsci.dev
 ├── content/
 │   ├── _index.md                          # landing page (hand-written)
 │   ├── components/
@@ -91,11 +89,7 @@ docs/
 │   │   └── <domain>/<subdomain>/<name>/   # GENERATED
 │   │       └── index.md
 │   └── ...
-├── layouts/
-│   ├── _default/{baseof,list,single,terms}.html
-│   └── partials/{head,header,footer}.html
-├── static/
-│   └── css/site.css                       # site styling
+├── static/                               # (plots land in static/plots, generated)
 └── data/
     └── components-index.json              # GENERATED — faceted search feed
 ```
