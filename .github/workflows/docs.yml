@@ -1,54 +1,85 @@
----
 name: docs
+
+# Component pages and example plots are generated from components/**/*.esm
+# before the bundle is built (prebuild steps below). The site itself (Hugo,
+# search, link check, deploy) is built by earthsci.dev. The old standalone
+# workflow set no job timeout (GitHub's 360 min default) and the plot
+# rendering is slow, so the bundle job gets a generous one.
+
+# Installed in each EarthSci source repo as .github/workflows/docs.yml.
+# Nothing of the docs machinery lives in this repo: extraction, rendering and
+# bundling all run from EarthSciML/earthsci.dev (DESIGN.md there).
+#
+# On push to main: extract API docs, build the docs bundle, publish it to this
+# repo's `docs-bundle` branch and notify earthsci.dev, which rebuilds the site.
+# On pull requests: the same, minus publishing and notifying (validation only).
+#
+# Needs the repo (or org) secret SITE_DISPATCH_TOKEN: a token with contents:write
+# on EarthSciML/earthsci.dev.
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'components/**'
-      - 'tools/esm_to_docs.py'
-      - 'tools/esm_to_docs_test.py'
-      - 'tools/render_example_plots.py'
-      - 'tools/render_example_plots_test.py'
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
   pull_request:
-    paths:
-      - 'components/**'
-      - 'tools/esm_to_docs.py'
-      - 'tools/esm_to_docs_test.py'
-      - 'tools/render_example_plots.py'
-      - 'tools/render_example_plots_test.py'
-      - 'docs/**'
-      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
-# Coalesce concurrent runs on the same ref. On PR branches the latest push
-# supersedes earlier in-flight runs (the usual GHA pattern). On main we let
-# runs queue but each runs to completion — `cancel-in-progress: false` —
-# because every main commit is a merge whose docs build (and Pages deploy)
-# must be independently verified rather than skipped (mirrors test-esm.yml
-# after esm-g97l; cancelling on main produced a docs cascade where every
-# push killed the in-flight run before it could finish, leaving Pages stale
-# — esm-m0r2).
 concurrency:
   group: docs-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
-  build:
+  plan:
     runs-on: ubuntu-latest
-    env:
-      HUGO_VERSION: "0.131.0"
-      PAGEFIND_VERSION: "1.1.0"
+    outputs:
+      bindings: ${{ steps.plan.outputs.bindings }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: EarthSciML/earthsci.dev
+          ref: main
+          path: .earthsci-dev
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Prints the bindings in docs/api/config.toml as a JSON array ([] when
+      # the repo has no API reference).
+      - id: plan
+        run: echo "bindings=$(python .earthsci-dev/tools/api_docs/plan.py --repo-root .)" >> "$GITHUB_OUTPUT"
+
+  extract:
+    needs: plan
+    if: needs.plan.outputs.bindings != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # A failing binding is reported but does not block the bundle; it renders
+    # as "not extracted in this build". Remove to make failures fatal.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        binding: ${{ fromJSON(needs.plan.outputs.bindings) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EarthSciML/earthsci.dev/.github/actions/api-extract@main
+        with:
+          binding: ${{ matrix.binding }}
+
+  bundle:
+    needs: [plan, extract]
+    if: ${{ !cancelled() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: write   # push the docs-bundle branch
     steps:
       - uses: actions/checkout@v4
 
+      # Prebuild (docs/site.toml `prebuild`): component pages and example plots
+      # are generated from components/**/*.esm, never committed.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -64,23 +95,13 @@ jobs:
           # type. Install it before the unit-test step below.
           #
           # Clone the toolkit source so we can both pip-install it and copy its
-          # bundled schema into the installed package. EarthSciAST's pyproject
-          # now DOES declare `[tool.setuptools.package-data] earthsci_ast =
-          # ["data/*.json"]`, so the copy below is belt-and-braces rather than
-          # load-bearing; it is kept until the 1.0.0 tree is on `main` and a
-          # plain `pip install` has been observed to ship the schema. Without
-          # the schema `load()` raises "ESM schema not found".
-          git clone --depth=1 https://github.com/EarthSciML/EarthSciAST.git /tmp/ess
-          python -m pip install /tmp/ess/pkg/earthsci-ast-py
+          # bundled schema into the installed package (belt-and-braces; without
+          # the schema `load()` raises "ESM schema not found").
+          git clone --depth=1 https://github.com/EarthSciML/EarthSciAST.git "$RUNNER_TEMP/ess"
+          python -m pip install "$RUNNER_TEMP/ess/pkg/earthsci-ast-py"
           INSTALLED_DIR=$(python -c 'import earthsci_ast, os; print(os.path.dirname(earthsci_ast.__file__))')
           mkdir -p "$INSTALLED_DIR/data"
-          cp /tmp/ess/pkg/earthsci-ast-py/src/earthsci_ast/data/esm-schema.json "$INSTALLED_DIR/data/"
-
-      - name: Install Hugo extended
-        run: |
-          curl -sSL \
-            "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.tar.gz" \
-            | tar -xz -C /usr/local/bin hugo
+          cp "$RUNNER_TEMP/ess/pkg/earthsci-ast-py/src/earthsci_ast/data/esm-schema.json" "$INSTALLED_DIR/data/"
 
       - name: Unit test the generators
         run: |
@@ -93,59 +114,14 @@ jobs:
       - name: Generate component pages from .esm
         run: python tools/esm_to_docs.py
 
-      - name: Build site with Hugo
-        run: hugo --source docs --minify --destination public
-
-      - name: Install Pagefind
-        run: npm install -g "pagefind@${PAGEFIND_VERSION}"
-
-      - name: Build Pagefind search index
-        run: pagefind --site docs/public
-
-      # Hugo emits root-relative hrefs of the form /EarthSciModels/...
-      # because the GitHub-Pages baseURL has that path component. The local
-      # build tree lives at docs/public/, so we stage it under a parent dir
-      # that mirrors the deployed path layout. Lychee's --root-dir then
-      # resolves those hrefs to real files. Absolute paths are required —
-      # lychee 0.23+ rejects relative --base/--root-dir values.
-      - name: Stage built site for link-checking
-        run: |
-          rm -rf /tmp/lychee-root
-          mkdir -p /tmp/lychee-root/EarthSciModels
-          cp -r docs/public/. /tmp/lychee-root/EarthSciModels/
-
-      # Internal-link guard: catches the class of bug where a Hugo template
-      # emits root-relative URLs that drop the project-Pages baseURL prefix
-      # (e.g. href="/components/" instead of "/EarthSciModels/components/").
-      # --offline + scheme excludes keep CI hermetic and free of third-party
-      # rate-limit flake.
-      - name: Check internal links (lychee)
-        uses: lycheeverse/lychee-action@v2
+      - name: Download extracted docstrings
+        continue-on-error: true
+        uses: actions/download-artifact@v4
         with:
-          args: >-
-            --offline
-            --no-progress
-            --include-fragments
-            --root-dir /tmp/lychee-root
-            --exclude '^https?://'
-            --exclude '^mailto:'
-            '/tmp/lychee-root/EarthSciModels/**/*.html'
-          fail: true
-          format: detailed
+          pattern: api-docs-*
+          path: build/api-docs
+          merge-multiple: true
 
-      - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: actions/upload-pages-artifact@v3
+      - uses: EarthSciML/earthsci.dev/.github/actions/docs-bundle@main
         with:
-          path: docs/public
-
-  deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          dispatch-token: ${{ secrets.SITE_DISPATCH_TOKEN }}
