@@ -29,6 +29,11 @@
     },
     "models": {
         "DryDepositionGas": {
+            "expression_template_imports": [
+                {
+                    "ref": "./wesley1989/resistance_templates.esm"
+                }
+            ],
             "reference": {
                 "citation": "Wesely, M. L. (1989). Parameterization of surface resistances to gaseous dry deposition in regional-scale numerical models. Atmospheric Environment 23(6), 1293-1304. doi:10.1016/0004-6981(89)90153-4",
                 "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/dry_deposition.jl:323\n\nUpstream `DryDepositionGas` is an MTK builder that declares 12 scalar @parameters (season, landuse, z, del_P, z_0, u_star, L, rho_A, G, Ts, theta, lev) and builds equations depvel .~ DryDepGas.(...) and deprate .~ depvel .* g .* rho_A ./ del_P for 132 gas species. The species GasData (Dh2oPerDx, Hstar, Fo) are constants from src/wesley1989.jl. rain=false and dew=false are hardcoded in the builder.\n\nFor each species i, DryDepGas computes:\n  v_i = ifelse(lev==1,1,0) / (Ra + Rb_i + Rc_i)\n  Ra = ra(z, z0, u_star, L) [aerodynamic resistance, shared]\n  Rb_i = 5 * Sc_i^(2/3) / u_star [quasi-laminar, Seinfeld & Pandis Eq. 19.17]\n  Sc_i = mu(Ts) / (rho_A * dH2O(Ts) / Dh2oPerDx_i) [Schmidt number]\n  Rc_i = WesleySurfaceResistance(GasData_i, G, Ts-273, theta, season, landuse, false, false, isSO2_i, isO3_i)\n\nMigration approach: Ra, mu_air, Dh2o, and the 7 Wesley table lookups plus rs, rdc, correction are computed as shared observed variables. For each species, species-specific parts (Rb, Rc) are inlined into the v_* expression with GasData constants substituted. Since rain=false and dew=false, rlux=rlux_dry for all species and the rs rain/dew multiplier=1.\n\nSO2 (species 131): isSO2=true → rclx=r_clS_val, rgsx=r_gsS_val.\nO3 (species 114): isO3=true → rclx=r_clO_val, rgsx=r_gsO_val.\nAll other species: rclx=1/(Hstar/(1e5*r_clS)+Fo/r_clO), rgsx=1/(Hstar/(1e5*r_gsS)+Fo/r_gsO).\n\nTemperature convention: Ts parameter is in Kelvin (default 298K). mu_air and Dh2o use Ts directly (Kelvin). Wesley surface resistance uses Ts_c = Ts - 273 (Celsius), consistent with the upstream (Ts * T_unitless - 273) conversion in DryDepGas.\n\nNeutral-stability: L=0 is the neutral-stability sentinel. zeta and zeta_0 are reformulated as z*L/(L^2+1e-300) and z0*L/(L^2+1e-300) to avoid division by zero, per dry_aerosol.esm convention.\n\nTolerance (model-level rel=1e-6): closed-form algebraic system; interp.linear table lookups land on integer knots (zero blend weight), subsequent arithmetic accumulates ~1e-13 float64 round-off. rel=1e-6 provides comfortable headroom."
@@ -219,7 +224,7 @@
                 "rs": {
                     "type": "unknown",
                     "units": "s/m",
-                    "description": "Stomatal resistance rs [s/m] (Wesley 1989 Eq. 3). Uses Ts_c (Celsius). With rain=dew=false the wet-surface multiplier=1. Capped at 1e25 when Ts_c <= 0.1°C."
+                    "description": "Stomatal resistance rs [s/m] (Wesley 1989 Eq. 3), the wesely_stomatal_resistance template of wesley1989/resistance_templates.esm applied to Ts_c (Celsius). With rain=dew=false the wet-surface multiplier=1. Capped at 1e25 s/m when Ts_c <= 0.1 degC."
                 },
                 "rdc": {
                     "type": "unknown",
@@ -229,7 +234,7 @@
                 "correction": {
                     "type": "unknown",
                     "units": "s/m",
-                    "description": "Cold-temperature correction for all surface resistances. 1000*exp(-Ts_c-4) when Ts_c<0, else 0. Wesely (1989) writes the exponent with Ts_c as a number of degrees Celsius, so it is divided by a 1 degC constant to make the argument of exp dimensionless, and the 1000 s/m factor carries its unit on a const (esm-spec 4.8.5; the unit-bearing consts are why this file declares esm 1.2.0)."
+                    "description": "Cold-temperature correction for all surface resistances: 1000 s/m * exp(-Ts_c/(1 degC) - 4) when Ts_c < 0 degC, else 0. Defined by the wesely_cold_correction template of wesley1989/resistance_templates.esm."
                 },
                 "v_NO": {
                     "type": "unknown",
@@ -2919,67 +2924,14 @@
                 {
                     "lhs": "rs",
                     "rhs": {
-                        "op": "ifelse",
-                        "args": [
-                            {
-                                "op": "<=",
-                                "args": [
-                                    "Ts_c",
-                                    0.1
-                                ]
-                            },
-                            1e+25,
-                            {
-                                "op": "*",
-                                "args": [
-                                    "r_i_val",
-                                    {
-                                        "op": "+",
-                                        "args": [
-                                            1,
-                                            {
-                                                "op": "^",
-                                                "args": [
-                                                    {
-                                                        "op": "/",
-                                                        "args": [
-                                                            200.0,
-                                                            {
-                                                                "op": "+",
-                                                                "args": [
-                                                                    "G",
-                                                                    1.0
-                                                                ]
-                                                            }
-                                                        ]
-                                                    },
-                                                    2
-                                                ]
-                                            }
-                                        ]
-                                    },
-                                    {
-                                        "op": "/",
-                                        "args": [
-                                            400.0,
-                                            {
-                                                "op": "*",
-                                                "args": [
-                                                    "Ts_c",
-                                                    {
-                                                        "op": "-",
-                                                        "args": [
-                                                            40.0,
-                                                            "Ts_c"
-                                                        ]
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        ]
+                        "op": "apply_expression_template",
+                        "args": [],
+                        "name": "wesely_stomatal_resistance",
+                        "bindings": {
+                            "r_i": "r_i_val",
+                            "G": "G",
+                            "T_c": "Ts_c"
+                        }
                     }
                 },
                 {
@@ -3031,56 +2983,12 @@
                 {
                     "lhs": "correction",
                     "rhs": {
-                        "op": "ifelse",
-                        "args": [
-                            {
-                                "op": "<",
-                                "args": [
-                                    "Ts_c",
-                                    0.0
-                                ]
-                            },
-                            {
-                                "op": "*",
-                                "args": [
-                                    {
-                                        "op": "const",
-                                        "args": [],
-                                        "value": 1000.0,
-                                        "units": "s/m"
-                                    },
-                                    {
-                                        "op": "exp",
-                                        "args": [
-                                            {
-                                                "op": "-",
-                                                "args": [
-                                                    {
-                                                        "op": "-",
-                                                        "args": [
-                                                            {
-                                                                "op": "/",
-                                                                "args": [
-                                                                    "Ts_c",
-                                                                    {
-                                                                        "op": "const",
-                                                                        "args": [],
-                                                                        "value": 1.0,
-                                                                        "units": "degC"
-                                                                    }
-                                                                ]
-                                                            }
-                                                        ]
-                                                    },
-                                                    4
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                ]
-                            },
-                            0.0
-                        ]
+                        "op": "apply_expression_template",
+                        "args": [],
+                        "name": "wesely_cold_correction",
+                        "bindings": {
+                            "T_c": "Ts_c"
+                        }
                     }
                 },
                 {
