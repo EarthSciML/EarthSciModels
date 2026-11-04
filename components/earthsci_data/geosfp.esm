@@ -675,17 +675,23 @@
         },
         "PS": {
           "type": "parameter",
-          "units": "Pa",
-          "default": 100000.0,
-          "description": "Surface pressure (Pa). 3-hourly instantaneous 2D field (no lev dimension). Used in hybrid pressure calculation P = Ap[lev] + Bp[lev]*PS. Sourced from GEOSFP_I3.PS. Default 100000.0: near sea-level surface pressure (standard atmosphere 101325 Pa; CONUS GEOS-FP 4x5 mean on 2016-04-30 is 961 hPa because of terrain).",
+          "units": "hPa",
+          "default": 1000.0,
+          "description": "Surface pressure (hPa). 3-hourly instantaneous 2D field (no lev dimension). Declared in hPa because that is what the GEOS-FP I3 files store (their PS units attribute is hPa; the CONUS mean is ~961) and the loader returns raw file values. Used in hybrid pressure calculation P = Ap[lev] + Bp[lev]*pa_per_hpa*PS, which converts it to Pa. Sourced from GEOSFP_I3.PS. Default 1000.0: near sea-level surface pressure (standard atmosphere 1013.25 hPa; CONUS GEOS-FP 4x5 mean on 2016-04-30 is 961 hPa because of terrain).",
           "update": {
             "kind": "data",
             "source": "GEOSFP_I3",
             "from": {
               "file_variable": "PS",
-              "description": "Surface pressure (Pa). 3-hourly instantaneous 2D field (lat×lon only, no lev dimension). Used for hybrid pressure calculation P = Ap[lev] + Bp[lev]*PS. Clamp extrapolation."
+              "description": "Surface pressure (hPa, as stored in the file). 3-hourly instantaneous 2D field (lat×lon only, no lev dimension). Used for hybrid pressure calculation P = Ap[lev] + Bp[lev]*pa_per_hpa*PS. Clamp extrapolation."
             }
           }
+        },
+        "pa_per_hpa": {
+          "type": "parameter",
+          "units": "Pa/hPa",
+          "default": 100.0,
+          "description": "Unit conversion from the hPa of the GEOS-FP surface pressure PS to the Pa of the hybrid coefficient Ap and of P (1 hPa = 100 Pa)."
         },
         "T2M": {
           "type": "parameter",
@@ -1183,7 +1189,7 @@
         "P": {
           "type": "unknown",
           "units": "Pa",
-          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (interp.linear over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup."
+          "description": "Atmospheric pressure at hybrid level lev (Pa): P = Ap(lev) + Bp(lev)*pa_per_hpa*PS. Ap [Pa] and Bp [dimensionless] are the GEOS-FP 72-level (73-edge) hybrid sigma-pressure coefficients, evaluated at the 1-based level index lev by piecewise-linear interpolation (interp.linear over the integer level axis 1..73; lev=1 -> surface ~ PS, lev=73 -> ~1 Pa). PS is the surface pressure from the GEOSFP_I3 loader subsystem, in hPa as the files store it; pa_per_hpa converts it to Pa. Uses interp.linear with inline const coefficient arrays (the tree-walk-native form, as fastjx.esm does) rather than a table_lookup over top-level function_tables, because the runtime evaluator does not lower/evaluate table_lookup."
         },
         "Tv": {
           "type": "unknown",
@@ -1694,6 +1700,7 @@
                       "lev"
                     ]
                   },
+                  "pa_per_hpa",
                   "PS"
                 ]
               }
