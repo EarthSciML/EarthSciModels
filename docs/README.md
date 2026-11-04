@@ -10,7 +10,7 @@ site is a view over them.
 | Piece | Purpose |
 | --- | --- |
 | [`tools/esm_to_docs.py`](../tools/esm_to_docs.py) | Walks `components/**/*.esm`, writes one Hugo page per component (plus `docs/data/components-index.json`). SSG-agnostic: only the output format is Hugo-specific. |
-| [`tools/render_example_plots.py`](../tools/render_example_plots.py) | Walks `components/**/*.esm`, evaluates each example via the `parameter_sweep` path (algebraic models) or via the canonical Python ESS runner (`earthsci_ast.simulation.simulate`) (ODE models with `time_span` + `initial_state`), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. |
+| [`tools/render_example_plots.jl`](../tools/render_example_plots.jl) | Walks `components/**/*.esm`, evaluates each analysis through the canonical Julia runner (`EarthSciAST.esm_problem` + SciML `solve`; a `parameter_sweep` grid for algebraic components, integrations over `time_span` for ODE components), and writes a PNG per declared plot under `<esm_dir>/<stem>.plots/`. `esm_to_docs.py` then inlines the artifacts on the rendered page. Its environment is [`tools/plots/`](../tools/plots/Project.toml). |
 | [Hugo](https://gohugo.io) | Static site generator. The Hugo config, layouts and CSS live in [EarthSciML/earthsci.dev](https://github.com/EarthSciML/earthsci.dev), not here. |
 | [KaTeX](https://katex.org) | Client-side math rendering for rate laws / equations (loaded by the earthsci.dev layouts). |
 | [Pagefind](https://pagefind.app) | Client-side chunked search index built post-`hugo` by the earthsci.dev build. Lazy-loads, no server required. |
@@ -55,15 +55,19 @@ Taxonomies configured in earthsci.dev's `hugo.toml` (`domain`, `component_type`,
 ## Local development
 
 ```bash
-# Render example plots from .esm files (requires matplotlib + numpy).
-python tools/render_example_plots.py
+# Render example plots from .esm files (Julia 1.12+; the first run
+# instantiates and precompiles tools/plots, which takes several minutes).
+julia --project=tools/plots -e 'using Pkg; Pkg.instantiate()'
+julia --project=tools/plots tools/render_example_plots.jl
+# ...or just some files:
+julia --project=tools/plots tools/render_example_plots.jl --files components/gaschem/superfast.esm
 
 # Generate pages from .esm files.
 python tools/esm_to_docs.py
 
 # Run the generators' unit tests.
 python -m unittest tools/esm_to_docs_test.py
-python -m unittest tools/render_example_plots_test.py
+julia --project=tools/plots tools/render_example_plots_test.jl
 
 # Preview: the site is built by earthsci.dev (Python 3.11+, Hugo extended >= 0.131).
 git clone https://github.com/EarthSciML/earthsci.dev ../earthsci.dev
@@ -100,11 +104,10 @@ Analyses in the `.esm` schema (esm-spec §6.7 — the 1.0.0 spelling of what 0.x
 called `examples`) carry declarative plot specs (`type: line` /
 `heatmap`, axis labels, variable bindings — see
 [ESS §5.4.11](https://github.com/EarthSciML/EarthSciAST)). At
-build time, [`tools/render_example_plots.py`](../tools/render_example_plots.py)
-walks `components/**/*.esm`, evaluates each analysis (cartesian
-`parameter_sweep` for algebraic models, or via the canonical Python ESS
-runner (`earthsci_ast.simulation.simulate`) of `time_span` +
-`initial_state` for ODE models), and writes a PNG per declared plot under
+build time, [`tools/render_example_plots.jl`](../tools/render_example_plots.jl)
+walks `components/**/*.esm`, evaluates each analysis through the canonical
+Julia runner (`EarthSciAST.esm_problem` + SciML `solve`), and writes a PNG
+per declared plot under
 
 ```
 components/<domain>/[<subdomain>/]<name>.plots/<analysis_id>-<plot_id>.png
@@ -118,41 +121,39 @@ analysis are still supported by simply checking them into the same path
 
 ### Coverage
 
-The renderer handles two analysis shapes:
+Each component (model or reaction system) is built once with
+`esm_problem`; every analysis on it reuses that build, and `remake` swaps
+parameter values between sweep points without recompiling. The renderer
+handles two analysis shapes:
 
-- **Algebraic models** (no `D` op in `equations`) drive the cartesian
-  `parameter_sweep` path: each grid point is evaluated through ESS and
-  fed to one PNG per declared plot. Covers `CloudAlbedo`,
-  `WaterEquilibrium`, `DropletGrowth`, `AerosolScavenging`, etc.
-- **ODE models** (one or more `D(state)/dt = rhs` equations) drive the
-  time-series path when the analysis carries `time_span` + `initial_state`
-  (either the flat scalar map or the esm-spec §11.4 `{type, values}` union).
-  Each analysis integrates via the canonical Python
-  ESS runner (`earthsci_ast.simulation.simulate`) and emits one PNG
-  per plot of state/algebraic trajectories vs `t`. A
-  1-D `parameter_sweep` is allowed and produces a family of curves on
-  one axes (one integration per grid point). Covers
-  `DiameterGrowthRate`'s Fig. 13.2 reproductions (mdl-hxx).
+- **Algebraic components** (the built problem has no state) drive the
+  cartesian `parameter_sweep` path: each grid point's observed values are
+  read with `observed_field` and fed to one PNG per declared plot (`line`
+  and `scatter` for a 1-D sweep, `heatmap` for a 2-D one).
+- **ODE components** drive the time-series path: one integration over
+  `time_span` (or one per point of a 1-D `parameter_sweep`), starting from
+  the states' declared defaults overridden by `initial_state` (either the
+  flat scalar map or the esm-spec §11.4 `{type, values}` union). A `line`
+  plot with `x = t` draws the trajectories; one whose `x` is the swept
+  parameter draws each trajectory's final value against the sweep. The
+  integrator is FBDF (Rodas5P as a fallback) at `reltol = 1e-8`,
+  `abstol = 1e-12`.
 
-Reaction systems (`reaction_systems`), DAE-only models (algebraics that
-won't reduce to forward-defined targets), and analyses missing both
-`parameter_sweep` and `initial_state` are skipped with a diagnostic
-line. Both supported paths run in pure Python (`matplotlib`, `numpy`,
-`scipy`) and add ~1 s per .esm to the docs build.
+Analyses missing both `parameter_sweep` and `initial_state` on an algebraic
+component, 2-D sweeps of ODE components, `field_snapshot` / `field_slice`
+plots, and anything the runner refuses to build or evaluate are skipped
+with a `[skip]` line naming the reason.
 
 ### Build-time impact
 
-For the current 6 components × ~25 analysis plots:
+Measured on the full corpus (497 `.esm` files, 817 plots), one process on a
+shared workstation:
 
-| Stage | Local time | Notes |
+| Stage | Time | Notes |
 | --- | --- | --- |
-| `pip install matplotlib numpy scipy` | ~10–15 s | Cached across CI runs once the wheels are in place. |
-| `python tools/render_example_plots.py` | <20 s | Algebraic analyses scale with sweep grid size; ODE analyses scale with the canonical-runner integration cost. |
+| `Pkg.instantiate()` + precompile of `tools/plots` | ~5 min cold | Cached across CI runs by `julia-actions/cache`; only EarthSciAST recompiles when its `main` moves. |
+| `julia --project=tools/plots tools/render_example_plots.jl` | ~22 min | Mostly per-component compilation (a few seconds per document). `geoschem_fullchem.esm`, which took ~5 h under the old Python/LSODA renderer, is ~80 s including its build. |
 | `python tools/esm_to_docs.py` | <0.5 s | Unchanged. |
-
-The `Render example plots` step grows roughly proportional to the total
-sweep grid count plus the integration time of any ODE analyses, but
-stays well under 30 s in practice for the current component set.
 
 ### Follow-up — interactive embeds
 
@@ -161,17 +162,15 @@ Tracked separately:
 - **Client-side interactive embeds** — render the plot spec as Vega-Lite /
   Plotly JSON and let the browser draw it from the integration result.
   Still needs a server-side evaluation step to produce the data.
-- **`reaction_systems` + DAE-only rendering** — pure-Python ODE coverage
-  landed in mdl-hxx, but `reaction_systems` and DAE models with
-  irreducible algebraics still skip. Wiring `EarthSciModels.jl` (Julia +
-  MTK + Catalyst + a solver stack) into the docs CI would close the
-  remaining gap through the same `<esm_stem>.plots/` convention.
+- **PDE / field plots** — `field_snapshot` and `field_slice` plots, and
+  documents whose spatial operators need an EarthSciDiscretizations stencil
+  (`${ESD_ROOT}`, which the docs job does not clone), are still skipped.
 
 ## Out of scope (tracked elsewhere)
 
 - Connectors (not yet a distinct `.esm` section)
 - Discretization rules (lives in ESD, not ESM)
 - Versioned docs (history of a component across `.esm` versions)
-- `reaction_systems` and DAE-only plot rendering (see "Analysis plots → Follow-up" above)
+- PDE / field plot rendering (see "Analysis plots → Follow-up" above)
 - Algolia DocSearch swap (revisit only if we outgrow Pagefind at >10k pages)
 - PDF export
