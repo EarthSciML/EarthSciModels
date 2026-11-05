@@ -2,9 +2,9 @@ name: docs
 
 # Component pages and example plots are generated from components/**/*.esm
 # before the bundle is built (prebuild steps below). The site itself (Hugo,
-# search, link check, deploy) is built by earthsci.dev. The old standalone
-# workflow set no job timeout (GitHub's 360 min default) and the plot
-# rendering is slow, so the bundle job gets a generous one.
+# search, link check, deploy) is built by earthsci.dev. The plots are rendered
+# in Julia (tools/render_example_plots.jl); the bundle job's timeout is left
+# generous so a cold Julia depot cache (a full precompile) still fits.
 
 # Installed in each EarthSci source repo as .github/workflows/docs.yml.
 # Nothing of the docs machinery lives in this repo: extraction, rendering and
@@ -92,11 +92,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python plotting deps
+      - name: Install the page generator's Python deps
         run: |
-          python -m pip install --upgrade matplotlib numpy scipy sympy
-          # `earthsci_ast` is a HARD dependency of both generators, not just of
-          # the plotting one: from esm 1.0.0 the only declared variable types
+          python -m pip install --upgrade numpy scipy sympy
+          # `earthsci_ast` is a HARD dependency of the page generator: from
+          # esm 1.0.0 the only declared variable types
           # are `unknown` and `parameter`, and `tools/esm_to_docs.py` asks
           # `earthsci_ast.classification` (esm-spec §6.3.1) which unknowns are
           # ODE states, observed or algebraic rather than reading a declared
@@ -111,13 +111,33 @@ jobs:
           mkdir -p "$INSTALLED_DIR/data"
           cp "$RUNNER_TEMP/ess/pkg/earthsci-ast-py/src/earthsci_ast/data/esm-schema.json" "$INSTALLED_DIR/data/"
 
-      - name: Unit test the generators
-        run: |
-          python -m unittest tools/esm_to_docs_test.py
-          python -m unittest tools/render_example_plots_test.py
+      - name: Unit test the page generator
+        run: python -m unittest tools/esm_to_docs_test.py
+
+      # Example plots are rendered in Julia, through EarthSciAST.jl's
+      # `esm_problem` + `solve` (tools/render_example_plots.jl). The Python
+      # renderer it replaced spent ~5 h of every build integrating
+      # gaschem/geoschem_fullchem.esm with LSODA and a finite-difference
+      # Jacobian; FBDF does the same three analyses in seconds.
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+
+      # Caches the depot, so the plotting/solver stack's precompile is paid
+      # once rather than on every build. EarthSciAST itself tracks `main`
+      # (tools/plots/Project.toml `[sources]`) and recompiles when it moves.
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: docs-plots
+
+      - name: Instantiate the plot environment
+        run: julia --project=tools/plots -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+      - name: Test the plot renderer
+        run: julia --project=tools/plots tools/render_example_plots_test.jl
 
       - name: Render example plots from .esm
-        run: python tools/render_example_plots.py
+        run: julia --project=tools/plots tools/render_example_plots.jl
 
       - name: Generate component pages from .esm
         run: python tools/esm_to_docs.py
