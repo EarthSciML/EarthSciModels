@@ -1,0 +1,460 @@
+---
+title: "ThousandHourFuelMoisture"
+slug: "thousandhourfuelmoisture"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/moisture_1000h.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station."
+description: "1000-hour timelag dead fuel moisture content per the 1978 NFDRS (Cohen & Deeming 1985), basic equations. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:354 (`ThousandHourFuelMoisture` @component). Algebraic state-variable model: BNDRYT (today's boundary value) is computed from precipitation duration and the 24-hour average EMC; MC1000 is updated from the previous day's value (PM1000) using the 7-day boundary average (BDYBAR) and a fixed 1000-hour response coefficient."
+tags: ["wildland_fire", "nfdrs", "model", "fuel_moisture"]
+---
+
+## Description
+
+1000-hour timelag dead fuel moisture content per the 1978 NFDRS (Cohen & Deeming 1985), basic equations. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:354 (`ThousandHourFuelMoisture` @component). Algebraic state-variable model: BNDRYT (today's boundary value) is computed from precipitation duration and the 24-hour average EMC; MC1000 is updated from the previous day's value (PM1000) using the 7-day boundary average (BDYBAR) and a fixed 1000-hour response coefficient.
+
+## Reference
+
+Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station.
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:354
+Upstream `ThousandHourFuelMoisture` is an MTK `@component` with two algebraic equations:
+
+  BNDRYT = ((76 + 2.7 * PPTDUR_hr) * PPTDUR_hr / 100 + EMCBAR * (24 - PPTDUR_hr)) / 24
+  MC1000 = PM1000 + response_coef * (BDYBAR - PM1000)
+
+where PPTDUR_hr = PPTDUR / (hr_to_s * s_ref) converts the precipitation duration from seconds to hours via the upstream `@constants` (hr_to_s = 3600, s_ref = 1). BNDRYT is today's boundary moisture value, weighted between a saturated-fuel formula during precipitation hours and the 24-hour average EMC during dry hours. MC1000 updates the 1000-hour fuel moisture from yesterday's value (PM1000) toward the 7-day moving average of past BNDRYT values (BDYBAR) at a fixed daily response rate.
+
+The response coefficient response_coef = 1 - 0.82 * exp(-0.168) ≈ 0.30680985555857987 is the NFDRS-1978 1000-hour value (Bradshaw et al. 1983, p.9): 0.82 is the empirical pre-factor and 0.168 = 7 days × 24 h/day / 1000 h is the dimensionless ratio of the 7-day update interval to the 1000-hour timelag.
+
+Note: BDYBAR (the 7-day BNDRYT average) is an input parameter to this component, not a state. The upstream model expects the consumer to maintain a running 7-day buffer of past BNDRYT values and pass the mean in each day. Likewise, PM1000 (yesterday's MC1000) is an input parameter. This matches the upstream MTK @component, which exposes a single-day algebraic snapshot rather than the multi-day discrete recurrence.
+
+The BNDRYT formula is **not** clamped to [0, 1]: full-day precipitation (PPTDUR_hr = 24) produces BNDRYT = (76 + 64.8) * 24 / 100 / 24 = 1.408, representing saturated fuel above the standard dry-basis fraction range. This preserves bit-fidelity with the upstream component, which also does not clamp.
+
+Tolerance rationale (model-level rel=1e-12): algebraic system (no ODE integration); equations are polynomial in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `s_ref` | `s` | `1.0` | Reference time for non-dimensionalization (MTK unit-balancing constant preserved from upstream). |
+| `hr_to_s` | `1` | `3600.0` | Hours-to-seconds conversion factor (dimensionless after non-dimensionalization). Preserved from upstream `@constants`. |
+| `PPTDUR` | `s` | `0.0` | Duration of precipitation over the past 24 hours (seconds). |
+| `EMCBAR` | `1` | `0.1` | Weighted 24-hour average equilibrium moisture content (dimensionless fraction). Computed upstream (e.g., from the HundredHourFuelMoisture daylength weighting) and supplied to this component. |
+| `BDYBAR` | `1` | `0.1` | Seven-day moving average of past BNDRYT values (dimensionless fraction). Maintained by the consumer in a running 7-day buffer; this component reads it as an input. |
+| `response_coef` | `1` | `0.30680985555857987` | NFDRS 1000-hour daily moisture response coefficient (dimensionless), computed as 1 - 0.82 * exp(-0.168) ≈ 0.3068 (Bradshaw et al. 1983). |
+| `PM1000` | `1` | `0.1` | Previous day's MC1000 value (dimensionless fraction). Default 0.10 = 10%, mid-range NFDRS value. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `PPTDUR_hr` | `1` |  | Precipitation duration in hours (dimensionless after non-dimensionalization via hr_to_s and s_ref). Algebraic intermediate: PPTDUR_hr = PPTDUR / (hr_to_s * s_ref). |
+| `BNDRYT` | `1` |  | Today's boundary moisture value (dimensionless fraction). Weighted average of the saturated-fuel boundary formula during precipitation hours and the 24-hour average EMC during dry hours. |
+| `MC1000` | `1` |  | 1000-hour fuel moisture content (dimensionless fraction). |
+
+## Observed expressions
+
+$$
+PPTDUR_{hr} = \frac{PPTDUR}{hr_{to\,s} \cdot s_{ref}}
+$$
+_Precipitation duration in hours (dimensionless after non-dimensionalization via hr_to_s and s_ref). Algebraic intermediate: PPTDUR_hr = PPTDUR / (hr_to_s * s_ref)._
+
+$$
+BNDRYT = \frac{\frac{\left(76.0 + 2.7 \cdot PPTDUR_{hr}\right) \cdot PPTDUR_{hr}}{100.0} + EMCBAR \cdot \left(24.0 - PPTDUR_{hr}\right)}{24.0}
+$$
+_Today's boundary moisture value (dimensionless fraction). Weighted average of the saturated-fuel boundary formula during precipitation hours and the 24-hour average EMC during dry hours._
+
+$$
+MC1000 = PM1000 + response_{coef} \cdot \left(BDYBAR - PM1000\right)
+$$
+_1000-hour fuel moisture content (dimensionless fraction)._
+
+## Analyses
+
+### default_thousand_hour_fuel_moisture
+
+Default ThousandHourFuelMoisture snapshot under typical mid-range NFDRS conditions: no precipitation, EMCBAR = BDYBAR = PM1000 = 0.10, so MC1000 holds steady and BNDRYT collapses to EMCBAR.
+
+**Time span:** 0.0 → 1.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station.",
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:354\nUpstream `ThousandHourFuelMoisture` is an MTK `@component` with two algebraic equations:\n\n  BNDRYT = ((76 + 2.7 * PPTDUR_hr) * PPTDUR_hr / 100 + EMCBAR * (24 - PPTDUR_hr)) / 24\n  MC1000 = PM1000 + response_coef * (BDYBAR - PM1000)\n\nwhere PPTDUR_hr = PPTDUR / (hr_to_s * s_ref) converts the precipitation duration from seconds to hours via the upstream `@constants` (hr_to_s = 3600, s_ref = 1). BNDRYT is today's boundary moisture value, weighted between a saturated-fuel formula during precipitation hours and the 24-hour average EMC during dry hours. MC1000 updates the 1000-hour fuel moisture from yesterday's value (PM1000) toward the 7-day moving average of past BNDRYT values (BDYBAR) at a fixed daily response rate.\n\nThe response coefficient response_coef = 1 - 0.82 * exp(-0.168) ≈ 0.30680985555857987 is the NFDRS-1978 1000-hour value (Bradshaw et al. 1983, p.9): 0.82 is the empirical pre-factor and 0.168 = 7 days × 24 h/day / 1000 h is the dimensionless ratio of the 7-day update interval to the 1000-hour timelag.\n\nNote: BDYBAR (the 7-day BNDRYT average) is an input parameter to this component, not a state. The upstream model expects the consumer to maintain a running 7-day buffer of past BNDRYT values and pass the mean in each day. Likewise, PM1000 (yesterday's MC1000) is an input parameter. This matches the upstream MTK @component, which exposes a single-day algebraic snapshot rather than the multi-day discrete recurrence.\n\nThe BNDRYT formula is **not** clamped to [0, 1]: full-day precipitation (PPTDUR_hr = 24) produces BNDRYT = (76 + 64.8) * 24 / 100 / 24 = 1.408, representing saturated fuel above the standard dry-basis fraction range. This preserves bit-fidelity with the upstream component, which also does not clamp.\n\nTolerance rationale (model-level rel=1e-12): algebraic system (no ODE integration); equations are polynomial in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "s_ref": {
+      "type": "parameter",
+      "units": "s",
+      "default": 1.0,
+      "description": "Reference time for non-dimensionalization (MTK unit-balancing constant preserved from upstream)."
+    },
+    "hr_to_s": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3600.0,
+      "description": "Hours-to-seconds conversion factor (dimensionless after non-dimensionalization). Preserved from upstream `@constants`."
+    },
+    "PPTDUR": {
+      "type": "parameter",
+      "units": "s",
+      "default": 0.0,
+      "description": "Duration of precipitation over the past 24 hours (seconds)."
+    },
+    "EMCBAR": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "Weighted 24-hour average equilibrium moisture content (dimensionless fraction). Computed upstream (e.g., from the HundredHourFuelMoisture daylength weighting) and supplied to this component."
+    },
+    "BDYBAR": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "Seven-day moving average of past BNDRYT values (dimensionless fraction). Maintained by the consumer in a running 7-day buffer; this component reads it as an input."
+    },
+    "response_coef": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.30680985555857987,
+      "description": "NFDRS 1000-hour daily moisture response coefficient (dimensionless), computed as 1 - 0.82 * exp(-0.168) ≈ 0.3068 (Bradshaw et al. 1983)."
+    },
+    "PM1000": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "Previous day's MC1000 value (dimensionless fraction). Default 0.10 = 10%, mid-range NFDRS value."
+    },
+    "PPTDUR_hr": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Precipitation duration in hours (dimensionless after non-dimensionalization via hr_to_s and s_ref). Algebraic intermediate: PPTDUR_hr = PPTDUR / (hr_to_s * s_ref)."
+    },
+    "BNDRYT": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Today's boundary moisture value (dimensionless fraction). Weighted average of the saturated-fuel boundary formula during precipitation hours and the 24-hour average EMC during dry hours."
+    },
+    "MC1000": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1000-hour fuel moisture content (dimensionless fraction)."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "PPTDUR_hr",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "PPTDUR",
+          {
+            "op": "*",
+            "args": [
+              "hr_to_s",
+              "s_ref"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "BNDRYT",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          76.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              2.7,
+                              "PPTDUR_hr"
+                            ]
+                          }
+                        ]
+                      },
+                      "PPTDUR_hr"
+                    ]
+                  },
+                  100.0
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "EMCBAR",
+                  {
+                    "op": "-",
+                    "args": [
+                      24.0,
+                      "PPTDUR_hr"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          24.0
+        ]
+      }
+    },
+    {
+      "lhs": "MC1000",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "PM1000",
+          {
+            "op": "*",
+            "args": [
+              "response_coef",
+              {
+                "op": "-",
+                "args": [
+                  "BDYBAR",
+                  "PM1000"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "dry_equilibrium",
+      "description": "No precipitation (PPTDUR=0) and BDYBAR equal to yesterday's PM1000 — fully at equilibrium. BNDRYT = EMCBAR = 0.10; MC1000 unchanged from PM1000.",
+      "parameter_overrides": {
+        "PPTDUR": 0.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1000",
+          "time": 0.0,
+          "expected": 0.1
+        }
+      ]
+    },
+    {
+      "id": "dry_bndryt_matches_emcbar",
+      "description": "No precipitation: BNDRYT collapses to EMCBAR (the (24 - PPTDUR_hr) coefficient becomes 24 and the precipitation term zeroes out). EMCBAR = 0.10 ⇒ BNDRYT = 0.10.",
+      "parameter_overrides": {
+        "PPTDUR": 0.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "BNDRYT",
+          "time": 0.0,
+          "expected": 0.1
+        }
+      ]
+    },
+    {
+      "id": "drying_after_wet_week",
+      "description": "No precipitation today, but the running 7-day BDYBAR (0.15) is below yesterday's MC1000 (0.18). MC1000 dries toward BDYBAR: 0.18 + 0.30680985555857987 * (0.15 - 0.18) = 0.18 - 0.009204295666757395 = 0.17079570433324260.",
+      "parameter_overrides": {
+        "PPTDUR": 0.0,
+        "EMCBAR": 0.05,
+        "BDYBAR": 0.15,
+        "PM1000": 0.18
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1000",
+          "time": 0.0,
+          "expected": 0.17079570433324262
+        }
+      ]
+    },
+    {
+      "id": "wetting_after_dry_week",
+      "description": "No precipitation today, but the running 7-day BDYBAR (0.08) is above yesterday's MC1000 (0.05). MC1000 wets toward BDYBAR: 0.05 + 0.30680985555857987 * (0.08 - 0.05) = 0.05 + 0.009204295666757395 = 0.0592042956667574.",
+      "parameter_overrides": {
+        "PPTDUR": 0.0,
+        "EMCBAR": 0.15,
+        "BDYBAR": 0.08,
+        "PM1000": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1000",
+          "time": 0.0,
+          "expected": 0.0592042956667574
+        }
+      ]
+    },
+    {
+      "id": "light_rain_1h_bndryt",
+      "description": "One hour of rain (PPTDUR = 3600 s ⇒ PPTDUR_hr = 1) with EMCBAR = 0.10. BNDRYT = ((76 + 2.7)*1/100 + 0.10*23)/24 = (0.787 + 2.3)/24 = 3.087/24 = 0.128625.",
+      "parameter_overrides": {
+        "PPTDUR": 3600.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "BNDRYT",
+          "time": 0.0,
+          "expected": 0.128625
+        }
+      ]
+    },
+    {
+      "id": "heavy_rain_12h_bndryt",
+      "description": "Half-day rain (PPTDUR = 43200 s ⇒ PPTDUR_hr = 12) with EMCBAR = 0.10. BNDRYT = ((76 + 32.4)*12/100 + 0.10*12)/24 = (13.008 + 1.2)/24 = 14.208/24 = 0.592.",
+      "parameter_overrides": {
+        "PPTDUR": 43200.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "BNDRYT",
+          "time": 0.0,
+          "expected": 0.592
+        }
+      ]
+    },
+    {
+      "id": "all_day_rain_saturated_bndryt",
+      "description": "Full-day rain (PPTDUR = 86400 s ⇒ PPTDUR_hr = 24). The dry-hours term zeroes out and BNDRYT = (76 + 64.8)*24/100/24 = 140.8/100 = 1.408. Exercises the upper end of the saturated-fuel formula — BNDRYT > 1 is permitted by the upstream component (no clamp).",
+      "parameter_overrides": {
+        "PPTDUR": 86400.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "BNDRYT",
+          "time": 0.0,
+          "expected": 1.408
+        }
+      ]
+    },
+    {
+      "id": "typical_summer_2h_rain",
+      "description": "Brief summer shower (PPTDUR = 7200 s ⇒ PPTDUR_hr = 2) with EMCBAR = 0.08. BNDRYT = ((76 + 5.4)*2/100 + 0.08*22)/24 = (1.628 + 1.76)/24 = 3.388/24 = 0.14116666666666666.",
+      "parameter_overrides": {
+        "PPTDUR": 7200.0,
+        "EMCBAR": 0.08,
+        "BDYBAR": 0.1,
+        "PM1000": 0.12
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "BNDRYT",
+          "time": 0.0,
+          "expected": 0.14116666666666666
+        }
+      ]
+    },
+    {
+      "id": "typical_summer_2h_rain_mc1000",
+      "description": "Same brief shower as typical_summer_2h_rain — but assert on MC1000. BDYBAR (0.10) < PM1000 (0.12), so MC1000 dries: 0.12 + 0.30680985555857987*(0.10 - 0.12) = 0.12 - 0.006136197111171597 = 0.11386380288882840.",
+      "parameter_overrides": {
+        "PPTDUR": 7200.0,
+        "EMCBAR": 0.08,
+        "BDYBAR": 0.1,
+        "PM1000": 0.12
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1000",
+          "time": 0.0,
+          "expected": 0.1138638028888284
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "default_thousand_hour_fuel_moisture",
+      "description": "Default ThousandHourFuelMoisture snapshot under typical mid-range NFDRS conditions: no precipitation, EMCBAR = BDYBAR = PM1000 = 0.10, so MC1000 holds steady and BNDRYT collapses to EMCBAR.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "PPTDUR": 0.0,
+        "EMCBAR": 0.1,
+        "BDYBAR": 0.1,
+        "PM1000": 0.1
+      }
+    }
+  ]
+}
+```
+
+</details>

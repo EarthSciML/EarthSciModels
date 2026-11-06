@@ -1,0 +1,1318 @@
+---
+title: "FuelModelLookup"
+slug: "fuelmodellookup"
+domains: ["wildland_fire"]
+component_types: ["model"]
+domain: "wildland_fire"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/fuel_model_lookup.esm"
+reference: "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122."
+description: "Anderson (1982) 13 fuel-model parameter lookup: maps integer fuel model code (1–13) to the six Rothermel fire spread fuel properties (σ, w₀, δ, Mₓ, h, Tᶠ). Aggregates the six registered fuel_* functions (fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight) into a single observed-variable component. Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for σ, w₀, δ, Mₓ, and Tᶠ, and 0 J/kg for h. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:155 (`FuelModelLookup` @mtkmodel). Resolves the gt-p3ep blocking gap via ifelse + interp.linear for the five variable-valued properties and a simple ifelse for the constant heat content."
+tags: ["wildland_fire", "model", "fuel_model", "anderson1982", "rothermel", "lookup"]
+---
+
+## Description
+
+Anderson (1982) 13 fuel-model parameter lookup: maps integer fuel model code (1–13) to the six Rothermel fire spread fuel properties (σ, w₀, δ, Mₓ, h, Tᶠ). Aggregates the six registered fuel_* functions (fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight) into a single observed-variable component. Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for σ, w₀, δ, Mₓ, and Tᶠ, and 0 J/kg for h. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:155 (`FuelModelLookup` @mtkmodel). Resolves the gt-p3ep blocking gap via ifelse + interp.linear for the five variable-valued properties and a simple ifelse for the constant heat content.
+
+## Reference
+
+Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122.
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:155
+
+Upstream `FuelModelLookup` is an MTK `@mtkmodel` whose single input is `code` (`@parameters code=1`) and whose six outputs are `@variables sigma(t), w_0(t), delta(t), M_x(t), h(t), T_f(t)` defined by `@observed` equations that call the six `@register_symbolic` fuel functions:
+
+  sigma ~ fuel_savr(code)
+  w_0   ~ fuel_load(code)
+  delta ~ fuel_depth(code)
+  M_x   ~ fuel_mce(code)
+  h     ~ fuel_heat(code)
+  T_f   ~ fuel_weight(code)
+
+Each fuel_* registered function maps the integer Anderson code to a physical property in SI units, falling back to the fuel-model-1 default for out-of-range codes. The sole exception is fuel_heat, which maps codes 1–13 to the shared value 18,608,000 J/kg and all other codes (including LANDFIRE non-burnable 91–99) to 0 J/kg.
+
+SI unit conversions (applied in the registered function ESMs, preserved here):
+  sigma  (σ): 1/ft → 1/m via ÷ 0.3048
+  w_0 (w₀): upstream mixed units → kg/m² via × (0.45359237 / 0.09290304)
+  delta (δ): ft → m via × 0.3048
+  M_x:  already dimensionless fraction in source
+  h:    BTU/lb → J/kg via × 2326 (8000 BTU/lb for all Anderson models)
+  T_f:  s (weight / 0.8514 where weight is the source time constant)
+
+gt-p3ep resolution: each property except h is expressed as
+  ifelse(AND(code>=1, code<=13), interp.linear(values, [1..13], code), default)
+where interp.linear on integer-valued code returns the exact table value.
+h uses the degenerate form ifelse(AND(code>=1, code<=13), 18608000.0, 0.0)
+because all 13 Anderson models share the same heat content.
+
+Anderson fuel model parameter table (SI units):
+  code |  sigma (m⁻¹) |  w_0 (kg/m²) | delta (m) |  M_x  |  h (J/kg) |  T_f (s)
+  1    | 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 18608000  | 8.221752
+  2    |  9842.519685 | 0.449183343  | 0.3048    | 0.15  | 18608000  | 8.221752
+  3    |  4921.259843 | 0.673775014  | 0.762     | 0.25  | 18608000  | 8.221752
+  4    |  5705.380577 | 1.122958356  | 1.8288    | 0.20  | 18608000  | 211.41649
+  5    |  5521.653543 | 0.224591671  | 0.6096    | 0.20  | 18608000  | 29.36340
+  6    |  5131.233596 | 0.336887507  | 0.762     | 0.25  | 18608000  | 29.36340
+  7    |  5124.671916 | 0.253886237  | 0.762     | 0.40  | 18608000  | 29.36340
+  8    |  6197.506562 | 0.336887507  | 0.06096   | 0.30  | 18608000  | 1057.08245
+  9    |  8149.606299 | 0.654245303  | 0.06096   | 0.25  | 18608000  | 1057.08245
+  10   |  5787.401575 | 0.673775014  | 0.3048    | 0.25  | 18608000  | 1057.08245
+  11   |  3877.952756 | 0.336887507  | 0.3048    | 0.15  | 18608000  | 1057.08245
+  12   |  3756.561680 | 0.898366685  | 0.70104   | 0.20  | 18608000  | 1057.08245
+  13   |  3802.493438 | 1.572141699  | 0.9144    | 0.25  | 18608000  | 1057.08245
+  other| 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 0         | 8.221752
+
+Tolerance rationale (model-level rel=1e-12): all six outputs are computed
+via ifelse + interp.linear at integer-valued code inputs, which returns
+exact table values at grid knots. 1e-12 covers the one-ULP float64
+rounding without admitting any physical imprecision._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `code` | `1` | `1.0` | Anderson 13 fuel model code (integer 1–13). Values outside this range (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for all properties except h, which returns 0 J/kg for out-of-range codes. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `sigma` | `1/m` |  | Surface-area-to-volume ratio σ of the fuel particle (m⁻¹). Anderson model 1 (short grass): 11482.94 m⁻¹ through model 13 (heavy slash): 3802.49 m⁻¹. Out-of-range codes return 11482.94 m⁻¹ (fuel model 1 default). Sourced from fuel_savr registered function. |
+| `w_0` | `kg/m^2` |  | Oven-dry fuel load per unit area w₀ (kg/m²). Anderson model 1: 0.1660 kg/m² (light short-grass fuel); model 13 (heavy slash): 1.5721 kg/m². Out-of-range codes return 0.1660 kg/m² (fuel model 1 default). Sourced from fuel_load registered function. |
+| `delta` | `m` |  | Fuel bed depth δ (m). Anderson model 1: 0.3048 m (1 ft, short grass); model 4 (chaparral): 1.8288 m (6 ft). Models 8 and 9 (closed/open timber litter): 0.06096 m (0.2 ft). Out-of-range codes return 0.3048 m (fuel model 1 default). Sourced from fuel_depth registered function. |
+| `M_x` | `1` |  | Dead fuel moisture content of extinction Mₓ (dimensionless dry-weight-basis fraction). Ranges from 0.12 (model 1, short grass) to 0.40 (model 7, southern rough). Out-of-range codes return 0.12 (fuel model 1 default). Sourced from fuel_mce registered function. |
+| `h` | `J/kg` |  | Low heat content of combustion h (J/kg). All 13 Anderson fuel models share h = 8000 BTU/lb = 18,608,000 J/kg (using 1 BTU/lb = 2326 J/kg). LANDFIRE non-burnable codes (91–99) and other out-of-range codes return 0 J/kg (no combustion). Sourced from fuel_heat registered function. |
+| `T_f` | `s` |  | Fuel particle residence time Tᶠ (s), computed as the WRF-SFIRE weight constant divided by 0.8514. Codes 1–3 (grass): ≈ 8.22 s; code 4 (chaparral): ≈ 211.4 s; codes 5–7 (shrub): ≈ 29.4 s; codes 8–13 (timber/slash): ≈ 1057 s. Out-of-range codes return ≈ 8.22 s (fuel model 1 default). Sourced from fuel_weight registered function. |
+| `wind_reduction` | `1` |  | Midflame wind adjustment factor (unsheltered fuel; Baughman & Albini 1980, Andrews 2012 RMRS-GTR-266): WAF = 1.83 / ln((6.096 + 0.36·δ)/(0.13·δ)), with δ the fuel-bed depth in METRES and 6.096 m = 20 ft (the reference wind height). This is the feet-form 1.83/ln((20+0.36·δ_ft)/(0.13·δ_ft)) rewritten in SI (multiply num & den by 0.3048) so it is dimensionally consistent. It is the ratio of the midflame wind to the 10 m (≈20 ft) wind: grass (δ=1 ft=0.305 m)→≈0.36, brush/chaparral (δ=6 ft=1.83 m)→≈0.55. Coupled to MidflameWind.wind_reduction to replace the former fixed 0.4, making the reduction fuel-dependent. δ floored at 0.01 m so the log stays finite for non-burnable codes (which carry h=0 → R0=0 anyway). |
+
+## Observed expressions
+
+$$
+sigma = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), code\right), 11482.939632545931\right)
+$$
+_Surface-area-to-volume ratio σ of the fuel particle (m⁻¹). Anderson model 1 (short grass): 11482.94 m⁻¹ through model 13 (heavy slash): 3802.49 m⁻¹. Out-of-range codes return 11482.94 m⁻¹ (fuel model 1 default). Sourced from fuel_savr registered function._
+
+$$
+w_{0} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), code\right), 0.16600253963702372\right)
+$$
+_Oven-dry fuel load per unit area w₀ (kg/m²). Anderson model 1: 0.1660 kg/m² (light short-grass fuel); model 13 (heavy slash): 1.5721 kg/m². Out-of-range codes return 0.1660 kg/m² (fuel model 1 default). Sourced from fuel_load registered function._
+
+$$
+delta = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), code\right), 0.3048\right)
+$$
+_Fuel bed depth δ (m). Anderson model 1: 0.3048 m (1 ft, short grass); model 4 (chaparral): 1.8288 m (6 ft). Models 8 and 9 (closed/open timber litter): 0.06096 m (0.2 ft). Out-of-range codes return 0.3048 m (fuel model 1 default). Sourced from fuel_depth registered function._
+
+$$
+M_{x} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), code\right), 0.12\right)
+$$
+_Dead fuel moisture content of extinction Mₓ (dimensionless dry-weight-basis fraction). Ranges from 0.12 (model 1, short grass) to 0.40 (model 7, southern rough). Out-of-range codes return 0.12 (fuel model 1 default). Sourced from fuel_mce registered function._
+
+$$
+h = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), 18608000.0, 0.0\right)
+$$
+_Low heat content of combustion h (J/kg). All 13 Anderson fuel models share h = 8000 BTU/lb = 18,608,000 J/kg (using 1 BTU/lb = 2326 J/kg). LANDFIRE non-burnable codes (91–99) and other out-of-range codes return 0 J/kg (no combustion). Sourced from fuel_heat registered function._
+
+$$
+T_{f} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>=}\left(code, 1.0\right), \mathrm{<=}\left(code, 13.0\right)\right), \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), code\right), 8.221752407798919\right)
+$$
+_Fuel particle residence time Tᶠ (s), computed as the WRF-SFIRE weight constant divided by 0.8514. Codes 1–3 (grass): ≈ 8.22 s; code 4 (chaparral): ≈ 211.4 s; codes 5–7 (shrub): ≈ 29.4 s; codes 8–13 (timber/slash): ≈ 1057 s. Out-of-range codes return ≈ 8.22 s (fuel model 1 default). Sourced from fuel_weight registered function._
+
+$$
+wind_{reduction} = \frac{1.83}{\ln\left(\frac{6.096 + 0.36 \cdot \mathrm{max}\left(delta, 0.01\right)}{0.13 \cdot \mathrm{max}\left(delta, 0.01\right)}\right)}
+$$
+_Midflame wind adjustment factor (unsheltered fuel; Baughman & Albini 1980, Andrews 2012 RMRS-GTR-266): WAF = 1.83 / ln((6.096 + 0.36·δ)/(0.13·δ)), with δ the fuel-bed depth in METRES and 6.096 m = 20 ft (the reference wind height). This is the feet-form 1.83/ln((20+0.36·δ_ft)/(0.13·δ_ft)) rewritten in SI (multiply num & den by 0.3048) so it is dimensionally consistent. It is the ratio of the midflame wind to the 10 m (≈20 ft) wind: grass (δ=1 ft=0.305 m)→≈0.36, brush/chaparral (δ=6 ft=1.83 m)→≈0.55. Coupled to MidflameWind.wind_reduction to replace the former fixed 0.4, making the reduction fuel-dependent. δ floored at 0.01 m so the log stays finite for non-burnable codes (which carry h=0 → R0=0 anyway)._
+
+## Analyses
+
+### fuel_properties_vs_code
+
+Sweep fuel model codes 0–14 to visualise all six Rothermel fuel properties across the 13 Anderson models. Code 0 and 14 return the out-of-range defaults (fuel-model-1 for σ, w₀, δ, Mₓ, Tᶠ; 0 for h). The plots show the piecewise-constant lookup structure and the discontinuity in h at the boundary between burnable (codes 1–13) and non-burnable codes.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `code`
+
+![Surface-area-to-volume ratio σ (m⁻¹) across fuel model codes. Short grass (1) and hardwood litter (9) have the highest σ; heavy slash (12–13) the lowest.](/plots/wildland_fire/fuelmodellookup/fuel_properties_vs_code-sigma_vs_code.png)
+
+![Oven-dry fuel load w₀ (kg/m²) across fuel model codes. Chaparral (4) and heavy slash (13) have the heaviest fuel loads.](/plots/wildland_fire/fuelmodellookup/fuel_properties_vs_code-w0_vs_code.png)
+
+![Heat content h (J/kg) across fuel model codes. Codes 1–13 share the Anderson 8000 BTU/lb value; codes outside 1–13 return 0 (non-burnable).](/plots/wildland_fire/fuelmodellookup/fuel_properties_vs_code-h_vs_code.png)
+
+![Fuel particle residence time Tᶠ (s) across fuel model codes. Grass models (1–3) have the shortest Tᶠ (≈8 s); timber/slash models (8–13) the longest (≈1057 s).](/plots/wildland_fire/fuelmodellookup/fuel_properties_vs_code-Tf_vs_code.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122.",
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:155\n\nUpstream `FuelModelLookup` is an MTK `@mtkmodel` whose single input is `code` (`@parameters code=1`) and whose six outputs are `@variables sigma(t), w_0(t), delta(t), M_x(t), h(t), T_f(t)` defined by `@observed` equations that call the six `@register_symbolic` fuel functions:\n\n  sigma ~ fuel_savr(code)\n  w_0   ~ fuel_load(code)\n  delta ~ fuel_depth(code)\n  M_x   ~ fuel_mce(code)\n  h     ~ fuel_heat(code)\n  T_f   ~ fuel_weight(code)\n\nEach fuel_* registered function maps the integer Anderson code to a physical property in SI units, falling back to the fuel-model-1 default for out-of-range codes. The sole exception is fuel_heat, which maps codes 1–13 to the shared value 18,608,000 J/kg and all other codes (including LANDFIRE non-burnable 91–99) to 0 J/kg.\n\nSI unit conversions (applied in the registered function ESMs, preserved here):\n  sigma  (σ): 1/ft → 1/m via ÷ 0.3048\n  w_0 (w₀): upstream mixed units → kg/m² via × (0.45359237 / 0.09290304)\n  delta (δ): ft → m via × 0.3048\n  M_x:  already dimensionless fraction in source\n  h:    BTU/lb → J/kg via × 2326 (8000 BTU/lb for all Anderson models)\n  T_f:  s (weight / 0.8514 where weight is the source time constant)\n\ngt-p3ep resolution: each property except h is expressed as\n  ifelse(AND(code>=1, code<=13), interp.linear(values, [1..13], code), default)\nwhere interp.linear on integer-valued code returns the exact table value.\nh uses the degenerate form ifelse(AND(code>=1, code<=13), 18608000.0, 0.0)\nbecause all 13 Anderson models share the same heat content.\n\nAnderson fuel model parameter table (SI units):\n  code |  sigma (m⁻¹) |  w_0 (kg/m²) | delta (m) |  M_x  |  h (J/kg) |  T_f (s)\n  1    | 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 18608000  | 8.221752\n  2    |  9842.519685 | 0.449183343  | 0.3048    | 0.15  | 18608000  | 8.221752\n  3    |  4921.259843 | 0.673775014  | 0.762     | 0.25  | 18608000  | 8.221752\n  4    |  5705.380577 | 1.122958356  | 1.8288    | 0.20  | 18608000  | 211.41649\n  5    |  5521.653543 | 0.224591671  | 0.6096    | 0.20  | 18608000  | 29.36340\n  6    |  5131.233596 | 0.336887507  | 0.762     | 0.25  | 18608000  | 29.36340\n  7    |  5124.671916 | 0.253886237  | 0.762     | 0.40  | 18608000  | 29.36340\n  8    |  6197.506562 | 0.336887507  | 0.06096   | 0.30  | 18608000  | 1057.08245\n  9    |  8149.606299 | 0.654245303  | 0.06096   | 0.25  | 18608000  | 1057.08245\n  10   |  5787.401575 | 0.673775014  | 0.3048    | 0.25  | 18608000  | 1057.08245\n  11   |  3877.952756 | 0.336887507  | 0.3048    | 0.15  | 18608000  | 1057.08245\n  12   |  3756.561680 | 0.898366685  | 0.70104   | 0.20  | 18608000  | 1057.08245\n  13   |  3802.493438 | 1.572141699  | 0.9144    | 0.25  | 18608000  | 1057.08245\n  other| 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 0         | 8.221752\n\nTolerance rationale (model-level rel=1e-12): all six outputs are computed\nvia ifelse + interp.linear at integer-valued code inputs, which returns\nexact table values at grid knots. 1e-12 covers the one-ULP float64\nrounding without admitting any physical imprecision."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "code": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Anderson 13 fuel model code (integer 1–13). Values outside this range (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for all properties except h, which returns 0 J/kg for out-of-range codes."
+    },
+    "sigma": {
+      "type": "unknown",
+      "units": "1/m",
+      "description": "Surface-area-to-volume ratio σ of the fuel particle (m⁻¹). Anderson model 1 (short grass): 11482.94 m⁻¹ through model 13 (heavy slash): 3802.49 m⁻¹. Out-of-range codes return 11482.94 m⁻¹ (fuel model 1 default). Sourced from fuel_savr registered function."
+    },
+    "w_0": {
+      "type": "unknown",
+      "units": "kg/m^2",
+      "description": "Oven-dry fuel load per unit area w₀ (kg/m²). Anderson model 1: 0.1660 kg/m² (light short-grass fuel); model 13 (heavy slash): 1.5721 kg/m². Out-of-range codes return 0.1660 kg/m² (fuel model 1 default). Sourced from fuel_load registered function."
+    },
+    "delta": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Fuel bed depth δ (m). Anderson model 1: 0.3048 m (1 ft, short grass); model 4 (chaparral): 1.8288 m (6 ft). Models 8 and 9 (closed/open timber litter): 0.06096 m (0.2 ft). Out-of-range codes return 0.3048 m (fuel model 1 default). Sourced from fuel_depth registered function."
+    },
+    "M_x": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Dead fuel moisture content of extinction Mₓ (dimensionless dry-weight-basis fraction). Ranges from 0.12 (model 1, short grass) to 0.40 (model 7, southern rough). Out-of-range codes return 0.12 (fuel model 1 default). Sourced from fuel_mce registered function."
+    },
+    "h": {
+      "type": "unknown",
+      "units": "J/kg",
+      "description": "Low heat content of combustion h (J/kg). All 13 Anderson fuel models share h = 8000 BTU/lb = 18,608,000 J/kg (using 1 BTU/lb = 2326 J/kg). LANDFIRE non-burnable codes (91–99) and other out-of-range codes return 0 J/kg (no combustion). Sourced from fuel_heat registered function."
+    },
+    "T_f": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Fuel particle residence time Tᶠ (s), computed as the WRF-SFIRE weight constant divided by 0.8514. Codes 1–3 (grass): ≈ 8.22 s; code 4 (chaparral): ≈ 211.4 s; codes 5–7 (shrub): ≈ 29.4 s; codes 8–13 (timber/slash): ≈ 1057 s. Out-of-range codes return ≈ 8.22 s (fuel model 1 default). Sourced from fuel_weight registered function."
+    },
+    "wind_reduction": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Midflame wind adjustment factor (unsheltered fuel; Baughman & Albini 1980, Andrews 2012 RMRS-GTR-266): WAF = 1.83 / ln((6.096 + 0.36·δ)/(0.13·δ)), with δ the fuel-bed depth in METRES and 6.096 m = 20 ft (the reference wind height). This is the feet-form 1.83/ln((20+0.36·δ_ft)/(0.13·δ_ft)) rewritten in SI (multiply num & den by 0.3048) so it is dimensionally consistent. It is the ratio of the midflame wind to the 10 m (≈20 ft) wind: grass (δ=1 ft=0.305 m)→≈0.36, brush/chaparral (δ=6 ft=1.83 m)→≈0.55. Coupled to MidflameWind.wind_reduction to replace the former fixed 0.4, making the reduction fuel-dependent. δ floored at 0.01 m so the log stays finite for non-burnable codes (which carry h=0 → R0=0 anyway)."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "sigma",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  11482.939632545931,
+                  9842.51968503937,
+                  4921.259842519685,
+                  5705.380577427822,
+                  5521.653543307087,
+                  5131.233595800525,
+                  5124.6719160104985,
+                  6197.50656167979,
+                  8149.606299212598,
+                  5787.40157480315,
+                  3877.952755905512,
+                  3756.561679790026,
+                  3802.49343832021
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ],
+                "args": []
+              },
+              "code"
+            ]
+          },
+          11482.939632545931
+        ]
+      }
+    },
+    {
+      "lhs": "w_0",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  0.16600253963702372,
+                  0.4491833425472406,
+                  0.673775013820861,
+                  1.1229583563681016,
+                  0.2245916712736203,
+                  0.3368875069104305,
+                  0.2538862370919186,
+                  0.3368875069104305,
+                  0.6542453032753287,
+                  0.673775013820861,
+                  0.3368875069104305,
+                  0.8983666850944813,
+                  1.5721416989153423
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ],
+                "args": []
+              },
+              "code"
+            ]
+          },
+          0.16600253963702372
+        ]
+      }
+    },
+    {
+      "lhs": "delta",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  0.3048,
+                  0.3048,
+                  0.762,
+                  1.8288,
+                  0.6096,
+                  0.762,
+                  0.762,
+                  0.06096,
+                  0.06096,
+                  0.3048,
+                  0.3048,
+                  0.70104,
+                  0.9144
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ],
+                "args": []
+              },
+              "code"
+            ]
+          },
+          0.3048
+        ]
+      }
+    },
+    {
+      "lhs": "M_x",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  0.12,
+                  0.15,
+                  0.25,
+                  0.2,
+                  0.2,
+                  0.25,
+                  0.4,
+                  0.3,
+                  0.25,
+                  0.25,
+                  0.15,
+                  0.2,
+                  0.25
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ],
+                "args": []
+              },
+              "code"
+            ]
+          },
+          0.12
+        ]
+      }
+    },
+    {
+      "lhs": "h",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          18608000.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "T_f",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "code",
+                  1.0
+                ]
+              },
+              {
+                "op": "<=",
+                "args": [
+                  "code",
+                  13.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "fn",
+            "name": "interp.linear",
+            "args": [
+              {
+                "op": "const",
+                "value": [
+                  8.221752407798919,
+                  8.221752407798919,
+                  8.221752407798919,
+                  211.4164904862579,
+                  29.36340145642471,
+                  29.36340145642471,
+                  29.36340145642471,
+                  1057.0824524312895,
+                  1057.0824524312895,
+                  1057.0824524312895,
+                  1057.0824524312895,
+                  1057.0824524312895,
+                  1057.0824524312895
+                ],
+                "args": []
+              },
+              {
+                "op": "const",
+                "value": [
+                  1.0,
+                  2.0,
+                  3.0,
+                  4.0,
+                  5.0,
+                  6.0,
+                  7.0,
+                  8.0,
+                  9.0,
+                  10.0,
+                  11.0,
+                  12.0,
+                  13.0
+                ],
+                "args": []
+              },
+              "code"
+            ]
+          },
+          8.221752407798919
+        ]
+      }
+    },
+    {
+      "lhs": "wind_reduction",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.83,
+          {
+            "op": "log",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      6.096,
+                      {
+                        "op": "*",
+                        "args": [
+                          0.36,
+                          {
+                            "op": "max",
+                            "args": [
+                              "delta",
+                              0.01
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      0.13,
+                      {
+                        "op": "max",
+                        "args": [
+                          "delta",
+                          0.01
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "code_1_short_grass_all_properties",
+      "description": "Anderson fuel model 1 (short grass): code=1 → verify all six Rothermel fuel properties. This is the lowest-numbered Anderson model and the default for out-of-range codes (except h).",
+      "parameter_overrides": {
+        "code": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 11482.939632545931,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.16600253963702372,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.3048,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.12,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 18608000.0,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 8.221752407798919,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_2_timber_grass",
+      "description": "Anderson fuel model 2 (timber/grass/shrub understory): code=2 → verify σ and T_f (same T_f as model 1 but different σ and w₀).",
+      "parameter_overrides": {
+        "code": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 9842.51968503937,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.4491833425472406,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.15,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 8.221752407798919,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_4_chaparral_all_properties",
+      "description": "Anderson fuel model 4 (chaparral): code=4 → verify all six properties. Model 4 has the deepest fuel bed (1.8288 m) and the longest residence time (≈211.4 s) of the shrub/brush group.",
+      "parameter_overrides": {
+        "code": 4.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 5705.380577427822,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 1.1229583563681016,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 1.8288,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.2,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 18608000.0,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 211.4164904862579,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_7_southern_rough",
+      "description": "Anderson fuel model 7 (southern rough): code=7 → highest Mₓ (0.40) in the Anderson table; T_f in the shrub group (≈29.4 s).",
+      "parameter_overrides": {
+        "code": 7.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 5124.6719160104985,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.2538862370919186,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.762,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.4,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 18608000.0,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 29.36340145642471,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_8_closed_timber_litter",
+      "description": "Anderson fuel model 8 (closed timber litter): code=8 → transitions to the timber/slash group with T_f≈1057 s and very shallow fuel bed (0.06096 m = 0.2 ft).",
+      "parameter_overrides": {
+        "code": 8.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 6197.50656167979,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.06096,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.3,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 1057.0824524312895,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_13_heavy_slash_all_properties",
+      "description": "Anderson fuel model 13 (heavy logging slash): code=13 → highest-numbered valid model; highest w₀ (1.5721 kg/m²) and long residence time (≈1057 s).",
+      "parameter_overrides": {
+        "code": 13.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 3802.49343832021,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 1.5721416989153423,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.9144,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.25,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 18608000.0,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 1057.0824524312895,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_0_below_range",
+      "description": "Code 0 (below valid range 1–13): all five non-h properties return fuel-model-1 defaults; h returns 0.0 J/kg (no combustion for non-burnable codes).",
+      "parameter_overrides": {
+        "code": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 11482.939632545931,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.16600253963702372,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.3048,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.12,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 8.221752407798919,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_14_above_range",
+      "description": "Code 14 (above valid range 1–13): same default behavior as code 0. Confirms upper boundary of the guard.",
+      "parameter_overrides": {
+        "code": 14.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 11482.939632545931,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 8.221752407798919,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_91_nonburnable_urban",
+      "description": "LANDFIRE non-burnable code 91 (urban): h returns 0 J/kg (fire spread suppressed via zero heat content); other five properties return fuel-model-1 defaults.",
+      "parameter_overrides": {
+        "code": 91.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 11482.939632545931,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.16600253963702372,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.3048,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.12,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        },
+        {
+          "variable": "h",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 8.221752407798919,
+          "tolerance": {
+            "rel": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "code_11_light_logging_slash",
+      "description": "Anderson fuel model 11 (light logging slash): code=11 → lowest σ of the three slash models (3877.95 m⁻¹); M_x drops back to 0.15 (same as model 2).",
+      "parameter_overrides": {
+        "code": 11.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "sigma",
+          "time": 0.0,
+          "expected": 3877.952755905512,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "w_0",
+          "time": 0.0,
+          "expected": 0.3368875069104305,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "delta",
+          "time": 0.0,
+          "expected": 0.3048,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "M_x",
+          "time": 0.0,
+          "expected": 0.15,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        },
+        {
+          "variable": "T_f",
+          "time": 0.0,
+          "expected": 1057.0824524312895,
+          "tolerance": {
+            "abs": 0.0,
+            "rel": 0.0
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "fuel_properties_vs_code",
+      "description": "Sweep fuel model codes 0–14 to visualise all six Rothermel fuel properties across the 13 Anderson models. Code 0 and 14 return the out-of-range defaults (fuel-model-1 for σ, w₀, δ, Mₓ, Tᶠ; 0 for h). The plots show the piecewise-constant lookup structure and the discontinuity in h at the boundary between burnable (codes 1–13) and non-burnable codes.",
+      "initial_state": {},
+      "parameters": {
+        "code": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "code",
+            "range": {
+              "start": 0.0,
+              "stop": 14.0,
+              "count": 15,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "sigma_vs_code",
+          "type": "line",
+          "description": "Surface-area-to-volume ratio σ (m⁻¹) across fuel model codes. Short grass (1) and hardwood litter (9) have the highest σ; heavy slash (12–13) the lowest.",
+          "x": {
+            "variable": "code",
+            "label": "fuel model code"
+          },
+          "y": {
+            "variable": "sigma",
+            "label": "σ (m⁻¹)"
+          }
+        },
+        {
+          "id": "w0_vs_code",
+          "type": "line",
+          "description": "Oven-dry fuel load w₀ (kg/m²) across fuel model codes. Chaparral (4) and heavy slash (13) have the heaviest fuel loads.",
+          "x": {
+            "variable": "code",
+            "label": "fuel model code"
+          },
+          "y": {
+            "variable": "w_0",
+            "label": "w₀ (kg/m²)"
+          }
+        },
+        {
+          "id": "h_vs_code",
+          "type": "line",
+          "description": "Heat content h (J/kg) across fuel model codes. Codes 1–13 share the Anderson 8000 BTU/lb value; codes outside 1–13 return 0 (non-burnable).",
+          "x": {
+            "variable": "code",
+            "label": "fuel model code"
+          },
+          "y": {
+            "variable": "h",
+            "label": "h (J/kg)"
+          }
+        },
+        {
+          "id": "Tf_vs_code",
+          "type": "line",
+          "description": "Fuel particle residence time Tᶠ (s) across fuel model codes. Grass models (1–3) have the shortest Tᶠ (≈8 s); timber/slash models (8–13) the longest (≈1057 s).",
+          "x": {
+            "variable": "code",
+            "label": "fuel model code"
+          },
+          "y": {
+            "variable": "T_f",
+            "label": "Tᶠ (s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

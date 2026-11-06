@@ -1,0 +1,671 @@
+---
+title: "ImperviousWaterBalance"
+slug: "imperviouswaterbalance"
+domains: ["urban_canopy"]
+component_types: ["model"]
+subdomains: ["hydro"]
+domain: "urban_canopy"
+subdomain: "hydro"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/urban_canopy/hydro/impervious_water_balance.esm"
+reference: "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5, Section 5.1 (Surface Water), Eqs. 5.2-5.5, p. 112."
+description: "Surface water balance for roof and impervious-road urban surfaces, following Oleson et al. (2010, CLM Tech Note Ch. 5) Eqs. 5.2-5.5. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:937 (`ImperviousWaterBalance` @component). Parameterized as observed-only: precipitation (q_rain, q_sno) and loss fluxes (E_surface, q_over, q_rgwl, q_snwcp_ice) are inputs; q_grnd_liq, q_grnd_ice, and water_input are algebraic outputs."
+tags: ["urban_canopy", "hydro", "model", "hydrology", "impervious", "observed-only", "clmu"]
+---
+
+## Description
+
+Surface water balance for roof and impervious-road urban surfaces, following Oleson et al. (2010, CLM Tech Note Ch. 5) Eqs. 5.2-5.5. Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:937 (`ImperviousWaterBalance` @component). Parameterized as observed-only: precipitation (q_rain, q_sno) and loss fluxes (E_surface, q_over, q_rgwl, q_snwcp_ice) are inputs; q_grnd_liq, q_grnd_ice, and water_input are algebraic outputs.
+
+## Reference
+
+_source_ref: UrbanCanopy.jl@9200edd4:src/hydrology.jl:937
+Upstream `ImperviousWaterBalance` is an MTK `@component` whose six inputs (q_rain, q_sno, E_surface, q_over, q_rgwl, q_snwcp_ice) are `@parameters` (driven by a parent surface/atmosphere coupler) and whose three outputs (water_input, q_grnd_liq, q_grnd_ice) are time-indexed `@variables` with three algebraic equations and no derivatives. Identical structure preserved here.
+
+Upstream-source detail intentionally not migrated: the Julia component declares two `@constants` (w_pond_max = 1.0 kg/m^2 ponding limit; zero_kgpm2s = 0.0 kg/(m^2*s) zero-flux sentinel) that are not referenced by any of the three eqs in this component. They appear to be vestigial copies of the constants used by sibling components ImperviousRunoff (hydrology.jl:991) and PerviousRoadRunoff. Omitting them here preserves the mathematical model exactly while keeping the .esm minimal; if the canonical pipeline ever needs them for cross-component coupling, they should be added at that time alongside the equations that reference them.
+
+Observability classification: this component is functionally observed-only — all three outputs are given by single algebraic equations in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_content_calc.esm, snow_compaction.esm).
+
+Tolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are at most one summation of six float64 terms — fewer than ten IEEE-754 operations — so roundoff is ~1e-15. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any physical-discrimination scale on surface mass-flux densities (which range from ~1e-6 to ~1e-2 kg/(m^2*s) for any plausible CLMU urban surface state)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `q_rain` | `kg/(m^2*s)` | `0.0` | Liquid precipitation rate (Eq. 5.4) |
+| `q_sno` | `kg/(m^2*s)` | `0.0` | Solid precipitation rate (Eq. 5.5) |
+| `E_surface` | `kg/(m^2*s)` | `0.0` | Total evaporation from surface |
+| `q_over` | `kg/(m^2*s)` | `0.0` | Surface runoff |
+| `q_rgwl` | `kg/(m^2*s)` | `0.0` | Liquid runoff from groundwater |
+| `q_snwcp_ice` | `kg/(m^2*s)` | `0.0` | Solid runoff from snow capping |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `q_grnd_liq` | `kg/(m^2*s)` |  | Liquid precipitation reaching surface (Oleson Eq. 5.4): q_grnd_liq = q_rain |
+| `q_grnd_ice` | `kg/(m^2*s)` |  | Solid precipitation reaching surface (Oleson Eq. 5.5): q_grnd_ice = q_sno |
+| `water_input` | `kg/(m^2*s)` |  | Net water input rate to impervious surface (Oleson Eqs. 5.2-5.3): water_input = q_rain + q_sno - E_surface - q_over - q_rgwl - q_snwcp_ice |
+
+## Observed expressions
+
+$$
+q_{grnd\,liq} = q_{rain}
+$$
+_Liquid precipitation reaching surface (Oleson Eq. 5.4): q_grnd_liq = q_rain_
+
+$$
+q_{grnd\,ice} = q_{sno}
+$$
+_Solid precipitation reaching surface (Oleson Eq. 5.5): q_grnd_ice = q_sno_
+
+$$
+water_{input} = q_{rain} + q_{sno} - \left(E_{surface} + q_{over} + q_{rgwl} + q_{snwcp\,ice}\right)
+$$
+_Net water input rate to impervious surface (Oleson Eqs. 5.2-5.3): water_input = q_rain + q_sno - E_surface - q_over - q_rgwl - q_snwcp_ice_
+
+## Analyses
+
+### water_input_vs_rain_rate
+
+Net water input as a function of incident rainfall rate (with fixed evaporation E_surface = 5e-4 and fixed overland runoff q_over = 2e-4). The linear unit-slope dependence in Eqs. 5.2-5.3 is visible: each kg/(m^2*s) of additional rain raises water_input by exactly 1 kg/(m^2*s). Sweeps q_rain over the typical urban-storm range (0 to 5e-3 kg/(m^2*s) ≈ 0 to 18 mm/hr).
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `q_rain`
+
+![water_input vs q_rain — linear with intercept = -(E_surface + q_over).](/plots/urban_canopy/hydro/imperviouswaterbalance/water_input_vs_rain_rate-water_input_vs_q_rain.png)
+
+### water_input_rain_evap_grid
+
+Joint sweep over q_rain and E_surface at fixed q_over = 1e-4 — surfaces the iso-water_input contours of Eq. 5.2 across the (precipitation, evaporation) plane. Useful for visualizing the net-zero locus where rainfall just balances evaporation plus runoff.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `q_rain`, `E_surface`
+
+![water_input as a function of q_rain and E_surface at q_over = 1e-4.](/plots/urban_canopy/hydro/imperviouswaterbalance/water_input_rain_evap_grid-water_input_heatmap.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: UrbanCanopy.jl@9200edd4:src/hydrology.jl:937\nUpstream `ImperviousWaterBalance` is an MTK `@component` whose six inputs (q_rain, q_sno, E_surface, q_over, q_rgwl, q_snwcp_ice) are `@parameters` (driven by a parent surface/atmosphere coupler) and whose three outputs (water_input, q_grnd_liq, q_grnd_ice) are time-indexed `@variables` with three algebraic equations and no derivatives. Identical structure preserved here.\n\nUpstream-source detail intentionally not migrated: the Julia component declares two `@constants` (w_pond_max = 1.0 kg/m^2 ponding limit; zero_kgpm2s = 0.0 kg/(m^2*s) zero-flux sentinel) that are not referenced by any of the three eqs in this component. They appear to be vestigial copies of the constants used by sibling components ImperviousRunoff (hydrology.jl:991) and PerviousRoadRunoff. Omitting them here preserves the mathematical model exactly while keeping the .esm minimal; if the canonical pipeline ever needs them for cross-component coupling, they should be added at that time alongside the equations that reference them.\n\nObservability classification: this component is functionally observed-only — all three outputs are given by single algebraic equations in terms of the parameters (the `(t)` time index has no role since there are no derivatives). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this directory (soil_water_content_calc.esm, snow_compaction.esm).\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are at most one summation of six float64 terms — fewer than ten IEEE-754 operations — so roundoff is ~1e-15. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any physical-discrimination scale on surface mass-flux densities (which range from ~1e-6 to ~1e-2 kg/(m^2*s) for any plausible CLMU urban surface state)."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "q_rain": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Liquid precipitation rate (Eq. 5.4)"
+    },
+    "q_sno": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Solid precipitation rate (Eq. 5.5)"
+    },
+    "E_surface": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Total evaporation from surface"
+    },
+    "q_over": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Surface runoff"
+    },
+    "q_rgwl": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Liquid runoff from groundwater"
+    },
+    "q_snwcp_ice": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Solid runoff from snow capping"
+    },
+    "q_grnd_liq": {
+      "type": "unknown",
+      "units": "kg/(m^2*s)",
+      "description": "Liquid precipitation reaching surface (Oleson Eq. 5.4): q_grnd_liq = q_rain"
+    },
+    "q_grnd_ice": {
+      "type": "unknown",
+      "units": "kg/(m^2*s)",
+      "description": "Solid precipitation reaching surface (Oleson Eq. 5.5): q_grnd_ice = q_sno"
+    },
+    "water_input": {
+      "type": "unknown",
+      "units": "kg/(m^2*s)",
+      "description": "Net water input rate to impervious surface (Oleson Eqs. 5.2-5.3): water_input = q_rain + q_sno - E_surface - q_over - q_rgwl - q_snwcp_ice"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "q_grnd_liq",
+      "rhs": "q_rain"
+    },
+    {
+      "lhs": "q_grnd_ice",
+      "rhs": "q_sno"
+    },
+    {
+      "lhs": "water_input",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              "q_rain",
+              "q_sno"
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              "E_surface",
+              {
+                "op": "+",
+                "args": [
+                  "q_over",
+                  {
+                    "op": "+",
+                    "args": [
+                      "q_rgwl",
+                      "q_snwcp_ice"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "all_zero",
+      "description": "All inputs zero — quiescent dry surface with no precipitation, no evaporation, no runoff. All three outputs must be exactly zero. Exercises the additive-zero limit of Eqs. 5.2-5.5.",
+      "parameter_overrides": {
+        "q_rain": 0.0,
+        "q_sno": 0.0,
+        "E_surface": 0.0,
+        "q_over": 0.0,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "pure_rain",
+      "description": "Pure liquid precipitation event (q_rain = 1e-3 kg/(m^2*s) ≈ 3.6 mm/hr) with no other fluxes. q_grnd_liq must equal q_rain (Eq. 5.4), q_grnd_ice = 0 (Eq. 5.5), and water_input = q_rain (Eqs. 5.2-5.3 with all loss terms zero).",
+      "parameter_overrides": {
+        "q_rain": 0.001,
+        "q_sno": 0.0,
+        "E_surface": 0.0,
+        "q_over": 0.0,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.001
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.001
+        }
+      ]
+    },
+    {
+      "id": "pure_snow",
+      "description": "Pure solid precipitation event (q_sno = 5e-4 kg/(m^2*s)) with no other fluxes. q_grnd_ice must equal q_sno (Eq. 5.5), q_grnd_liq = 0 (Eq. 5.4), and water_input = q_sno.",
+      "parameter_overrides": {
+        "q_rain": 0.0,
+        "q_sno": 0.0005,
+        "E_surface": 0.0,
+        "q_over": 0.0,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0005
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.0005
+        }
+      ]
+    },
+    {
+      "id": "evaporation_only",
+      "description": "Dry-surface evaporation event (E_surface = 2e-4 kg/(m^2*s)) with no precipitation or runoff. q_grnd_liq and q_grnd_ice are zero; water_input = -E_surface = -2e-4 (a net loss). Exercises the negative-balance regime where the surface is losing mass.",
+      "parameter_overrides": {
+        "q_rain": 0.0,
+        "q_sno": 0.0,
+        "E_surface": 0.0002,
+        "q_over": 0.0,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": -0.0002
+        }
+      ]
+    },
+    {
+      "id": "all_loss_terms",
+      "description": "All three loss-only paths active simultaneously (q_over = 1e-4, q_rgwl = 2e-4, q_snwcp_ice = 3e-4) with no precipitation or evaporation. water_input = -(q_over + q_rgwl + q_snwcp_ice) = -6e-4. Verifies that the three runoff terms enter the balance with the correct (negative) sign and that the balance equation distinguishes them from the precipitation terms.",
+      "parameter_overrides": {
+        "q_rain": 0.0,
+        "q_sno": 0.0,
+        "E_surface": 0.0,
+        "q_over": 0.0001,
+        "q_rgwl": 0.0002,
+        "q_snwcp_ice": 0.0003
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": -0.0006
+        }
+      ]
+    },
+    {
+      "id": "mixed_storm_with_losses",
+      "description": "Mixed-phase storm with all loss paths active — the canonical Eqs. 5.2-5.5 use case. q_rain = 2e-3, q_sno = 1e-3, E_surface = 3e-4, q_over = 2e-4, q_rgwl = 1e-4, q_snwcp_ice = 4e-4. water_input = (2e-3 + 1e-3) - (3e-4 + 2e-4 + 1e-4 + 4e-4) = 3e-3 - 1e-3 = 2e-3 kg/(m^2*s). Exercises the full balance with all six inputs nonzero.",
+      "parameter_overrides": {
+        "q_rain": 0.002,
+        "q_sno": 0.001,
+        "E_surface": 0.0003,
+        "q_over": 0.0002,
+        "q_rgwl": 0.0001,
+        "q_snwcp_ice": 0.0004
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.002
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.001
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.002
+        }
+      ]
+    },
+    {
+      "id": "heavy_rain_with_overland_runoff",
+      "description": "Intense rainstorm (q_rain = 5e-3 kg/(m^2*s) ≈ 18 mm/hr) on an impervious surface generating substantial overland runoff (q_over = 2e-3). q_grnd_liq = 5e-3, q_grnd_ice = 0, water_input = 5e-3 - 2e-3 = 3e-3. Represents a typical urban storm-runoff partition where roughly 40% of incident rain is shed as runoff.",
+      "parameter_overrides": {
+        "q_rain": 0.005,
+        "q_sno": 0.0,
+        "E_surface": 0.0,
+        "q_over": 0.002,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.005
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.003
+        }
+      ]
+    },
+    {
+      "id": "winter_snow_capping",
+      "description": "Cold-season snowfall on an impervious surface where the saturated snow layer caps further accumulation, diverting solid precipitation to runoff (q_snwcp_ice). q_sno = 8e-4 kg/(m^2*s), q_snwcp_ice = 3e-4. q_grnd_ice = q_sno = 8e-4 (all incident snow reaches the surface in Eq. 5.5), but water_input = 8e-4 - 3e-4 = 5e-4 since some is shed as solid runoff. Exercises the q_snwcp_ice loss path that is unique to impervious surfaces.",
+      "parameter_overrides": {
+        "q_rain": 0.0,
+        "q_sno": 0.0008,
+        "E_surface": 0.0,
+        "q_over": 0.0,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0003
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0008
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.0005
+        }
+      ]
+    },
+    {
+      "id": "summer_warm_dry_with_evap_runoff",
+      "description": "Warm-season rainfall on a heated impervious surface — concurrent rain (q_rain = 1.5e-3), evaporation (E_surface = 5e-4), and overland runoff (q_over = 4e-4). water_input = 1.5e-3 - 5e-4 - 4e-4 = 6e-4. Verifies that evaporation and runoff both enter as negative terms and that the balance handles a positive but reduced net input.",
+      "parameter_overrides": {
+        "q_rain": 0.0015,
+        "q_sno": 0.0,
+        "E_surface": 0.0005,
+        "q_over": 0.0004,
+        "q_rgwl": 0.0,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0015
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": 0.0006
+        }
+      ]
+    },
+    {
+      "id": "groundwater_lateral_loss",
+      "description": "Light rain (q_rain = 5e-4) with a lateral groundwater loss term active (q_rgwl = 7e-4) — net negative balance because the q_rgwl outflow exceeds the incoming rain. water_input = 5e-4 - 7e-4 = -2e-4. Exercises the q_rgwl loss path in isolation and verifies that water_input correctly goes negative when losses outweigh inputs.",
+      "parameter_overrides": {
+        "q_rain": 0.0005,
+        "q_sno": 0.0,
+        "E_surface": 0.0,
+        "q_over": 0.0,
+        "q_rgwl": 0.0007,
+        "q_snwcp_ice": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "q_grnd_liq",
+          "time": 0.0,
+          "expected": 0.0005
+        },
+        {
+          "variable": "q_grnd_ice",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "water_input",
+          "time": 0.0,
+          "expected": -0.0002
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "water_input_vs_rain_rate",
+      "description": "Net water input as a function of incident rainfall rate (with fixed evaporation E_surface = 5e-4 and fixed overland runoff q_over = 2e-4). The linear unit-slope dependence in Eqs. 5.2-5.3 is visible: each kg/(m^2*s) of additional rain raises water_input by exactly 1 kg/(m^2*s). Sweeps q_rain over the typical urban-storm range (0 to 5e-3 kg/(m^2*s) ≈ 0 to 18 mm/hr).",
+      "initial_state": {},
+      "parameters": {
+        "E_surface": 0.0005,
+        "q_over": 0.0002
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "q_rain",
+            "range": {
+              "start": 0.0,
+              "stop": 0.005,
+              "count": 26,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "water_input_vs_q_rain",
+          "type": "line",
+          "description": "water_input vs q_rain — linear with intercept = -(E_surface + q_over).",
+          "x": {
+            "variable": "q_rain",
+            "label": "q_rain (kg/(m^2*s))"
+          },
+          "y": {
+            "variable": "water_input",
+            "label": "water_input (kg/(m^2*s))"
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_input_rain_evap_grid",
+      "description": "Joint sweep over q_rain and E_surface at fixed q_over = 1e-4 — surfaces the iso-water_input contours of Eq. 5.2 across the (precipitation, evaporation) plane. Useful for visualizing the net-zero locus where rainfall just balances evaporation plus runoff.",
+      "initial_state": {},
+      "parameters": {
+        "q_over": 0.0001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "q_rain",
+            "range": {
+              "start": 0.0,
+              "stop": 0.003,
+              "count": 11,
+              "scale": "linear"
+            }
+          },
+          {
+            "parameter": "E_surface",
+            "range": {
+              "start": 0.0,
+              "stop": 0.001,
+              "count": 11,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "water_input_heatmap",
+          "type": "heatmap",
+          "description": "water_input as a function of q_rain and E_surface at q_over = 1e-4.",
+          "x": {
+            "variable": "q_rain",
+            "label": "q_rain (kg/(m^2*s))"
+          },
+          "y": {
+            "variable": "E_surface",
+            "label": "E_surface (kg/(m^2*s))"
+          },
+          "value": {
+            "variable": "water_input",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

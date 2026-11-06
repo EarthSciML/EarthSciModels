@@ -1,0 +1,1539 @@
+---
+title: "DropletGrowth"
+slug: "dropletgrowth"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["cloud_physics"]
+domain: "aerosol"
+subdomain: "cloud_physics"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/cloud_physics/droplet_growth.esm"
+reference: "https://www.wiley.com/en-us/Atmospheric+Chemistry+and+Physics%3A+From+Air+Pollution+to+Climate+Change%2C+2nd+Edition-p-9780471720188"
+description: "Diffusional growth rate of a cloud droplet by condensation of water vapor. Accounts for vapor-phase diffusion (D_v), the kinetic correction to the diffusivity (D_v'), thermal conductivity of air (k_a and k_a'), and the curvature + solute (Köhler) contributions to the equilibrium saturation ratio S_eq over the droplet surface. Output is the droplet-diameter growth rate dD_p/dt (m/s) from Seinfeld & Pandis (2006) Eq. 17.70. Source: Aerosol.jl@c8c640bb src/cloud_physics.jl:322 (mtk2esm-scaffolded, mdl-43a)."
+tags: ["aerosol", "cloud_physics", "model", "droplet_growth", "seinfeld_pandis"]
+---
+
+## Description
+
+Diffusional growth rate of a cloud droplet by condensation of water vapor. Accounts for vapor-phase diffusion (D_v), the kinetic correction to the diffusivity (D_v'), thermal conductivity of air (k_a and k_a'), and the curvature + solute (Köhler) contributions to the equilibrium saturation ratio S_eq over the droplet surface. Output is the droplet-diameter growth rate dD_p/dt (m/s) from Seinfeld & Pandis (2006) Eq. 17.70. Source: Aerosol.jl@c8c640bb src/cloud_physics.jl:322 (mtk2esm-scaffolded, mdl-43a).
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N.: Atmospheric Chemistry and Physics — From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 17 (Cloud Physics), 2006.
+
+_Single-droplet diffusional growth. Equations 17.61, 17.62, 17.70, 17.71, 17.72 (air diffusivity + kinetic correction, thermal conductivity + kinetic correction, simplified droplet-growth equation). Köhler (Eq. 17.27) composite term for S_eq uses the solute moles n_s and an insoluble-core diameter d_u; pass n_s = 0, d_u = 0 for pure-water droplets. The `vol_eps` term (1e-60 m^3) is a numerical regularizer that prevents division by zero when D_p^3 == d_u^3 — at any physical droplet size it contributes O(1e-40) to a quantity of order D_p^3 and is negligible. `one_val`, `π_val`, `T_unit`, `vol_eps` are numerical-stability / dimensionless-constant parameters that the upstream `@constants` block declared with explicit units (1 or m^3) — they should not be treated as tunable. Upstream repo: https://github.com/EarthSciML/Aerosol.jl; pinned commit c8c640bb636b22f2425460e9ed5cba50793bfee1._
+- **URL**: https://www.wiley.com/en-us/Atmospheric+Chemistry+and+Physics%3A+From+Air+Pollution+to+Climate+Change%2C+2nd+Edition-p-9780471720188
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `one_val` | `1` | `1.0` | Unit value (dimensionless) |
+| `α_T` | `1` | `1.0` | Thermal accommodation coefficient (dimensionless) |
+| `T` | `K` | `293.15` | Temperature |
+| `Hv_exp_const` | `1` | `0.167` | Latent-heat exponent constant (dimensionless) |
+| `d_u` | `m` | `0.0` | Insoluble core diameter |
+| `π_val` | `1` | `3.141592653589793` | Pi (dimensionless) |
+| `M_w` | `kg/mol` | `0.018015` | Molecular weight of water |
+| `p_sat_ref` | `Pa` | `610.94` | Reference saturation pressure (Magnus) |
+| `σ_w` | `N/m` | `0.0728` | Surface tension of water |
+| `Dv_ref` | `m^2/s` | `2.11e-05` | Reference water-vapor diffusivity at 273 K, 1 atm |
+| `vol_eps` | `m^3` | `1e-60` | Small volume for numerical stability |
+| `p_ref` | `Pa` | `101325.0` | Reference pressure (1 atm) |
+| `magnus_b` | `K` | `243.04` | Magnus coefficient b |
+| `n_s` | `mol` | `0.0` | Moles of solute in droplet |
+| `D_p` | `m` | `1e-06` | Droplet diameter |
+| `T_Dv_ref` | `K` | `273.0` | Reference temperature for D_v |
+| `Hv_exp_coeff` | `1/K` | `0.000367` | Latent-heat exponent coefficient |
+| `ρ_w` | `kg/m^3` | `997.0` | Density of liquid water |
+| `c_p_air` | `J/kg/K` | `1005.0` | Specific heat of air |
+| `M_a` | `kg/mol` | `0.02897` | Molecular weight of air |
+| `p_a` | `Pa` | `101325.0` | Atmospheric pressure |
+| `Hv_ref_kg` | `J/kg` | `2500000.0` | Reference latent heat of vaporization |
+| `T_Hv_ref` | `K` | `273.15` | Reference temperature for latent heat |
+| `T_magnus_offset` | `K` | `273.15` | Magnus temperature offset |
+| `S_v` | `1` | `1.01` | Environmental saturation ratio (dimensionless) |
+| `α_c` | `1` | `1.0` | Mass accommodation coefficient (dimensionless) |
+| `ka_c1` | `J/m/s/K^2` | `7.1e-05` | Thermal conductivity slope |
+| `R` | `J/mol/K` | `8.314` | Universal gas constant |
+| `ka_c0` | `J/m/s/K` | `0.00439` | Thermal conductivity constant |
+| `magnus_a` | `1` | `17.625` | Magnus coefficient a (dimensionless) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `p_sat` | `Pa` |  | Saturation vapor pressure (Magnus) |
+| `D_v` | `m^2/s` |  | Diffusivity of water vapor in air |
+| `D_v_prime` | `m^2/s` |  | Modified diffusivity of water vapor |
+| `ρ_air` | `kg/m^3` |  | Air density from ideal gas law |
+| `S_eq` | `1` |  | Equilibrium saturation ratio over droplet (dimensionless) |
+| `dDp_dt` | `m/s` |  | Droplet diameter growth rate |
+| `k_a` | `J/m/s/K` |  | Thermal conductivity of air |
+| `ΔH_v` | `J/kg` |  | Latent heat of vaporization |
+| `k_a_prime` | `J/m/s/K` |  | Modified thermal conductivity of air |
+
+## Observed expressions
+
+$$
+p_{sat} = p_{sat\,ref} \cdot e^{\frac{\left(T + \left(-1\right) \cdot T_{magnus\,offset}\right) \cdot magnus_{a}}{T + \left(-1\right) \cdot T_{magnus\,offset} + magnus_{b}}}
+$$
+_Saturation vapor pressure (Magnus)_
+
+$$
+D_{v} = \frac{p_{ref} \cdot \frac{T}{T_{Dv\,ref}}^{1.94} \cdot Dv_{ref}}{p_{a}}
+$$
+_Diffusivity of water vapor in air_
+
+$$
+D_{v\,prime} = \frac{D_{v}}{one_{val} + \frac{2 \cdot \sqrt{\frac{2 \cdot M_{w} \cdot π_{val}}{T \cdot R}} \cdot D_{v}}{D_{p} \cdot α_{c}}}
+$$
+_Modified diffusivity of water vapor_
+
+$$
+ρ_{air} = \frac{M_{a} \cdot p_{a}}{T \cdot R}
+$$
+_Air density from ideal gas law_
+
+$$
+S_{eq} = e^{\frac{4 \cdot M_{w} \cdot σ_{w}}{T \cdot R \cdot D_{p} \cdot ρ_{w}} + \frac{\left(-6\right) \cdot M_{w} \cdot n_{s}}{\left(D_{p}^{3} + \left(-1\right) \cdot d_{u}^{3} + vol_{eps}\right) \cdot π_{val} \cdot ρ_{w}}}
+$$
+_Equilibrium saturation ratio over droplet (dimensionless)_
+
+$$
+dDp_{dt} = \frac{one_{val} \cdot \left(\left(-1\right) \cdot S_{eq} + S_{v}\right)}{\left(\frac{\left(\left(-1\right) \cdot one_{val} + \frac{M_{w} \cdot ΔH_{v}}{T \cdot R}\right) \cdot ΔH_{v} \cdot ρ_{w}}{4 \cdot T \cdot k_{a\,prime}} + \frac{T \cdot R \cdot ρ_{w}}{4 \cdot p_{sat} \cdot M_{w} \cdot D_{v\,prime}}\right) \cdot D_{p}}
+$$
+_Droplet diameter growth rate_
+
+$$
+k_{a} = T \cdot ka_{c1} + ka_{c0}
+$$
+_Thermal conductivity of air_
+
+$$
+ΔH_{v} = Hv_{ref\,kg} \cdot \frac{T_{Hv\,ref}}{T}^{Hv_{exp\,const} + T \cdot Hv_{exp\,coeff}}
+$$
+_Latent heat of vaporization_
+
+$$
+k_{a\,prime} = \frac{k_{a}}{one_{val} + \frac{2 \cdot \sqrt{\frac{2 \cdot M_{a} \cdot π_{val}}{T \cdot R}} \cdot k_{a}}{c_{p\,air} \cdot α_{T} \cdot D_{p} \cdot ρ_{air}}}
+$$
+_Modified thermal conductivity of air_
+
+## Analyses
+
+### growth_rate_vs_Dp
+
+Droplet-diameter growth rate dD_p/dt as a function of droplet diameter at fixed T, p_a, S_v, and n_s. Reproduces the canonical shape of Seinfeld & Pandis Fig. 17.6–17.7 (Köhler curve): at very small D_p the Kelvin term dominates and growth is suppressed / negative; above the critical diameter the droplet grows freely with the ~1/D_p Maxwell scaling.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `D_p`
+
+![dD_p/dt (m/s) vs D_p (m) at S_v=1.003 with a small solute mass — resembles the activation-curve shape in Seinfeld & Pandis Fig. 17.6.](/plots/aerosol/cloud_physics/dropletgrowth/growth_rate_vs_Dp-dDp_dt_vs_Dp_log.png)
+
+### Dv_vs_T
+
+Water-vapor diffusivity D_v as a function of temperature at 1 atm. Reproduces Eq. 17.61: D_v = 0.211e-4 × (p_ref/p_a) × (T/273)^1.94. The ~(T/273)^1.94 scaling is a textbook result (Seinfeld & Pandis §17.4.1) and should cross 2.4e-5 m²/s at ~293 K.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![Water-vapor diffusivity D_v vs T (Eq. 17.61).](/plots/aerosol/cloud_physics/dropletgrowth/Dv_vs_T-Dv_vs_T_curve.png)
+
+![Air thermal conductivity k_a vs T (Eq. 17.71).](/plots/aerosol/cloud_physics/dropletgrowth/Dv_vs_T-ka_vs_T_curve.png)
+
+### psat_vs_T_magnus
+
+Saturation vapor pressure p_sat as a function of T via the Magnus formula. Reproduces the water-vapor pressure curve in Seinfeld & Pandis Table 17.2 / Fig. 17.1: rises from a few hundred Pa at 0 °C to several thousand Pa at 30 °C.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![Magnus saturation vapor pressure vs T (S&P Table 17.2).](/plots/aerosol/cloud_physics/dropletgrowth/psat_vs_T_magnus-psat_vs_T.png)
+
+### growth_rate_vs_Sv
+
+Droplet growth rate dD_p/dt as a function of environmental saturation ratio S_v. The curve crosses zero at S_v = S_eq (Kelvin-limited equilibrium) and grows linearly in (S_v − S_eq). Useful for inspecting model sensitivity to ambient humidity, as in Seinfeld & Pandis §17.4.2.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `S_v`
+
+![Growth rate vs ambient saturation ratio S_v.](/plots/aerosol/cloud_physics/dropletgrowth/growth_rate_vs_Sv-dDp_dt_vs_Sv.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "p_sat": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Saturation vapor pressure (Magnus)"
+    },
+    "one_val": {
+      "default": 1.0,
+      "type": "parameter",
+      "units": "1",
+      "description": "Unit value (dimensionless)"
+    },
+    "α_T": {
+      "default": 1.0,
+      "type": "parameter",
+      "units": "1",
+      "description": "Thermal accommodation coefficient (dimensionless)"
+    },
+    "D_v": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Diffusivity of water vapor in air"
+    },
+    "T": {
+      "default": 293.15,
+      "type": "parameter",
+      "units": "K",
+      "description": "Temperature"
+    },
+    "Hv_exp_const": {
+      "default": 0.167,
+      "type": "parameter",
+      "units": "1",
+      "description": "Latent-heat exponent constant (dimensionless)"
+    },
+    "d_u": {
+      "default": 0.0,
+      "type": "parameter",
+      "units": "m",
+      "description": "Insoluble core diameter"
+    },
+    "π_val": {
+      "default": 3.141592653589793,
+      "type": "parameter",
+      "units": "1",
+      "description": "Pi (dimensionless)"
+    },
+    "M_w": {
+      "default": 0.018015,
+      "type": "parameter",
+      "units": "kg/mol",
+      "description": "Molecular weight of water"
+    },
+    "p_sat_ref": {
+      "default": 610.94,
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Reference saturation pressure (Magnus)"
+    },
+    "D_v_prime": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Modified diffusivity of water vapor"
+    },
+    "ρ_air": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Air density from ideal gas law"
+    },
+    "σ_w": {
+      "default": 0.0728,
+      "type": "parameter",
+      "units": "N/m",
+      "description": "Surface tension of water"
+    },
+    "Dv_ref": {
+      "default": 2.11e-05,
+      "type": "parameter",
+      "units": "m^2/s",
+      "description": "Reference water-vapor diffusivity at 273 K, 1 atm"
+    },
+    "vol_eps": {
+      "default": 1e-60,
+      "type": "parameter",
+      "units": "m^3",
+      "description": "Small volume for numerical stability"
+    },
+    "p_ref": {
+      "default": 101325.0,
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Reference pressure (1 atm)"
+    },
+    "magnus_b": {
+      "default": 243.04,
+      "type": "parameter",
+      "units": "K",
+      "description": "Magnus coefficient b"
+    },
+    "S_eq": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Equilibrium saturation ratio over droplet (dimensionless)"
+    },
+    "n_s": {
+      "default": 0.0,
+      "type": "parameter",
+      "units": "mol",
+      "description": "Moles of solute in droplet"
+    },
+    "D_p": {
+      "default": 1e-06,
+      "type": "parameter",
+      "units": "m",
+      "description": "Droplet diameter"
+    },
+    "T_Dv_ref": {
+      "default": 273.0,
+      "type": "parameter",
+      "units": "K",
+      "description": "Reference temperature for D_v"
+    },
+    "Hv_exp_coeff": {
+      "default": 0.000367,
+      "type": "parameter",
+      "units": "1/K",
+      "description": "Latent-heat exponent coefficient"
+    },
+    "ρ_w": {
+      "default": 997.0,
+      "type": "parameter",
+      "units": "kg/m^3",
+      "description": "Density of liquid water"
+    },
+    "c_p_air": {
+      "default": 1005.0,
+      "type": "parameter",
+      "units": "J/kg/K",
+      "description": "Specific heat of air"
+    },
+    "M_a": {
+      "default": 0.02897,
+      "type": "parameter",
+      "units": "kg/mol",
+      "description": "Molecular weight of air"
+    },
+    "p_a": {
+      "default": 101325.0,
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Atmospheric pressure"
+    },
+    "dDp_dt": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Droplet diameter growth rate"
+    },
+    "Hv_ref_kg": {
+      "default": 2500000.0,
+      "type": "parameter",
+      "units": "J/kg",
+      "description": "Reference latent heat of vaporization"
+    },
+    "k_a": {
+      "type": "unknown",
+      "units": "J/m/s/K",
+      "description": "Thermal conductivity of air"
+    },
+    "ΔH_v": {
+      "type": "unknown",
+      "units": "J/kg",
+      "description": "Latent heat of vaporization"
+    },
+    "T_Hv_ref": {
+      "default": 273.15,
+      "type": "parameter",
+      "units": "K",
+      "description": "Reference temperature for latent heat"
+    },
+    "T_magnus_offset": {
+      "default": 273.15,
+      "type": "parameter",
+      "units": "K",
+      "description": "Magnus temperature offset"
+    },
+    "S_v": {
+      "default": 1.01,
+      "type": "parameter",
+      "units": "1",
+      "description": "Environmental saturation ratio (dimensionless)"
+    },
+    "α_c": {
+      "default": 1.0,
+      "type": "parameter",
+      "units": "1",
+      "description": "Mass accommodation coefficient (dimensionless)"
+    },
+    "ka_c1": {
+      "default": 7.1e-05,
+      "type": "parameter",
+      "units": "J/m/s/K^2",
+      "description": "Thermal conductivity slope"
+    },
+    "R": {
+      "default": 8.314,
+      "type": "parameter",
+      "units": "J/mol/K",
+      "description": "Universal gas constant"
+    },
+    "ka_c0": {
+      "default": 0.00439,
+      "type": "parameter",
+      "units": "J/m/s/K",
+      "description": "Thermal conductivity constant"
+    },
+    "k_a_prime": {
+      "type": "unknown",
+      "units": "J/m/s/K",
+      "description": "Modified thermal conductivity of air"
+    },
+    "magnus_a": {
+      "default": 17.625,
+      "type": "parameter",
+      "units": "1",
+      "description": "Magnus coefficient a (dimensionless)"
+    }
+  },
+  "equations": [
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "p_ref",
+              {
+                "args": [
+                  {
+                    "args": [
+                      "T",
+                      "T_Dv_ref"
+                    ],
+                    "op": "/"
+                  },
+                  1.94
+                ],
+                "op": "^"
+              },
+              "Dv_ref"
+            ],
+            "op": "*"
+          },
+          "p_a"
+        ],
+        "op": "/"
+      },
+      "lhs": "D_v"
+    },
+    {
+      "rhs": {
+        "args": [
+          "D_v",
+          {
+            "args": [
+              "one_val",
+              {
+                "args": [
+                  {
+                    "args": [
+                      2,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  2,
+                                  "M_w",
+                                  "π_val"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  "T",
+                                  "R"
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "sqrt"
+                      },
+                      "D_v"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      "D_p",
+                      "α_c"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "/"
+      },
+      "lhs": "D_v_prime"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "T",
+              "ka_c1"
+            ],
+            "op": "*"
+          },
+          "ka_c0"
+        ],
+        "op": "+"
+      },
+      "lhs": "k_a"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "M_a",
+              "p_a"
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              "T",
+              "R"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "/"
+      },
+      "lhs": "ρ_air"
+    },
+    {
+      "rhs": {
+        "args": [
+          "k_a",
+          {
+            "args": [
+              "one_val",
+              {
+                "args": [
+                  {
+                    "args": [
+                      2,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  2,
+                                  "M_a",
+                                  "π_val"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  "T",
+                                  "R"
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "sqrt"
+                      },
+                      "k_a"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      "c_p_air",
+                      "α_T",
+                      "D_p",
+                      "ρ_air"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "/"
+      },
+      "lhs": "k_a_prime"
+    },
+    {
+      "rhs": {
+        "args": [
+          "p_sat_ref",
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "T",
+                          {
+                            "args": [
+                              -1,
+                              "T_magnus_offset"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "+"
+                      },
+                      "magnus_a"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      "T",
+                      {
+                        "args": [
+                          -1,
+                          "T_magnus_offset"
+                        ],
+                        "op": "*"
+                      },
+                      "magnus_b"
+                    ],
+                    "op": "+"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "exp"
+          }
+        ],
+        "op": "*"
+      },
+      "lhs": "p_sat"
+    },
+    {
+      "rhs": {
+        "args": [
+          "Hv_ref_kg",
+          {
+            "args": [
+              {
+                "args": [
+                  "T_Hv_ref",
+                  "T"
+                ],
+                "op": "/"
+              },
+              {
+                "args": [
+                  "Hv_exp_const",
+                  {
+                    "args": [
+                      "T",
+                      "Hv_exp_coeff"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "^"
+          }
+        ],
+        "op": "*"
+      },
+      "lhs": "ΔH_v"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      4,
+                      "M_w",
+                      "σ_w"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      "T",
+                      "R",
+                      "D_p",
+                      "ρ_w"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      -6,
+                      "M_w",
+                      "n_s"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              "D_p",
+                              3
+                            ],
+                            "op": "^"
+                          },
+                          {
+                            "args": [
+                              -1,
+                              {
+                                "args": [
+                                  "d_u",
+                                  3
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "*"
+                          },
+                          "vol_eps"
+                        ],
+                        "op": "+"
+                      },
+                      "π_val",
+                      "ρ_w"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "exp"
+      },
+      "lhs": "S_eq"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "one_val",
+              {
+                "args": [
+                  {
+                    "args": [
+                      -1,
+                      "S_eq"
+                    ],
+                    "op": "*"
+                  },
+                  "S_v"
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  -1,
+                                  "one_val"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      "M_w",
+                                      "ΔH_v"
+                                    ],
+                                    "op": "*"
+                                  },
+                                  {
+                                    "args": [
+                                      "T",
+                                      "R"
+                                    ],
+                                    "op": "*"
+                                  }
+                                ],
+                                "op": "/"
+                              }
+                            ],
+                            "op": "+"
+                          },
+                          "ΔH_v",
+                          "ρ_w"
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          4,
+                          "T",
+                          "k_a_prime"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "/"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "T",
+                          "R",
+                          "ρ_w"
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          4,
+                          "p_sat",
+                          "M_w",
+                          "D_v_prime"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "/"
+                  }
+                ],
+                "op": "+"
+              },
+              "D_p"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "/"
+      },
+      "lhs": "dDp_dt"
+    }
+  ],
+  "tests": [
+    {
+      "id": "baseline_supersat_293K",
+      "description": "Seinfeld & Pandis (2006) base case: T=293.15 K, p_a=101325 Pa, S_v=1.01, D_p=1 μm, pure water (n_s=0, d_u=0). Checks all 9 observed variables against Tsit5 ground truth at three times. Primary behavioral gate: reproduces upstream 'DropletGrowth physical behavior' testitem in cloud_physics_test.jl (dDp_dt > 0, D_v ≈ 2.4e-5 m^2/s, k_a ≈ 0.025 J/(m·s·K)).\n\nTolerance rationale (test-level rel=1e-4, applied uniformly across this and all other tests in this file): reference values from upstream Aerosol.jl Tsit5 ground truth at the test conditions; 1e-4 absorbs Tsit5↔Python LSODA truncation over tspan=[0,1] s plus float64 roundoff in the kinetic-correction expressions for D_v' (Eq. 17.61) and k_a' (Eq. 17.71) and the Köhler composite S_eq (Eq. 17.27) inlined into Eq. 17.70. Per-assertion `tolerance` blocks duplicate the test-level value (no numerical reason to differ); the redundancy is a serialization artifact that could be removed in a follow-up cleanup.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "D_v",
+          "time": 0.0,
+          "expected": 2.4225978261e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "D_v",
+          "time": 1.0,
+          "expected": 2.4225978261e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "D_v_prime",
+          "time": 0.5,
+          "expected": 1.821237252e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a",
+          "time": 0.0,
+          "expected": 0.02520365,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a",
+          "time": 0.5,
+          "expected": 0.02520365,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a_prime",
+          "time": 0.5,
+          "expected": 0.018533519773,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ρ_air",
+          "time": 0.0,
+          "expected": 1.2043845867,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "p_sat",
+          "time": 0.5,
+          "expected": 2333.4406231,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.5,
+          "expected": 2451959.6638,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "S_eq",
+          "time": 0.5,
+          "expected": 1.0021612223,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.0,
+          "expected": 2.8822501313e-06,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 1.0,
+          "expected": 2.8822501313e-06,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "subsat_293K_evaporation",
+      "description": "Same thermodynamic state as baseline, but S_v=0.99 (subsaturated). Mirrors upstream 'DropletGrowth physical behavior' subsat branch: growth rate must flip sign. dDp_dt < 0 proves the driving force (S_v − S_eq) is handled with correct sign.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied to the evaporation branch. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 0.99,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "S_eq",
+          "time": 0.5,
+          "expected": 1.0021612223,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.5,
+          "expected": -4.4715752844e-06,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "small_Dp_grows_faster",
+      "description": "D_p=5e-7 m with same S_v=1.01: Eq. 17.70 has a 1/D_p prefactor and Kelvin S_eq is larger at smaller D_p (Eq. 17.27). Net effect at this D_p range: |dDp_dt| is larger. Mirrors upstream 'smaller droplet should grow faster' assertion.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied to a smaller-D_p variant of the baseline. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 5e-07,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "D_v_prime",
+          "time": 0.0,
+          "expected": 1.4590562514e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a_prime",
+          "time": 0.0,
+          "expected": 0.014655065772,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "S_eq",
+          "time": 0.0,
+          "expected": 1.0043271155,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.0,
+          "expected": 3.3112759979e-06,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "cold_cloud_263K",
+      "description": "Cold cloud at T=263.15 K. D_v scales as (T/273)^1.94 so it drops ~20%, p_sat (Magnus) drops by an order of magnitude, and ΔH_v rises slightly. Net growth rate is much slower than the 293 K baseline. Guards against T-dependence regressions in Eq. 17.61, 17.71, the Magnus formula, and Eq. 17.3.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied to a cold-cloud regime. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 263.15,
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "D_v",
+          "time": 0.5,
+          "expected": 1.9648141009e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a",
+          "time": 0.5,
+          "expected": 0.02307365,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ρ_air",
+          "time": 0.5,
+          "expected": 1.3416885487,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "p_sat",
+          "time": 0.5,
+          "expected": 286.77296062,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.5,
+          "expected": 2524697.6096,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "S_eq",
+          "time": 0.5,
+          "expected": 1.0024079055,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.5,
+          "expected": 7.923430706e-07,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "large_Dp_10um",
+      "description": "D_p=10 μm (drizzle drop): curvature is weak so S_eq is close to 1 and the kinetic corrections to D_v and k_a are minor. Tests the large-D_p limit where the Maxwellian diffusion picture should dominate; |dDp_dt| is ~6× smaller than the 1 μm baseline at the same S_v.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied to the drizzle-drop regime. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 1e-05,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "D_v_prime",
+          "time": 0.0,
+          "expected": 2.345162114e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a_prime",
+          "time": 0.0,
+          "expected": 0.024328092902,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "S_eq",
+          "time": 0.0,
+          "expected": 1.0002159123,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.0,
+          "expected": 4.6957270508e-07,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "solute_lowers_Seq",
+      "description": "Add 1e-15 mol solute (n_s) into a 1 μm droplet. Eq. 17.27's Raoult term pulls S_eq below unity so the droplet grows even at only 0.1% supersaturation (S_v=1.001). Confirms the composite Köhler expression embedded in Eq. 17.70 handles the n_s term with correct sign.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied with the Köhler n_s term active. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 1.001,
+        "D_p": 1e-06,
+        "n_s": 1e-15,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "S_eq",
+          "time": 0.0,
+          "expected": 0.9681669338,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.0,
+          "expected": 1.2072431836e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    },
+    {
+      "id": "low_pressure_500hPa",
+      "description": "Upper-tropospheric conditions: p_a=500 hPa, T=273.15 K. D_v nearly doubles via the p_ref/p_a factor in Eq. 17.61, and air density falls. Used to guard the p_a dependence of Eq. 17.61 and of ρ_air (ideal-gas law), plus the T-dependence of k_a and ΔH_v.\n\nTolerance rationale (rel=1e-4): see baseline_supersat_293K — same Tsit5↔LSODA truncation profile applied to upper-tropospheric pressure/temperature. Per-assertion blocks are redundant with test-level.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.15,
+        "p_a": 50000.0,
+        "S_v": 1.01,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "assertions": [
+        {
+          "variable": "D_v",
+          "time": 0.5,
+          "expected": 4.2804740205e-05,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "k_a",
+          "time": 0.5,
+          "expected": 0.02378365,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ρ_air",
+          "time": 0.5,
+          "expected": 0.63783342539,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "p_sat",
+          "time": 0.5,
+          "expected": 610.94,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.5,
+          "expected": 2500000.0,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "S_eq",
+          "time": 0.5,
+          "expected": 1.0023196501,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "dDp_dt",
+          "time": 0.5,
+          "expected": 1.5566265402e-06,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        }
+      ]
+    }
+  ],
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N.: Atmospheric Chemistry and Physics — From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 17 (Cloud Physics), 2006.",
+    "notes": "Single-droplet diffusional growth. Equations 17.61, 17.62, 17.70, 17.71, 17.72 (air diffusivity + kinetic correction, thermal conductivity + kinetic correction, simplified droplet-growth equation). Köhler (Eq. 17.27) composite term for S_eq uses the solute moles n_s and an insoluble-core diameter d_u; pass n_s = 0, d_u = 0 for pure-water droplets. The `vol_eps` term (1e-60 m^3) is a numerical regularizer that prevents division by zero when D_p^3 == d_u^3 — at any physical droplet size it contributes O(1e-40) to a quantity of order D_p^3 and is negligible. `one_val`, `π_val`, `T_unit`, `vol_eps` are numerical-stability / dimensionless-constant parameters that the upstream `@constants` block declared with explicit units (1 or m^3) — they should not be treated as tunable. Upstream repo: https://github.com/EarthSciML/Aerosol.jl; pinned commit c8c640bb636b22f2425460e9ed5cba50793bfee1.",
+    "url": "https://www.wiley.com/en-us/Atmospheric+Chemistry+and+Physics%3A+From+Air+Pollution+to+Climate+Change%2C+2nd+Edition-p-9780471720188"
+  },
+  "analyses": [
+    {
+      "id": "growth_rate_vs_Dp",
+      "description": "Droplet-diameter growth rate dD_p/dt as a function of droplet diameter at fixed T, p_a, S_v, and n_s. Reproduces the canonical shape of Seinfeld & Pandis Fig. 17.6–17.7 (Köhler curve): at very small D_p the Kelvin term dominates and growth is suppressed / negative; above the critical diameter the droplet grows freely with the ~1/D_p Maxwell scaling.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "S_v": 1.003,
+        "n_s": 1e-16,
+        "d_u": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "D_p",
+            "values": [
+              1e-08,
+              2e-08,
+              5e-08,
+              1e-07,
+              2e-07,
+              5e-07,
+              1e-06,
+              2e-06,
+              5e-06,
+              1e-05
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "dDp_dt_vs_Dp_log",
+          "type": "line",
+          "description": "dD_p/dt (m/s) vs D_p (m) at S_v=1.003 with a small solute mass — resembles the activation-curve shape in Seinfeld & Pandis Fig. 17.6.",
+          "x": {
+            "variable": "D_p",
+            "label": "Droplet diameter D_p (m)"
+          },
+          "y": {
+            "variable": "dDp_dt",
+            "label": "Growth rate dD_p/dt (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "Dv_vs_T",
+      "description": "Water-vapor diffusivity D_v as a function of temperature at 1 atm. Reproduces Eq. 17.61: D_v = 0.211e-4 × (p_ref/p_a) × (T/273)^1.94. The ~(T/273)^1.94 scaling is a textbook result (Seinfeld & Pandis §17.4.1) and should cross 2.4e-5 m²/s at ~293 K.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "values": [
+              233.15,
+              243.15,
+              253.15,
+              263.15,
+              273.15,
+              283.15,
+              293.15,
+              303.15,
+              313.15
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "Dv_vs_T_curve",
+          "type": "line",
+          "description": "Water-vapor diffusivity D_v vs T (Eq. 17.61).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature (K)"
+          },
+          "y": {
+            "variable": "D_v",
+            "label": "Diffusivity D_v (m²/s)"
+          }
+        },
+        {
+          "id": "ka_vs_T_curve",
+          "type": "line",
+          "description": "Air thermal conductivity k_a vs T (Eq. 17.71).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature (K)"
+          },
+          "y": {
+            "variable": "k_a",
+            "label": "Thermal conductivity k_a (J/(m·s·K))"
+          }
+        }
+      ]
+    },
+    {
+      "id": "psat_vs_T_magnus",
+      "description": "Saturation vapor pressure p_sat as a function of T via the Magnus formula. Reproduces the water-vapor pressure curve in Seinfeld & Pandis Table 17.2 / Fig. 17.1: rises from a few hundred Pa at 0 °C to several thousand Pa at 30 °C.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "p_a": 101325.0,
+        "S_v": 1.01,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "values": [
+              253.15,
+              263.15,
+              273.15,
+              283.15,
+              293.15,
+              303.15,
+              313.15,
+              323.15
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "psat_vs_T",
+          "type": "line",
+          "description": "Magnus saturation vapor pressure vs T (S&P Table 17.2).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature (K)"
+          },
+          "y": {
+            "variable": "p_sat",
+            "label": "Saturation pressure p_sat (Pa)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "growth_rate_vs_Sv",
+      "description": "Droplet growth rate dD_p/dt as a function of environmental saturation ratio S_v. The curve crosses zero at S_v = S_eq (Kelvin-limited equilibrium) and grows linearly in (S_v − S_eq). Useful for inspecting model sensitivity to ambient humidity, as in Seinfeld & Pandis §17.4.2.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "T": 293.15,
+        "p_a": 101325.0,
+        "D_p": 1e-06,
+        "n_s": 0.0,
+        "d_u": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "S_v",
+            "values": [
+              0.99,
+              0.995,
+              1.0,
+              1.002,
+              1.005,
+              1.01,
+              1.02,
+              1.05
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "dDp_dt_vs_Sv",
+          "type": "line",
+          "description": "Growth rate vs ambient saturation ratio S_v.",
+          "x": {
+            "variable": "S_v",
+            "label": "Environmental saturation ratio S_v"
+          },
+          "y": {
+            "variable": "dDp_dt",
+            "label": "Growth rate dD_p/dt (m/s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

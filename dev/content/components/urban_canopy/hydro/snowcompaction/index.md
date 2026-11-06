@@ -1,0 +1,1083 @@
+---
+title: "SnowCompaction"
+slug: "snowcompaction"
+domains: ["urban_canopy"]
+component_types: ["model"]
+subdomains: ["hydro"]
+domain: "urban_canopy"
+subdomain: "hydro"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/urban_canopy/hydro/snow_compaction.esm"
+reference: "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Snow Hydrology), Section 5.1.4 (Snow Compaction), Eqs. 5.24–5.33, pp. 118–120."
+description: "Total fractional snow-layer compaction rate combining destructive metamorphism (Eq. 5.26), overburden pressure (Eq. 5.28), and melt-induced compaction (Eq. 5.31). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:174 (`SnowCompaction` @component). Implements Oleson et al. (2010) CLM4 Tech Note Chapter 5, Section 5.1.4, Eqs. 5.24–5.33. Parameterized as observed-only: T_i, w_ice, w_liq, dz, P_s, f_ice_n, f_ice_n1 are inputs; c_1, c_2, C_R1, eta, C_R2, C_R3, C_R are algebraic outputs."
+tags: ["urban_canopy", "hydro", "model", "hydrology", "snow", "observed-only", "clm4"]
+---
+
+## Description
+
+Total fractional snow-layer compaction rate combining destructive metamorphism (Eq. 5.26), overburden pressure (Eq. 5.28), and melt-induced compaction (Eq. 5.31). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:174 (`SnowCompaction` @component). Implements Oleson et al. (2010) CLM4 Tech Note Chapter 5, Section 5.1.4, Eqs. 5.24–5.33. Parameterized as observed-only: T_i, w_ice, w_liq, dz, P_s, f_ice_n, f_ice_n1 are inputs; c_1, c_2, C_R1, eta, C_R2, C_R3, C_R are algebraic outputs.
+
+## Reference
+
+_source_ref: UrbanCanopy.jl@9200edd4:src/hydrology.jl:174
+Upstream `SnowCompaction` is an MTK `@component` where T_i, w_ice, w_liq, Δz, P_s, f_ice_n, and f_ice_n1 are `@parameters` (driven by a parent layer/timestepper). For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the migration tracker's `(M, equations)` classification. The seven algebraic equations are unchanged from upstream. Δz is renamed to `dz` and η to `eta` for ASCII parameter names.
+
+Tolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/ifelse/max closed-form expressions across the relevant snow regimes (T_i 230–273 K, snow densities 50–500 kg/m³, overburden pressures 0–10⁴ kg/m²)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T_i` | `K` | `263.15` | Snow layer temperature |
+| `w_ice` | `kg/m^2` | `50.0` | Mass of ice in layer |
+| `w_liq` | `kg/m^2` | `1.0` | Mass of liquid water in layer |
+| `dz` | `m` | `0.5` | Snow layer thickness (Δz in upstream Julia source) |
+| `P_s` | `kg/m^2` | `100.0` | Snow load pressure on this layer (Eq. 5.30) |
+| `f_ice_n` | `1` | `0.9` | Ice fraction at time n (dimensionless) |
+| `f_ice_n1` | `1` | `0.9` | Ice fraction at time n+1 (dimensionless) |
+| `T_f` | `K` | `273.15` | Freezing temperature of water (Oleson et al. 2010 Table 1.4) |
+| `c_3` | `s^-1` | `2.777e-06` | Fractional compaction rate at T_f (Eq. 5.26) |
+| `c_4` | `K^-1` | `0.04` | Temperature coefficient for metamorphism (Eq. 5.26) |
+| `eta_0` | `kg*s/m^2` | `900000.0` | Reference viscosity (Eq. 5.29) |
+| `c_5` | `K^-1` | `0.08` | Viscosity temperature coefficient (Eq. 5.29) |
+| `c_6` | `m^3/kg` | `0.023` | Viscosity density coefficient (Eq. 5.29) |
+| `hundred_kgpm3` | `kg/m^3` | `100.0` | Reference density 100 kg/m^3 (Eq. 5.27 threshold) |
+| `thresh_liq_density` | `kg/m^3` | `0.01` | Liquid water density threshold (Eq. 5.27) |
+| `coeff_0046` | `m^3/kg` | `0.046` | Density coefficient (Eq. 5.27) |
+| `one_per_s` | `s^-1` | `1.0` | Unit rate for nondimensionalization (Eq. 5.31) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `c_1` | `1` |  | Density-dependent coefficient (Eq. 5.27, dimensionless) |
+| `c_2` | `1` |  | Liquid-dependent coefficient (Eq. 5.27, dimensionless) |
+| `C_R1` | `s^-1` |  | Destructive metamorphism compaction rate (Eq. 5.26) |
+| `eta` | `kg*s/m^2` |  | Viscosity coefficient (Eq. 5.29; η in upstream Julia source) |
+| `C_R2` | `s^-1` |  | Overburden compaction rate (Eq. 5.28) |
+| `C_R3` | `s^-1` |  | Melt compaction rate (Eq. 5.31) |
+| `C_R` | `s^-1` |  | Total fractional compaction rate (Eq. 5.24) |
+
+## Observed expressions
+
+$$
+c_{1} = \mathrm{ifelse}\left(\mathrm{>}\left(\frac{w_{ice}}{dz}, hundred_{kgpm3}\right), e^{\left(-1\right) \cdot coeff_{0046} \cdot \left(\frac{w_{ice}}{dz} - hundred_{kgpm3}\right)}, 1.0\right)
+$$
+_Density-dependent coefficient (Eq. 5.27, dimensionless)_
+
+$$
+c_{2} = \mathrm{ifelse}\left(\mathrm{>}\left(\frac{w_{liq}}{dz}, thresh_{liq\,density}\right), 2.0, 1.0\right)
+$$
+_Liquid-dependent coefficient (Eq. 5.27, dimensionless)_
+
+$$
+C_{R1} = \left(-1\right) \cdot c_{3} \cdot c_{1} \cdot c_{2} \cdot e^{\left(-1\right) \cdot c_{4} \cdot \left(T_{f} - T_{i}\right)}
+$$
+_Destructive metamorphism compaction rate (Eq. 5.26)_
+
+$$
+eta = eta_{0} \cdot e^{c_{5} \cdot \left(T_{f} - T_{i}\right) + c_{6} \cdot \frac{w_{ice}}{dz}}
+$$
+_Viscosity coefficient (Eq. 5.29; η in upstream Julia source)_
+
+$$
+C_{R2} = \frac{\left(-1\right) \cdot P_{s}}{eta}
+$$
+_Overburden compaction rate (Eq. 5.28)_
+
+$$
+C_{R3} = \left(-1\right) \cdot one_{per\,s} \cdot \mathrm{max}\left(0.0, \frac{f_{ice\,n} - f_{ice\,n1}}{\mathrm{max}\left(f_{ice\,n}, 1 \times 10^{-10}\right)}\right)
+$$
+_Melt compaction rate (Eq. 5.31)_
+
+$$
+C_{R} = C_{R1} + C_{R2} + C_{R3}
+$$
+_Total fractional compaction rate (Eq. 5.24)_
+
+## Analyses
+
+### metamorphism_vs_temperature
+
+Destructive-metamorphism compaction rate C_R1 as a function of snow layer temperature T_i, sweeping the cold-pack to near-freezing range (240–273 K). Holds the c_1 = 1 (w_ice/Δz ≤ 100 kg/m³) and c_2 = 2 (wet) branches of Eq. 5.27 by using the default w_ice/dz = 100 kg/m³ and w_liq/dz = 2 kg/m³. Overburden and melt contributions are zeroed (P_s = 0, f_ice_n = f_ice_n1 = 0.5) so the C_R1 curve stands alone. Surfaces the canonical Anderson-1976 exp(−c_4 (T_f − T_i)) temperature dependence of Eq. 5.26 — C_R1 grows by ≈ exp(c_4 × 33) ≈ 3.7× across the 240→273 K sweep.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T_i`
+
+![C_R1 vs T_i: Anderson-1976 exponential ramp (Eq. 5.26) from cold-snow floor toward the near-freezing maximum.](/plots/urban_canopy/hydro/snowcompaction/metamorphism_vs_temperature-C_R1_curve.png)
+
+### viscosity_temperature_sweep
+
+Snow viscosity coefficient η (Eq. 5.29) and the resulting overburden compaction rate C_R2 (Eq. 5.28) as functions of layer temperature, sweeping 240–273 K at a fixed mid-pack snow density (w_ice/Δz = 200 kg/m³) and fixed overburden P_s = 1000 kg/m². η decreases by ≈ exp(c_5 × 33) ≈ 14× as T_i warms, so |C_R2| = P_s / η grows by the same factor. Surfaces the strong temperature suppression of viscosity-controlled compaction in cold snowpacks. Melt is zeroed (f_ice_n = f_ice_n1 = 0.5) so C_R2 stands alone aside from a weak C_R1 contribution.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T_i`
+
+![η vs T_i: viscosity drops near-exponentially as the layer warms (Eq. 5.29) at fixed density 200 kg/m³.](/plots/urban_canopy/hydro/snowcompaction/viscosity_temperature_sweep-eta_curve.png)
+
+![C_R2 vs T_i at P_s = 1000 kg/m²: −P_s/η warms toward larger magnitude as η falls.](/plots/urban_canopy/hydro/snowcompaction/viscosity_temperature_sweep-C_R2_curve.png)
+
+### overburden_load_sweep
+
+Overburden compaction rate C_R2 as a function of snow load pressure P_s at a fixed cold (T_i = 250 K) mid-density (w_ice/Δz = 200 kg/m³) layer. With temperature and density fixed, η is constant, so C_R2 = −P_s/η is a unit-slope line through the origin (Eq. 5.28). Sweeps 0–5000 kg/m² — the upper end is representative of a deep snowpack column overburden. Surfaces the linear P_s dependence and the magnitude of overburden compaction relative to metamorphism. Melt zeroed (f_ice_n = f_ice_n1 = 0.5).
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `P_s`
+
+![C_R2 vs P_s at fixed T_i = 250 K, ρ_snow = 200 kg/m³: linear −P_s/η behavior (Eq. 5.28).](/plots/urban_canopy/hydro/snowcompaction/overburden_load_sweep-C_R2_line.png)
+
+### melt_compaction_ramp
+
+Melt-induced compaction rate C_R3 as a function of the post-melt ice fraction f_ice_n1, holding the pre-melt fraction f_ice_n = 0.9 fixed and sweeping f_ice_n1 across the full physical range [0, 1] in 21 points. For f_ice_n1 < f_ice_n, C_R3 = −(f_ice_n − f_ice_n1)/f_ice_n is a unit-slope ramp from −1.0 (complete ice loss in one step) to 0 (no melt). For f_ice_n1 ≥ f_ice_n (refreezing), the max(0, ·) clamp of Eq. 5.31 pins C_R3 = 0 — the no-negative-melt-rate guard. The two regimes meet at f_ice_n1 = 0.9 with a hinge in the curve. Metamorphism and overburden terms are zeroed at the canonical-cold defaults so C_R3 stands alone.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `f_ice_n1`
+
+![C_R3 vs f_ice_n1 (with f_ice_n = 0.9): linear ramp from −1.0 to 0 over (0, 0.9), then clamped to 0 for f_ice_n1 ≥ 0.9 (Eq. 5.31 max(0, ·) guard).](/plots/urban_canopy/hydro/snowcompaction/melt_compaction_ramp-C_R3_curve.png)
+
+### total_compaction_T_Ps_heatmap
+
+Total fractional compaction rate C_R = C_R1 + C_R2 + C_R3 (Eq. 5.24) on the (T_i, P_s) plane at no-melt (f_ice_n = f_ice_n1 = 0.5) and fixed mid-pack density (w_ice/Δz = 200 kg/m³). 13×13 Cartesian sweep of T_i ∈ [240, 273] K against P_s ∈ [0, 5000] kg/m². Surfaces the joint behavior of the two non-melt mechanisms: at P_s = 0 the surface reduces to the C_R1(T_i) temperature curve; along the temperature-fixed axis the slope vs P_s is −1/η, with the slope steepening rapidly toward T_f as η drops. The result is a strongly bowed surface where the largest compaction magnitudes concentrate in the warm, heavily-loaded corner — the operational regime where overburden compaction dominates the snowpack mass-budget.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T_i`, `P_s`
+
+![C_R(T_i, P_s) at fixed ρ_snow = 200 kg/m³, no melt: combined metamorphism + overburden surface; strongest compaction in the warm/heavy-load corner.](/plots/urban_canopy/hydro/snowcompaction/total_compaction_T_Ps_heatmap-C_R_surface.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: UrbanCanopy.jl@9200edd4:src/hydrology.jl:174\nUpstream `SnowCompaction` is an MTK `@component` where T_i, w_ice, w_liq, Δz, P_s, f_ice_n, and f_ice_n1 are `@parameters` (driven by a parent layer/timestepper). For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the migration tracker's `(M, equations)` classification. The seven algebraic equations are unchanged from upstream. Δz is renamed to `dz` and η to `eta` for ASCII parameter names.\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/ifelse/max closed-form expressions across the relevant snow regimes (T_i 230–273 K, snow densities 50–500 kg/m³, overburden pressures 0–10⁴ kg/m²)."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "T_i": {
+      "type": "parameter",
+      "units": "K",
+      "default": 263.15,
+      "description": "Snow layer temperature"
+    },
+    "w_ice": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 50.0,
+      "description": "Mass of ice in layer"
+    },
+    "w_liq": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 1.0,
+      "description": "Mass of liquid water in layer"
+    },
+    "dz": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.5,
+      "description": "Snow layer thickness (Δz in upstream Julia source)"
+    },
+    "P_s": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 100.0,
+      "description": "Snow load pressure on this layer (Eq. 5.30)"
+    },
+    "f_ice_n": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.9,
+      "description": "Ice fraction at time n (dimensionless)"
+    },
+    "f_ice_n1": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.9,
+      "description": "Ice fraction at time n+1 (dimensionless)"
+    },
+    "T_f": {
+      "type": "parameter",
+      "units": "K",
+      "default": 273.15,
+      "description": "Freezing temperature of water (Oleson et al. 2010 Table 1.4)"
+    },
+    "c_3": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 2.777e-06,
+      "description": "Fractional compaction rate at T_f (Eq. 5.26)"
+    },
+    "c_4": {
+      "type": "parameter",
+      "units": "K^-1",
+      "default": 0.04,
+      "description": "Temperature coefficient for metamorphism (Eq. 5.26)"
+    },
+    "eta_0": {
+      "type": "parameter",
+      "units": "kg*s/m^2",
+      "default": 900000.0,
+      "description": "Reference viscosity (Eq. 5.29)"
+    },
+    "c_5": {
+      "type": "parameter",
+      "units": "K^-1",
+      "default": 0.08,
+      "description": "Viscosity temperature coefficient (Eq. 5.29)"
+    },
+    "c_6": {
+      "type": "parameter",
+      "units": "m^3/kg",
+      "default": 0.023,
+      "description": "Viscosity density coefficient (Eq. 5.29)"
+    },
+    "hundred_kgpm3": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 100.0,
+      "description": "Reference density 100 kg/m^3 (Eq. 5.27 threshold)"
+    },
+    "thresh_liq_density": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 0.01,
+      "description": "Liquid water density threshold (Eq. 5.27)"
+    },
+    "coeff_0046": {
+      "type": "parameter",
+      "units": "m^3/kg",
+      "default": 0.046,
+      "description": "Density coefficient (Eq. 5.27)"
+    },
+    "one_per_s": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 1.0,
+      "description": "Unit rate for nondimensionalization (Eq. 5.31)"
+    },
+    "c_1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Density-dependent coefficient (Eq. 5.27, dimensionless)"
+    },
+    "c_2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Liquid-dependent coefficient (Eq. 5.27, dimensionless)"
+    },
+    "C_R1": {
+      "type": "unknown",
+      "units": "s^-1",
+      "description": "Destructive metamorphism compaction rate (Eq. 5.26)"
+    },
+    "eta": {
+      "type": "unknown",
+      "units": "kg*s/m^2",
+      "description": "Viscosity coefficient (Eq. 5.29; η in upstream Julia source)"
+    },
+    "C_R2": {
+      "type": "unknown",
+      "units": "s^-1",
+      "description": "Overburden compaction rate (Eq. 5.28)"
+    },
+    "C_R3": {
+      "type": "unknown",
+      "units": "s^-1",
+      "description": "Melt compaction rate (Eq. 5.31)"
+    },
+    "C_R": {
+      "type": "unknown",
+      "units": "s^-1",
+      "description": "Total fractional compaction rate (Eq. 5.24)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "c_1",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "w_ice",
+                  "dz"
+                ]
+              },
+              "hundred_kgpm3"
+            ]
+          },
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  "coeff_0046",
+                  {
+                    "op": "-",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "w_ice",
+                          "dz"
+                        ]
+                      },
+                      "hundred_kgpm3"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "c_2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "w_liq",
+                  "dz"
+                ]
+              },
+              "thresh_liq_density"
+            ]
+          },
+          2.0,
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "C_R1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1,
+          "c_3",
+          "c_1",
+          "c_2",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  "c_4",
+                  {
+                    "op": "-",
+                    "args": [
+                      "T_f",
+                      "T_i"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "eta",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "eta_0",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "c_5",
+                      {
+                        "op": "-",
+                        "args": [
+                          "T_f",
+                          "T_i"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "c_6",
+                      {
+                        "op": "/",
+                        "args": [
+                          "w_ice",
+                          "dz"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_R2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1,
+              "P_s"
+            ]
+          },
+          "eta"
+        ]
+      }
+    },
+    {
+      "lhs": "C_R3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1,
+          "one_per_s",
+          {
+            "op": "max",
+            "args": [
+              0.0,
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "f_ice_n",
+                      "f_ice_n1"
+                    ]
+                  },
+                  {
+                    "op": "max",
+                    "args": [
+                      "f_ice_n",
+                      1e-10
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_R",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "C_R1",
+          "C_R2",
+          "C_R3"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_state",
+      "description": "Default parameter values: cold (T_i=263.15 K), boundary-density snow (w_ice/dz = 100 kg/m³ — branch FALSE → c_1 = 1.0), wet (w_liq/dz = 2.0 kg/m³ > 0.01 → c_2 = 2.0), moderate overburden, no melt (f_ice_n = f_ice_n1 = 0.9 → C_R3 = 0).",
+      "parameter_overrides": {
+        "T_i": 263.15,
+        "w_ice": 50.0,
+        "w_liq": 1.0,
+        "dz": 0.5,
+        "P_s": 100.0,
+        "f_ice_n": 0.9,
+        "f_ice_n1": 0.9
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "c_1",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "c_2",
+          "time": 0.0,
+          "expected": 2.0
+        },
+        {
+          "variable": "C_R1",
+          "time": 0.0,
+          "expected": -3.7229575356819407e-06
+        },
+        {
+          "variable": "eta",
+          "time": 0.0,
+          "expected": 19978156.15329746
+        },
+        {
+          "variable": "C_R2",
+          "time": 0.0,
+          "expected": -5.005466932617536e-06
+        },
+        {
+          "variable": "C_R3",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "C_R",
+          "time": 0.0,
+          "expected": -8.728424468299477e-06
+        }
+      ]
+    },
+    {
+      "id": "dense_snow_metamorphism",
+      "description": "Higher-density snow (w_ice/dz = 200 kg/m³ > 100 → c_1 < 1 branch), dry layer (w_liq/dz < threshold → c_2 = 1), no overburden, no melt. Isolates the destructive-metamorphism path with the density-suppression factor.",
+      "parameter_overrides": {
+        "T_i": 263.15,
+        "w_ice": 200.0,
+        "w_liq": 0.001,
+        "dz": 1.0,
+        "P_s": 0.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "c_1",
+          "time": 0.0,
+          "expected": 0.010051835744633586
+        },
+        {
+          "variable": "c_2",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "C_R1",
+          "time": 0.0,
+          "expected": -1.871127881646035e-08
+        },
+        {
+          "variable": "C_R2",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "C_R3",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "warm_low_density",
+      "description": "Near-freezing layer (T_i = 272 K), low density (w_ice/dz = 80 kg/m³ < 100 → c_1 = 1), wet layer (c_2 = 2). Maximizes destructive metamorphism rate (T_i close to T_f).",
+      "parameter_overrides": {
+        "T_i": 272.0,
+        "w_ice": 40.0,
+        "w_liq": 5.0,
+        "dz": 0.5,
+        "P_s": 0.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "c_1",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "c_2",
+          "time": 0.0,
+          "expected": 2.0
+        },
+        {
+          "variable": "C_R1",
+          "time": 0.0,
+          "expected": -5.304303058007234e-06
+        }
+      ]
+    },
+    {
+      "id": "overburden_dominated",
+      "description": "Heavy overburden pressure (P_s = 5000 kg/m²) with cold dense snow. Eta is high (cold + dense), but P_s/eta still dominates the total rate.",
+      "parameter_overrides": {
+        "T_i": 250.0,
+        "w_ice": 150.0,
+        "w_liq": 0.0,
+        "dz": 0.5,
+        "P_s": 5000.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "eta",
+          "time": 0.0,
+          "expected": 5690989902.689874
+        },
+        {
+          "variable": "C_R2",
+          "time": 0.0,
+          "expected": -8.785817732055239e-07
+        },
+        {
+          "variable": "C_R",
+          "time": 0.0,
+          "expected": -8.786929233306654e-07
+        }
+      ]
+    },
+    {
+      "id": "melt_compaction",
+      "description": "Active melt: f_ice drops from 0.9 to 0.7 in one step → C_R3 = -1.0 * (0.2/0.9). C_R1 and C_R2 are smaller-magnitude contributions; melt dominates.",
+      "parameter_overrides": {
+        "T_i": 272.0,
+        "w_ice": 50.0,
+        "w_liq": 5.0,
+        "dz": 0.5,
+        "P_s": 100.0,
+        "f_ice_n": 0.9,
+        "f_ice_n1": 0.7
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "C_R3",
+          "time": 0.0,
+          "expected": -0.2222222222222223
+        },
+        {
+          "variable": "C_R",
+          "time": 0.0,
+          "expected": -0.2222376872594633
+        }
+      ]
+    },
+    {
+      "id": "no_melt_negative_diff",
+      "description": "f_ice_n1 > f_ice_n (refreezing): the max(0, ...) clamps C_R3 to zero. Verifies the no-negative-melt-rate guard from Eq. 5.31.",
+      "parameter_overrides": {
+        "T_i": 263.15,
+        "w_ice": 50.0,
+        "w_liq": 1.0,
+        "dz": 0.5,
+        "P_s": 0.0,
+        "f_ice_n": 0.7,
+        "f_ice_n1": 0.9
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "C_R3",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "very_cold",
+      "description": "Very cold layer (T_i = 230 K, 43 K below T_f). Both metamorphism and viscosity-driven overburden compaction are strongly suppressed (exp(-0.04*43) ≈ 0.179; exp(0.08*43) ≈ 31).",
+      "parameter_overrides": {
+        "T_i": 230.0,
+        "w_ice": 60.0,
+        "w_liq": 0.001,
+        "dz": 0.5,
+        "P_s": 200.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "C_R1",
+          "time": 0.0,
+          "expected": -1.9698478402571534e-07
+        },
+        {
+          "variable": "eta",
+          "time": 0.0,
+          "expected": 448827884.87023425
+        },
+        {
+          "variable": "C_R2",
+          "time": 0.0,
+          "expected": -4.4560511220871287e-07
+        }
+      ]
+    },
+    {
+      "id": "all_three_processes_active",
+      "description": "All three compaction mechanisms simultaneously active: dense wet snow (c_1<1, c_2=2), nontrivial overburden, and active melt. Verifies C_R = C_R1 + C_R2 + C_R3 sum (Eq. 5.24).",
+      "parameter_overrides": {
+        "T_i": 270.0,
+        "w_ice": 200.0,
+        "w_liq": 10.0,
+        "dz": 1.0,
+        "P_s": 1000.0,
+        "f_ice_n": 0.85,
+        "f_ice_n1": 0.8
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "c_1",
+          "time": 0.0,
+          "expected": 0.010051835744633586
+        },
+        {
+          "variable": "c_2",
+          "time": 0.0,
+          "expected": 2.0
+        },
+        {
+          "variable": "C_R1",
+          "time": 0.0,
+          "expected": -4.921870173644911e-08
+        },
+        {
+          "variable": "eta",
+          "time": 0.0,
+          "expected": 115196513.64921543
+        },
+        {
+          "variable": "C_R2",
+          "time": 0.0,
+          "expected": -8.680818267166463e-06
+        },
+        {
+          "variable": "C_R3",
+          "time": 0.0,
+          "expected": -0.05882352941176463
+        },
+        {
+          "variable": "C_R",
+          "time": 0.0,
+          "expected": -0.058832259448733534
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "metamorphism_vs_temperature",
+      "description": "Destructive-metamorphism compaction rate C_R1 as a function of snow layer temperature T_i, sweeping the cold-pack to near-freezing range (240–273 K). Holds the c_1 = 1 (w_ice/Δz ≤ 100 kg/m³) and c_2 = 2 (wet) branches of Eq. 5.27 by using the default w_ice/dz = 100 kg/m³ and w_liq/dz = 2 kg/m³. Overburden and melt contributions are zeroed (P_s = 0, f_ice_n = f_ice_n1 = 0.5) so the C_R1 curve stands alone. Surfaces the canonical Anderson-1976 exp(−c_4 (T_f − T_i)) temperature dependence of Eq. 5.26 — C_R1 grows by ≈ exp(c_4 × 33) ≈ 3.7× across the 240→273 K sweep.",
+      "initial_state": {},
+      "parameters": {
+        "w_ice": 50.0,
+        "w_liq": 1.0,
+        "dz": 0.5,
+        "P_s": 0.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T_i",
+            "range": {
+              "start": 240.0,
+              "stop": 273.0,
+              "count": 34,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "C_R1_curve",
+          "type": "line",
+          "description": "C_R1 vs T_i: Anderson-1976 exponential ramp (Eq. 5.26) from cold-snow floor toward the near-freezing maximum.",
+          "x": {
+            "variable": "T_i",
+            "label": "Snow layer temperature T_i (K)"
+          },
+          "y": {
+            "variable": "C_R1",
+            "label": "Destructive metamorphism rate C_R1 (s^-1)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "viscosity_temperature_sweep",
+      "description": "Snow viscosity coefficient η (Eq. 5.29) and the resulting overburden compaction rate C_R2 (Eq. 5.28) as functions of layer temperature, sweeping 240–273 K at a fixed mid-pack snow density (w_ice/Δz = 200 kg/m³) and fixed overburden P_s = 1000 kg/m². η decreases by ≈ exp(c_5 × 33) ≈ 14× as T_i warms, so |C_R2| = P_s / η grows by the same factor. Surfaces the strong temperature suppression of viscosity-controlled compaction in cold snowpacks. Melt is zeroed (f_ice_n = f_ice_n1 = 0.5) so C_R2 stands alone aside from a weak C_R1 contribution.",
+      "initial_state": {},
+      "parameters": {
+        "w_ice": 100.0,
+        "w_liq": 0.0,
+        "dz": 0.5,
+        "P_s": 1000.0,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T_i",
+            "range": {
+              "start": 240.0,
+              "stop": 273.0,
+              "count": 34,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "eta_curve",
+          "type": "line",
+          "description": "η vs T_i: viscosity drops near-exponentially as the layer warms (Eq. 5.29) at fixed density 200 kg/m³.",
+          "x": {
+            "variable": "T_i",
+            "label": "Snow layer temperature T_i (K)"
+          },
+          "y": {
+            "variable": "eta",
+            "label": "Viscosity coefficient η (kg·s/m^2)"
+          }
+        },
+        {
+          "id": "C_R2_curve",
+          "type": "line",
+          "description": "C_R2 vs T_i at P_s = 1000 kg/m²: −P_s/η warms toward larger magnitude as η falls.",
+          "x": {
+            "variable": "T_i",
+            "label": "Snow layer temperature T_i (K)"
+          },
+          "y": {
+            "variable": "C_R2",
+            "label": "Overburden compaction rate C_R2 (s^-1)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "overburden_load_sweep",
+      "description": "Overburden compaction rate C_R2 as a function of snow load pressure P_s at a fixed cold (T_i = 250 K) mid-density (w_ice/Δz = 200 kg/m³) layer. With temperature and density fixed, η is constant, so C_R2 = −P_s/η is a unit-slope line through the origin (Eq. 5.28). Sweeps 0–5000 kg/m² — the upper end is representative of a deep snowpack column overburden. Surfaces the linear P_s dependence and the magnitude of overburden compaction relative to metamorphism. Melt zeroed (f_ice_n = f_ice_n1 = 0.5).",
+      "initial_state": {},
+      "parameters": {
+        "T_i": 250.0,
+        "w_ice": 100.0,
+        "w_liq": 0.0,
+        "dz": 0.5,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "P_s",
+            "range": {
+              "start": 0.0,
+              "stop": 5000.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "C_R2_line",
+          "type": "line",
+          "description": "C_R2 vs P_s at fixed T_i = 250 K, ρ_snow = 200 kg/m³: linear −P_s/η behavior (Eq. 5.28).",
+          "x": {
+            "variable": "P_s",
+            "label": "Snow load pressure P_s (kg/m^2)"
+          },
+          "y": {
+            "variable": "C_R2",
+            "label": "Overburden compaction rate C_R2 (s^-1)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "melt_compaction_ramp",
+      "description": "Melt-induced compaction rate C_R3 as a function of the post-melt ice fraction f_ice_n1, holding the pre-melt fraction f_ice_n = 0.9 fixed and sweeping f_ice_n1 across the full physical range [0, 1] in 21 points. For f_ice_n1 < f_ice_n, C_R3 = −(f_ice_n − f_ice_n1)/f_ice_n is a unit-slope ramp from −1.0 (complete ice loss in one step) to 0 (no melt). For f_ice_n1 ≥ f_ice_n (refreezing), the max(0, ·) clamp of Eq. 5.31 pins C_R3 = 0 — the no-negative-melt-rate guard. The two regimes meet at f_ice_n1 = 0.9 with a hinge in the curve. Metamorphism and overburden terms are zeroed at the canonical-cold defaults so C_R3 stands alone.",
+      "initial_state": {},
+      "parameters": {
+        "T_i": 263.15,
+        "w_ice": 50.0,
+        "w_liq": 1.0,
+        "dz": 0.5,
+        "P_s": 0.0,
+        "f_ice_n": 0.9
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "f_ice_n1",
+            "range": {
+              "start": 0.0,
+              "stop": 1.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "C_R3_curve",
+          "type": "line",
+          "description": "C_R3 vs f_ice_n1 (with f_ice_n = 0.9): linear ramp from −1.0 to 0 over [0, 0.9], then clamped to 0 for f_ice_n1 ≥ 0.9 (Eq. 5.31 max(0, ·) guard).",
+          "x": {
+            "variable": "f_ice_n1",
+            "label": "Post-step ice fraction f_ice_n1 (—)"
+          },
+          "y": {
+            "variable": "C_R3",
+            "label": "Melt compaction rate C_R3 (s^-1)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "total_compaction_T_Ps_heatmap",
+      "description": "Total fractional compaction rate C_R = C_R1 + C_R2 + C_R3 (Eq. 5.24) on the (T_i, P_s) plane at no-melt (f_ice_n = f_ice_n1 = 0.5) and fixed mid-pack density (w_ice/Δz = 200 kg/m³). 13×13 Cartesian sweep of T_i ∈ [240, 273] K against P_s ∈ [0, 5000] kg/m². Surfaces the joint behavior of the two non-melt mechanisms: at P_s = 0 the surface reduces to the C_R1(T_i) temperature curve; along the temperature-fixed axis the slope vs P_s is −1/η, with the slope steepening rapidly toward T_f as η drops. The result is a strongly bowed surface where the largest compaction magnitudes concentrate in the warm, heavily-loaded corner — the operational regime where overburden compaction dominates the snowpack mass-budget.",
+      "initial_state": {},
+      "parameters": {
+        "w_ice": 100.0,
+        "w_liq": 0.0,
+        "dz": 0.5,
+        "f_ice_n": 0.5,
+        "f_ice_n1": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T_i",
+            "range": {
+              "start": 240.0,
+              "stop": 273.0,
+              "count": 13,
+              "scale": "linear"
+            }
+          },
+          {
+            "parameter": "P_s",
+            "range": {
+              "start": 0.0,
+              "stop": 5000.0,
+              "count": 13,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "C_R_surface",
+          "type": "heatmap",
+          "description": "C_R(T_i, P_s) at fixed ρ_snow = 200 kg/m³, no melt: combined metamorphism + overburden surface; strongest compaction in the warm/heavy-load corner.",
+          "x": {
+            "variable": "T_i",
+            "label": "Snow layer temperature T_i (K)"
+          },
+          "y": {
+            "variable": "P_s",
+            "label": "Snow load pressure P_s (kg/m^2)"
+          },
+          "value": {
+            "variable": "C_R",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,581 @@
+---
+title: "NoninteractingSOA"
+slug: "noninteractingsoa"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["organic"]
+domain: "aerosol"
+subdomain: "organic"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/organic/noninteracting_soa.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.2, Eqs. 14.6–14.18 — noninteracting SOA gas–particle partitioning model. Migrated from Aerosol.jl src/organic_aerosol.jl `NoninteractingSOA` (esm-cyz)."
+description: "Gas-particle partitioning model for a secondary organic aerosol (SOA) compound that does not interact with preexisting aerosol. The compound condenses as a pure substance once the reacted ROG exceeds a threshold set by the saturation concentration; below the threshold all product remains in the gas phase. From Seinfeld and Pandis (2006), Chapter 14, Section 14.5.2, Equations 14.6–14.18."
+tags: ["aerosol", "organic", "model", "soa", "noninteracting", "gas-particle-partitioning"]
+---
+
+## Description
+
+Gas-particle partitioning model for a secondary organic aerosol (SOA) compound that does not interact with preexisting aerosol. The compound condenses as a pure substance once the reacted ROG exceeds a threshold set by the saturation concentration; below the threshold all product remains in the gas phase. From Seinfeld and Pandis (2006), Chapter 14, Section 14.5.2, Equations 14.6–14.18.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.2, Eqs. 14.6–14.18 — noninteracting SOA gas–particle partitioning model. Migrated from Aerosol.jl src/organic_aerosol.jl `NoninteractingSOA` (esm-cyz).
+
+_source_ref: Aerosol.jl@main:src/organic_aerosol.jl:64
+
+Upstream `NoninteractingSOA` is an MTK `@component` with 3 constants (R_gas=8.314, zero_conc=0, zero_dimless=0), 5 parameters (a_i, p_i, M_i, M_ROG, T) and 7 variables (ΔROG, c_eq, c_total, ΔROG_threshold, c_aer, c_gas, X_p, Y). The equations are:
+  • c_eq ~ p_i * M_i / (R_gas * T)                                    [Eq. 14.7]
+  • c_total ~ a_i * (M_i / M_ROG) * ΔROG                              [Eq. 14.11]
+  • ΔROG_threshold ~ p_i * M_ROG / (a_i * R_gas * T)                  [Eq. 14.13]
+  • c_aer ~ max(0, c_total - c_eq)                                     [Eq. 14.9/14.10]
+  • c_gas ~ c_total - c_aer                                            [Eq. 14.6 rearranged]
+  • X_p ~ ifelse(c_total > 0, c_aer / c_total, 0)                     [Eq. 14.14]
+  • Y ~ ifelse(ΔROG > 0, c_aer / ΔROG, 0)                             [Eq. 14.16]
+
+ESM representation:
+  ΔROG becomes the `delta_ROG` parameter (the external driving input). R_gas=8.314 and the zero-clamp literals are folded directly into expressions. The 4 primary computed quantities (c_eq, c_total, delta_ROG_threshold, c_aer) are ESM `state` variables with equations in the `equations` array; the 3 diagnostic quantities (c_gas, X_p, Y) are ESM `observed` variables with embedded expressions referencing the state variables. This matches `features: variables, parameters, observed` in the migration tracker.
+
+Acausality note: all 7 equations are purely algebraic (no ODEs). The system has no cycles in the topological substitution order: c_eq and c_total depend only on parameters; delta_ROG_threshold depends only on parameters; c_aer depends on c_eq and c_total; c_gas, X_p, Y depend on c_aer and c_total. The ESS substitution loop resolves all states without a DAE solver.
+
+Physics note: c_aer = max(0, c_total − c_eq) implements the threshold behaviour — no aerosol forms until c_total ≥ c_eq, i.e. until delta_ROG ≥ delta_ROG_threshold. Above the threshold the excess condensate equals c_total − c_eq.
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system; all outputs are analytic functions of the 6 parameters with no time integration. Floating-point round-off is ~1e-15. rel=1e-9 leaves comfortable headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `a_i` | `1` | `0.05` | Molar yield of product i (dimensionless fraction of reacted ROG that becomes product i) |
+| `p_i` | `Pa` | `1.01325e-05` | Vapor pressure of pure condensed product i at temperature T |
+| `M_i` | `kg/mol` | `0.18` | Molecular weight of product i |
+| `M_ROG` | `kg/mol` | `0.15` | Molecular weight of the parent reactive organic gas (ROG) |
+| `T` | `K` | `298.0` | Temperature |
+| `delta_ROG` | `kg/m^3` | `1e-05` | Reacted reactive organic gas (ROG) concentration. The primary driving input. Aerosol forms only when delta_ROG >= delta_ROG_threshold. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `c_eq` | `kg/m^3` |  | Equilibrium gas-phase saturation concentration of product i (Eq. 14.7). Equals p_i * M_i / (R_gas * T); depends only on parameters. |
+| `c_total` | `kg/m^3` |  | Total mass concentration of product i (gas + aerosol) produced from the reacted ROG (Eq. 14.11). Linear in delta_ROG. |
+| `delta_ROG_threshold` | `kg/m^3` |  | Threshold reacted ROG concentration below which no aerosol forms (Eq. 14.13). Equals p_i * M_ROG / (a_i * R_gas * T); depends only on parameters. |
+| `c_aer` | `kg/m^3` |  | Aerosol-phase mass concentration of product i (Eq. 14.9/14.10). Zero below the formation threshold; equals c_total − c_eq above it. |
+| `c_gas` | `kg/m^3` |  | Gas-phase mass concentration of product i (Eq. 14.6 rearranged). Equals c_total − c_aer; equals c_total below the threshold, approaches c_eq above it. |
+| `X_p` | `1` |  | Mass fraction of product i in the aerosol phase (Eq. 14.14, dimensionless). Zero when no total product is present. |
+| `Y` | `1` |  | Aerosol mass yield (Eq. 14.16, dimensionless). Fraction of reacted ROG that partitions into the aerosol phase: Y = c_aer / delta_ROG. Zero when delta_ROG = 0. |
+
+## Observed expressions
+
+$$
+c_{eq} = \frac{p_{i} \cdot M_{i}}{8.314 \cdot T}
+$$
+_Equilibrium gas-phase saturation concentration of product i (Eq. 14.7). Equals p_i * M_i / (R_gas * T); depends only on parameters._
+
+$$
+c_{total} = a_{i} \cdot \frac{M_{i}}{M_{ROG}} \cdot delta_{ROG}
+$$
+_Total mass concentration of product i (gas + aerosol) produced from the reacted ROG (Eq. 14.11). Linear in delta_ROG._
+
+$$
+delta_{ROG\,threshold} = \frac{p_{i} \cdot M_{ROG}}{a_{i} \cdot 8.314 \cdot T}
+$$
+_Threshold reacted ROG concentration below which no aerosol forms (Eq. 14.13). Equals p_i * M_ROG / (a_i * R_gas * T); depends only on parameters._
+
+$$
+c_{aer} = \mathrm{max}\left(0, c_{total} - c_{eq}\right)
+$$
+_Aerosol-phase mass concentration of product i (Eq. 14.9/14.10). Zero below the formation threshold; equals c_total − c_eq above it._
+
+$$
+c_{gas} = c_{total} - c_{aer}
+$$
+_Gas-phase mass concentration of product i (Eq. 14.6 rearranged). Equals c_total − c_aer; equals c_total below the threshold, approaches c_eq above it._
+
+$$
+X_{p} = \mathrm{ifelse}\left(\mathrm{>}\left(c_{total}, 0\right), \frac{c_{aer}}{c_{total}}, 0\right)
+$$
+_Mass fraction of product i in the aerosol phase (Eq. 14.14, dimensionless). Zero when no total product is present._
+
+$$
+Y = \mathrm{ifelse}\left(\mathrm{>}\left(delta_{ROG}, 0\right), \frac{c_{aer}}{delta_{ROG}}, 0\right)
+$$
+_Aerosol mass yield (Eq. 14.16, dimensionless). Fraction of reacted ROG that partitions into the aerosol phase: Y = c_aer / delta_ROG. Zero when delta_ROG = 0._
+
+## Analyses
+
+### rog_loading_sweep
+
+Sweep reacted ROG concentration from 1e-10 to 1e-4 kg/m³ (log scale) to show the threshold behaviour and approach to the mass-yield plateau Y → a_i*(M_i/M_ROG) = 0.06 at high loading. Below the threshold (~1.23e-8 kg/m³) no aerosol forms; above it aerosol concentration grows quasi-linearly.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `delta_ROG`
+
+![Aerosol mass yield Y vs. reacted ROG (log scale). Shows Y = 0 below the threshold and approach to a_i*(M_i/M_ROG)=0.06 at high loading.](/plots/aerosol/organic/noninteractingsoa/rog_loading_sweep-aerosol_yield_vs_rog.png)
+
+![Aerosol mass concentration c_aer vs. reacted ROG (log-log scale). Shows zero below the threshold and linear growth above it.](/plots/aerosol/organic/noninteractingsoa/rog_loading_sweep-aerosol_conc_vs_rog.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 14, Section 14.5.2, Eqs. 14.6–14.18 — noninteracting SOA gas–particle partitioning model. Migrated from Aerosol.jl src/organic_aerosol.jl `NoninteractingSOA` (esm-cyz).",
+    "notes": "source_ref: Aerosol.jl@main:src/organic_aerosol.jl:64\n\nUpstream `NoninteractingSOA` is an MTK `@component` with 3 constants (R_gas=8.314, zero_conc=0, zero_dimless=0), 5 parameters (a_i, p_i, M_i, M_ROG, T) and 7 variables (ΔROG, c_eq, c_total, ΔROG_threshold, c_aer, c_gas, X_p, Y). The equations are:\n  • c_eq ~ p_i * M_i / (R_gas * T)                                    [Eq. 14.7]\n  • c_total ~ a_i * (M_i / M_ROG) * ΔROG                              [Eq. 14.11]\n  • ΔROG_threshold ~ p_i * M_ROG / (a_i * R_gas * T)                  [Eq. 14.13]\n  • c_aer ~ max(0, c_total - c_eq)                                     [Eq. 14.9/14.10]\n  • c_gas ~ c_total - c_aer                                            [Eq. 14.6 rearranged]\n  • X_p ~ ifelse(c_total > 0, c_aer / c_total, 0)                     [Eq. 14.14]\n  • Y ~ ifelse(ΔROG > 0, c_aer / ΔROG, 0)                             [Eq. 14.16]\n\nESM representation:\n  ΔROG becomes the `delta_ROG` parameter (the external driving input). R_gas=8.314 and the zero-clamp literals are folded directly into expressions. The 4 primary computed quantities (c_eq, c_total, delta_ROG_threshold, c_aer) are ESM `state` variables with equations in the `equations` array; the 3 diagnostic quantities (c_gas, X_p, Y) are ESM `observed` variables with embedded expressions referencing the state variables. This matches `features: variables, parameters, observed` in the migration tracker.\n\nAcausality note: all 7 equations are purely algebraic (no ODEs). The system has no cycles in the topological substitution order: c_eq and c_total depend only on parameters; delta_ROG_threshold depends only on parameters; c_aer depends on c_eq and c_total; c_gas, X_p, Y depend on c_aer and c_total. The ESS substitution loop resolves all states without a DAE solver.\n\nPhysics note: c_aer = max(0, c_total − c_eq) implements the threshold behaviour — no aerosol forms until c_total ≥ c_eq, i.e. until delta_ROG ≥ delta_ROG_threshold. Above the threshold the excess condensate equals c_total − c_eq.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system; all outputs are analytic functions of the 6 parameters with no time integration. Floating-point round-off is ~1e-15. rel=1e-9 leaves comfortable headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "a_i": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.05,
+      "description": "Molar yield of product i (dimensionless fraction of reacted ROG that becomes product i)"
+    },
+    "p_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.01325e-05,
+      "description": "Vapor pressure of pure condensed product i at temperature T"
+    },
+    "M_i": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.18,
+      "description": "Molecular weight of product i"
+    },
+    "M_ROG": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.15,
+      "description": "Molecular weight of the parent reactive organic gas (ROG)"
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature"
+    },
+    "delta_ROG": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1e-05,
+      "description": "Reacted reactive organic gas (ROG) concentration. The primary driving input. Aerosol forms only when delta_ROG >= delta_ROG_threshold."
+    },
+    "c_eq": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Equilibrium gas-phase saturation concentration of product i (Eq. 14.7). Equals p_i * M_i / (R_gas * T); depends only on parameters."
+    },
+    "c_total": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Total mass concentration of product i (gas + aerosol) produced from the reacted ROG (Eq. 14.11). Linear in delta_ROG."
+    },
+    "delta_ROG_threshold": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Threshold reacted ROG concentration below which no aerosol forms (Eq. 14.13). Equals p_i * M_ROG / (a_i * R_gas * T); depends only on parameters."
+    },
+    "c_aer": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Aerosol-phase mass concentration of product i (Eq. 14.9/14.10). Zero below the formation threshold; equals c_total − c_eq above it."
+    },
+    "c_gas": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Gas-phase mass concentration of product i (Eq. 14.6 rearranged). Equals c_total − c_aer; equals c_total below the threshold, approaches c_eq above it."
+    },
+    "X_p": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Mass fraction of product i in the aerosol phase (Eq. 14.14, dimensionless). Zero when no total product is present."
+    },
+    "Y": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Aerosol mass yield (Eq. 14.16, dimensionless). Fraction of reacted ROG that partitions into the aerosol phase: Y = c_aer / delta_ROG. Zero when delta_ROG = 0."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "c_eq",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "p_i",
+              "M_i"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              8.314,
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_total",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "a_i",
+          {
+            "op": "/",
+            "args": [
+              "M_i",
+              "M_ROG"
+            ]
+          },
+          "delta_ROG"
+        ]
+      }
+    },
+    {
+      "lhs": "delta_ROG_threshold",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "p_i",
+              "M_ROG"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "a_i",
+              8.314,
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_aer",
+      "rhs": {
+        "op": "max",
+        "args": [
+          0,
+          {
+            "op": "-",
+            "args": [
+              "c_total",
+              "c_eq"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_gas",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "c_total",
+          "c_aer"
+        ]
+      }
+    },
+    {
+      "lhs": "X_p",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "c_total",
+              0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              "c_aer",
+              "c_total"
+            ]
+          },
+          0
+        ]
+      }
+    },
+    {
+      "lhs": "Y",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "delta_ROG",
+              0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              "c_aer",
+              "delta_ROG"
+            ]
+          },
+          0
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "Default parameter set: delta_ROG = 1e-5 kg/m³ (~10 μg/m³), well above the threshold (~1.23e-8 kg/m³). c_total = a_i*(M_i/M_ROG)*delta_ROG = 0.06*1e-5 = 6e-7. c_aer = 6e-7 − c_eq = 5.9926385590e-7. Y = c_aer/delta_ROG = 0.059926386. X_p = c_aer/c_total = 0.99877309.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "delta_ROG": 1e-05
+      },
+      "assertions": [
+        {
+          "variable": "c_eq",
+          "time": 0.0,
+          "expected": 7.3614409591e-10,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "c_total",
+          "time": 0.0,
+          "expected": 6e-07,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "delta_ROG_threshold",
+          "time": 0.0,
+          "expected": 1.2269068265e-08,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "c_aer",
+          "time": 0.0,
+          "expected": 5.992638559e-07,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "c_gas",
+          "time": 0.0,
+          "expected": 7.3614409591e-10,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "Y",
+          "time": 0.0,
+          "expected": 0.05992638559,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "X_p",
+          "time": 0.0,
+          "expected": 0.9987730932,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        }
+      ]
+    },
+    {
+      "id": "ten_times_threshold",
+      "description": "delta_ROG = 10 × delta_ROG_threshold = 1.2269068265e-7 kg/m³. At this loading c_total = 10 × c_eq, so c_aer = 9 × c_eq. Y = 9 × a_i*(M_i/M_ROG)/10 = 0.054 (exact). X_p = 9/10 = 0.9 (exact). c_gas = c_eq (exact).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "delta_ROG": 1.2269068265e-07
+      },
+      "assertions": [
+        {
+          "variable": "c_total",
+          "time": 0.0,
+          "expected": 7.3614409591e-09,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "c_aer",
+          "time": 0.0,
+          "expected": 6.6252968632e-09,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "c_gas",
+          "time": 0.0,
+          "expected": 7.3614409591e-10,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "Y",
+          "time": 0.0,
+          "expected": 0.054,
+          "tolerance": {
+            "rel": 1e-08
+          }
+        },
+        {
+          "variable": "X_p",
+          "time": 0.0,
+          "expected": 0.9,
+          "tolerance": {
+            "rel": 1e-08
+          }
+        }
+      ]
+    },
+    {
+      "id": "below_threshold",
+      "description": "delta_ROG = 1e-9 kg/m³, well below the threshold (~1.23e-8 kg/m³). c_total = 6e-11 < c_eq = 7.36e-10, so c_aer = max(0, negative) = 0. All product remains in the gas phase: c_gas = c_total = 6e-11. Y = 0, X_p = 0.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "delta_ROG": 1e-09
+      },
+      "assertions": [
+        {
+          "variable": "c_total",
+          "time": 0.0,
+          "expected": 6e-11,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "c_aer",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "c_gas",
+          "time": 0.0,
+          "expected": 6e-11,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "Y",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        },
+        {
+          "variable": "X_p",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "rog_loading_sweep",
+      "description": "Sweep reacted ROG concentration from 1e-10 to 1e-4 kg/m³ (log scale) to show the threshold behaviour and approach to the mass-yield plateau Y → a_i*(M_i/M_ROG) = 0.06 at high loading. Below the threshold (~1.23e-8 kg/m³) no aerosol forms; above it aerosol concentration grows quasi-linearly.",
+      "initial_state": {},
+      "parameters": {
+        "a_i": 0.05,
+        "p_i": 1.01325e-05,
+        "M_i": 0.18,
+        "M_ROG": 0.15,
+        "T": 298.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "delta_ROG",
+            "range": {
+              "start": 1e-10,
+              "stop": 0.0001,
+              "count": 80,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "aerosol_yield_vs_rog",
+          "type": "line",
+          "description": "Aerosol mass yield Y vs. reacted ROG (log scale). Shows Y = 0 below the threshold and approach to a_i*(M_i/M_ROG)=0.06 at high loading.",
+          "x": {
+            "variable": "delta_ROG",
+            "label": "ΔROG (kg/m³)"
+          },
+          "y": {
+            "variable": "Y",
+            "label": "Y (aerosol mass yield)"
+          }
+        },
+        {
+          "id": "aerosol_conc_vs_rog",
+          "type": "line",
+          "description": "Aerosol mass concentration c_aer vs. reacted ROG (log-log scale). Shows zero below the threshold and linear growth above it.",
+          "x": {
+            "variable": "delta_ROG",
+            "label": "ΔROG (kg/m³)"
+          },
+          "y": {
+            "variable": "c_aer",
+            "label": "c_aer (kg/m³)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

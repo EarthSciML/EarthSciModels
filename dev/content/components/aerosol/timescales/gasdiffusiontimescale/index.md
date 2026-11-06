@@ -1,0 +1,395 @@
+---
+title: "GasDiffusionTimescale"
+slug: "gasdiffusiontimescale"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["timescales"]
+domain: "aerosol"
+subdomain: "timescales"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/timescales/gas_diffusion.esm"
+reference: "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Gas-phase diffusion timescale: Eq. 12.49."
+description: "Characteristic timescale for gas-phase diffusion of a species to an aerosol particle — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12, Eq. 12.49. The gas-phase diffusion timescale τ_dg = R_p²/(4·D_g) is the characteristic time for a gas-phase concentration perturbation to diffuse to the surface of a particle of radius R_p, given the gas-phase molecular diffusivity D_g of the species. It is one of the family of mass-transfer timescales in Ch. 12 — gas-phase diffusion, interfacial transport, aqueous-phase diffusion, aqueous-phase reaction — that are compared against one another to identify the rate-limiting step in gas-to-particle conversion: a short τ_dg means gas-phase diffusion is fast and not the bottleneck. The timescale grows quadratically with the particle radius and inversely with the diffusivity. Migrated from Aerosol.jl GasDiffusionTimescale."
+tags: ["aerosol", "timescales", "model", "seinfeld_pandis_ch12", "mass-transfer"]
+---
+
+## Description
+
+Characteristic timescale for gas-phase diffusion of a species to an aerosol particle — Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 12, Eq. 12.49. The gas-phase diffusion timescale τ_dg = R_p²/(4·D_g) is the characteristic time for a gas-phase concentration perturbation to diffuse to the surface of a particle of radius R_p, given the gas-phase molecular diffusivity D_g of the species. It is one of the family of mass-transfer timescales in Ch. 12 — gas-phase diffusion, interfacial transport, aqueous-phase diffusion, aqueous-phase reaction — that are compared against one another to identify the rate-limiting step in gas-to-particle conversion: a short τ_dg means gas-phase diffusion is fast and not the bottleneck. The timescale grows quadratically with the particle radius and inversely with the diffusivity. Migrated from Aerosol.jl GasDiffusionTimescale.
+
+## Reference
+
+Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Gas-phase diffusion timescale: Eq. 12.49.
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:14
+
+Upstream `GasDiffusionTimescale` is an MTK `@component` (no parameterization). It declares two scalar `@parameters` — `R_p` (particle radius, m, default 1.0e-5) and `D_g` (gas-phase diffusivity, m^2/s, default 2.0e-5) — and one scalar `@variable` `τ_dg` (gas-phase diffusion timescale, s). The single equation is `τ_dg ~ R_p^2 / (4 * D_g)` — Eq. 12.49 of Seinfeld & Pandis (2006) Ch. 12: the characteristic time for a gas-phase concentration perturbation to diffuse to the particle surface.
+
+Observed classification: GasDiffusionTimescale has no `D()` time-derivative anywhere — it is a purely-algebraic component. `τ_dg` is an algebraic output (`τ_dg ~ R_p^2/(4·D_g)`). After MTK `mtkcompile` / `structural_simplify` the compiled system has zero ODE states and `τ_dg` becomes an observed quantity. It is therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the sibling pure-algebraic timescale migration `aqueous_eq.esm` (src/timescales.jl:183) and the other pure-algebraic Aerosol.jl migrations `zsr.esm` and `critical_ssa.esm`.
+
+Unicode identifier `τ_dg` is kept verbatim from the upstream `@variables` declaration; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migrations (`aqueous_eq.esm`: `τ_s`, `τ_a`; `zsr.esm`: `α_w`; `kelvin.esm`: `σ`, `ρ_l`) keep Greek symbols, so no ASCII rename is applied. The ASCII parameter names `R_p` and `D_g` are likewise carried verbatim from the upstream `@parameters`; `R_p` does not collide with the reserved bare constant name `R` (universal gas constant).
+
+Tests authored from physics: the upstream `timescales.jl` carries no test file (`has_tests: N` in the migration tracker). The inline `tests` block is authored from the closed-form Eq. 12.49 — pinning the exact analytic value of `τ_dg = R_p²/(4·D_g)` at the upstream default parameterization, bracketing the quadratic dependence on the particle radius R_p on both sides of the default (radius doubled → timescale ×4; radius halved → timescale ÷4), exercising the inverse dependence on the gas-phase diffusivity D_g (diffusivity doubled → timescale ÷2), the fast-diffusion limit of a fine accumulation-mode particle, and the R_p = 0 limit where the timescale vanishes.
+
+Not migrated: `timescales.jl` defines six independent `@component`s — `GasDiffusionTimescale`, `AqueousDiffusionTimescale`, `InterfacialTimescale`, `ReactionTimescale`, `SolidEquilibrationTimescale`, and `AqueousEquilibrationTimescale`. Only `GasDiffusionTimescale` (src/timescales.jl:14) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/timescales/`.
+
+Tolerance rationale (model-level rel=1e-8): the model is a single closed-form algebraic expression — one squaring, one multiplication, and one division — so float64 evaluation roundoff is at the 1-ULP (~1e-16 relative) level; rel=1e-8 leaves ample headroom. The `zero_radius_zero_timescale` test adds a tight per-assertion abs=1e-20 so a stuck-nonzero regression in the `τ_dg` quotient cannot pass on the relative branch._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `R_p` | `m` | `1e-05` | Particle radius — the characteristic radius of the aerosol particle to which the gas-phase species diffuses (Eq. 12.49 term R_p). Sets the diffusion length scale; because the perturbation must spread across a distance comparable to R_p, the timescale grows as R_p². |
+| `D_g` | `m^2/s` | `2e-05` | Gas-phase (molecular) diffusivity of the species in air (Eq. 12.49 term D_g) — sets the rate at which a gas-phase concentration perturbation spreads. A larger diffusivity propagates the perturbation to the particle surface faster and shortens the diffusion timescale. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `τ_dg` | `s` |  | Gas-phase diffusion timescale (Eq. 12.49): τ_dg = R_p²/(4·D_g). The characteristic time for a gas-phase concentration perturbation to diffuse to the particle surface. Grows quadratically with the particle radius R_p and inversely with the gas-phase diffusivity D_g; when short relative to the interfacial, aqueous-diffusion and reaction timescales, gas-phase diffusion is not the rate-limiting step in gas-to-particle conversion. |
+
+## Observed expressions
+
+$$
+τ_{dg} = \frac{R_{p}^{2}}{4 \cdot D_{g}}
+$$
+_Gas-phase diffusion timescale (Eq. 12.49): τ_dg = R_p²/(4·D_g). The characteristic time for a gas-phase concentration perturbation to diffuse to the particle surface. Grows quadratically with the particle radius R_p and inversely with the gas-phase diffusivity D_g; when short relative to the interfacial, aqueous-diffusion and reaction timescales, gas-phase diffusion is not the rate-limiting step in gas-to-particle conversion._
+
+## Analyses
+
+### timescale_vs_radius
+
+The gas-phase diffusion timescale rises quadratically with the particle radius (Eq. 12.49). Sweeping R_p over the 1e-9–1e-5 m range — from a nucleation-mode cluster up to a coarse particle — at the default D_g = 2e-5 m²/s traces the parabola τ_dg = R_p²/(4·D_g): τ_dg climbs four orders of magnitude for every two decades of radius.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `R_p`
+
+![Gas-phase diffusion timescale τ_dg as a function of particle radius R_p (at the default D_g).](/plots/aerosol/timescales/gasdiffusiontimescale/timescale_vs_radius-tau_dg_vs_R_p.png)
+
+### timescale_vs_diffusivity
+
+The gas-phase diffusion timescale varies inversely with the gas-phase diffusivity (Eq. 12.49). With R_p at the default 1e-5 m, sweeping D_g over the 5e-6–5e-5 m²/s range — the span of molecular diffusivities of trace gases in air — traces the τ_dg = R_p²/(4·D_g) hyperbola: a faster-diffusing species reaches the particle surface sooner.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `D_g`
+
+![Gas-phase diffusion timescale τ_dg as a function of gas-phase diffusivity D_g (at the default R_p).](/plots/aerosol/timescales/gasdiffusiontimescale/timescale_vs_diffusivity-tau_dg_vs_D_g.png)
+
+### timescale_radius_diffusivity_heatmap
+
+Joint dependence of the gas-phase diffusion timescale on the particle radius and the gas-phase diffusivity (Eq. 12.49). The heatmap of τ_dg(R_p, D_g) shows the timescale rising steeply (quadratically) with R_p and falling with D_g — the τ_dg = R_p²/(4·D_g) surface over the aerosol-size / gas-diffusivity plane.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `R_p`, `D_g`
+
+![τ_dg(R_p, D_g) heatmap over the aerosol-size / gas-diffusivity plane.](/plots/aerosol/timescales/gasdiffusiontimescale/timescale_radius_diffusivity_heatmap-tau_dg_R_p_D_g_heatmap.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Chapter 12. Gas-phase diffusion timescale: Eq. 12.49.",
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/timescales.jl:14\n\nUpstream `GasDiffusionTimescale` is an MTK `@component` (no parameterization). It declares two scalar `@parameters` — `R_p` (particle radius, m, default 1.0e-5) and `D_g` (gas-phase diffusivity, m^2/s, default 2.0e-5) — and one scalar `@variable` `τ_dg` (gas-phase diffusion timescale, s). The single equation is `τ_dg ~ R_p^2 / (4 * D_g)` — Eq. 12.49 of Seinfeld & Pandis (2006) Ch. 12: the characteristic time for a gas-phase concentration perturbation to diffuse to the particle surface.\n\nObserved classification: GasDiffusionTimescale has no `D()` time-derivative anywhere — it is a purely-algebraic component. `τ_dg` is an algebraic output (`τ_dg ~ R_p^2/(4·D_g)`). After MTK `mtkcompile` / `structural_simplify` the compiled system has zero ODE states and `τ_dg` becomes an observed quantity. It is therefore serialized as `type: observed` with an `expression` (not `type: state` with an equation), and the `equations` array is empty, matching the sibling pure-algebraic timescale migration `aqueous_eq.esm` (src/timescales.jl:183) and the other pure-algebraic Aerosol.jl migrations `zsr.esm` and `critical_ssa.esm`.\n\nUnicode identifier `τ_dg` is kept verbatim from the upstream `@variables` declaration; the ESM identifier pattern permits unicode and the sibling Aerosol.jl migrations (`aqueous_eq.esm`: `τ_s`, `τ_a`; `zsr.esm`: `α_w`; `kelvin.esm`: `σ`, `ρ_l`) keep Greek symbols, so no ASCII rename is applied. The ASCII parameter names `R_p` and `D_g` are likewise carried verbatim from the upstream `@parameters`; `R_p` does not collide with the reserved bare constant name `R` (universal gas constant).\n\nTests authored from physics: the upstream `timescales.jl` carries no test file (`has_tests: N` in the migration tracker). The inline `tests` block is authored from the closed-form Eq. 12.49 — pinning the exact analytic value of `τ_dg = R_p²/(4·D_g)` at the upstream default parameterization, bracketing the quadratic dependence on the particle radius R_p on both sides of the default (radius doubled → timescale ×4; radius halved → timescale ÷4), exercising the inverse dependence on the gas-phase diffusivity D_g (diffusivity doubled → timescale ÷2), the fast-diffusion limit of a fine accumulation-mode particle, and the R_p = 0 limit where the timescale vanishes.\n\nNot migrated: `timescales.jl` defines six independent `@component`s — `GasDiffusionTimescale`, `AqueousDiffusionTimescale`, `InterfacialTimescale`, `ReactionTimescale`, `SolidEquilibrationTimescale`, and `AqueousEquilibrationTimescale`. Only `GasDiffusionTimescale` (src/timescales.jl:14) is in scope for this component migration; the other five are separate migration-tracker rows with their own target `.esm` files under `components/aerosol/timescales/`.\n\nTolerance rationale (model-level rel=1e-8): the model is a single closed-form algebraic expression — one squaring, one multiplication, and one division — so float64 evaluation roundoff is at the 1-ULP (~1e-16 relative) level; rel=1e-8 leaves ample headroom. The `zero_radius_zero_timescale` test adds a tight per-assertion abs=1e-20 so a stuck-nonzero regression in the `τ_dg` quotient cannot pass on the relative branch."
+  },
+  "variables": {
+    "R_p": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-05,
+      "description": "Particle radius — the characteristic radius of the aerosol particle to which the gas-phase species diffuses (Eq. 12.49 term R_p). Sets the diffusion length scale; because the perturbation must spread across a distance comparable to R_p, the timescale grows as R_p²."
+    },
+    "D_g": {
+      "type": "parameter",
+      "units": "m^2/s",
+      "default": 2e-05,
+      "description": "Gas-phase (molecular) diffusivity of the species in air (Eq. 12.49 term D_g) — sets the rate at which a gas-phase concentration perturbation spreads. A larger diffusivity propagates the perturbation to the particle surface faster and shortens the diffusion timescale."
+    },
+    "τ_dg": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Gas-phase diffusion timescale (Eq. 12.49): τ_dg = R_p²/(4·D_g). The characteristic time for a gas-phase concentration perturbation to diffuse to the particle surface. Grows quadratically with the particle radius R_p and inversely with the gas-phase diffusivity D_g; when short relative to the interfacial, aqueous-diffusion and reaction timescales, gas-phase diffusion is not the rate-limiting step in gas-to-particle conversion."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "τ_dg",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              "R_p",
+              2
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              4,
+              "D_g"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tolerance": {
+    "rel": 1e-08
+  },
+  "tests": [
+    {
+      "id": "default_parameters",
+      "description": "Eq. 12.49 at the upstream default parameterization (R_p = 1e-5 m, D_g = 2e-5 m²/s). The gas-phase diffusion timescale is τ_dg = R_p²/(4·D_g) = (1e-5)²/(4·2e-5) = 1.25e-6 s — a microsecond-scale time for a gas-phase concentration perturbation to diffuse to the particle surface. The output is algebraic and time-invariant, so the same value is asserted at t = 0 and t = 1.",
+      "parameter_overrides": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 1.25e-06
+        },
+        {
+          "variable": "τ_dg",
+          "time": 1.0,
+          "expected": 1.25e-06
+        }
+      ]
+    },
+    {
+      "id": "quadratic_in_radius",
+      "description": "Eq. 12.49 is quadratic in the particle radius R_p — the diffusion length scale enters squared. Doubling R_p from the 1e-5 m default to 2e-5 m quadruples the gas-phase diffusion timescale from 1.25e-6 to τ_dg = (2e-5)²/(4·2e-5) = 5e-6 s: a larger particle presents a longer distance for the gas-phase perturbation to diffuse across.",
+      "parameter_overrides": {
+        "R_p": 2e-05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 5e-06
+        }
+      ]
+    },
+    {
+      "id": "radius_halved_quarters_timescale",
+      "description": "The quadratic dependence of Eq. 12.49 acts downward as well: halving the particle radius R_p from the 1e-5 m default to 5e-6 m quarters the gas-phase diffusion timescale from 1.25e-6 to τ_dg = (5e-6)²/(4·2e-5) = 3.125e-7 s. Together with quadratic_in_radius this brackets the R_p² scaling on both sides of the default.",
+      "parameter_overrides": {
+        "R_p": 5e-06
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 3.125e-07
+        }
+      ]
+    },
+    {
+      "id": "inverse_in_diffusivity",
+      "description": "Eq. 12.49 varies inversely with the gas-phase diffusivity D_g. Doubling D_g from the 2e-5 m²/s default to 4e-5 m²/s halves the gas-phase diffusion timescale from 1.25e-6 to τ_dg = (1e-5)²/(4·4e-5) = 6.25e-7 s — a faster-diffusing species spreads a concentration perturbation to the particle surface more quickly.",
+      "parameter_overrides": {
+        "D_g": 4e-05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 6.25e-07
+        }
+      ]
+    },
+    {
+      "id": "fine_particle_fast_diffusion",
+      "description": "For a fine accumulation-mode particle the quadratic R_p² scaling makes gas-phase diffusion extremely fast. With R_p = 1e-7 m (a 0.1 µm radius, two decades below the coarse-particle default) and the default D_g = 2e-5 m²/s, τ_dg = (1e-7)²/(4·2e-5) = 1.25e-10 s — sub-nanosecond, confirming gas-phase diffusion is never the rate-limiting step for fine particles.",
+      "parameter_overrides": {
+        "R_p": 1e-07
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 1.25e-10
+        }
+      ]
+    },
+    {
+      "id": "zero_radius_zero_timescale",
+      "description": "Limiting case: with a vanishing particle radius (R_p = 0) there is no diffusion length scale and τ_dg = 0 exactly — the numerator R_p² vanishes while the denominator 4·D_g stays finite at the default D_g. A tight per-assertion absolute tolerance guards against a stuck-nonzero regression in the τ_dg quotient.",
+      "parameter_overrides": {
+        "R_p": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_dg",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-20
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "timescale_vs_radius",
+      "description": "The gas-phase diffusion timescale rises quadratically with the particle radius (Eq. 12.49). Sweeping R_p over the 1e-9–1e-5 m range — from a nucleation-mode cluster up to a coarse particle — at the default D_g = 2e-5 m²/s traces the parabola τ_dg = R_p²/(4·D_g): τ_dg climbs four orders of magnitude for every two decades of radius.",
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "R_p",
+            "range": {
+              "start": 1e-09,
+              "stop": 1e-05,
+              "count": 60,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "tau_dg_vs_R_p",
+          "type": "line",
+          "description": "Gas-phase diffusion timescale τ_dg as a function of particle radius R_p (at the default D_g).",
+          "x": {
+            "variable": "R_p",
+            "label": "Particle radius R_p (m)"
+          },
+          "y": {
+            "variable": "τ_dg",
+            "label": "Gas-phase diffusion timescale τ_dg (s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "timescale_vs_diffusivity",
+      "description": "The gas-phase diffusion timescale varies inversely with the gas-phase diffusivity (Eq. 12.49). With R_p at the default 1e-5 m, sweeping D_g over the 5e-6–5e-5 m²/s range — the span of molecular diffusivities of trace gases in air — traces the τ_dg = R_p²/(4·D_g) hyperbola: a faster-diffusing species reaches the particle surface sooner.",
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "D_g",
+            "range": {
+              "start": 5e-06,
+              "stop": 5e-05,
+              "count": 60,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "tau_dg_vs_D_g",
+          "type": "line",
+          "description": "Gas-phase diffusion timescale τ_dg as a function of gas-phase diffusivity D_g (at the default R_p).",
+          "x": {
+            "variable": "D_g",
+            "label": "Gas-phase diffusivity D_g (m²/s)"
+          },
+          "y": {
+            "variable": "τ_dg",
+            "label": "Gas-phase diffusion timescale τ_dg (s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "timescale_radius_diffusivity_heatmap",
+      "description": "Joint dependence of the gas-phase diffusion timescale on the particle radius and the gas-phase diffusivity (Eq. 12.49). The heatmap of τ_dg(R_p, D_g) shows the timescale rising steeply (quadratically) with R_p and falling with D_g — the τ_dg = R_p²/(4·D_g) surface over the aerosol-size / gas-diffusivity plane.",
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "R_p",
+            "range": {
+              "start": 1e-09,
+              "stop": 1e-05,
+              "count": 30,
+              "scale": "log"
+            }
+          },
+          {
+            "parameter": "D_g",
+            "range": {
+              "start": 5e-06,
+              "stop": 5e-05,
+              "count": 25,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "tau_dg_R_p_D_g_heatmap",
+          "type": "heatmap",
+          "description": "τ_dg(R_p, D_g) heatmap over the aerosol-size / gas-diffusivity plane.",
+          "x": {
+            "variable": "R_p",
+            "label": "Particle radius R_p (m)"
+          },
+          "y": {
+            "variable": "D_g",
+            "label": "Gas-phase diffusivity D_g (m²/s)"
+          },
+          "value": {
+            "variable": "τ_dg",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,346 @@
+---
+title: "Visibility"
+slug: "visibility"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mie"]
+domain: "aerosol"
+subdomain: "mie"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/mie/visibility.esm"
+reference: "Seinfeld, J.H. and Pandis, S.N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, Chapter 15, Equations 15.31-15.36."
+description: "Visibility calculation from extinction coefficient. Computes visual range using the Koschmeider equation (Eq. 15.36) and related visibility metrics. Visual range is the distance at which a black object against a white background reaches the threshold contrast of 0.02."
+tags: ["aerosol", "mie", "model", "visibility", "mie-scattering", "optical", "seinfeld-pandis"]
+---
+
+## Description
+
+Visibility calculation from extinction coefficient. Computes visual range using the Koschmeider equation (Eq. 15.36) and related visibility metrics. Visual range is the distance at which a black object against a white background reaches the threshold contrast of 0.02.
+
+## Reference
+
+_Coupler identity: this model was serialized with the model-level field `coupletype: "Visibility"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 ("informational label identifying this system's role in coupling"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `Koschmeider_const` | `1` | `3.912` | Koschmeider constant = -ln(0.02) (dimensionless) |
+| `one_km` | `m` | `1000.0` | One kilometer in meters |
+| `b_ext` | `m^-1` | `0.0001` | Total extinction coefficient |
+| `b_sg` | `m^-1` | `1.32e-05` | Rayleigh scattering coefficient (gas) |
+| `b_ag` | `m^-1` | `0.0` | Absorption coefficient due to gases (mainly NO2) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `x_v` | `m` |  | Visual range |
+| `τ_per_km` | `1` |  | Optical depth per kilometer (dimensionless) |
+| `b_sp` | `m^-1` |  | Scattering coefficient due to particles |
+
+## Observed expressions
+
+$$
+x_{v} = \frac{Koschmeider_{const}}{b_{ext}}
+$$
+_Visual range_
+
+$$
+τ_{per\,km} = b_{ext} \cdot one_{km}
+$$
+_Optical depth per kilometer (dimensionless)_
+
+$$
+b_{sp} = b_{ext} - b_{sg} - b_{ag}
+$$
+_Scattering coefficient due to particles_
+
+## Analyses
+
+### koschmeider_curve
+
+Koschmeider equation (Eq. 15.36): visual range x_v vs extinction coefficient b_ext. At sea level in a clean Rayleigh atmosphere (b_ext ~13.2e-6 m^-1), maximum visual range is ~296 km. Urban conditions (b_ext ~1e-4 to 1e-3 m^-1) reduce visibility to 4-40 km. Reproduces the characteristic curve from S&P Chapter 15.
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `b_ext`
+
+![Visual range x_v (m) vs extinction coefficient b_ext (m^-1), reproducing the Koschmeider relationship (Eq. 15.36).](/plots/aerosol/mie/visibility/koschmeider_curve-visual_range_vs_extinction.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "Coupler identity: this model was serialized with the model-level field `coupletype: \"Visibility\"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 (\"informational label identifying this system's role in coupling\"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable."
+  },
+  "variables": {
+    "Koschmeider_const": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.912,
+      "description": "Koschmeider constant = -ln(0.02) (dimensionless)"
+    },
+    "one_km": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1000.0,
+      "description": "One kilometer in meters"
+    },
+    "b_ext": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0001,
+      "description": "Total extinction coefficient"
+    },
+    "b_sg": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 1.32e-05,
+      "description": "Rayleigh scattering coefficient (gas)"
+    },
+    "b_ag": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0,
+      "description": "Absorption coefficient due to gases (mainly NO2)"
+    },
+    "x_v": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Visual range"
+    },
+    "τ_per_km": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Optical depth per kilometer (dimensionless)"
+    },
+    "b_sp": {
+      "type": "unknown",
+      "units": "m^-1",
+      "description": "Scattering coefficient due to particles"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "x_v",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "Koschmeider_const",
+          "b_ext"
+        ]
+      }
+    },
+    {
+      "lhs": "τ_per_km",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "b_ext",
+          "one_km"
+        ]
+      }
+    },
+    {
+      "lhs": "b_sp",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              "b_ext",
+              "b_sg"
+            ]
+          },
+          "b_ag"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "koschmeider_default",
+      "description": "Visual range at default parameters (b_ext=1e-4 m^-1): x_v = 3.912 / 1e-4 = 39120 m",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "x_v",
+          "time": 0,
+          "expected": 39120.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        }
+      ]
+    },
+    {
+      "id": "optical_depth_default",
+      "description": "Optical depth per km at default parameters (b_ext=1e-4): tau_per_km = 1e-4 x 1000 = 0.1",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "τ_per_km",
+          "time": 0,
+          "expected": 0.1,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "particle_scattering_default",
+      "description": "Particle scattering at defaults: b_sp = 1e-4 - 13.2e-6 - 0 = 8.68e-5 m^-1",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "b_sp",
+          "time": 0,
+          "expected": 8.68e-05,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "rayleigh_clean_atmosphere",
+      "description": "Clean Rayleigh atmosphere (S&P p.705): b_ext = b_sg = 13.2e-6 m^-1, x_v = 3.912 / 13.2e-6 = 296363.6 m (~296 km), no particle contribution",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "b_ext": 1.32e-05,
+        "b_sg": 1.32e-05,
+        "b_ag": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "x_v",
+          "time": 0,
+          "expected": 296363.636,
+          "tolerance": {
+            "rel": 0.001
+          }
+        },
+        {
+          "variable": "b_sp",
+          "time": 0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "urban_polluted",
+      "description": "Urban polluted conditions (b_ext=2e-4 m^-1): x_v = 3.912 / 2e-4 = 19560 m (~20 km), tau_per_km = 0.2",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "b_ext": 0.0002
+      },
+      "assertions": [
+        {
+          "variable": "x_v",
+          "time": 0,
+          "expected": 19560.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        },
+        {
+          "variable": "τ_per_km",
+          "time": 0,
+          "expected": 0.2,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "gas_absorption_contribution",
+      "description": "With NO2 absorption (b_ag=5e-6 m^-1): b_sp = 1e-4 - 13.2e-6 - 5e-6 = 8.18e-5 m^-1",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "b_ag": 5e-06
+      },
+      "assertions": [
+        {
+          "variable": "b_sp",
+          "time": 0,
+          "expected": 8.18e-05,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "koschmeider_curve",
+      "description": "Koschmeider equation (Eq. 15.36): visual range x_v vs extinction coefficient b_ext. At sea level in a clean Rayleigh atmosphere (b_ext ~13.2e-6 m^-1), maximum visual range is ~296 km. Urban conditions (b_ext ~1e-4 to 1e-3 m^-1) reduce visibility to 4-40 km. Reproduces the characteristic curve from S&P Chapter 15.",
+      "initial_state": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "b_ext",
+            "range": {
+              "start": 1e-05,
+              "stop": 0.001,
+              "count": 50,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "visual_range_vs_extinction",
+          "type": "line",
+          "description": "Visual range x_v (m) vs extinction coefficient b_ext (m^-1), reproducing the Koschmeider relationship (Eq. 15.36).",
+          "x": {
+            "variable": "b_ext",
+            "label": "Extinction coefficient b_ext (m^-1)"
+          },
+          "y": {
+            "variable": "x_v",
+            "label": "Visual range x_v (m)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

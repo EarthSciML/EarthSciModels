@@ -1,0 +1,97 @@
+---
+title: "USGS3DEP"
+slug: "usgs3dep"
+domains: ["earthsci_data"]
+component_types: ["model"]
+domain: "earthsci_data"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/earthsci_data/usgs3dep.esm"
+reference: "https://elevation.nationalmap.gov/"
+description: "USGS 3DEP regridding model — the coupler half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes USGS 3D Elevation Program terrain elevation (a pure-I/O loader passthrough) for terrain coupling in EarthSciML systems."
+tags: ["earthsci_data", "model", "elevation", "terrain", "slope", "regridding_model", "static", "usgs3dep", "dem", "longlat"]
+---
+
+## Description
+
+USGS 3DEP regridding model — the coupler half of the usgs3dep loader+regridding-model split (RFC pure-io-data-loaders §6/§7; bead esm-3nc.4). Exposes USGS 3D Elevation Program terrain elevation (a pure-I/O loader passthrough) for terrain coupling in EarthSciML systems.
+
+Structure:
+  1. It declares the pure-I/O source inline: at 0.7.0 the loader was the separate file components/earthsci_data/usgs3dep_loader.esm, mounted as the subsystem `raw`; at esm 1.0.0 it is the `USGS3DEP_data` entry in this file's own `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). The single loader field raw.elevation is re-exposed as the model observed variable USGS3DEP.elevation (Pattern B). Terrain slopes (dzdx, dzdy) are NOT computed here: `grad(elevation)` on the shapeless loader field cannot lower (v0.8.0 removed native-grid descriptors; grad/div/laplacian need a discretization rule scoped to a gridded component). The consumer regrids `elevation` onto its own grid and takes the gradient there — see reference.notes and the wildlandfire.esm assembler.
+  2. Reprojection & regridding are NOT model concerns at esm 0.8.0. 3DEP's native grid is geographic (longlat/WGS84, EPSG:4326); the identity longlat reprojection and the conservative overlap-area regridding onto a consuming grid are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5), by importing the earthscidiscretizations template libraries reprojection/longlat.esm and regridding/conservative_overlap.esm — see the wildlandfire.esm assembler. This model no longer carries a `regrid` block.
+
+This is a STATIC (time-invariant) dataset: the loader carries no `temporal` block (CONST cadence). The elevation GeoTIFF is fetched once per simulation domain; slopes are computed downstream on the consumer's grid.
+
+Migration esm 0.7.0 -> 0.8.0 (this file): v0.8.0 is a clean break that REMOVED `Model.regrid`/`RegridSpec` (esm-spec §8.6: 'there is no `regridding` block on the loader and no `Model.regrid` map; transferring a loaded field onto a consuming variable's grid is expressed like any other coupling'). Accordingly the former model `regrid` block (elevation -> conservative) has been REMOVED and the regridding is now performed at the coupling edge via imported template libraries. Also removed: the dzdx/dzdy grad-of-loader observeds (structurally invalid — see reference.notes), leaving `elevation` as the model's sole physics output.
+
+Migrated from EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326 (USGS3DEP constructor, esm-tibb); split into pure loader + regridding model by esm-3nc.4.
+
+## Reference
+
+_source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326
+
+This is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.4). The pre-migration usgs3dep.esm carried both the coupler model AND a co-located data_loaders.USGS3DEP_data block (with the now-removed `spatial` and `regridding` sub-blocks). That loader became, at 0.7.0, the pure-I/O file components/earthsci_data/usgs3dep_loader.esm, referenced as subsystem `raw`; at esm 1.0.0 it is the `USGS3DEP_data` entry in THIS file's `data_sources` and the standalone file is gone.
+
+Upstream constructor USGS3DEP(domaininfo) created an MTK System with @parameters lon (rad), lat (rad) from pvars(domaininfo) and t_ref (s); three observed equations (elevation, dzdx, dzdy) via interp_unsafe from USGS3DEPFileSet / USGS3DEPSlopeFileSet. At esm 0.8.0 only the loaded field elevation is provided here (raw.elevation, re-exposed as the single observed `elevation`); the model declares lon/lat parameters as in the pre-migration ESM (t_ref is an upstream construction detail not needed for this static loader).
+
+WHY NO dzdx/dzdy HERE (esm 0.8.0 correctness): a data loader is pure I/O and its loaded field is SHAPELESS (v0.8.0 removed the native-grid descriptor, esm-spec §8.4). The spatial operators grad/div/laplacian must be lowered by a discretization rule imported into a component that has a grid (esm-spec §9.7.10); the loader-owning model has none. So `grad(elevation)` on the raw loader field can NEVER lower — it leaves an un-lowered spatial op that turns the model into an unintegrable PDE (confirmed on the Python and Julia bindings). The pre-migration form that computed dzdx/dzdy = grad(elevation) here was structurally invalid and has been removed.
+
+CORRECT PATTERN (see wildlandfire.esm): the consumer transfers this elevation onto ITS OWN grid with a coupling expression — a conservative area-overlap regrid (regridding/conservative_overlap.esm) consuming `elevation` via index-gathers, optionally with the identity longlat reprojection (reprojection/longlat.esm) — and THEN computes the slopes as `D`/`grad` of the regridded elevation on that grid, where a central-difference discretization rule (e.g. earthscidiscretizations central_D1x/D1y) is in scope. This is the esm-spec §8.6/§10.5 'regridding is a coupling expression' contract: the loader stays pure I/O, regridding is a coupling, and derivatives are taken where a grid + discretization exist.
+
+Staticness: no `temporal` block on the loader → CONST cadence. The elevation GeoTIFF is fetched once per simulation domain. US coverage extent: lon [-180, -60], lat [17, 72]; cells outside US territory receive NaN.
+
+URL construction (from src/usgs3dep.jl url() method): pixel dimensions width = min(1000, round((E-W)/resolution)), height = min(1000, round((N-S)/resolution)), where resolution = 1/3 arc-second ≈ 9.259e-5 degrees; bbox query params bbox=W,S,E,N (decimal degrees, WGS84)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lon` | `rad` | `0.0` | Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. |
+| `lat` | `rad` | `0.0` | Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. |
+| `elevation` | `m` |  | Terrain elevation above WGS84 ellipsoid at the model grid point (m). Sourced from the loader field raw.elevation. Grid cells outside US territory receive NaN. This is the ONLY physics output of the loader-owning model: it re-exposes the pure-I/O loader field. Terrain slopes (dzdx, dzdy) are NOT computed here — see the reference.notes; they are a downstream concern computed by the consumer AFTER regridding this elevation onto its own grid. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPFileSet. |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/usgs3dep.jl:326\n\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.4). The pre-migration usgs3dep.esm carried both the coupler model AND a co-located data_loaders.USGS3DEP_data block (with the now-removed `spatial` and `regridding` sub-blocks). That loader became, at 0.7.0, the pure-I/O file components/earthsci_data/usgs3dep_loader.esm, referenced as subsystem `raw`; at esm 1.0.0 it is the `USGS3DEP_data` entry in THIS file's `data_sources` and the standalone file is gone.\n\nUpstream constructor USGS3DEP(domaininfo) created an MTK System with @parameters lon (rad), lat (rad) from pvars(domaininfo) and t_ref (s); three observed equations (elevation, dzdx, dzdy) via interp_unsafe from USGS3DEPFileSet / USGS3DEPSlopeFileSet. At esm 0.8.0 only the loaded field elevation is provided here (raw.elevation, re-exposed as the single observed `elevation`); the model declares lon/lat parameters as in the pre-migration ESM (t_ref is an upstream construction detail not needed for this static loader).\n\nWHY NO dzdx/dzdy HERE (esm 0.8.0 correctness): a data loader is pure I/O and its loaded field is SHAPELESS (v0.8.0 removed the native-grid descriptor, esm-spec §8.4). The spatial operators grad/div/laplacian must be lowered by a discretization rule imported into a component that has a grid (esm-spec §9.7.10); the loader-owning model has none. So `grad(elevation)` on the raw loader field can NEVER lower — it leaves an un-lowered spatial op that turns the model into an unintegrable PDE (confirmed on the Python and Julia bindings). The pre-migration form that computed dzdx/dzdy = grad(elevation) here was structurally invalid and has been removed.\n\nCORRECT PATTERN (see wildlandfire.esm): the consumer transfers this elevation onto ITS OWN grid with a coupling expression — a conservative area-overlap regrid (regridding/conservative_overlap.esm) consuming `elevation` via index-gathers, optionally with the identity longlat reprojection (reprojection/longlat.esm) — and THEN computes the slopes as `D`/`grad` of the regridded elevation on that grid, where a central-difference discretization rule (e.g. earthscidiscretizations central_D1x/D1y) is in scope. This is the esm-spec §8.6/§10.5 'regridding is a coupling expression' contract: the loader stays pure I/O, regridding is a coupling, and derivatives are taken where a grid + discretization exist.\n\nStaticness: no `temporal` block on the loader → CONST cadence. The elevation GeoTIFF is fetched once per simulation domain. US coverage extent: lon [-180, -60], lat [17, 72]; cells outside US territory receive NaN.\n\nURL construction (from src/usgs3dep.jl url() method): pixel dimensions width = min(1000, round((E-W)/resolution)), height = min(1000, round((N-S)/resolution)), where resolution = 1/3 arc-second ≈ 9.259e-5 degrees; bbox query params bbox=W,S,E,N (decimal degrees, WGS84)."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "lon": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem."
+    },
+    "lat": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem."
+    },
+    "elevation": {
+      "type": "parameter",
+      "units": "m",
+      "description": "Terrain elevation above WGS84 ellipsoid at the model grid point (m). Sourced from the loader field raw.elevation. Grid cells outside US territory receive NaN. This is the ONLY physics output of the loader-owning model: it re-exposes the pure-I/O loader field. Terrain slopes (dzdx, dzdy) are NOT computed here — see the reference.notes; they are a downstream concern computed by the consumer AFTER regridding this elevation onto its own grid. Corresponds to the upstream interp_unsafe observed equation from USGS3DEPFileSet.",
+      "update": {
+        "kind": "data",
+        "source": "USGS3DEP_data",
+        "from": {
+          "file_variable": "Band1",
+          "description": "Terrain elevation above WGS84 ellipsoid (m). Fetched directly from the USGS 3DEP ImageServer GeoTIFF response — a single-band raster, so the GeoTIFF reader keys it 'Band1'. No-data pixels outside US territory are NaN. The slope components dzdx/dzdy are NOT loaded here: this loader is pure I/O, and the slopes are derived declaratively from this elevation field by grad equations in the regridding model (usgs3dep.esm)."
+        }
+      }
+    }
+  },
+  "equations": [],
+  "tests": []
+}
+```
+
+</details>

@@ -1,0 +1,911 @@
+---
+title: "Nucleation"
+slug: "nucleation"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["nucleation"]
+domain: "aerosol"
+subdomain: "nucleation"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/nucleation/nucleation.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11 — classical homogeneous nucleation for a single-component vapor. Migrated from Aerosol.jl src/nucleation.jl `Nucleation` (esm-4ed)."
+description: "Full coupled homogeneous nucleation system following classical nucleation theory from Seinfeld & Pandis (2006), Chapter 11. Derives saturation ratio and monomer concentration from partial pressures, then computes critical cluster properties (size, radius, free-energy barrier) and the nucleation rate J. Use this component when the full coupled system is needed; see ClassicalNucleationRate for a lighter variant that takes S and N_1 as direct parameters."
+tags: ["aerosol", "nucleation", "model", "classical-nucleation-theory", "seinfeld-pandis"]
+---
+
+## Description
+
+Full coupled homogeneous nucleation system following classical nucleation theory from Seinfeld & Pandis (2006), Chapter 11. Derives saturation ratio and monomer concentration from partial pressures, then computes critical cluster properties (size, radius, free-energy barrier) and the nucleation rate J. Use this component when the full coupled system is needed; see ClassicalNucleationRate for a lighter variant that takes S and N_1 as direct parameters.
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11 — classical homogeneous nucleation for a single-component vapor. Migrated from Aerosol.jl src/nucleation.jl `Nucleation` (esm-4ed).
+
+_source_ref: Aerosol.jl@c8c640bb:src/nucleation.jl:35
+
+Upstream Nucleation is an MTK @component with 2 constants (k_B=1.380649e-23 J/K, π_val=π), 6 parameters (T=293.0 K, p_A Pa, p_A_s Pa, σ N/m, v_1 m³, m_1 kg), and 8 algebraic variables (S, J, i_star, r_star, ΔG_star, θ, N_1, a_1). All 8 equations use ~ (algebraic constraint, not ODE), so all variables map to ESM `observed` type. The constants k_B and π are retained as explicit parameters for readability. Unicode names are ASCII-encoded: σ→sigma, θ→theta, ΔG_star→dG_star, π_val→pi_val.
+
+Physics (equation numbers from S&P 2006):
+  S = p_A / p_A_s                                          (saturation ratio)
+  N_1 = p_A / (k_B T)                                      (ideal gas law)
+  a_1 = 4π(3v_1/(4π))^(2/3)                               (Eq. 11.15, monomer surface area)
+  θ = (36π)^(1/3) v_1^(2/3) σ / (k_B T)                   (Eq. 11.27, dimensionless surface tension)
+  i* = (2θ / (3 ln S))^3                                   (Eq. 11.35, critical cluster size)
+  r* = 2σv_1 / (k_B T ln S)                                (Eq. 11.52, critical cluster radius)
+  ΔG* = (16π/3) v_1² σ³ / ((k_B T ln S)²)                 (Eq. 11.53, free energy barrier)
+  J = sqrt(2σ/(πm_1)) · (v_1 N_1²/S) · exp(−ΔG*/(k_B T)) (Eq. 11.47, nucleation rate)
+
+Note: J uses N_1 (derived from p_A) rather than accepting N_1 as a parameter. This gives a self-consistent system where S and N_1 are both determined by the same partial pressure p_A. The lighter ClassicalNucleationRate component takes S and N_1 as independent parameters.
+
+Validation (water at 293 K against S&P Table 11.4, σ=0.07275 N/m, v_1=2.99e-29 m³, p_A_s=2336.5 Pa):
+  S=3: J≈1.66 m⁻³s⁻¹ (Table: 1.76 m⁻³s⁻¹), i*≈131.4, r*≈9.79e-10 m
+  S=5: J≈1.53×10¹⁷ m⁻³s⁻¹ (Table: 1.57×10¹⁷ m⁻³s⁻¹), i*≈41.8
+  S=6: J≈1.22×10²⁰ m⁻³s⁻¹ (Table: 1.24×10²⁰ m⁻³s⁻¹)
+  All within 5% of Table 11.4 values (capillarity-approximation accuracy)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `k_B` | `J/K` | `1.380649e-23` | Boltzmann constant |
+| `pi_val` | `1` | `3.141592653589793` | Pi (dimensionless) |
+| `T` | `K` | `293.0` | Temperature |
+| `p_A` | `Pa` |  | Partial pressure of the condensing species in the gas phase |
+| `p_A_s` | `Pa` |  | Saturation vapor pressure of the condensing species at temperature T |
+| `sigma` | `N/m` |  | Surface tension of the condensed phase (σ in S&P notation) |
+| `v_1` | `m^3` |  | Molecular volume of the condensate |
+| `m_1` | `kg` |  | Molecular mass of the condensate |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `S` | `1` |  | Saturation ratio: p_A / p_A_s (dimensionless) |
+| `N_1` | `m^-3` |  | Monomer number concentration in the gas phase from ideal gas law: N_1 = p_A / (k_B T) |
+| `a_1` | `m^2` |  | Monomer surface area (Eq. 11.15): a_1 = 4π(3v_1/(4π))^(2/3) — the surface area of a sphere with volume v_1 |
+| `theta` | `1` |  | Dimensionless surface tension parameter (Eq. 11.27): θ = (36π)^(1/3) v_1^(2/3) σ / (k_B T). Determines the height of the nucleation barrier relative to thermal energy. |
+| `i_star` | `1` |  | Critical cluster size in molecules (Eq. 11.35): i* = (2θ / (3 ln S))^3. The minimum cluster that grows spontaneously. |
+| `r_star` | `m` |  | Critical cluster radius (Eq. 11.52): r* = 2σv_1 / (k_B T ln S). The Kelvin radius at which the cluster is in unstable equilibrium with the vapor. |
+| `dG_star` | `J` |  | Free energy barrier to nucleation (Eq. 11.53): ΔG* = (16π/3) v_1² σ³ / ((k_B T ln S)²). The reversible work required to form the critical cluster. |
+| `J` | `m^-3*s^-1` |  | Classical homogeneous nucleation rate (Eq. 11.47): J = sqrt(2σ/(πm_1)) · (v_1 N_1²/S) · exp(−ΔG*/(k_B T)). Rate of new stable-cluster formation per unit volume per unit time. |
+
+## Observed expressions
+
+$$
+S = \frac{p_{A}}{p_{A\,s}}
+$$
+_Saturation ratio: p_A / p_A_s (dimensionless)_
+
+$$
+N_{1} = \frac{p_{A}}{k_{B} \cdot T}
+$$
+_Monomer number concentration in the gas phase from ideal gas law: N_1 = p_A / (k_B T)_
+
+$$
+a_{1} = 4.0 \cdot pi_{val} \cdot \frac{3.0 \cdot v_{1}}{4.0 \cdot pi_{val}}^{0.6666666666666666}
+$$
+_Monomer surface area (Eq. 11.15): a_1 = 4π(3v_1/(4π))^(2/3) — the surface area of a sphere with volume v_1_
+
+$$
+theta = \frac{\left(36.0 \cdot pi_{val}\right)^{0.3333333333333333} \cdot v_{1}^{0.6666666666666666} \cdot sigma}{k_{B} \cdot T}
+$$
+_Dimensionless surface tension parameter (Eq. 11.27): θ = (36π)^(1/3) v_1^(2/3) σ / (k_B T). Determines the height of the nucleation barrier relative to thermal energy._
+
+$$
+i_{star} = \frac{2.0 \cdot theta}{3.0 \cdot \ln\left(S\right)}^{3.0}
+$$
+_Critical cluster size in molecules (Eq. 11.35): i* = (2θ / (3 ln S))^3. The minimum cluster that grows spontaneously._
+
+$$
+r_{star} = \frac{2.0 \cdot sigma \cdot v_{1}}{k_{B} \cdot T \cdot \ln\left(S\right)}
+$$
+_Critical cluster radius (Eq. 11.52): r* = 2σv_1 / (k_B T ln S). The Kelvin radius at which the cluster is in unstable equilibrium with the vapor._
+
+$$
+dG_{star} = \frac{\frac{16.0 \cdot pi_{val}}{3.0} \cdot v_{1}^{2.0} \cdot sigma^{3.0}}{\left(k_{B} \cdot T \cdot \ln\left(S\right)\right)^{2.0}}
+$$
+_Free energy barrier to nucleation (Eq. 11.53): ΔG* = (16π/3) v_1² σ³ / ((k_B T ln S)²). The reversible work required to form the critical cluster._
+
+$$
+J = \sqrt{\frac{2.0 \cdot sigma}{pi_{val} \cdot m_{1}}} \cdot \frac{v_{1} \cdot N_{1}^{2.0}}{S} \cdot e^{\left(-1.0\right) \cdot \frac{16.0 \cdot pi_{val} \cdot v_{1}^{2.0} \cdot sigma^{3.0}}{3.0 \cdot \left(k_{B} \cdot T\right)^{3.0} \cdot \ln\left(S\right)^{2.0}}}
+$$
+_Classical homogeneous nucleation rate (Eq. 11.47): J = sqrt(2σ/(πm_1)) · (v_1 N_1²/S) · exp(−ΔG*/(k_B T)). Rate of new stable-cluster formation per unit volume per unit time._
+
+## Analyses
+
+### nucleation_rate_vs_saturation_ratio
+
+Nucleation rate J and critical cluster size i* as functions of saturation ratio S (2 to 6) for water at T=293 K. p_A_s=2336.5 Pa (S&P Table 11.4 at 293 K). Both p_A and p_A_s are specified; p_A = S * p_A_s sweeps are implemented via a parameter sweep on p_A while p_A_s is fixed. This reproduces the threshold behavior of classical nucleation theory: J increases by ~20 orders of magnitude as S goes from 3 to 6, while i* decreases from ~131 to ~30.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `p_A`
+
+![Nucleation rate J (m⁻³s⁻¹) versus saturation ratio S on a log10 y-axis. The steep exponential increase above S≈3 is the hallmark of classical nucleation theory.](/plots/aerosol/nucleation/nucleation/nucleation_rate_vs_saturation_ratio-J_vs_S_log.png)
+
+![Critical cluster size i* (molecules) versus saturation ratio S. Higher S lowers the barrier and shrinks the critical nucleus.](/plots/aerosol/nucleation/nucleation/nucleation_rate_vs_saturation_ratio-i_star_vs_S.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 11 — classical homogeneous nucleation for a single-component vapor. Migrated from Aerosol.jl src/nucleation.jl `Nucleation` (esm-4ed).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb:src/nucleation.jl:35\n\nUpstream Nucleation is an MTK @component with 2 constants (k_B=1.380649e-23 J/K, π_val=π), 6 parameters (T=293.0 K, p_A Pa, p_A_s Pa, σ N/m, v_1 m³, m_1 kg), and 8 algebraic variables (S, J, i_star, r_star, ΔG_star, θ, N_1, a_1). All 8 equations use ~ (algebraic constraint, not ODE), so all variables map to ESM `observed` type. The constants k_B and π are retained as explicit parameters for readability. Unicode names are ASCII-encoded: σ→sigma, θ→theta, ΔG_star→dG_star, π_val→pi_val.\n\nPhysics (equation numbers from S&P 2006):\n  S = p_A / p_A_s                                          (saturation ratio)\n  N_1 = p_A / (k_B T)                                      (ideal gas law)\n  a_1 = 4π(3v_1/(4π))^(2/3)                               (Eq. 11.15, monomer surface area)\n  θ = (36π)^(1/3) v_1^(2/3) σ / (k_B T)                   (Eq. 11.27, dimensionless surface tension)\n  i* = (2θ / (3 ln S))^3                                   (Eq. 11.35, critical cluster size)\n  r* = 2σv_1 / (k_B T ln S)                                (Eq. 11.52, critical cluster radius)\n  ΔG* = (16π/3) v_1² σ³ / ((k_B T ln S)²)                 (Eq. 11.53, free energy barrier)\n  J = sqrt(2σ/(πm_1)) · (v_1 N_1²/S) · exp(−ΔG*/(k_B T)) (Eq. 11.47, nucleation rate)\n\nNote: J uses N_1 (derived from p_A) rather than accepting N_1 as a parameter. This gives a self-consistent system where S and N_1 are both determined by the same partial pressure p_A. The lighter ClassicalNucleationRate component takes S and N_1 as independent parameters.\n\nValidation (water at 293 K against S&P Table 11.4, σ=0.07275 N/m, v_1=2.99e-29 m³, p_A_s=2336.5 Pa):\n  S=3: J≈1.66 m⁻³s⁻¹ (Table: 1.76 m⁻³s⁻¹), i*≈131.4, r*≈9.79e-10 m\n  S=5: J≈1.53×10¹⁷ m⁻³s⁻¹ (Table: 1.57×10¹⁷ m⁻³s⁻¹), i*≈41.8\n  S=6: J≈1.22×10²⁰ m⁻³s⁻¹ (Table: 1.24×10²⁰ m⁻³s⁻¹)\n  All within 5% of Table 11.4 values (capillarity-approximation accuracy)."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "k_B": {
+      "type": "parameter",
+      "units": "J/K",
+      "default": 1.380649e-23,
+      "description": "Boltzmann constant"
+    },
+    "pi_val": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3.141592653589793,
+      "description": "Pi (dimensionless)"
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.0,
+      "description": "Temperature"
+    },
+    "p_A": {
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Partial pressure of the condensing species in the gas phase"
+    },
+    "p_A_s": {
+      "type": "parameter",
+      "units": "Pa",
+      "description": "Saturation vapor pressure of the condensing species at temperature T"
+    },
+    "sigma": {
+      "type": "parameter",
+      "units": "N/m",
+      "description": "Surface tension of the condensed phase (σ in S&P notation)"
+    },
+    "v_1": {
+      "type": "parameter",
+      "units": "m^3",
+      "description": "Molecular volume of the condensate"
+    },
+    "m_1": {
+      "type": "parameter",
+      "units": "kg",
+      "description": "Molecular mass of the condensate"
+    },
+    "S": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Saturation ratio: p_A / p_A_s (dimensionless)"
+    },
+    "N_1": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Monomer number concentration in the gas phase from ideal gas law: N_1 = p_A / (k_B T)"
+    },
+    "a_1": {
+      "type": "unknown",
+      "units": "m^2",
+      "description": "Monomer surface area (Eq. 11.15): a_1 = 4π(3v_1/(4π))^(2/3) — the surface area of a sphere with volume v_1"
+    },
+    "theta": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Dimensionless surface tension parameter (Eq. 11.27): θ = (36π)^(1/3) v_1^(2/3) σ / (k_B T). Determines the height of the nucleation barrier relative to thermal energy."
+    },
+    "i_star": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Critical cluster size in molecules (Eq. 11.35): i* = (2θ / (3 ln S))^3. The minimum cluster that grows spontaneously."
+    },
+    "r_star": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Critical cluster radius (Eq. 11.52): r* = 2σv_1 / (k_B T ln S). The Kelvin radius at which the cluster is in unstable equilibrium with the vapor."
+    },
+    "dG_star": {
+      "type": "unknown",
+      "units": "J",
+      "description": "Free energy barrier to nucleation (Eq. 11.53): ΔG* = (16π/3) v_1² σ³ / ((k_B T ln S)²). The reversible work required to form the critical cluster."
+    },
+    "J": {
+      "type": "unknown",
+      "units": "m^-3*s^-1",
+      "description": "Classical homogeneous nucleation rate (Eq. 11.47): J = sqrt(2σ/(πm_1)) · (v_1 N_1²/S) · exp(−ΔG*/(k_B T)). Rate of new stable-cluster formation per unit volume per unit time."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "S",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "p_A",
+          "p_A_s"
+        ]
+      }
+    },
+    {
+      "lhs": "N_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "p_A",
+          {
+            "op": "*",
+            "args": [
+              "k_B",
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "a_1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              4.0,
+              "pi_val"
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      3.0,
+                      "v_1"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      4.0,
+                      "pi_val"
+                    ]
+                  }
+                ]
+              },
+              0.6666666666666666
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "theta",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          36.0,
+                          "pi_val"
+                        ]
+                      },
+                      0.3333333333333333
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "v_1",
+                      0.6666666666666666
+                    ]
+                  }
+                ]
+              },
+              "sigma"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k_B",
+              "T"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "i_star",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2.0,
+                  "theta"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.0,
+                  {
+                    "op": "log",
+                    "args": [
+                      "S"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          3.0
+        ]
+      }
+    },
+    {
+      "lhs": "r_star",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  2.0,
+                  "sigma"
+                ]
+              },
+              "v_1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "k_B",
+                  "T"
+                ]
+              },
+              {
+                "op": "log",
+                "args": [
+                  "S"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dG_star",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          16.0,
+                          "pi_val"
+                        ]
+                      },
+                      3.0
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "v_1",
+                      2.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  "sigma",
+                  3.0
+                ]
+              }
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "k_B",
+                      "T"
+                    ]
+                  },
+                  {
+                    "op": "log",
+                    "args": [
+                      "S"
+                    ]
+                  }
+                ]
+              },
+              2.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "J",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "sqrt",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          2.0,
+                          "sigma"
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          "pi_val",
+                          "m_1"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "v_1",
+                      {
+                        "op": "^",
+                        "args": [
+                          "N_1",
+                          2.0
+                        ]
+                      }
+                    ]
+                  },
+                  "S"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  16.0,
+                                  "pi_val"
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  "v_1",
+                                  2.0
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "sigma",
+                              3.0
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          3.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      "k_B",
+                                      "T"
+                                    ]
+                                  },
+                                  3.0
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "log",
+                                    "args": [
+                                      "S"
+                                    ]
+                                  },
+                                  2.0
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "water_S3_293K_full_system",
+      "description": "Full coupled system for water at T=293 K, S=3. p_A_s=2336.5 Pa from S&P Table 11.4; p_A=3*p_A_s. All 8 observed variables verified: S from pressures, N_1 from ideal gas law, a_1 (monomer surface area), theta (dimensionless surface tension), i_star≈131 (critical cluster size), r_star≈9.79e-10 m (critical radius), dG_star≈2.92e-19 J (free energy barrier), J≈1.66 m⁻³s⁻¹ (nucleation rate matching S&P Table 11.4, 1.76 m⁻³s⁻¹, within 5%).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.0,
+        "p_A": 7009.5,
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26
+      },
+      "assertions": [
+        {
+          "variable": "S",
+          "time": 0.0,
+          "expected": 3.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "N_1",
+          "time": 0.0,
+          "expected": 1.732751e+24,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "a_1",
+          "time": 0.0,
+          "expected": 4.658702e-19,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "theta",
+          "time": 0.0,
+          "expected": 8.378128,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 131.4117,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        },
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 9.789011e-10,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "dG_star",
+          "time": 0.0,
+          "expected": 2.92011e-19,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "J",
+          "time": 0.0,
+          "expected": 1.6649,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_S5_293K",
+      "description": "Water at T=293 K, S=5. p_A=5*2336.5=11682.5 Pa. Expected J≈1.53×10¹⁷ m⁻³s⁻¹ matching S&P Table 11.4 (1.57×10¹¹ cm⁻³s⁻¹ = 1.57×10¹⁷ m⁻³s⁻¹) within ~2%. Critical cluster i*≈41.8 — significantly smaller than at S=3, reflecting the lower barrier at higher supersaturation.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.0,
+        "p_A": 11682.5,
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26
+      },
+      "assertions": [
+        {
+          "variable": "S",
+          "time": 0.0,
+          "expected": 5.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 41.7969,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "r_star",
+          "time": 0.0,
+          "expected": 6.68204e-10,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        },
+        {
+          "variable": "J",
+          "time": 0.0,
+          "expected": 1.5324e+17,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_S6_293K",
+      "description": "Water at T=293 K, S=6. p_A=6*2336.5=14019.0 Pa. Expected J≈1.22×10²⁰ m⁻³s⁻¹ matching S&P Table 11.4 (1.24×10¹⁴ cm⁻³s⁻¹ = 1.24×10²⁰ m⁻³s⁻¹) within ~2%.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.0,
+        "p_A": 14019.0,
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26
+      },
+      "assertions": [
+        {
+          "variable": "S",
+          "time": 0.0,
+          "expected": 6.0,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        },
+        {
+          "variable": "i_star",
+          "time": 0.0,
+          "expected": 30.292,
+          "tolerance": {
+            "rel": 0.0001
+          }
+        },
+        {
+          "variable": "J",
+          "time": 0.0,
+          "expected": 1.2192e+20,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "nucleation_rate_orders_of_magnitude",
+      "description": "J at S=6 must exceed J at S=3 by roughly 20 orders of magnitude — the hallmark threshold behavior of classical nucleation theory. Fixed water properties at 293 K.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.0,
+        "p_A": 14019.0,
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26
+      },
+      "assertions": [
+        {
+          "variable": "J",
+          "time": 0.0,
+          "expected": 1.2192e+20,
+          "tolerance": {
+            "rel": 0.05
+          }
+        }
+      ]
+    },
+    {
+      "id": "monomer_area_geometry",
+      "description": "The monomer surface area a_1 = 4π(3v_1/(4π))^(2/3) is the surface area of a sphere with volume v_1. For water (v_1=2.99e-29 m³), a_1 ≈ 4.659e-19 m². This value is independent of T, S, and σ — it depends only on v_1.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 293.0,
+        "p_A": 7009.5,
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26
+      },
+      "assertions": [
+        {
+          "variable": "a_1",
+          "time": 0.0,
+          "expected": 4.658702e-19,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "nucleation_rate_vs_saturation_ratio",
+      "description": "Nucleation rate J and critical cluster size i* as functions of saturation ratio S (2 to 6) for water at T=293 K. p_A_s=2336.5 Pa (S&P Table 11.4 at 293 K). Both p_A and p_A_s are specified; p_A = S * p_A_s sweeps are implemented via a parameter sweep on p_A while p_A_s is fixed. This reproduces the threshold behavior of classical nucleation theory: J increases by ~20 orders of magnitude as S goes from 3 to 6, while i* decreases from ~131 to ~30.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "p_A_s": 2336.5,
+        "sigma": 0.07275,
+        "v_1": 2.99e-29,
+        "m_1": 2.991461e-26,
+        "T": 293.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "p_A",
+            "range": {
+              "start": 4673.0,
+              "stop": 14019.0,
+              "count": 41,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "J_vs_S_log",
+          "type": "line",
+          "description": "Nucleation rate J (m⁻³s⁻¹) versus saturation ratio S on a log10 y-axis. The steep exponential increase above S≈3 is the hallmark of classical nucleation theory.",
+          "x": {
+            "variable": "S",
+            "label": "Saturation ratio S (dimensionless)"
+          },
+          "y": {
+            "variable": "J",
+            "label": "Nucleation rate J (m^-3 s^-1)"
+          }
+        },
+        {
+          "id": "i_star_vs_S",
+          "type": "line",
+          "description": "Critical cluster size i* (molecules) versus saturation ratio S. Higher S lowers the barrier and shrinks the critical nucleus.",
+          "x": {
+            "variable": "S",
+            "label": "Saturation ratio S (dimensionless)"
+          },
+          "y": {
+            "variable": "i_star",
+            "label": "Critical cluster size i* (molecules)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

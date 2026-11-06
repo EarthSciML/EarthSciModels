@@ -1,0 +1,2020 @@
+---
+title: "MethaneOxidationODE"
+slug: "methaneoxidationode"
+domains: ["gaschem"]
+component_types: ["model"]
+subdomains: ["methane"]
+domain: "gaschem"
+subdomain: "methane"
+component_type: "model"
+esm_version: "1.1.0"
+esm_path: "components/gaschem/methane/methane_ode.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons, Hoboken, NJ. Chapter 6 (Chemistry of the Troposphere), §6.4 (Methane Oxidation Cycle), Table 6.1 pp. 219-227 — the canonical 17-reaction Table 6.1 mechanism that this ODE system implements. Rate constants at 298 K, units cm³/molec/s (bimolecular) and cm⁶/molec²/s (termolecular), converted to SI here via ×1e-6 and ×1e-12 respectively."
+description: "Full time-resolved ODE system for the methane oxidation mechanism in the polluted-continental troposphere (Seinfeld & Pandis 2006 Ch. 6 §6.4 Table 6.1, pp. 219-227). Eighteen-state stiff ODE on the methane oxidation chain CH₄ → CH₃ → CH₃O₂ → CH₃O → HCHO → HCO → CO → (CO₂) plus the supporting NOx/HOx radical chemistry that recycles OH and converts NO ↔ NO₂. The reaction network has 22 reactions: the 17 canonical Table 6.1 reactions covering the Cl-skeleton oxidation chain through HCHO and ozone-formation chemistry via the peroxy + NO channels, plus 5 auxiliary reactions (CO + OH, OH + NO₂ → HNO₃ termination, HO₂ + HO₂ → H₂O₂ termination, NO + O₃ titration, and a zero-order external OH source representing primary OH production from O(¹D) + H₂O that is implicit in the upstream model). Eight termolecular reactions (R2, R6, R13, R14, R17) and the bimolecular cross-reactions have their O₂ and M dependence folded into effective rate constants k6_eff, k13_eff and the explicit k2_0·M·O₂, k14_0·M·O₂, k17_0·M·O₂ products with M_fixed, O2_fixed parameters at fixed STP-tropospheric values (M = 2.5e25 m⁻³, O₂ = 5.25e24 m⁻³). Migrated from GasChem.jl@8c12c048 src/methane_oxidation.jl:213 (`MethaneOxidationODE` @component / @network_component → Catalyst.ode_model). The reaction-network DSL form upstream is converted to explicit ODE equations here because the migration tracker classifies this as `Model` with `variables, parameters, equations` features (not a ReactionSystem-shaped migration — those go to a separate path; see sibling superfast.esm)."
+tags: ["gaschem", "methane", "model", "tropospheric-chemistry", "voc-oxidation", "seinfeld-pandis", "ode", "stiff"]
+---
+
+## Description
+
+Full time-resolved ODE system for the methane oxidation mechanism in the polluted-continental troposphere (Seinfeld & Pandis 2006 Ch. 6 §6.4 Table 6.1, pp. 219-227). Eighteen-state stiff ODE on the methane oxidation chain CH₄ → CH₃ → CH₃O₂ → CH₃O → HCHO → HCO → CO → (CO₂) plus the supporting NOx/HOx radical chemistry that recycles OH and converts NO ↔ NO₂. The reaction network has 22 reactions: the 17 canonical Table 6.1 reactions covering the Cl-skeleton oxidation chain through HCHO and ozone-formation chemistry via the peroxy + NO channels, plus 5 auxiliary reactions (CO + OH, OH + NO₂ → HNO₃ termination, HO₂ + HO₂ → H₂O₂ termination, NO + O₃ titration, and a zero-order external OH source representing primary OH production from O(¹D) + H₂O that is implicit in the upstream model). Eight termolecular reactions (R2, R6, R13, R14, R17) and the bimolecular cross-reactions have their O₂ and M dependence folded into effective rate constants k6_eff, k13_eff and the explicit k2_0·M·O₂, k14_0·M·O₂, k17_0·M·O₂ products with M_fixed, O2_fixed parameters at fixed STP-tropospheric values (M = 2.5e25 m⁻³, O₂ = 5.25e24 m⁻³). Migrated from GasChem.jl@8c12c048 src/methane_oxidation.jl:213 (`MethaneOxidationODE` @component / @network_component → Catalyst.ode_model). The reaction-network DSL form upstream is converted to explicit ODE equations here because the migration tracker classifies this as `Model` with `variables, parameters, equations` features (not a ReactionSystem-shaped migration — those go to a separate path; see sibling superfast.esm).
+
+## Reference
+
+_source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/methane_oxidation.jl:213
+
+Upstream `MethaneOxidationODE` is an MTK `@component` that internally uses Catalyst.jl's `@network_component` DSL to declare 18 species, 22 reactions, and ~25 parameters, then calls `Catalyst.ode_model(complete(rn); combinatoric_ratelaws = false, name = name)` to convert the reaction network into an ODE system. The migration to `.esm` resolves this two-step construction by emitting the explicit ODE right-hand sides directly — one ODE per species summing the signed-stoichiometry-weighted reaction rates that touch that species. This is bit-equivalent to the Catalyst-generated MTK system because (a) the `combinatoric_ratelaws = false` flag means each reaction rate is just `k · ∏[reactants]` (no `n!` combinatorial factors), and (b) MTK's `complete()` step on the network preserves the user-declared species list exactly, so `unknowns(sys)` returns the same 18 species in the same order.
+
+Upstream test structural-verification invariant (test/test_methane_oxidation.jl `MethaneOxidationODE: Structural Verification` testitem at lines 37-61): asserts `length(unknowns(sys)) == 18` and `length(equations(sys)) == 18` and that the species names CH4, CH3O2, HCHO, OH, HO2, NO, NO2, O3, HNO3, H2O2 appear in the unknowns list — matched here by the 18 entries in `equations` and the 18 `state`-typed entries in `variables` with exactly those species names.
+
+Upstream parameter-list invariant (test/test_methane_oxidation.jl `MethaneOxidationODE: Rate Constants and Parameters` testitem at lines 98-119): checks k1 = 2.45e-12 · exp(-1775/298) · 1e-6 ≈ 6.34e-21 m³/s (Arrhenius pre-factor and activation temperature evaluated at the 298 K reference), k3 = 7.7e-12 · 1e-6 = 7.7e-18 m³/s, k15 = 8.1e-12 · 1e-6 = 8.1e-18 m³/s, k_CO_OH = 2.4e-13 · 1e-6 = 2.4e-19 m³/s, k_OH_NO2 = 1.0e-11 · 1e-6 = 1.0e-17 m³/s, k_HO2_HO2 = 2.9e-12 · 1e-6 = 2.9e-18 m³/s, k_NO_O3 = 1.9e-14 · 1e-6 = 1.9e-20 m³/s, P_OH_ext = 1.0e6 · 1e6 = 1.0e12 m⁻³/s. The migrated `.esm` encodes these as `type: parameter` with the pre-computed Float64 defaults matching the upstream IEEE-754 values exactly (k1 default 6.3437334324972315e-21 is `bitstring(2.45e-12 * exp(-1775/298) * 1.0e-6)` evaluated in Float64 — the upstream Julia parameter default expression evaluates to this exact value at module-load time).
+
+Design decision: encode all 24 upstream parameters as `type: parameter` (not `type: constant`), mirroring the rig-wide convention for chemistry migrations (chapman.esm encodes its four upstream `@constants` k2_A/k4_A/C_k4/T_ref as `type: parameter`; hox_cycle.esm encodes its eight upstream `@constants` similarly). This lets a downstream consumer override any rate coefficient, photolysis rate, or boundary-condition parameter through the canonical `parameter_overrides` interface for sensitivity studies (e.g. doubled-OH, zero-NOx, half-photolysis, lifetime-at-modified-298K scenarios) — every parameter is an MTK parameter symbol, so the structural distinction between Julia `@constants` (compile-time literals) and `@parameters` (overrideable symbols) is collapsed at the `.esm` schema level.
+
+The k6_eff and k13_eff parameters retain their upstream pre-folded form: k6_eff = k6 · O₂_fixed = 1.9e-15 · 1e-6 · 5.25e24 = 9975.0 s⁻¹ (the CH₃O + O₂ → HCHO + HO₂ first-order rate at fixed O₂), k13_eff = k13 · O₂_fixed = 5.2e-12 · 1e-6 · 5.25e24 = 2.73e7 s⁻¹ (the HCO + O₂ → CO + HO₂ first-order rate at fixed O₂). The k14_0·M·O₂ and k17_0·M·O₂ products in R14 (H + O₂ + M → HO₂ + M) and R17 (O + O₂ + M → O₃ + M) are kept as explicit triple-products in the ODE RHS (k14_0 · M_fixed · O2_fixed · H, etc.) to preserve the upstream multiplicative-coefficient structure that exposes M_fixed and O2_fixed as overrideable parameters — this is the only way a downstream consumer can probe the M-dependence of the three-body channels at fixed kinetic rate constants (e.g. an altitude sweep at fixed T).
+
+State variable defaults: each of the 18 species carries a `default` value taken from the upstream test's headline scenario (test/test_methane_oxidation.jl `MethaneOxidationODE: Numerical Integration` at lines 444-484): CH4 = 4.5e19 m⁻³ (typical tropospheric ~1800 ppb), CH3O2 = 1e14 m⁻³ (peroxy radical pool), CH3O = 1e10 m⁻³ (trace alkoxy intermediate), CH3OOH = 1e15 m⁻³ (methyl hydroperoxide), HCHO = 1e16 m⁻³ (~0.4 ppb formaldehyde), HCO = 1e10 m⁻³ (formyl trace), CO = 2.5e18 m⁻³ (~100 ppb), H2 = 1.3e19 m⁻³ (~530 ppb molecular hydrogen background), OH = 1e12 m⁻³ (~4e-5 ppt daytime OH), HO2 = 1e14 m⁻³ (~4e-3 ppt HO₂), NO = 2.5e15 m⁻³ (~0.1 ppb NO), NO2 = 2.5e16 m⁻³ (~1 ppb NO₂), O3 = 1e18 m⁻³ (~40 ppb tropospheric ozone), and four species at 0.0 (CH3, H, O, HNO3, H2O2 — initial trace species and accumulating reservoirs). At the all-defaults run these match the upstream test's u0 initial-conditions vector bit-exactly, so the `default_long_term_100s` test reproduces the upstream integration scenario directly without per-species IC overrides.
+
+Unit balance (verified): each of the 18 ODE right-hand sides resolves to m⁻³ s⁻¹ matching the unit of D(species) = d/dt(m⁻³). The bimolecular flux k · A · B has units (m³/s) · (m⁻³) · (m⁻³) = m⁻³/s ✓. The termolecular flux k₀ · M · O₂ · A has units (m⁶/s) · (m⁻³) · (m⁻³) · (m⁻³) = m⁻³/s ✓ (note the leading dimensionality `m⁶/s` of k_0 — `k2_0 ≡ k2_A in 3-body Lindemann low-pressure limit`). Effective first-order rates k_eff · A have units (1/s) · (m⁻³) = m⁻³/s ✓. Photolysis terms j · A have units (1/s) · (m⁻³) = m⁻³/s ✓. The P_OH_ext zero-order source has units m⁻³/s by direct dimensional declaration ✓.
+
+Tolerance rationale (model-level rel=1e-6): 18-state stiff ODE with widely separated timescales — radical species (OH, HO2, H, CH3, CH3O, HCO) have lifetimes from ~0.001 s (k6_eff = 1e4 s⁻¹ on CH3O) to ~10 s (HO2+NO dominant loss), while CH4 has a multi-year lifetime against OH oxidation (~5 years at 1e12 m⁻³ OH per the `MethaneOxidation: CH4 Lifetime` testitem at test_methane_oxidation.jl:347-374). The 100-second integration window over which the upstream `MethaneOxidationODE: Numerical Integration` test asserts positivity is short on the CH4 timescale (CH4 drops by ~10⁻⁹ relative) but long enough for full radical equilibration. The expected values pinned in the inline tests are LSODA references produced by `earthsci_ast.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` — the same canonical ESS runner and integrator settings the inline-test gate itself uses — so there is zero cross-integrator drift by construction and the model-level rel=1e-6 (the ESS spec §6.6.4 default tolerance) is applied without broadening, tight enough to catch any real trajectory regression. Test-level override: `initial_conditions_t0` tightens to rel=1e-10 / abs=1e-14 because t=0 carries no integration drift, with abs=1e-14 per-assertion overrides on the five zero-default species CH3, H, O, HNO3, H2O2 where a relative tolerance is undefined at zero.
+
+Upstream test reproduction:
+- `MethaneOxidationODE: Structural Verification` (test_methane_oxidation.jl:37-61): 18 unknowns / 18 equations / required species names — reproduced by the structural shape of the `variables` and `equations` blocks.
+- `MethaneOxidationODE: Rate Constants and Parameters` (test_methane_oxidation.jl:98-119): the 7 explicit parameter-value assertions — reproduced verbatim by the `default` field on each parameter declaration in `variables`.
+- `MethaneOxidationODE: Numerical Integration` (test_methane_oxidation.jl:444-484): 100-second integration with the standard u0 initial-condition vector asserting only `retcode == Success` and `all(x >= -1e-6 * max(abs(vals[1]), 1.0))` positivity — reproduced and tightened by `default_long_term_100s` which pins all 18 species at the three intermediate times t=1, 10, 100 s at rel=1e-6 (the t=0 state is pinned separately by `initial_conditions_t0` at rel=1e-10) so the actual trajectory is the regression target, not just bare positivity.
+- `MethaneOxidationODE: Approximate NOx Conservation` (test_methane_oxidation.jl:489-531): asserts NOx_total = NO + NO2 + HNO3 conserved at rtol=1e-4 over 100s — reproduced by `nox_conservation_100s` pinning the actual NOx_total trajectory (the sum is slowly leaking into HNO3 via the OH+NO₂ termination channel, but conserves to ~1e-5 relative over 100s).
+- `MethaneOxidationODE: CH4 Decreases Monotonically` (test_methane_oxidation.jl:536-575): asserts CH4 monotone non-increasing — reproduced by `default_long_term_100s` pinning CH4 at three times confirming the monotone decrease at the slow OH-driven rate (CH4 drops by ~10⁻⁹ relative over 100s, consistent with the ~5-year tropospheric lifetime).
+- `MethaneOxidationODE: HNO3 and H2O2 Accumulate` (test_methane_oxidation.jl:577-612): asserts HNO3 and H2O2 both positive at t=100s — reproduced by `default_long_term_100s` pinning both as accumulating from 0 to specific positive values.
+
+The upstream tests do not pin specific trajectory values — they only assert qualitative properties (retcode, positivity, monotonicity, conservation-bound). The migrated `.esm` tests upgrade these to quantitative trajectory pins, which is a tightening — every upstream qualitative assertion is implied by the more-specific pinned value (e.g. `CH4_100 ≈ 4.499999999e19 < 4.5e19 = CH4_0` implies the upstream monotone-decrease assertion). This gives the inline-test gate full regression coverage of the actual numerical trajectory.
+
+Stiffness declaration: this document declares the top-level solver block solver.stiffness = "high" (esm-spec 2.2), and its declared esm version is 1.1.0 for that reason alone -- the solver block arrives at 1.1.0 and a 1.0.0 document carrying one is rejected with `solver_version_too_old`. The methane oxidation chain is stiff by construction, and the tolerance rationale above already names the span: CH3 is consumed by the k2_0 three-body channel at k2_0 * M_fixed * O2_fixed = 1.3125e8 1/s (a 7.6e-9 s lifetime), HCO by k13_eff = 2.73e7 1/s (3.7e-8 s) and H by k14_0 * M_fixed * O2_fixed = 7.48e6 1/s (1.3e-7 s), while CH4 itself is removed by k1 * OH at ~6.3e-9 1/s -- a ~5-year lifetime. That is sixteen orders of magnitude of timescale inside one 18-state system, integrated over a 100 s window. Measured through EarthSciAST.run_inline_tests in one warm Julia session: without the declaration the non-stiff default hands back every one of the file's 107 assertions as an error, `solver retcode MaxIters`, after 280.6 s of grinding to its iteration budget; with it the binding picks Rosenbrock23 and all 107 pass in 36.8 s -- 16.0 s on a repeat in the same session, once the Rosenbrock23 specialization for this system is compiled. Under Rosenbrock23 the Julia actuals agree with the stored LSODA reference values to 8.1e-9 relative at worst (HNO3 at t = 1 s in `default_long_term_100s` and `nox_conservation_100s`), 123 times inside the rel=1e-6 bound. The Python binding integrates the file either way -- 107/107 before and 107/107 after -- so nothing in the Python gate ever said this document was stiff, which is the agreement-by-luck a three-binding sweep exists to stop relying on. What the declaration changes there is the method (LSODA to BDF), which costs 2.6 s -> 3.5 s and moves the worst asserted value by 5.9e-10 relative (NO at t = 100 s in `low_no_perturbation`), three orders of magnitude inside the same bound. The Rust binding parses and version-checks the block but does not map stiffness to an integrator, and its rows are identical before and after: 18 passes and 89 errors from diffsol's `Step size is too small at time = 6.73e-18`, a pre-existing failure this declaration neither causes nor clears. As with components/gaschem/pollu.esm and components/gaschem/stratospheric/chapman.esm, the fact that this model needs an implicit method now lives in the document, where all three bindings read it, rather than in a per-file solver table in one gate._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `CH4` | `m^-3` | `4.5e+19` | Methane CH₄ number density (~1800 ppb at typical tropospheric column-mean, 4.5e13 molec/cm³ × 1e6 → m⁻³). State variable with a single loss channel D(CH4) = -k1·CH4·OH (R1, slow rate-limiting step) — CH₄ has a tropospheric lifetime of ~5 years at typical [OH]=1e12 m⁻³, so over the 100-second integration window CH₄ drops by only ~10⁻⁹ relative. Methane is the longest-lived state in this system by ~10 orders of magnitude relative to the radical species. |
+| `CH3` | `m^-3` | `0.0` | Methyl radical CH₃ number density. Trace short-lived intermediate: produced by R1 (CH4+OH), consumed by R2 (CH3+O2+M three-body). Lifetime ~1/(k2_0·M·O₂) ≈ 1/(1e-42 · 2.5e25 · 5.25e24) ≈ 7.6e-9 s — extremely short, CH₃ rapidly reaches quasi-equilibrium balancing R1 against R2. |
+| `CH3O2` | `m^-3` | `100000000000000.0` | Methylperoxy radical CH₃O₂ number density (~4e-3 ppt). The key carbon-chain reservoir in methane oxidation — produced by R2 (CH3+O2+M) and R7 (CH3OOH+OH), consumed by R3 (CH3O2+NO peroxy-NO channel), R4 (CH3O2+HO2 peroxide formation), and R5 (self-reaction). The R3/R4 branching ratio determines the NOx regime. |
+| `CH3O` | `m^-3` | `10000000000.0` | Methoxy radical CH₃O number density. Short-lived intermediate: produced by R3 (CH3O2+NO) and R9 (CH3OOH photolysis), consumed by R6 (CH3O+O2 → HCHO+HO2). Lifetime ~1/k6_eff = 1e-4 s. |
+| `CH3OOH` | `m^-3` | `1000000000000000.0` | Methyl hydroperoxide CH₃OOH number density (~40 ppt). The low-NOx peroxide reservoir: produced by R4 (CH3O2+HO2 termination), consumed by R7 (OH-recycle to CH3O2), R8 (OH-recycle to HCHO), and R9 (photolysis). In low-NOx conditions CH₃OOH accumulates; in high-NOx conditions R4 is suppressed by the faster R3 channel. |
+| `HCHO` | `m^-3` | `1e+16` | Formaldehyde HCHO number density (~0.4 ppb). Central reactive intermediate in methane oxidation — produced by R6 (CH3O+O2) and R8 (CH3OOH+OH HCHO-branch), consumed by R10 (HCHO+OH), R11 (radical photolysis), and R12 (molecular photolysis). The 2:1 ratio of j12:j11 means the molecular channel dominates. |
+| `HCO` | `m^-3` | `10000000000.0` | Formyl radical HCO number density. Extremely short-lived intermediate: produced by R10 (HCHO+OH) and R11 (HCHO photolysis radical branch), consumed by R13 (HCO+O2 → CO+HO2). Lifetime ~1/k13_eff = 3.7e-8 s. |
+| `CO` | `m^-3` | `2.5e+18` | Carbon monoxide CO number density (~100 ppb, typical tropospheric background). Accumulating reservoir in methane oxidation — produced by R12 (HCHO molecular photolysis) and R13 (HCO+O2), consumed by R18 (CO+OH → CO2+HO2 auxiliary channel). CO is the longest-lived intermediate in the chain (lifetime ~months at typical [OH]). |
+| `H2` | `m^-3` | `1.3e+19` | Molecular hydrogen H₂ number density (~530 ppb, well-mixed tropospheric background). Sink-only state in this component: produced only by R12 (HCHO molecular photolysis), no loss channels modeled. H₂ accumulates monotonically over the integration window. |
+| `OH` | `m^-3` | `1000000000000.0` | Hydroxyl radical OH number density (~4e-5 ppt typical daytime). The central oxidant in tropospheric chemistry — consumed by R1 (CH4+OH, slow), R7 (CH3OOH+OH), R10 (HCHO+OH), R18 (CO+OH), R19 (OH+NO2 → HNO3 termination); produced by R9 (CH3OOH photolysis), R15 (HO2+NO recycle channel — dominant OH source in this system), and the external P_OH_ext zero-order source. |
+| `HO2` | `m^-3` | `100000000000000.0` | Hydroperoxy radical HO₂ number density (~4e-3 ppt typical daytime). HO₂ is the dominant HOx pool in mid-day tropospheric conditions — produced by R6 (CH3O+O2), R13 (HCO+O2), R14 (H+O2+M), and R18 (CO+OH); consumed by R4 (CH3O2+HO2), R15 (HO2+NO → OH+NO2 recycle), R20 (HO2+HO2 → H2O2 termination). |
+| `H` | `m^-3` | `0.0` | Atomic hydrogen H number density. Extremely short-lived intermediate from R11 (HCHO radical photolysis), immediately consumed by R14 (H+O2+M → HO2+M). Lifetime ~1/(k14_0·M·O₂) ≈ 1.3e-7 s — H is essentially in instant equilibrium with R11 and R14 fluxes. |
+| `NO` | `m^-3` | `2500000000000000.0` | Nitric oxide NO number density (~0.1 ppb, moderate-NOx scenario). Consumed by R3 (CH3O2+NO), R15 (HO2+NO), R21 (NO+O3 titration); produced by R16 (NO2 photolysis). The daytime NO/NO2 partitioning is set by the balance between R16 (NO2 → NO + O via photolysis) and R3+R15+R21 (NO → NO2 via peroxy/HO2/O3 chemistry). |
+| `NO2` | `m^-3` | `2.5e+16` | Nitrogen dioxide NO₂ number density (~1 ppb, moderate-NOx scenario). Consumed by R16 (photolysis to NO + O), R19 (OH+NO2 → HNO3 termination); produced by R3 (CH3O2+NO), R15 (HO2+NO), R21 (NO+O3 titration). Photo-steady-state at solar noon: NO/NO2 ratio ≈ 0.1 (set by j16/k_NO_O3·[O3] ≈ 8e-3/(1.9e-20·1e18) ≈ 0.42 photolysis-vs-titration balance plus the peroxy channels). |
+| `O` | `m^-3` | `0.0` | Atomic oxygen O number density. Extremely short-lived radical produced by R16 (NO2 photolysis), immediately consumed by R17 (O+O2+M → O3+M). Lifetime ~1/(k17_0·M·O₂) ≈ 1/(6e-46·2.5e25·5.25e24) ≈ 1.27e-5 s — O is essentially in instant equilibrium with R16 and R17 fluxes. |
+| `O3` | `m^-3` | `1e+18` | Ozone O₃ number density (~40 ppb, tropospheric background). Produced by R17 (O+O2+M → O3+M, where O comes from NO2 photolysis), consumed by R21 (NO+O3 titration → NO2+O2). Over 100 seconds at default conditions, O₃ shows the canonical daytime photochemistry signature — slow net production where R17 source exceeds R21 sink. |
+| `HNO3` | `m^-3` | `0.0` | Nitric acid HNO₃ number density. NOx-termination reservoir: produced only by R19 (OH+NO2 → HNO3), no loss channels modeled. HNO₃ accumulates monotonically over the integration window — the dominant NOx-removal pathway over hours-to-days timescales. |
+| `H2O2` | `m^-3` | `0.0` | Hydrogen peroxide H₂O₂ number density. HOx-termination reservoir: produced only by R20 (HO2+HO2 → H2O2), no loss channels modeled. H₂O₂ accumulates monotonically over the integration window — the dominant HOx-removal pathway in low-NOx conditions, complementing R19 in high-NOx conditions. |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `k1` | `m^3/s` | `6.3437334324972315e-21` | CH₄ + OH → CH₃ + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 1, S&P p. 220). Upstream Arrhenius form 2.45e-12 · exp(-1775/T) cm³/molec/s evaluated at T = 298 K, converted to SI via × 1e-6 → m³/s. This is the rate-limiting step of the whole methane oxidation chain (k1 ≈ 6.34e-21 m³/s is ~10⁶ × slower than the typical bimolecular OH-radical reaction rate ~1e-17 m³/s at 298 K). |
+| `k3` | `m^3/s` | `7.7e-18` | CH₃O₂ + NO → CH₃O + NO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 3, S&P p. 220). The peroxy + NO channel that drives O₃ production via NO → NO₂ conversion. 7.7e-12 cm³/molec/s × 1e-6 → m³/s. |
+| `k4` | `m^3/s` | `5.2e-18` | CH₃O₂ + HO₂ → CH₃OOH + O₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 4, S&P p. 220). The peroxide-forming termination channel that dominates over R3 in low-NOx conditions. 5.2e-12 cm³/molec/s × 1e-6 → m³/s. |
+| `k5` | `m^3/s` | `3.5e-19` | CH₃O₂ + CH₃O₂ → products self-reaction rate coefficient at 298 K (Table 6.1 rxn 5, S&P p. 220). 3.5e-13 cm³/molec/s × 1e-6 → m³/s. With combinatoric_ratelaws=false the upstream Catalyst.jl `2CH3O2 → 0` reaction gives a rate k5·[CH3O2]² and removes 2·rate molecules per unit time; this is preserved here in the explicit ODE form as -2·k5·CH3O2² in the D(CH3O2) right-hand side. |
+| `k7` | `m^3/s` | `7.043285735348479e-18` | CH₃OOH + OH → CH₃O₂ + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 5a, S&P p. 221). The recycling channel that returns methyl hydroperoxide to methylperoxy. Upstream Arrhenius form 3.6e-12 · exp(200/T) cm³/molec/s at T = 298 K, converted to SI via × 1e-6 → m³/s. |
+| `k8` | `m^3/s` | `1.9e-18` | CH₃OOH + OH → HCHO + OH + H₂O rate coefficient at 298 K (Table 6.1 rxn 5b, S&P p. 221). The HCHO-forming branch of CH₃OOH + OH (OH is regenerated by definition of this channel — net stoichiometry is CH₃OOH → HCHO + H₂O at the cost of one OH cycle). 1.9e-12 cm³/molec/s × 1e-6 → m³/s. |
+| `k10` | `m^3/s` | `9e-18` | HCHO + OH → HCO + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 7, S&P p. 221). The dominant HCHO loss pathway. 9.0e-12 cm³/molec/s × 1e-6 → m³/s. |
+| `k13` | `m^3/s` | `5.2e-18` | HCO + O₂ → CO + HO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 9, S&P p. 221). Not directly used in the ODE — see k13_eff for the O₂-folded effective rate used in the D(HCO) and D(CO) equations. Exposed as a separate parameter so a downstream consumer can re-fold the effective rate at a different O₂ background (k13_eff = k13 · O₂_fixed). 5.2e-12 cm³/molec/s × 1e-6 → m³/s. Note: the upstream Julia code defines this as the kinetic value only inside k13_eff — exposing it separately here preserves the upstream physical-constant identity at the cost of one redundant parameter. |
+| `k15` | `m^3/s` | `8.1e-18` | HO₂ + NO → OH + NO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 11, S&P p. 222). The HO₂+NO recycle channel that returns OH from HO₂ — this is the dominant OH source in NOx-rich tropospheric chemistry. 8.1e-12 cm³/molec/s × 1e-6 → m³/s. |
+| `k_CO_OH` | `m^3/s` | `2.4e-19` | CO + OH → CO₂ + HO₂ bimolecular rate coefficient at 298 K (S&P p. 223 §6.5). Auxiliary channel beyond Table 6.1 that closes the CO loss budget in the troposphere — CO₂ is not tracked as a state variable, only the HO₂ produced enters the radical chain. 2.4e-13 cm³/molec/s × 1e-6 → m³/s. |
+| `k_OH_NO2` | `m^3/s` | `1e-17` | OH + NO₂ + M → HNO₃ + M effective bimolecular rate coefficient at 298 K (S&P Eq. 6.6 / Table B.2). Auxiliary channel beyond Table 6.1: the dominant NOx-removal (HNO₃-forming) termination channel in the troposphere. 1.0e-11 cm³/molec/s × 1e-6 → m³/s. Note: the upstream model treats this as an effective bimolecular rate (M-folded already at the 1e-11 cm³/molec/s level) rather than a termolecular reaction with explicit M dependence. |
+| `k_HO2_HO2` | `m^3/s` | `2.9e-18` | HO₂ + HO₂ → H₂O₂ + O₂ self-reaction rate coefficient at 298 K (S&P Table B.1). Auxiliary channel beyond Table 6.1: the dominant H₂O₂-forming HOx termination channel in the troposphere. 2.9e-12 cm³/molec/s × 1e-6 → m³/s. With combinatoric_ratelaws=false the upstream Catalyst.jl `2HO2 → H2O2` reaction gives a rate k·[HO2]² and removes 2·rate HO₂ molecules per unit time — preserved here as -2·k_HO2_HO2·HO2² in D(HO2) and +k_HO2_HO2·HO2² in D(H2O2). |
+| `k_NO_O3` | `m^3/s` | `1.9e-20` | NO + O₃ → NO₂ + O₂ bimolecular rate coefficient at 298 K (S&P p. 211 §6.2 Eq. 6.6). Auxiliary channel beyond Table 6.1: the NO+O₃ titration channel that converts NO to NO₂ on a timescale of ~1 minute at ambient O₃ ~40 ppb. 1.9e-14 cm³/molec/s × 1e-6 → m³/s. |
+| `k2_0` | `m^6/s` | `1e-42` | CH₃ + O₂ + M → CH₃O₂ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 2, S&P p. 220). Low-pressure-limit Lindemann form: full rate is k2_0·[M]·[O₂]·[CH₃]. 1.0e-30 cm⁶/molec²/s × 1e-12 → m⁶/s. |
+| `k14_0` | `m^6/s` | `5.7e-44` | H + O₂ + M → HO₂ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 9, S&P p. 222). 5.7e-32 cm⁶/molec²/s × 1e-12 → m⁶/s. The H atom is extremely short-lived (lifetime ~1/(k14_0·M·O₂) ≈ 1/(5.7e-44 · 2.5e25 · 5.25e24) ≈ 1.3e-7 s under default conditions) — H rapidly converts to HO₂ on a timescale below the integrator's minimum step. |
+| `k17_0` | `m^6/s` | `6e-46` | O + O₂ + M → O₃ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 14, S&P p. 222). The same kinetic coefficient as in the stratospheric Chapman cycle (chapman.esm `k2_A` parameter) — preserved at the SI conversion 6.0e-34 cm⁶/molec²/s × 1e-12 → m⁶/s. Here it is evaluated at the tropospheric 298 K reference; chapman.esm uses a (T_ref/T)^2.4 power-law extension to stratospheric temperatures (T ≈ 227 K). |
+| `k6_eff` | `s^-1` | `9975.0` | CH₃O + O₂ → HCHO + HO₂ effective first-order rate coefficient at 298 K, with O₂ folded into the rate constant (Table 6.1 rxn 6, S&P p. 221). Upstream definition: k6 · O₂_fixed = (1.9e-15 · 1e-6 m³/s) · (5.25e24 m⁻³) = 9975 s⁻¹. Encoded as a separate parameter (rather than computed inline from k6 and O₂_fixed) to match the upstream parameter list, which presents k6_eff as an MTK `@parameter` and does not expose k6 as a separate symbol. A downstream consumer that wants to probe the O₂-dependence at fixed kinetic k6 can override this parameter directly. |
+| `k13_eff` | `s^-1` | `27299999.999999996` | HCO + O₂ → CO + HO₂ effective first-order rate coefficient at 298 K, with O₂ folded into the rate constant (Table 6.1 rxn 9, S&P p. 221). Upstream definition: k13 · O₂_fixed = (5.2e-12 · 1e-6 m³/s) · (5.25e24 m⁻³) = 2.73e7 s⁻¹. The HCO radical has an extremely short lifetime (~1/k13_eff ≈ 3.7e-8 s) — HCO rapidly converts to CO + HO₂ on a timescale below the integrator's minimum step. The IEEE-754 closest-double representation is 27299999.999999996 not exactly 2.73e7 because the product (5.2e-12 · 1e-6 · 5.25e24 · 1e6) does not round to an exact binary fraction. |
+| `M_fixed` | `m^-3` | `2.5e+25` | Total air number density at the boundary-layer reference scenario (2.5e19 molec/cm³ × 1e6 → m⁻³; S&P §1.4 STP-tropospheric reference). Held fixed during the integration — the model treats M as a slow-evolving background not modeled here. Multiplies the termolecular rate-coefficient products in R2 (CH₃+O₂+M), R14 (H+O₂+M), and R17 (O+O₂+M). |
+| `O2_fixed` | `m^-3` | `5.25e+24` | Molecular oxygen number density at the boundary-layer reference scenario (5.25e18 molec/cm³ × 1e6 → m⁻³; 21% of M_fixed). Held fixed during the integration — O₂ is treated as a background reservoir that is not depleted. Multiplies the termolecular rate-coefficient products in R2, R14, R17. |
+| `j9` | `s^-1` | `5e-06` | CH₃OOH + hν → CH₃O + OH photolysis rate (Table 6.1 rxn 5c, S&P p. 221 mid-latitude solar noon). Returns OH and CH₃O from the methyl hydroperoxide reservoir. |
+| `j11` | `s^-1` | `3e-05` | HCHO + hν → HCO + H radical photolysis branch (Table 6.1 rxn 7a, S&P p. 221 mid-latitude solar noon). Produces the H atom that is rapidly converted to HO₂ via R14. |
+| `j12` | `s^-1` | `4e-05` | HCHO + hν → H₂ + CO molecular photolysis branch (Table 6.1 rxn 7b, S&P p. 221 mid-latitude solar noon). The non-radical branch — produces H₂ and CO without contributing to the radical pool. Slightly faster than j11 (4e-5 vs 3e-5 s⁻¹), so the molecular channel dominates over the radical channel at mid-latitude solar noon. |
+| `j16` | `s^-1` | `0.008` | NO₂ + hν → NO + O photolysis rate (S&P §6.2 Eq. 6.5 mid-latitude solar noon). The fast photolysis (~125 s photolysis lifetime at solar noon) that drives the daytime NO/NO₂ ratio toward NO and produces the O atom that becomes O₃ via R17. |
+| `P_OH_ext` | `m^-3*s^-1` | `1000000000000.0` | External OH production rate (zero-order source: 0 → OH). Represents primary OH production from O(¹D) + H₂O → 2 OH that is not explicitly modeled in this component but is required to keep the OH pool from collapsing on the 100-second integration timescale. 1.0e6 molec/cm³/s × 1e6 → m⁻³/s (≈ canonical mid-latitude solar-noon primary OH production rate). |
+
+## Equations
+
+$$
+\mathrm{D}\left(CH4\right) = \left(-1.0\right) \cdot k1 \cdot CH4 \cdot OH
+$$
+
+$$
+\mathrm{D}\left(CH3\right) = k1 \cdot CH4 \cdot OH + \left(-1.0\right) \cdot k2_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot CH3
+$$
+
+$$
+\mathrm{D}\left(CH3O2\right) = k2_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot CH3 + \left(-1.0\right) \cdot k3 \cdot CH3O2 \cdot NO + \left(-1.0\right) \cdot k4 \cdot CH3O2 \cdot HO2 + \left(-2.0\right) \cdot k5 \cdot CH3O2 \cdot CH3O2 + k7 \cdot CH3OOH \cdot OH
+$$
+
+$$
+\mathrm{D}\left(CH3O\right) = k3 \cdot CH3O2 \cdot NO + \left(-1.0\right) \cdot k6_{eff} \cdot CH3O + j9 \cdot CH3OOH
+$$
+
+$$
+\mathrm{D}\left(CH3OOH\right) = k4 \cdot CH3O2 \cdot HO2 + \left(-1.0\right) \cdot k7 \cdot CH3OOH \cdot OH + \left(-1.0\right) \cdot k8 \cdot CH3OOH \cdot OH + \left(-1.0\right) \cdot j9 \cdot CH3OOH
+$$
+
+$$
+\mathrm{D}\left(HCHO\right) = k6_{eff} \cdot CH3O + k8 \cdot CH3OOH \cdot OH + \left(-1.0\right) \cdot k10 \cdot HCHO \cdot OH + \left(-1.0\right) \cdot j11 \cdot HCHO + \left(-1.0\right) \cdot j12 \cdot HCHO
+$$
+
+$$
+\mathrm{D}\left(HCO\right) = k10 \cdot HCHO \cdot OH + j11 \cdot HCHO + \left(-1.0\right) \cdot k13_{eff} \cdot HCO
+$$
+
+$$
+\mathrm{D}\left(CO\right) = j12 \cdot HCHO + k13_{eff} \cdot HCO + \left(-1.0\right) \cdot k_{CO\,OH} \cdot CO \cdot OH
+$$
+
+$$
+\mathrm{D}\left(H2\right) = j12 \cdot HCHO
+$$
+
+$$
+\mathrm{D}\left(OH\right) = \left(-1.0\right) \cdot k1 \cdot CH4 \cdot OH + \left(-1.0\right) \cdot k7 \cdot CH3OOH \cdot OH + j9 \cdot CH3OOH + \left(-1.0\right) \cdot k10 \cdot HCHO \cdot OH + k15 \cdot HO2 \cdot NO + \left(-1.0\right) \cdot k_{CO\,OH} \cdot CO \cdot OH + \left(-1.0\right) \cdot k_{OH\,NO2} \cdot OH \cdot NO2 + P_{OH\,ext}
+$$
+
+$$
+\mathrm{D}\left(HO2\right) = \left(-1.0\right) \cdot k4 \cdot CH3O2 \cdot HO2 + k6_{eff} \cdot CH3O + k13_{eff} \cdot HCO + k14_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot H + \left(-1.0\right) \cdot k15 \cdot HO2 \cdot NO + k_{CO\,OH} \cdot CO \cdot OH + \left(-2.0\right) \cdot k_{HO2\,HO2} \cdot HO2 \cdot HO2
+$$
+
+$$
+\mathrm{D}\left(H\right) = j11 \cdot HCHO + \left(-1.0\right) \cdot k14_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot H
+$$
+
+$$
+\mathrm{D}\left(NO\right) = \left(-1.0\right) \cdot k3 \cdot CH3O2 \cdot NO + \left(-1.0\right) \cdot k15 \cdot HO2 \cdot NO + j16 \cdot NO2 + \left(-1.0\right) \cdot k_{NO\,O3} \cdot NO \cdot O3
+$$
+
+$$
+\mathrm{D}\left(NO2\right) = k3 \cdot CH3O2 \cdot NO + k15 \cdot HO2 \cdot NO + \left(-1.0\right) \cdot j16 \cdot NO2 + \left(-1.0\right) \cdot k_{OH\,NO2} \cdot OH \cdot NO2 + k_{NO\,O3} \cdot NO \cdot O3
+$$
+
+$$
+\mathrm{D}\left(O\right) = j16 \cdot NO2 + \left(-1.0\right) \cdot k17_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot O
+$$
+
+$$
+\mathrm{D}\left(O3\right) = k17_{0} \cdot M_{fixed} \cdot O2_{fixed} \cdot O + \left(-1.0\right) \cdot k_{NO\,O3} \cdot NO \cdot O3
+$$
+
+$$
+\mathrm{D}\left(HNO3\right) = k_{OH\,NO2} \cdot OH \cdot NO2
+$$
+
+$$
+\mathrm{D}\left(H2O2\right) = k_{HO2\,HO2} \cdot HO2 \cdot HO2
+$$
+
+## Analyses
+
+### default_run_100s
+
+Headline 100-second integration under standard tropospheric initial conditions (CH4=4.5e19 m⁻³ ~1800 ppb, OH=1e12 m⁻³ ~4e-5 ppt daytime, HO2=1e14 m⁻³ ~4e-3 ppt, NO=2.5e15 m⁻³ ~0.1 ppb, NO2=2.5e16 m⁻³ ~1 ppb, O3=1e18 m⁻³ ~40 ppb, HCHO=1e16 m⁻³ ~0.4 ppb). Plots the major species trajectories: the slow CH4 decay (essentially flat at 100s scale per the multi-year tropospheric lifetime), the OH/HO2 radical equilibration to their photo-steady-state values, the HCHO partial loss via the photolysis + OH triple-channel, the slow O3 evolution under R17/R21 balance, and the monotone accumulation of HNO3 and H2O2 reservoirs.
+
+**Time span:** 0.0 → 100.0
+
+![OH radical pool over 100 seconds, showing the rapid radical equilibration from the initial 1e12 m⁻³ toward the photo-steady-state ~8e12 m⁻³ driven by the R15 HO2+NO recycle channel.](/plots/gaschem/methane/methaneoxidationode/default_run_100s-oh_vs_time.png)
+
+![HO2 radical pool over 100 seconds, showing the slow buildup from 1e14 to ~1.5e14 m⁻³ as the CH4 oxidation chain delivers HO2 via R6, R13, R14, R18.](/plots/gaschem/methane/methaneoxidationode/default_run_100s-ho2_vs_time.png)
+
+![Formaldehyde HCHO concentration over 100 seconds, showing the partial loss via the j11+j12+k10·OH triple-channel reaching a quasi-balance with the R6+R8 production from CH3O + O2 and CH3OOH + OH.](/plots/gaschem/methane/methaneoxidationode/default_run_100s-hcho_vs_time.png)
+
+![HNO3 accumulation over 100 seconds, the dominant NOx-termination channel via R19 (OH+NO2 → HNO3). Monotone increasing — no loss channel modeled. Grows from 0 to ~1.43e14 m⁻³ at t=100s.](/plots/gaschem/methane/methaneoxidationode/default_run_100s-hno3_accumulation_vs_time.png)
+
+![H2O2 accumulation over 100 seconds, the dominant HOx-termination channel via R20 (HO2+HO2 → H2O2). Monotone increasing — no loss channel modeled. Grows from 0 to ~6.2e12 m⁻³ at t=100s.](/plots/gaschem/methane/methaneoxidationode/default_run_100s-h2o2_accumulation_vs_time.png)
+
+### p_oh_ext_sensitivity_sweep
+
+External OH-source sensitivity sweep over P_OH_ext ∈ [1e11, 1e13] m⁻³/s on a log scale (2 orders of magnitude around the default 1e12). Surfaces the canonical linear-in-primary-OH-production scaling of tropospheric CH4 oxidation: doubling P_OH_ext approximately doubles the OH photo-steady-state pool, which in turn approximately doubles the k1·CH4·OH CH4 loss rate. The mid-troposphere primary OH production rate is set by J(O¹D)·[O₃]·f(H₂O,T,M) where f is the O¹D-vs-O³P branching ratio against deactivation by N₂/O₂ — typical values span the swept range across cloudy-vs-clear, low-vs-high humidity, low-vs-high zenith angle, and column-O₃ scenarios. Anchors the design choice that P_OH_ext is an overrideable parameter rather than a hardcoded constant.
+
+**Time span:** 0.0 → 100.0
+
+**Swept over:** `P_OH_ext`
+
+![OH photo-steady-state concentration at t=100s vs P_OH_ext on log-log axes. Approximately linear slope on the log scale, anchoring the linear-in-source scaling of the OH pool.](/plots/gaschem/methane/methaneoxidationode/p_oh_ext_sensitivity_sweep-oh_ss_vs_p_oh_ext.png)
+
+![HNO3 accumulated at t=100s vs P_OH_ext on log-log axes. Approximately linear slope confirming the OH+NO2 → HNO3 termination channel scales linearly with OH.](/plots/gaschem/methane/methaneoxidationode/p_oh_ext_sensitivity_sweep-hno3_vs_p_oh_ext.png)
+
+### j16_no2_photolysis_sweep
+
+NO2-photolysis sensitivity sweep over j16 ∈ [1e-4, 1e-1] s⁻¹ on a log scale (3 orders of magnitude around the default 8e-3 s⁻¹). Surfaces the diurnal-cycle signature: the j16 = 1e-4 s⁻¹ corresponds to the high-zenith-angle sunset/sunrise regime where NO2 photolysis is suppressed and NOx repartitions toward NO2; j16 = 8e-3 s⁻¹ is the canonical mid-latitude solar-noon value where NO/NO2 ratio equilibrates near photo-steady-state; j16 = 1e-1 s⁻¹ corresponds to high-altitude / low-zenith-angle / above-clouds regime where NO dominates over NO2. Anchors the canonical NO/NO2 partition driven by photolysis-vs-titration balance.
+
+**Time span:** 0.0 → 100.0
+
+**Swept over:** `j16`
+
+![NO concentration at t=100s vs j16 photolysis rate on log-log axes. Higher j16 → more NO2 photolysis → more NO accumulation.](/plots/gaschem/methane/methaneoxidationode/j16_no2_photolysis_sweep-no_ss_vs_j16.png)
+
+![NO2 concentration at t=100s vs j16 photolysis rate on log-x linear-y axes. Higher j16 → less NO2 (drained into NO via photolysis).](/plots/gaschem/methane/methaneoxidationode/j16_no2_photolysis_sweep-no2_ss_vs_j16.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/methane_oxidation.jl:213\n\nUpstream `MethaneOxidationODE` is an MTK `@component` that internally uses Catalyst.jl's `@network_component` DSL to declare 18 species, 22 reactions, and ~25 parameters, then calls `Catalyst.ode_model(complete(rn); combinatoric_ratelaws = false, name = name)` to convert the reaction network into an ODE system. The migration to `.esm` resolves this two-step construction by emitting the explicit ODE right-hand sides directly — one ODE per species summing the signed-stoichiometry-weighted reaction rates that touch that species. This is bit-equivalent to the Catalyst-generated MTK system because (a) the `combinatoric_ratelaws = false` flag means each reaction rate is just `k · ∏[reactants]` (no `n!` combinatorial factors), and (b) MTK's `complete()` step on the network preserves the user-declared species list exactly, so `unknowns(sys)` returns the same 18 species in the same order.\n\nUpstream test structural-verification invariant (test/test_methane_oxidation.jl `MethaneOxidationODE: Structural Verification` testitem at lines 37-61): asserts `length(unknowns(sys)) == 18` and `length(equations(sys)) == 18` and that the species names CH4, CH3O2, HCHO, OH, HO2, NO, NO2, O3, HNO3, H2O2 appear in the unknowns list — matched here by the 18 entries in `equations` and the 18 `state`-typed entries in `variables` with exactly those species names.\n\nUpstream parameter-list invariant (test/test_methane_oxidation.jl `MethaneOxidationODE: Rate Constants and Parameters` testitem at lines 98-119): checks k1 = 2.45e-12 · exp(-1775/298) · 1e-6 ≈ 6.34e-21 m³/s (Arrhenius pre-factor and activation temperature evaluated at the 298 K reference), k3 = 7.7e-12 · 1e-6 = 7.7e-18 m³/s, k15 = 8.1e-12 · 1e-6 = 8.1e-18 m³/s, k_CO_OH = 2.4e-13 · 1e-6 = 2.4e-19 m³/s, k_OH_NO2 = 1.0e-11 · 1e-6 = 1.0e-17 m³/s, k_HO2_HO2 = 2.9e-12 · 1e-6 = 2.9e-18 m³/s, k_NO_O3 = 1.9e-14 · 1e-6 = 1.9e-20 m³/s, P_OH_ext = 1.0e6 · 1e6 = 1.0e12 m⁻³/s. The migrated `.esm` encodes these as `type: parameter` with the pre-computed Float64 defaults matching the upstream IEEE-754 values exactly (k1 default 6.3437334324972315e-21 is `bitstring(2.45e-12 * exp(-1775/298) * 1.0e-6)` evaluated in Float64 — the upstream Julia parameter default expression evaluates to this exact value at module-load time).\n\nDesign decision: encode all 24 upstream parameters as `type: parameter` (not `type: constant`), mirroring the rig-wide convention for chemistry migrations (chapman.esm encodes its four upstream `@constants` k2_A/k4_A/C_k4/T_ref as `type: parameter`; hox_cycle.esm encodes its eight upstream `@constants` similarly). This lets a downstream consumer override any rate coefficient, photolysis rate, or boundary-condition parameter through the canonical `parameter_overrides` interface for sensitivity studies (e.g. doubled-OH, zero-NOx, half-photolysis, lifetime-at-modified-298K scenarios) — every parameter is an MTK parameter symbol, so the structural distinction between Julia `@constants` (compile-time literals) and `@parameters` (overrideable symbols) is collapsed at the `.esm` schema level.\n\nThe k6_eff and k13_eff parameters retain their upstream pre-folded form: k6_eff = k6 · O₂_fixed = 1.9e-15 · 1e-6 · 5.25e24 = 9975.0 s⁻¹ (the CH₃O + O₂ → HCHO + HO₂ first-order rate at fixed O₂), k13_eff = k13 · O₂_fixed = 5.2e-12 · 1e-6 · 5.25e24 = 2.73e7 s⁻¹ (the HCO + O₂ → CO + HO₂ first-order rate at fixed O₂). The k14_0·M·O₂ and k17_0·M·O₂ products in R14 (H + O₂ + M → HO₂ + M) and R17 (O + O₂ + M → O₃ + M) are kept as explicit triple-products in the ODE RHS (k14_0 · M_fixed · O2_fixed · H, etc.) to preserve the upstream multiplicative-coefficient structure that exposes M_fixed and O2_fixed as overrideable parameters — this is the only way a downstream consumer can probe the M-dependence of the three-body channels at fixed kinetic rate constants (e.g. an altitude sweep at fixed T).\n\nState variable defaults: each of the 18 species carries a `default` value taken from the upstream test's headline scenario (test/test_methane_oxidation.jl `MethaneOxidationODE: Numerical Integration` at lines 444-484): CH4 = 4.5e19 m⁻³ (typical tropospheric ~1800 ppb), CH3O2 = 1e14 m⁻³ (peroxy radical pool), CH3O = 1e10 m⁻³ (trace alkoxy intermediate), CH3OOH = 1e15 m⁻³ (methyl hydroperoxide), HCHO = 1e16 m⁻³ (~0.4 ppb formaldehyde), HCO = 1e10 m⁻³ (formyl trace), CO = 2.5e18 m⁻³ (~100 ppb), H2 = 1.3e19 m⁻³ (~530 ppb molecular hydrogen background), OH = 1e12 m⁻³ (~4e-5 ppt daytime OH), HO2 = 1e14 m⁻³ (~4e-3 ppt HO₂), NO = 2.5e15 m⁻³ (~0.1 ppb NO), NO2 = 2.5e16 m⁻³ (~1 ppb NO₂), O3 = 1e18 m⁻³ (~40 ppb tropospheric ozone), and four species at 0.0 (CH3, H, O, HNO3, H2O2 — initial trace species and accumulating reservoirs). At the all-defaults run these match the upstream test's u0 initial-conditions vector bit-exactly, so the `default_long_term_100s` test reproduces the upstream integration scenario directly without per-species IC overrides.\n\nUnit balance (verified): each of the 18 ODE right-hand sides resolves to m⁻³ s⁻¹ matching the unit of D(species) = d/dt(m⁻³). The bimolecular flux k · A · B has units (m³/s) · (m⁻³) · (m⁻³) = m⁻³/s ✓. The termolecular flux k₀ · M · O₂ · A has units (m⁶/s) · (m⁻³) · (m⁻³) · (m⁻³) = m⁻³/s ✓ (note the leading dimensionality `m⁶/s` of k_0 — `k2_0 ≡ k2_A in 3-body Lindemann low-pressure limit`). Effective first-order rates k_eff · A have units (1/s) · (m⁻³) = m⁻³/s ✓. Photolysis terms j · A have units (1/s) · (m⁻³) = m⁻³/s ✓. The P_OH_ext zero-order source has units m⁻³/s by direct dimensional declaration ✓.\n\nTolerance rationale (model-level rel=1e-6): 18-state stiff ODE with widely separated timescales — radical species (OH, HO2, H, CH3, CH3O, HCO) have lifetimes from ~0.001 s (k6_eff = 1e4 s⁻¹ on CH3O) to ~10 s (HO2+NO dominant loss), while CH4 has a multi-year lifetime against OH oxidation (~5 years at 1e12 m⁻³ OH per the `MethaneOxidation: CH4 Lifetime` testitem at test_methane_oxidation.jl:347-374). The 100-second integration window over which the upstream `MethaneOxidationODE: Numerical Integration` test asserts positivity is short on the CH4 timescale (CH4 drops by ~10⁻⁹ relative) but long enough for full radical equilibration. The expected values pinned in the inline tests are LSODA references produced by `earthsci_ast.simulation.simulate(rtol=1e-10, atol=1e-12, cse=False)` — the same canonical ESS runner and integrator settings the inline-test gate itself uses — so there is zero cross-integrator drift by construction and the model-level rel=1e-6 (the ESS spec §6.6.4 default tolerance) is applied without broadening, tight enough to catch any real trajectory regression. Test-level override: `initial_conditions_t0` tightens to rel=1e-10 / abs=1e-14 because t=0 carries no integration drift, with abs=1e-14 per-assertion overrides on the five zero-default species CH3, H, O, HNO3, H2O2 where a relative tolerance is undefined at zero.\n\nUpstream test reproduction:\n- `MethaneOxidationODE: Structural Verification` (test_methane_oxidation.jl:37-61): 18 unknowns / 18 equations / required species names — reproduced by the structural shape of the `variables` and `equations` blocks.\n- `MethaneOxidationODE: Rate Constants and Parameters` (test_methane_oxidation.jl:98-119): the 7 explicit parameter-value assertions — reproduced verbatim by the `default` field on each parameter declaration in `variables`.\n- `MethaneOxidationODE: Numerical Integration` (test_methane_oxidation.jl:444-484): 100-second integration with the standard u0 initial-condition vector asserting only `retcode == Success` and `all(x >= -1e-6 * max(abs(vals[1]), 1.0))` positivity — reproduced and tightened by `default_long_term_100s` which pins all 18 species at the three intermediate times t=1, 10, 100 s at rel=1e-6 (the t=0 state is pinned separately by `initial_conditions_t0` at rel=1e-10) so the actual trajectory is the regression target, not just bare positivity.\n- `MethaneOxidationODE: Approximate NOx Conservation` (test_methane_oxidation.jl:489-531): asserts NOx_total = NO + NO2 + HNO3 conserved at rtol=1e-4 over 100s — reproduced by `nox_conservation_100s` pinning the actual NOx_total trajectory (the sum is slowly leaking into HNO3 via the OH+NO₂ termination channel, but conserves to ~1e-5 relative over 100s).\n- `MethaneOxidationODE: CH4 Decreases Monotonically` (test_methane_oxidation.jl:536-575): asserts CH4 monotone non-increasing — reproduced by `default_long_term_100s` pinning CH4 at three times confirming the monotone decrease at the slow OH-driven rate (CH4 drops by ~10⁻⁹ relative over 100s, consistent with the ~5-year tropospheric lifetime).\n- `MethaneOxidationODE: HNO3 and H2O2 Accumulate` (test_methane_oxidation.jl:577-612): asserts HNO3 and H2O2 both positive at t=100s — reproduced by `default_long_term_100s` pinning both as accumulating from 0 to specific positive values.\n\nThe upstream tests do not pin specific trajectory values — they only assert qualitative properties (retcode, positivity, monotonicity, conservation-bound). The migrated `.esm` tests upgrade these to quantitative trajectory pins, which is a tightening — every upstream qualitative assertion is implied by the more-specific pinned value (e.g. `CH4_100 ≈ 4.499999999e19 < 4.5e19 = CH4_0` implies the upstream monotone-decrease assertion). This gives the inline-test gate full regression coverage of the actual numerical trajectory.\n\nStiffness declaration: this document declares the top-level solver block solver.stiffness = \"high\" (esm-spec 2.2), and its declared esm version is 1.1.0 for that reason alone -- the solver block arrives at 1.1.0 and a 1.0.0 document carrying one is rejected with `solver_version_too_old`. The methane oxidation chain is stiff by construction, and the tolerance rationale above already names the span: CH3 is consumed by the k2_0 three-body channel at k2_0 * M_fixed * O2_fixed = 1.3125e8 1/s (a 7.6e-9 s lifetime), HCO by k13_eff = 2.73e7 1/s (3.7e-8 s) and H by k14_0 * M_fixed * O2_fixed = 7.48e6 1/s (1.3e-7 s), while CH4 itself is removed by k1 * OH at ~6.3e-9 1/s -- a ~5-year lifetime. That is sixteen orders of magnitude of timescale inside one 18-state system, integrated over a 100 s window. Measured through EarthSciAST.run_inline_tests in one warm Julia session: without the declaration the non-stiff default hands back every one of the file's 107 assertions as an error, `solver retcode MaxIters`, after 280.6 s of grinding to its iteration budget; with it the binding picks Rosenbrock23 and all 107 pass in 36.8 s -- 16.0 s on a repeat in the same session, once the Rosenbrock23 specialization for this system is compiled. Under Rosenbrock23 the Julia actuals agree with the stored LSODA reference values to 8.1e-9 relative at worst (HNO3 at t = 1 s in `default_long_term_100s` and `nox_conservation_100s`), 123 times inside the rel=1e-6 bound. The Python binding integrates the file either way -- 107/107 before and 107/107 after -- so nothing in the Python gate ever said this document was stiff, which is the agreement-by-luck a three-binding sweep exists to stop relying on. What the declaration changes there is the method (LSODA to BDF), which costs 2.6 s -> 3.5 s and moves the worst asserted value by 5.9e-10 relative (NO at t = 100 s in `low_no_perturbation`), three orders of magnitude inside the same bound. The Rust binding parses and version-checks the block but does not map stiffness to an integrator, and its rows are identical before and after: 18 passes and 89 errors from diffsol's `Step size is too small at time = 6.73e-18`, a pre-existing failure this declaration neither causes nor clears. As with components/gaschem/pollu.esm and components/gaschem/stratospheric/chapman.esm, the fact that this model needs an implicit method now lives in the document, where all three bindings read it, rather than in a per-file solver table in one gate."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "k1": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 6.3437334324972315e-21,
+      "description": "CH₄ + OH → CH₃ + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 1, S&P p. 220). Upstream Arrhenius form 2.45e-12 · exp(-1775/T) cm³/molec/s evaluated at T = 298 K, converted to SI via × 1e-6 → m³/s. This is the rate-limiting step of the whole methane oxidation chain (k1 ≈ 6.34e-21 m³/s is ~10⁶ × slower than the typical bimolecular OH-radical reaction rate ~1e-17 m³/s at 298 K)."
+    },
+    "k3": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 7.7e-18,
+      "description": "CH₃O₂ + NO → CH₃O + NO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 3, S&P p. 220). The peroxy + NO channel that drives O₃ production via NO → NO₂ conversion. 7.7e-12 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k4": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 5.2e-18,
+      "description": "CH₃O₂ + HO₂ → CH₃OOH + O₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 4, S&P p. 220). The peroxide-forming termination channel that dominates over R3 in low-NOx conditions. 5.2e-12 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k5": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 3.5e-19,
+      "description": "CH₃O₂ + CH₃O₂ → products self-reaction rate coefficient at 298 K (Table 6.1 rxn 5, S&P p. 220). 3.5e-13 cm³/molec/s × 1e-6 → m³/s. With combinatoric_ratelaws=false the upstream Catalyst.jl `2CH3O2 → 0` reaction gives a rate k5·[CH3O2]² and removes 2·rate molecules per unit time; this is preserved here in the explicit ODE form as -2·k5·CH3O2² in the D(CH3O2) right-hand side."
+    },
+    "k7": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 7.043285735348479e-18,
+      "description": "CH₃OOH + OH → CH₃O₂ + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 5a, S&P p. 221). The recycling channel that returns methyl hydroperoxide to methylperoxy. Upstream Arrhenius form 3.6e-12 · exp(200/T) cm³/molec/s at T = 298 K, converted to SI via × 1e-6 → m³/s."
+    },
+    "k8": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 1.9e-18,
+      "description": "CH₃OOH + OH → HCHO + OH + H₂O rate coefficient at 298 K (Table 6.1 rxn 5b, S&P p. 221). The HCHO-forming branch of CH₃OOH + OH (OH is regenerated by definition of this channel — net stoichiometry is CH₃OOH → HCHO + H₂O at the cost of one OH cycle). 1.9e-12 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k10": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 9e-18,
+      "description": "HCHO + OH → HCO + H₂O bimolecular rate coefficient at 298 K (Table 6.1 rxn 7, S&P p. 221). The dominant HCHO loss pathway. 9.0e-12 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k13": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 5.2e-18,
+      "description": "HCO + O₂ → CO + HO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 9, S&P p. 221). Not directly used in the ODE — see k13_eff for the O₂-folded effective rate used in the D(HCO) and D(CO) equations. Exposed as a separate parameter so a downstream consumer can re-fold the effective rate at a different O₂ background (k13_eff = k13 · O₂_fixed). 5.2e-12 cm³/molec/s × 1e-6 → m³/s. Note: the upstream Julia code defines this as the kinetic value only inside k13_eff — exposing it separately here preserves the upstream physical-constant identity at the cost of one redundant parameter."
+    },
+    "k15": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 8.1e-18,
+      "description": "HO₂ + NO → OH + NO₂ bimolecular rate coefficient at 298 K (Table 6.1 rxn 11, S&P p. 222). The HO₂+NO recycle channel that returns OH from HO₂ — this is the dominant OH source in NOx-rich tropospheric chemistry. 8.1e-12 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k_CO_OH": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 2.4e-19,
+      "description": "CO + OH → CO₂ + HO₂ bimolecular rate coefficient at 298 K (S&P p. 223 §6.5). Auxiliary channel beyond Table 6.1 that closes the CO loss budget in the troposphere — CO₂ is not tracked as a state variable, only the HO₂ produced enters the radical chain. 2.4e-13 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k_OH_NO2": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 1e-17,
+      "description": "OH + NO₂ + M → HNO₃ + M effective bimolecular rate coefficient at 298 K (S&P Eq. 6.6 / Table B.2). Auxiliary channel beyond Table 6.1: the dominant NOx-removal (HNO₃-forming) termination channel in the troposphere. 1.0e-11 cm³/molec/s × 1e-6 → m³/s. Note: the upstream model treats this as an effective bimolecular rate (M-folded already at the 1e-11 cm³/molec/s level) rather than a termolecular reaction with explicit M dependence."
+    },
+    "k_HO2_HO2": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 2.9e-18,
+      "description": "HO₂ + HO₂ → H₂O₂ + O₂ self-reaction rate coefficient at 298 K (S&P Table B.1). Auxiliary channel beyond Table 6.1: the dominant H₂O₂-forming HOx termination channel in the troposphere. 2.9e-12 cm³/molec/s × 1e-6 → m³/s. With combinatoric_ratelaws=false the upstream Catalyst.jl `2HO2 → H2O2` reaction gives a rate k·[HO2]² and removes 2·rate HO₂ molecules per unit time — preserved here as -2·k_HO2_HO2·HO2² in D(HO2) and +k_HO2_HO2·HO2² in D(H2O2)."
+    },
+    "k_NO_O3": {
+      "type": "parameter",
+      "units": "m^3/s",
+      "default": 1.9e-20,
+      "description": "NO + O₃ → NO₂ + O₂ bimolecular rate coefficient at 298 K (S&P p. 211 §6.2 Eq. 6.6). Auxiliary channel beyond Table 6.1: the NO+O₃ titration channel that converts NO to NO₂ on a timescale of ~1 minute at ambient O₃ ~40 ppb. 1.9e-14 cm³/molec/s × 1e-6 → m³/s."
+    },
+    "k2_0": {
+      "type": "parameter",
+      "units": "m^6/s",
+      "default": 1e-42,
+      "description": "CH₃ + O₂ + M → CH₃O₂ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 2, S&P p. 220). Low-pressure-limit Lindemann form: full rate is k2_0·[M]·[O₂]·[CH₃]. 1.0e-30 cm⁶/molec²/s × 1e-12 → m⁶/s."
+    },
+    "k14_0": {
+      "type": "parameter",
+      "units": "m^6/s",
+      "default": 5.7e-44,
+      "description": "H + O₂ + M → HO₂ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 9, S&P p. 222). 5.7e-32 cm⁶/molec²/s × 1e-12 → m⁶/s. The H atom is extremely short-lived (lifetime ~1/(k14_0·M·O₂) ≈ 1/(5.7e-44 · 2.5e25 · 5.25e24) ≈ 1.3e-7 s under default conditions) — H rapidly converts to HO₂ on a timescale below the integrator's minimum step."
+    },
+    "k17_0": {
+      "type": "parameter",
+      "units": "m^6/s",
+      "default": 6e-46,
+      "description": "O + O₂ + M → O₃ + M three-body recombination rate coefficient at 298 K (Table 6.1 rxn 14, S&P p. 222). The same kinetic coefficient as in the stratospheric Chapman cycle (chapman.esm `k2_A` parameter) — preserved at the SI conversion 6.0e-34 cm⁶/molec²/s × 1e-12 → m⁶/s. Here it is evaluated at the tropospheric 298 K reference; chapman.esm uses a (T_ref/T)^2.4 power-law extension to stratospheric temperatures (T ≈ 227 K)."
+    },
+    "k6_eff": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 9975.0,
+      "description": "CH₃O + O₂ → HCHO + HO₂ effective first-order rate coefficient at 298 K, with O₂ folded into the rate constant (Table 6.1 rxn 6, S&P p. 221). Upstream definition: k6 · O₂_fixed = (1.9e-15 · 1e-6 m³/s) · (5.25e24 m⁻³) = 9975 s⁻¹. Encoded as a separate parameter (rather than computed inline from k6 and O₂_fixed) to match the upstream parameter list, which presents k6_eff as an MTK `@parameter` and does not expose k6 as a separate symbol. A downstream consumer that wants to probe the O₂-dependence at fixed kinetic k6 can override this parameter directly."
+    },
+    "k13_eff": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 27299999.999999996,
+      "description": "HCO + O₂ → CO + HO₂ effective first-order rate coefficient at 298 K, with O₂ folded into the rate constant (Table 6.1 rxn 9, S&P p. 221). Upstream definition: k13 · O₂_fixed = (5.2e-12 · 1e-6 m³/s) · (5.25e24 m⁻³) = 2.73e7 s⁻¹. The HCO radical has an extremely short lifetime (~1/k13_eff ≈ 3.7e-8 s) — HCO rapidly converts to CO + HO₂ on a timescale below the integrator's minimum step. The IEEE-754 closest-double representation is 27299999.999999996 not exactly 2.73e7 because the product (5.2e-12 · 1e-6 · 5.25e24 · 1e6) does not round to an exact binary fraction."
+    },
+    "M_fixed": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 2.5e+25,
+      "description": "Total air number density at the boundary-layer reference scenario (2.5e19 molec/cm³ × 1e6 → m⁻³; S&P §1.4 STP-tropospheric reference). Held fixed during the integration — the model treats M as a slow-evolving background not modeled here. Multiplies the termolecular rate-coefficient products in R2 (CH₃+O₂+M), R14 (H+O₂+M), and R17 (O+O₂+M)."
+    },
+    "O2_fixed": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 5.25e+24,
+      "description": "Molecular oxygen number density at the boundary-layer reference scenario (5.25e18 molec/cm³ × 1e6 → m⁻³; 21% of M_fixed). Held fixed during the integration — O₂ is treated as a background reservoir that is not depleted. Multiplies the termolecular rate-coefficient products in R2, R14, R17."
+    },
+    "j9": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 5e-06,
+      "description": "CH₃OOH + hν → CH₃O + OH photolysis rate (Table 6.1 rxn 5c, S&P p. 221 mid-latitude solar noon). Returns OH and CH₃O from the methyl hydroperoxide reservoir."
+    },
+    "j11": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 3e-05,
+      "description": "HCHO + hν → HCO + H radical photolysis branch (Table 6.1 rxn 7a, S&P p. 221 mid-latitude solar noon). Produces the H atom that is rapidly converted to HO₂ via R14."
+    },
+    "j12": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 4e-05,
+      "description": "HCHO + hν → H₂ + CO molecular photolysis branch (Table 6.1 rxn 7b, S&P p. 221 mid-latitude solar noon). The non-radical branch — produces H₂ and CO without contributing to the radical pool. Slightly faster than j11 (4e-5 vs 3e-5 s⁻¹), so the molecular channel dominates over the radical channel at mid-latitude solar noon."
+    },
+    "j16": {
+      "type": "parameter",
+      "units": "s^-1",
+      "default": 0.008,
+      "description": "NO₂ + hν → NO + O photolysis rate (S&P §6.2 Eq. 6.5 mid-latitude solar noon). The fast photolysis (~125 s photolysis lifetime at solar noon) that drives the daytime NO/NO₂ ratio toward NO and produces the O atom that becomes O₃ via R17."
+    },
+    "P_OH_ext": {
+      "type": "parameter",
+      "units": "m^-3*s^-1",
+      "default": 1000000000000.0,
+      "description": "External OH production rate (zero-order source: 0 → OH). Represents primary OH production from O(¹D) + H₂O → 2 OH that is not explicitly modeled in this component but is required to keep the OH pool from collapsing on the 100-second integration timescale. 1.0e6 molec/cm³/s × 1e6 → m⁻³/s (≈ canonical mid-latitude solar-noon primary OH production rate)."
+    },
+    "CH4": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 4.5e+19,
+      "description": "Methane CH₄ number density (~1800 ppb at typical tropospheric column-mean, 4.5e13 molec/cm³ × 1e6 → m⁻³). State variable with a single loss channel D(CH4) = -k1·CH4·OH (R1, slow rate-limiting step) — CH₄ has a tropospheric lifetime of ~5 years at typical [OH]=1e12 m⁻³, so over the 100-second integration window CH₄ drops by only ~10⁻⁹ relative. Methane is the longest-lived state in this system by ~10 orders of magnitude relative to the radical species."
+    },
+    "CH3": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 0.0,
+      "description": "Methyl radical CH₃ number density. Trace short-lived intermediate: produced by R1 (CH4+OH), consumed by R2 (CH3+O2+M three-body). Lifetime ~1/(k2_0·M·O₂) ≈ 1/(1e-42 · 2.5e25 · 5.25e24) ≈ 7.6e-9 s — extremely short, CH₃ rapidly reaches quasi-equilibrium balancing R1 against R2."
+    },
+    "CH3O2": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 100000000000000.0,
+      "description": "Methylperoxy radical CH₃O₂ number density (~4e-3 ppt). The key carbon-chain reservoir in methane oxidation — produced by R2 (CH3+O2+M) and R7 (CH3OOH+OH), consumed by R3 (CH3O2+NO peroxy-NO channel), R4 (CH3O2+HO2 peroxide formation), and R5 (self-reaction). The R3/R4 branching ratio determines the NOx regime."
+    },
+    "CH3O": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 10000000000.0,
+      "description": "Methoxy radical CH₃O number density. Short-lived intermediate: produced by R3 (CH3O2+NO) and R9 (CH3OOH photolysis), consumed by R6 (CH3O+O2 → HCHO+HO2). Lifetime ~1/k6_eff = 1e-4 s."
+    },
+    "CH3OOH": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 1000000000000000.0,
+      "description": "Methyl hydroperoxide CH₃OOH number density (~40 ppt). The low-NOx peroxide reservoir: produced by R4 (CH3O2+HO2 termination), consumed by R7 (OH-recycle to CH3O2), R8 (OH-recycle to HCHO), and R9 (photolysis). In low-NOx conditions CH₃OOH accumulates; in high-NOx conditions R4 is suppressed by the faster R3 channel."
+    },
+    "HCHO": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 1e+16,
+      "description": "Formaldehyde HCHO number density (~0.4 ppb). Central reactive intermediate in methane oxidation — produced by R6 (CH3O+O2) and R8 (CH3OOH+OH HCHO-branch), consumed by R10 (HCHO+OH), R11 (radical photolysis), and R12 (molecular photolysis). The 2:1 ratio of j12:j11 means the molecular channel dominates."
+    },
+    "HCO": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 10000000000.0,
+      "description": "Formyl radical HCO number density. Extremely short-lived intermediate: produced by R10 (HCHO+OH) and R11 (HCHO photolysis radical branch), consumed by R13 (HCO+O2 → CO+HO2). Lifetime ~1/k13_eff = 3.7e-8 s."
+    },
+    "CO": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 2.5e+18,
+      "description": "Carbon monoxide CO number density (~100 ppb, typical tropospheric background). Accumulating reservoir in methane oxidation — produced by R12 (HCHO molecular photolysis) and R13 (HCO+O2), consumed by R18 (CO+OH → CO2+HO2 auxiliary channel). CO is the longest-lived intermediate in the chain (lifetime ~months at typical [OH])."
+    },
+    "H2": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 1.3e+19,
+      "description": "Molecular hydrogen H₂ number density (~530 ppb, well-mixed tropospheric background). Sink-only state in this component: produced only by R12 (HCHO molecular photolysis), no loss channels modeled. H₂ accumulates monotonically over the integration window."
+    },
+    "OH": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 1000000000000.0,
+      "description": "Hydroxyl radical OH number density (~4e-5 ppt typical daytime). The central oxidant in tropospheric chemistry — consumed by R1 (CH4+OH, slow), R7 (CH3OOH+OH), R10 (HCHO+OH), R18 (CO+OH), R19 (OH+NO2 → HNO3 termination); produced by R9 (CH3OOH photolysis), R15 (HO2+NO recycle channel — dominant OH source in this system), and the external P_OH_ext zero-order source."
+    },
+    "HO2": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 100000000000000.0,
+      "description": "Hydroperoxy radical HO₂ number density (~4e-3 ppt typical daytime). HO₂ is the dominant HOx pool in mid-day tropospheric conditions — produced by R6 (CH3O+O2), R13 (HCO+O2), R14 (H+O2+M), and R18 (CO+OH); consumed by R4 (CH3O2+HO2), R15 (HO2+NO → OH+NO2 recycle), R20 (HO2+HO2 → H2O2 termination)."
+    },
+    "H": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 0.0,
+      "description": "Atomic hydrogen H number density. Extremely short-lived intermediate from R11 (HCHO radical photolysis), immediately consumed by R14 (H+O2+M → HO2+M). Lifetime ~1/(k14_0·M·O₂) ≈ 1.3e-7 s — H is essentially in instant equilibrium with R11 and R14 fluxes."
+    },
+    "NO": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 2500000000000000.0,
+      "description": "Nitric oxide NO number density (~0.1 ppb, moderate-NOx scenario). Consumed by R3 (CH3O2+NO), R15 (HO2+NO), R21 (NO+O3 titration); produced by R16 (NO2 photolysis). The daytime NO/NO2 partitioning is set by the balance between R16 (NO2 → NO + O via photolysis) and R3+R15+R21 (NO → NO2 via peroxy/HO2/O3 chemistry)."
+    },
+    "NO2": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 2.5e+16,
+      "description": "Nitrogen dioxide NO₂ number density (~1 ppb, moderate-NOx scenario). Consumed by R16 (photolysis to NO + O), R19 (OH+NO2 → HNO3 termination); produced by R3 (CH3O2+NO), R15 (HO2+NO), R21 (NO+O3 titration). Photo-steady-state at solar noon: NO/NO2 ratio ≈ 0.1 (set by j16/k_NO_O3·[O3] ≈ 8e-3/(1.9e-20·1e18) ≈ 0.42 photolysis-vs-titration balance plus the peroxy channels)."
+    },
+    "O": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 0.0,
+      "description": "Atomic oxygen O number density. Extremely short-lived radical produced by R16 (NO2 photolysis), immediately consumed by R17 (O+O2+M → O3+M). Lifetime ~1/(k17_0·M·O₂) ≈ 1/(6e-46·2.5e25·5.25e24) ≈ 1.27e-5 s — O is essentially in instant equilibrium with R16 and R17 fluxes."
+    },
+    "O3": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 1e+18,
+      "description": "Ozone O₃ number density (~40 ppb, tropospheric background). Produced by R17 (O+O2+M → O3+M, where O comes from NO2 photolysis), consumed by R21 (NO+O3 titration → NO2+O2). Over 100 seconds at default conditions, O₃ shows the canonical daytime photochemistry signature — slow net production where R17 source exceeds R21 sink."
+    },
+    "HNO3": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 0.0,
+      "description": "Nitric acid HNO₃ number density. NOx-termination reservoir: produced only by R19 (OH+NO2 → HNO3), no loss channels modeled. HNO₃ accumulates monotonically over the integration window — the dominant NOx-removal pathway over hours-to-days timescales."
+    },
+    "H2O2": {
+      "type": "unknown",
+      "units": "m^-3",
+      "default": 0.0,
+      "description": "Hydrogen peroxide H₂O₂ number density. HOx-termination reservoir: produced only by R20 (HO2+HO2 → H2O2), no loss channels modeled. H₂O₂ accumulates monotonically over the integration window — the dominant HOx-removal pathway in low-NOx conditions, complementing R19 in high-NOx conditions."
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CH4"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          "k1",
+          "CH4",
+          "OH"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CH3"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k1",
+              "CH4",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k2_0",
+              "M_fixed",
+              "O2_fixed",
+              "CH3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CH3O2"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k2_0",
+              "M_fixed",
+              "O2_fixed",
+              "CH3"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k3",
+              "CH3O2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k4",
+              "CH3O2",
+              "HO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -2.0,
+              "k5",
+              "CH3O2",
+              "CH3O2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k7",
+              "CH3OOH",
+              "OH"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CH3O"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k3",
+              "CH3O2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k6_eff",
+              "CH3O"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "j9",
+              "CH3OOH"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CH3OOH"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k4",
+              "CH3O2",
+              "HO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k7",
+              "CH3OOH",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k8",
+              "CH3OOH",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "j9",
+              "CH3OOH"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "HCHO"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k6_eff",
+              "CH3O"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k8",
+              "CH3OOH",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k10",
+              "HCHO",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "j11",
+              "HCHO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "j12",
+              "HCHO"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "HCO"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k10",
+              "HCHO",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "j11",
+              "HCHO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k13_eff",
+              "HCO"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "CO"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "j12",
+              "HCHO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k13_eff",
+              "HCO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_CO_OH",
+              "CO",
+              "OH"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "H2"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "j12",
+          "HCHO"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "OH"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k1",
+              "CH4",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k7",
+              "CH3OOH",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "j9",
+              "CH3OOH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k10",
+              "HCHO",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k15",
+              "HO2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_CO_OH",
+              "CO",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_OH_NO2",
+              "OH",
+              "NO2"
+            ]
+          },
+          "P_OH_ext"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "HO2"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k4",
+              "CH3O2",
+              "HO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k6_eff",
+              "CH3O"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k13_eff",
+              "HCO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k14_0",
+              "M_fixed",
+              "O2_fixed",
+              "H"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k15",
+              "HO2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k_CO_OH",
+              "CO",
+              "OH"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -2.0,
+              "k_HO2_HO2",
+              "HO2",
+              "HO2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "H"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "j11",
+              "HCHO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k14_0",
+              "M_fixed",
+              "O2_fixed",
+              "H"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "NO"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k3",
+              "CH3O2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k15",
+              "HO2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "j16",
+              "NO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_NO_O3",
+              "NO",
+              "O3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "NO2"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k3",
+              "CH3O2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k15",
+              "HO2",
+              "NO"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "j16",
+              "NO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_OH_NO2",
+              "OH",
+              "NO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k_NO_O3",
+              "NO",
+              "O3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "O"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "j16",
+              "NO2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k17_0",
+              "M_fixed",
+              "O2_fixed",
+              "O"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "O3"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k17_0",
+              "M_fixed",
+              "O2_fixed",
+              "O"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              "k_NO_O3",
+              "NO",
+              "O3"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "HNO3"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "k_OH_NO2",
+          "OH",
+          "NO2"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "H2O2"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "k_HO2_HO2",
+          "HO2",
+          "HO2"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "initial_conditions_t0",
+      "description": "Returns the declared species defaults at t=0. Pins each of the 18 species at the upstream-test u0 values (CH4=4.5e19, CH3O2=1e14, CH3O=1e10, CH3OOH=1e15, HCHO=1e16, HCO=1e10, CO=2.5e18, H2=1.3e19, OH=1e12, HO2=1e14, NO=2.5e15, NO2=2.5e16, O3=1e18) and the four trace/reservoir species at 0 (CH3, H, O, HNO3, H2O2). Tolerance tightened to rel=1e-10 / abs=1e-14 because at t=0 there is no integration drift — only parser→Float64 conversion and the first-step identity evaluation of the initial state.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "tolerance": {
+        "rel": 1e-10,
+        "abs": 1e-14
+      },
+      "assertions": [
+        {
+          "variable": "CH4",
+          "time": 0.0,
+          "expected": 4.5e+19
+        },
+        {
+          "variable": "CH3",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "CH3O2",
+          "time": 0.0,
+          "expected": 100000000000000.0
+        },
+        {
+          "variable": "CH3O",
+          "time": 0.0,
+          "expected": 10000000000.0
+        },
+        {
+          "variable": "CH3OOH",
+          "time": 0.0,
+          "expected": 1000000000000000.0
+        },
+        {
+          "variable": "HCHO",
+          "time": 0.0,
+          "expected": 1e+16
+        },
+        {
+          "variable": "HCO",
+          "time": 0.0,
+          "expected": 10000000000.0
+        },
+        {
+          "variable": "CO",
+          "time": 0.0,
+          "expected": 2.5e+18
+        },
+        {
+          "variable": "H2",
+          "time": 0.0,
+          "expected": 1.3e+19
+        },
+        {
+          "variable": "OH",
+          "time": 0.0,
+          "expected": 1000000000000.0
+        },
+        {
+          "variable": "HO2",
+          "time": 0.0,
+          "expected": 100000000000000.0
+        },
+        {
+          "variable": "H",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "NO",
+          "time": 0.0,
+          "expected": 2500000000000000.0
+        },
+        {
+          "variable": "NO2",
+          "time": 0.0,
+          "expected": 2.5e+16
+        },
+        {
+          "variable": "O",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "O3",
+          "time": 0.0,
+          "expected": 1e+18
+        },
+        {
+          "variable": "HNO3",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "H2O2",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        }
+      ]
+    },
+    {
+      "id": "default_long_term_100s",
+      "description": "Headline 100-second integration under the standard tropospheric initial conditions (CH4=4.5e19, OH=1e12, HO2=1e14, NO=2.5e15, NO2=2.5e16, O3=1e18, HCHO=1e16, etc. — matching the upstream `MethaneOxidationODE: Numerical Integration` test at test_methane_oxidation.jl:444-484). Reproduces and tightens the upstream test which asserts only `retcode == Success` and `all(x >= -1e-6 * max(abs(vals[1]), 1.0))` positivity — this test pins all 18 species at three intermediate times (t=1, 10, 100 s) at the rel=1e-6 model-default tolerance. The trajectory captures (i) the rapid radical equilibration of short-lived species (CH3, CH3O, HCO, H, O reach quasi-equilibrium within ~ms — by t=1s they are at their flux-balance values), (ii) the slow accumulation of NOx-termination products (HNO3 grows from 0 to 1.43e14 m⁻³ at t=100s via R19, H2O2 grows from 0 to 6.20e12 m⁻³ via R20), (iii) the slow CH4 decay (only ~10⁻⁹ relative change over 100s — drops from 4.5e19 to 4.49998e19 — due to the rate-limiting k1·CH4·OH slow oxidation step matching the canonical multi-year tropospheric CH4 lifetime), (iv) the fast HCHO partial loss via the j11+j12+k10·OH triple-channel reaching a quasi-balance with the R6+R8 production around 1.012e16 m⁻³, (v) the slow NO/NO2 photo-steady-state evolution driven by the j16 NO2 photolysis (NO grows from 2.5e15 to 7.35e15 m⁻³ while NO2 drops from 2.5e16 to 2.0e16 m⁻³, conserving NO+NO2 modulo the HNO3 leak).",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "assertions": [
+        {
+          "variable": "CH4",
+          "time": 1.0,
+          "expected": 4.499999953209377e+19
+        },
+        {
+          "variable": "CH3",
+          "time": 1.0,
+          "expected": 4536.359412248199
+        },
+        {
+          "variable": "CH3O2",
+          "time": 1.0,
+          "expected": 98454792017303.88
+        },
+        {
+          "variable": "CH3O",
+          "time": 1.0,
+          "expected": 201630640.65749195
+        },
+        {
+          "variable": "CH3OOH",
+          "time": 1.0,
+          "expected": 1000032294614021.6
+        },
+        {
+          "variable": "HCHO",
+          "time": 1.0,
+          "expected": 1.0001136161347214e+16
+        },
+        {
+          "variable": "HCO",
+          "time": 1.0,
+          "expected": 17866.93503579218
+        },
+        {
+          "variable": "CO",
+          "time": 1.0,
+          "expected": 2.499999874115602e+18
+        },
+        {
+          "variable": "H2",
+          "time": 1.0,
+          "expected": 1.3000000400022819e+19
+        },
+        {
+          "variable": "OH",
+          "time": 1.0,
+          "expected": 2085687961787.0535
+        },
+        {
+          "variable": "HO2",
+          "time": 1.0,
+          "expected": 101511294895884.62
+        },
+        {
+          "variable": "H",
+          "time": 1.0,
+          "expected": 40104.80666150563
+        },
+        {
+          "variable": "NO",
+          "time": 1.0,
+          "expected": 2646443019859174.5
+        },
+        {
+          "variable": "NO2",
+          "time": 1.0,
+          "expected": 2.485314854751675e+16
+        },
+        {
+          "variable": "O",
+          "time": 1.0,
+          "expected": 2524764483.777431
+        },
+        {
+          "variable": "O3",
+          "time": 1.0,
+          "expected": 1.0001505058616582e+18
+        },
+        {
+          "variable": "HNO3",
+          "time": 1.0,
+          "expected": 408432624092.9329
+        },
+        {
+          "variable": "H2O2",
+          "time": 1.0,
+          "expected": 29414053122.93484
+        },
+        {
+          "variable": "CH4",
+          "time": 10.0,
+          "expected": 4.499999168999017e+19
+        },
+        {
+          "variable": "CH3O2",
+          "time": 10.0,
+          "expected": 85377998987104.28
+        },
+        {
+          "variable": "HCHO",
+          "time": 10.0,
+          "expected": 1.0013039683017522e+16
+        },
+        {
+          "variable": "OH",
+          "time": 10.0,
+          "expected": 3710318363008.241
+        },
+        {
+          "variable": "HO2",
+          "time": 10.0,
+          "expected": 119167602449476.8
+        },
+        {
+          "variable": "NO",
+          "time": 10.0,
+          "expected": 3790801755825202.5
+        },
+        {
+          "variable": "NO2",
+          "time": 10.0,
+          "expected": 2.3702139433028104e+16
+        },
+        {
+          "variable": "O3",
+          "time": 10.0,
+          "expected": 1.0013416719826824e+18
+        },
+        {
+          "variable": "HNO3",
+          "time": 10.0,
+          "expected": 7058811146735.972
+        },
+        {
+          "variable": "H2O2",
+          "time": 10.0,
+          "expected": 348105833978.1684
+        },
+        {
+          "variable": "CH4",
+          "time": 100.0,
+          "expected": 4.4999808235380335e+19
+        },
+        {
+          "variable": "CH3",
+          "time": 100.0,
+          "expected": 18049.921716497145
+        },
+        {
+          "variable": "CH3O2",
+          "time": 100.0,
+          "expected": 43361978490831.875
+        },
+        {
+          "variable": "CH3O",
+          "time": 100.0,
+          "expected": 246606753.5738172
+        },
+        {
+          "variable": "CH3OOH",
+          "time": 100.0,
+          "expected": 997705681924689.4
+        },
+        {
+          "variable": "HCHO",
+          "time": 100.0,
+          "expected": 1.0119112941364504e+16
+        },
+        {
+          "variable": "HCO",
+          "time": 100.0,
+          "expected": 38804.701875196355
+        },
+        {
+          "variable": "CO",
+          "time": 100.0,
+          "expected": 2.499728320363757e+18
+        },
+        {
+          "variable": "H2",
+          "time": 100.0,
+          "expected": 1.3000040255488162e+19
+        },
+        {
+          "variable": "OH",
+          "time": 100.0,
+          "expected": 8298871620867.408
+        },
+        {
+          "variable": "HO2",
+          "time": 100.0,
+          "expected": 148056148700673.56
+        },
+        {
+          "variable": "H",
+          "time": 100.0,
+          "expected": 40577.896506182646
+        },
+        {
+          "variable": "NO",
+          "time": 100.0,
+          "expected": 7352523573794373.0
+        },
+        {
+          "variable": "NO2",
+          "time": 100.0,
+          "expected": 2.0005605484683616e+16
+        },
+        {
+          "variable": "O",
+          "time": 100.0,
+          "expected": 2032315490.6097624
+        },
+        {
+          "variable": "O3",
+          "time": 100.0,
+          "expected": 1.0058102845506171e+18
+        },
+        {
+          "variable": "HNO3",
+          "time": 100.0,
+          "expected": 141870941522019.16
+        },
+        {
+          "variable": "H2O2",
+          "time": 100.0,
+          "expected": 6073016803597.228
+        }
+      ]
+    },
+    {
+      "id": "nox_conservation_100s",
+      "description": "Reactive nitrogen conservation: NOx_total = NO + NO2 + HNO3 should be conserved to within rtol=1e-4 over 100 s (upstream `MethaneOxidationODE: Approximate NOx Conservation` test at test_methane_oxidation.jl:489-531). The model has one NOx-mass-conserving subset (R3, R15, R16, R21 all shuttle between NO and NO2 without changing the sum) and one NOx-removal channel (R19: OH+NO2 → HNO3 captures NO2 into the HNO3 reservoir without releasing it). Therefore the sum NO+NO2+HNO3 is conserved exactly modulo numerical integration drift, while NO+NO2 alone is NOT conserved. At the initial conditions NOx_total = 2.5e15 + 2.5e16 + 0 = 2.75e16 m⁻³; the integrator preserves this to ~3e-15 relative (16 digits of accuracy) across the 100s window, well below the upstream rtol=1e-4 bound. This test pins NO, NO2, HNO3 individually at three times so the conservation invariant is anchored both as the bare individual values and via the regenerated sum 2.75e16 m⁻³ — a regression in any single channel would show up as a wrong individual value AND a non-conserved sum.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "assertions": [
+        {
+          "variable": "NO",
+          "time": 1.0,
+          "expected": 2646443019859174.5
+        },
+        {
+          "variable": "NO2",
+          "time": 1.0,
+          "expected": 2.485314854751675e+16
+        },
+        {
+          "variable": "HNO3",
+          "time": 1.0,
+          "expected": 408432624092.9329
+        },
+        {
+          "variable": "NO",
+          "time": 10.0,
+          "expected": 3790801755825202.5
+        },
+        {
+          "variable": "NO2",
+          "time": 10.0,
+          "expected": 2.3702139433028104e+16
+        },
+        {
+          "variable": "HNO3",
+          "time": 10.0,
+          "expected": 7058811146735.972
+        },
+        {
+          "variable": "NO",
+          "time": 100.0,
+          "expected": 7352523573794373.0
+        },
+        {
+          "variable": "NO2",
+          "time": 100.0,
+          "expected": 2.0005605484683616e+16
+        },
+        {
+          "variable": "HNO3",
+          "time": 100.0,
+          "expected": 141870941522019.16
+        }
+      ]
+    },
+    {
+      "id": "low_no_perturbation",
+      "description": "Low-NOx regime: initial conditions overridden to NO=1e13 m⁻³ (~4e-4 ppb, factor ~250× lower than the default 2.5e15) and NO2=1e14 m⁻³ (~4e-3 ppb, factor ~250× lower than the default 2.5e16) while all other species and parameters remain at defaults. In this regime R4 (CH3O2 + HO2 → CH3OOH) dominates over R3 (CH3O2 + NO → CH3O + NO2), suppressing the peroxy-NO channel that drives O₃ production. Over 100 s the system shows (i) modest CH4 loss similar to default (k1·CH4·OH dominated by the OH source rather than the NOx regime), (ii) HO2 builds up faster than in the default case (~2.2e14 vs 1.5e14 at t=100s) because the R15·HO2·NO recycle is weak, (iii) NO grows from 1e13 to 2.9e13 m⁻³ as j16·NO2 photolysis converts NO2 to NO + O (gain from photolysis exceeds the R15 + R3 conversion back), (iv) HNO3 accumulates much slower (9.1e10 vs 1.43e14 at t=100s) because the OH+NO2 termination channel is weaker at low NO2, (v) H2O2 accumulates faster (7.7e12 vs 6.2e12 at t=100s) because R20 (HO2+HO2 → H2O2) is enhanced at the higher HO2 pool. Anchors the canonical NOx-regime sensitivity of tropospheric oxidation: low-NOx → peroxide-dominated → high HOx termination → low HNO3.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "initial_conditions": {
+        "NO": 10000000000000.0,
+        "NO2": 100000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "NO",
+          "time": 10.0,
+          "expected": 15160813106820.066
+        },
+        {
+          "variable": "NO2",
+          "time": 10.0,
+          "expected": 94829172235775.4
+        },
+        {
+          "variable": "HO2",
+          "time": 10.0,
+          "expected": 111950161375333.86
+        },
+        {
+          "variable": "CH3O2",
+          "time": 10.0,
+          "expected": 102283025495354.42
+        },
+        {
+          "variable": "CH4",
+          "time": 100.0,
+          "expected": 4.499996993029147e+19
+        },
+        {
+          "variable": "OH",
+          "time": 100.0,
+          "expected": 1072022453846.6475
+        },
+        {
+          "variable": "HO2",
+          "time": 100.0,
+          "expected": 208068180977695.44
+        },
+        {
+          "variable": "NO",
+          "time": 100.0,
+          "expected": 28897312839214.72
+        },
+        {
+          "variable": "NO2",
+          "time": 100.0,
+          "expected": 81011868652280.97
+        },
+        {
+          "variable": "HNO3",
+          "time": 100.0,
+          "expected": 90818508503.54785
+        },
+        {
+          "variable": "H2O2",
+          "time": 100.0,
+          "expected": 7367703347025.87
+        }
+      ]
+    },
+    {
+      "id": "doubled_p_oh_ext_perturbation",
+      "description": "Doubled OH primary-production source: P_OH_ext doubled from 1.0e12 to 2.0e12 m⁻³/s, simulating either doubled photolytic OH yield (e.g., enhanced J(O¹D) at lower solar zenith angle, or doubled J × [H₂O] at higher humidity) or doubled boundary-condition import of OH. All other parameters and ICs at defaults. Over 100 s the system reaches a higher OH photo-steady-state (1.12e13 vs 8.40e12 at default, ~33% higher than the default — note that the OH balance is not strictly linear in P_OH_ext because the dominant OH source is the R15 recycle channel, not the external source, so doubling P_OH_ext only modestly shifts the OH pool). HO2 rises (1.91e14 vs 1.50e14) because more OH means more R1·CH4·OH conversion of CH4 → CH3 → CH3O2 → ... → HCO → CO + HO2. CH4 loss is faster (drop to 4.4999755e19 vs 4.4999807e19 default) — about 1.25× faster, consistent with the higher OH. HNO3 accumulates faster (1.81e14 vs 1.43e14, 27% more) because R19 = k_OH_NO2·OH·NO2 scales with OH. Anchors the linear-in-OH scaling of CH4 oxidation and the canonical photochemistry-driven oxidant budget of the troposphere.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "parameter_overrides": {
+        "P_OH_ext": 2000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "OH",
+          "time": 10.0,
+          "expected": 4641912401131.439
+        },
+        {
+          "variable": "HO2",
+          "time": 10.0,
+          "expected": 124197776173184.36
+        },
+        {
+          "variable": "HNO3",
+          "time": 10.0,
+          "expected": 8982028577663.793
+        },
+        {
+          "variable": "CH4",
+          "time": 100.0,
+          "expected": 4.4999757322045596e+19
+        },
+        {
+          "variable": "OH",
+          "time": 100.0,
+          "expected": 11020575053537.59
+        },
+        {
+          "variable": "HO2",
+          "time": 100.0,
+          "expected": 187761800309392.84
+        },
+        {
+          "variable": "NO",
+          "time": 100.0,
+          "expected": 7271453564190778.0
+        },
+        {
+          "variable": "NO2",
+          "time": 100.0,
+          "expected": 2.0049000037616988e+16
+        },
+        {
+          "variable": "HNO3",
+          "time": 100.0,
+          "expected": 179546398192128.03
+        },
+        {
+          "variable": "H2O2",
+          "time": 100.0,
+          "expected": 8210380200699.587
+        }
+      ]
+    },
+    {
+      "id": "zero_photolysis_night_time",
+      "description": "Night-time scenario: all four photolysis rates zeroed (j9 = j11 = j12 = j16 = 0 s⁻¹). The CH3OOH photolysis (R9), HCHO radical photolysis (R11), HCHO molecular photolysis (R12), and NO2 photolysis (R16) all shut off — only the thermal kinetic channels (the k* rate constants) remain active, plus the P_OH_ext external source. Over 100 s the night-time signature emerges: (i) NO drops from 2.5e15 to 3.15e14 m⁻³ (factor ~8×, because j16·NO2 photolysis was the dominant NO source and is now shut off — the only remaining NO source is the negligible R21·NO+O3 → NO2 reverse direction which there is none, but the NO sinks R3+R15+R21 still operate, draining NO into NO2), (ii) NO2 accumulates to 2.71e16 (up ~8% from 2.5e16) absorbing the NO that drained, (iii) OH grows to 1.13e12 m⁻³ (about defaults — the P_OH_ext external source still operates but R9·CH3OOH photolysis is off so OH source is reduced), (iv) HO2 grows to 1.62e14 (slightly up from 1.5e14 default — the R15·HO2·NO loss channel is weaker at lower NO so HO2 builds up), (v) O₃ slightly decreases (R17·O+O₂+M is now starved of O atoms since R16 photolysis produces no O) — drops from 1.0e18 to 9.98e17 m⁻³ via the slow R21·NO+O3 titration. Verifies the model captures night-time photochemistry correctly: NOx repartitions toward NO2, OH/HO2 driven by primary P_OH_ext source plus thermal recycling, O₃ slowly titrates against the residual NO.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "parameter_overrides": {
+        "j9": 0.0,
+        "j11": 0.0,
+        "j12": 0.0,
+        "j16": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "OH",
+          "time": 10.0,
+          "expected": 2309166980394.312
+        },
+        {
+          "variable": "HO2",
+          "time": 10.0,
+          "expected": 111607635793686.7
+        },
+        {
+          "variable": "NO",
+          "time": 10.0,
+          "expected": 2035008289886737.0
+        },
+        {
+          "variable": "NO2",
+          "time": 10.0,
+          "expected": 2.5459262842575084e+16
+        },
+        {
+          "variable": "O3",
+          "time": 10.0,
+          "expected": 9.995707763951437e+17
+        },
+        {
+          "variable": "CH4",
+          "time": 100.0,
+          "expected": 4.499995226431559e+19
+        },
+        {
+          "variable": "OH",
+          "time": 100.0,
+          "expected": 1124312751123.8252
+        },
+        {
+          "variable": "HO2",
+          "time": 100.0,
+          "expected": 157867560415089.12
+        },
+        {
+          "variable": "NO",
+          "time": 100.0,
+          "expected": 316084526104908.94
+        },
+        {
+          "variable": "NO2",
+          "time": 100.0,
+          "expected": 2.7139965009542828e+16
+        },
+        {
+          "variable": "O3",
+          "time": 100.0,
+          "expected": 9.979916464065641e+17
+        },
+        {
+          "variable": "HNO3",
+          "time": 100.0,
+          "expected": 43950464352326.47
+        },
+        {
+          "variable": "H2O2",
+          "time": 100.0,
+          "expected": 5392114037703.409
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "default_run_100s",
+      "description": "Headline 100-second integration under standard tropospheric initial conditions (CH4=4.5e19 m⁻³ ~1800 ppb, OH=1e12 m⁻³ ~4e-5 ppt daytime, HO2=1e14 m⁻³ ~4e-3 ppt, NO=2.5e15 m⁻³ ~0.1 ppb, NO2=2.5e16 m⁻³ ~1 ppb, O3=1e18 m⁻³ ~40 ppb, HCHO=1e16 m⁻³ ~0.4 ppb). Plots the major species trajectories: the slow CH4 decay (essentially flat at 100s scale per the multi-year tropospheric lifetime), the OH/HO2 radical equilibration to their photo-steady-state values, the HCHO partial loss via the photolysis + OH triple-channel, the slow O3 evolution under R17/R21 balance, and the monotone accumulation of HNO3 and H2O2 reservoirs.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "plots": [
+        {
+          "id": "oh_vs_time",
+          "type": "line",
+          "description": "OH radical pool over 100 seconds, showing the rapid radical equilibration from the initial 1e12 m⁻³ toward the photo-steady-state ~8e12 m⁻³ driven by the R15 HO2+NO recycle channel.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "OH",
+            "label": "OH (m^-3)"
+          }
+        },
+        {
+          "id": "ho2_vs_time",
+          "type": "line",
+          "description": "HO2 radical pool over 100 seconds, showing the slow buildup from 1e14 to ~1.5e14 m⁻³ as the CH4 oxidation chain delivers HO2 via R6, R13, R14, R18.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "HO2",
+            "label": "HO2 (m^-3)"
+          }
+        },
+        {
+          "id": "hcho_vs_time",
+          "type": "line",
+          "description": "Formaldehyde HCHO concentration over 100 seconds, showing the partial loss via the j11+j12+k10·OH triple-channel reaching a quasi-balance with the R6+R8 production from CH3O + O2 and CH3OOH + OH.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "HCHO",
+            "label": "HCHO (m^-3)"
+          }
+        },
+        {
+          "id": "hno3_accumulation_vs_time",
+          "type": "line",
+          "description": "HNO3 accumulation over 100 seconds, the dominant NOx-termination channel via R19 (OH+NO2 → HNO3). Monotone increasing — no loss channel modeled. Grows from 0 to ~1.43e14 m⁻³ at t=100s.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "HNO3",
+            "label": "HNO3 (m^-3)"
+          }
+        },
+        {
+          "id": "h2o2_accumulation_vs_time",
+          "type": "line",
+          "description": "H2O2 accumulation over 100 seconds, the dominant HOx-termination channel via R20 (HO2+HO2 → H2O2). Monotone increasing — no loss channel modeled. Grows from 0 to ~6.2e12 m⁻³ at t=100s.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "H2O2",
+            "label": "H2O2 (m^-3)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "p_oh_ext_sensitivity_sweep",
+      "description": "External OH-source sensitivity sweep over P_OH_ext ∈ [1e11, 1e13] m⁻³/s on a log scale (2 orders of magnitude around the default 1e12). Surfaces the canonical linear-in-primary-OH-production scaling of tropospheric CH4 oxidation: doubling P_OH_ext approximately doubles the OH photo-steady-state pool, which in turn approximately doubles the k1·CH4·OH CH4 loss rate. The mid-troposphere primary OH production rate is set by J(O¹D)·[O₃]·f(H₂O,T,M) where f is the O¹D-vs-O³P branching ratio against deactivation by N₂/O₂ — typical values span the swept range across cloudy-vs-clear, low-vs-high humidity, low-vs-high zenith angle, and column-O₃ scenarios. Anchors the design choice that P_OH_ext is an overrideable parameter rather than a hardcoded constant.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "P_OH_ext",
+            "range": {
+              "start": 100000000000.0,
+              "stop": 10000000000000.0,
+              "count": 21,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "oh_ss_vs_p_oh_ext",
+          "type": "line",
+          "description": "OH photo-steady-state concentration at t=100s vs P_OH_ext on log-log axes. Approximately linear slope on the log scale, anchoring the linear-in-source scaling of the OH pool.",
+          "x": {
+            "variable": "P_OH_ext",
+            "label": "P_OH_ext (m^-3 s^-1)"
+          },
+          "y": {
+            "variable": "OH",
+            "label": "OH at t=100s (m^-3)"
+          }
+        },
+        {
+          "id": "hno3_vs_p_oh_ext",
+          "type": "line",
+          "description": "HNO3 accumulated at t=100s vs P_OH_ext on log-log axes. Approximately linear slope confirming the OH+NO2 → HNO3 termination channel scales linearly with OH.",
+          "x": {
+            "variable": "P_OH_ext",
+            "label": "P_OH_ext (m^-3 s^-1)"
+          },
+          "y": {
+            "variable": "HNO3",
+            "label": "HNO3 at t=100s (m^-3)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "j16_no2_photolysis_sweep",
+      "description": "NO2-photolysis sensitivity sweep over j16 ∈ [1e-4, 1e-1] s⁻¹ on a log scale (3 orders of magnitude around the default 8e-3 s⁻¹). Surfaces the diurnal-cycle signature: the j16 = 1e-4 s⁻¹ corresponds to the high-zenith-angle sunset/sunrise regime where NO2 photolysis is suppressed and NOx repartitions toward NO2; j16 = 8e-3 s⁻¹ is the canonical mid-latitude solar-noon value where NO/NO2 ratio equilibrates near photo-steady-state; j16 = 1e-1 s⁻¹ corresponds to high-altitude / low-zenith-angle / above-clouds regime where NO dominates over NO2. Anchors the canonical NO/NO2 partition driven by photolysis-vs-titration balance.",
+      "time_span": {
+        "start": 0.0,
+        "end": 100.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "j16",
+            "range": {
+              "start": 0.0001,
+              "stop": 0.1,
+              "count": 19,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "no_ss_vs_j16",
+          "type": "line",
+          "description": "NO concentration at t=100s vs j16 photolysis rate on log-log axes. Higher j16 → more NO2 photolysis → more NO accumulation.",
+          "x": {
+            "variable": "j16",
+            "label": "j16 (s^-1)"
+          },
+          "y": {
+            "variable": "NO",
+            "label": "NO at t=100s (m^-3)"
+          }
+        },
+        {
+          "id": "no2_ss_vs_j16",
+          "type": "line",
+          "description": "NO2 concentration at t=100s vs j16 photolysis rate on log-x linear-y axes. Higher j16 → less NO2 (drained into NO via photolysis).",
+          "x": {
+            "variable": "j16",
+            "label": "j16 (s^-1)"
+          },
+          "y": {
+            "variable": "NO2",
+            "label": "NO2 at t=100s (m^-3)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

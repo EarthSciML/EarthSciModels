@@ -1,0 +1,133 @@
+---
+title: "NEI2016"
+slug: "nei2016"
+domains: ["earthsci_data"]
+component_types: ["data_source"]
+domain: "earthsci_data"
+component_type: "data_source"
+esm_version: "1.0.0"
+esm_path: "components/earthsci_data/nei2016_monthly.esm"
+reference: "US EPA (2020). 2016 National Emissions Inventory, Version 1. https://gaftp.epa.gov/Air/emismod/2016/"
+description: "US EPA 2016 NEI CMAQ-formatted monthly DataLoader. Converts monthly gridded anthropogenic+biogenic emissions from the 12US1 12-km Lambert Conformal domain to mixing ratio source rates (1/s) for 69 species. Species-specific temporal scaling: CO (day-of-week×diurnal), FORM (diurnal), ISOP (isoprene diurnal), NO/NO2 (NOx day-of-week×NOx diurnal), others (none). The gt-p3ep(lookup) gap is resolved via datetime.hour+floor+interp.linear for diurnal/day-of-week and interp.bilinear for the 94x49 delp_dry_surface field. Migrated from EarthSciData.jl src/nei2016monthly.jl:358 (esm-ftdf)."
+tags: ["earthsci_data", "data_source", "emissions", "nei2016", "cmaq", "12us1", "anthropogenic", "biogenic", "dataloader", "monthly", "diurnal", "dayofweek", "surface_emissions", "regridding_model"]
+---
+
+## Description
+
+US EPA 2016 NEI CMAQ-formatted monthly DataLoader. Converts monthly gridded anthropogenic+biogenic emissions from the 12US1 12-km Lambert Conformal domain to mixing ratio source rates (1/s) for 69 species. Species-specific temporal scaling: CO (day-of-week×diurnal), FORM (diurnal), ISOP (isoprene diurnal), NO/NO2 (NOx day-of-week×NOx diurnal), others (none). The gt-p3ep(lookup) gap is resolved via datetime.hour+floor+interp.linear for diurnal/day-of-week and interp.bilinear for the 94x49 delp_dry_surface field. Migrated from EarthSciData.jl src/nei2016monthly.jl:358 (esm-ftdf).
+
+[esm-3nc.3] Split at 0.7.0 into a pure-I/O loader (nei2016_monthly_loader.esm) + this regridding model per RFC pure-io-data-loaders §6/§7; at esm 1.0.0 that file is merged BACK into this one, which now holds both the model and the `NEI2016` data source it consumes. The loader is referenced as the subsystem NEI2016; each of the 69 species emission observeds references its regridded loader field as NEI2016.<SP> and is regridded conservatively (cell-centered emissions). The native Lambert Conformal Conic grid (params 33/45/40/-97, R=6370997) is reprojected by ESD reprojection/lambert_conformal.esm (esd-47z.2). The pre-migration 69 flux_<SP> parameters and top-level param_to_var coupling block are removed.
+
+## Reference
+
+US EPA (2020). 2016 National Emissions Inventory, Version 1. https://gaftp.epa.gov/Air/emismod/2016/
+
+## Data source
+
+| | |
+| --- | --- |
+| Kind | `grid` |
+| URL template | `https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf` |
+| Mirrors | `../../data/https_gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf` |
+| Coverage | 2016-01-01T00:00:00Z → 2016-12-31T23:59:59Z |
+| File period | `P1M` |
+| Sample frequency | `P1M` |
+| Records per file | 1 |
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "kind": "grid",
+  "source": {
+    "url_template": "https://gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf",
+    "mirrors": [
+      "../../data/https_gaftp.epa.gov/Air/emismod/2016/v1/gridded/monthly_netCDF/2016fh_16j_{sector}_12US1_month_{date:%m}.ncf"
+    ]
+  },
+  "temporal": {
+    "start": "2016-01-01T00:00:00Z",
+    "end": "2016-12-31T23:59:59Z",
+    "file_period": "P1M",
+    "frequency": "P1M",
+    "records_per_file": 1,
+    "time_variable": "TSTEP"
+  },
+  "reference": {
+    "citation": "US EPA (2020). 2016 National Emissions Inventory, Version 1. https://gaftp.epa.gov/Air/emismod/2016/"
+  },
+  "metadata": {
+    "tags": [
+      "emissions",
+      "nei",
+      "cmaq",
+      "12us1",
+      "monthly"
+    ],
+    "earthscidata_source": "src/nei2016monthly.jl::NEI2016MonthlyEmisFileSet",
+    "projection": "lambert_conformal_conic",
+    "lcc_parameters": {
+      "truelat1": 33.0,
+      "truelat2": 45.0,
+      "cen_lat": 40.0,
+      "stand_lon": -97.0,
+      "sphere_radius_m": 6370997.0
+    },
+    "native_resolution_m": {
+      "x": 12000.0,
+      "y": 12000.0
+    },
+    "grid_name": "12US1",
+    "nominal_dimensions": {
+      "cols": 459,
+      "rows": 299
+    },
+    "proj4_string": "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=40 +lon_0=-97 +x_0=0 +y_0=0 +a=6370997.0 +b=6370997.0 +to_meter=1",
+    "former_regridding": "Pre-migration per-loader regridding block was {fill_value: 0.0, extrapolation: clamp}; regridding is now a per-variable model concern (nei2016_monthly.esm `regrid`).",
+    "default_sector": "mrggrid_withbeis_withrwc",
+    "grid_origin_m": {
+      "x": -2556000.0,
+      "y": -1728000.0
+    },
+    "merged_from": "components/earthsci_data/nei2016_monthly_loader.esm",
+    "merge_note": "Merged from the standalone pure-I/O file components/earthsci_data/nei2016_monthly_loader.esm, which is deleted by the same commit. The 0.x `X.esm` + `X_loader.esm` split existed only because a loader was a COMPONENT and a {\"ref\"} target had to contain exactly one component. At esm 1.0.0 a data source is NOT a component, not a coupling endpoint and not a scoped-name path root, and `data_sources` no longer counts toward a file's top-level system count — so one file may hold a model AND the data_sources that model consumes and still be mountable by {\"ref\"}. This registry entry is byte-identical to the one the deleted file declared (it was already mirrored here so this document would validate), and the deleted file's own top-level metadata — name, description, tags, created, authors, references — is preserved verbatim in `merged_file_metadata` so no provenance, citation or migration note is lost.",
+    "merged_file_metadata": {
+      "name": "NEI2016_loader",
+      "description": "Pure-I/O data loader for the US EPA 2016 National Emissions Inventory (NEI2016 v1) monthly gridded anthropogenic emissions on the 12US1 CONUS domain. Supplies 69 CMAQ/CB6-speciated surface emission flux densities (kg m⁻² s⁻¹) on the native Lambert Conformal Conic 12 km grid, monthly for 2016, sourced per sector ({sector} URL substitution) from EPA gridded monthly NetCDF (IOAPI) files.\n\nThis is the loader half of the nei2016_monthly loader+regridding-model split (RFC pure-io-data-loaders §4.1/§7; bead esm-3nc.3). It is PURE I/O: it declares its source (url_template + mirrors), the 69 file variables it reads (with units), its temporal cadence, and its NATIVE grid expressed as a GDD Grid with a PROJECTED (lambert_conformal) crs descriptor carrying the LCC projection parameters. It performs NO reprojection and NO regridding — those are concerns of the regridding model (components/earthsci_data/nei2016_monthly.esm), which references this file as the subsystem `NEI2016` via {\"ref\": \"./nei2016_monthly_loader.esm\"}.\n\nThe removed co-located blocks: the old DataLoaderSpatial block (proj4 crs string / grid_type / resolution) is replaced by the GDD `grid` (family + crs{projection:lambert_conformal, datum:sphere, R, parameters} + dimensions + extents); the old per-loader `regridding` block (fill_value / extrapolation) is gone — regridding is declared per-variable on the model (nei2016_monthly.esm `regrid`). Because a `temporal` block is present, this loader seeds DISCRETE cadence (ess-v9a.5).\n\nThe LCC projection parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97, R:6370997} match the 12US1 grid and are consumed by the downstream reprojection rule (ESD reprojection/lambert_conformal.esm, esd-47z.2) — the second LCC dataset after wrf, with a different parameter set.\n\nMigrated from EarthSciData.jl@830435a src/nei2016monthly.jl (NEI2016MonthlyEmisFileSet). Split out of the pre-migration components/earthsci_data/nei2016_monthly.esm (esm-ftdf).",
+      "tags": [
+        "earthsci_data",
+        "emissions",
+        "anthropogenic",
+        "nei",
+        "cmaq",
+        "12us1",
+        "monthly",
+        "data_loader",
+        "surface_flux",
+        "lambert_conformal",
+        "pure-io"
+      ],
+      "created": "2026-06-25T00:00:00Z",
+      "authors": [
+        "EarthSciData.jl contributors",
+        "EarthSciModels migration (esm-3nc.3)"
+      ],
+      "references": [
+        {
+          "citation": "US EPA (2020). 2016 National Emissions Inventory v1. https://gaftp.epa.gov/Air/emismod/2016/"
+        },
+        {
+          "citation": "Byun & Schere (2006). Models-3 CMAQ Modeling System. Applied Mechanics Reviews 59(2):51-77. — CMAQ IOAPI format."
+        },
+        {
+          "citation": "Source: EarthSciData.jl/src/nei2016monthly.jl (see EarthSciModels docs/migration-tracker.md for pinned SHA). NEI2016MonthlyEmis DataLoader — 69 algebraic observed variables with temporal scaling and flux-to-mixing-ratio conversion."
+        }
+      ]
+    }
+  }
+}
+```
+
+</details>

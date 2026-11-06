@@ -1,0 +1,2017 @@
+---
+title: "GaussianPGB"
+slug: "gaussianpgb"
+domains: ["environmental_transport"]
+component_types: ["model"]
+subdomains: ["gaussian"]
+domain: "environmental_transport"
+subdomain: "gaussian"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/environmental_transport/gaussian/pgb.esm"
+reference: "U.S. EPA (2000). Meteorological Monitoring Guidance for Regulatory Modeling Applications. EPA-454/R-99-005. §12.1.6: Pasquill-Gifford stability classification and Briggs dispersion coefficients for open-country conditions."
+description: "Classic Gaussian plume dispersion model parameterized with Pasquill-Gifford-Briggs (PGB) stability classification and dispersion coefficients. Given the current puff position (lon, lat) and height above ground (z_agl), classifies atmospheric stability from near-surface meteorology (wind speed, solar radiation, cloud fraction, temperature lapse), selects Briggs dispersion-curve coefficients, computes the haversine downwind distance from the source, and evaluates horizontal (sigma_h) and vertical (sigma_z) dispersion widths and the ground-level Gaussian concentration (C_gl). Migrated from EnvironmentalTransport.jl@a48559c4 src/GaussianDispersion.jl:83. When coupled with Puff, lon/lat/z_agl are supplied by the Puff component; in standalone mode they are treated as constant parameters."
+tags: ["environmental_transport", "gaussian", "model", "gaussian_dispersion", "pasquill_gifford_briggs", "atmospheric_stability", "lagrangian_puff"]
+---
+
+## Description
+
+Classic Gaussian plume dispersion model parameterized with Pasquill-Gifford-Briggs (PGB) stability classification and dispersion coefficients. Given the current puff position (lon, lat) and height above ground (z_agl), classifies atmospheric stability from near-surface meteorology (wind speed, solar radiation, cloud fraction, temperature lapse), selects Briggs dispersion-curve coefficients, computes the haversine downwind distance from the source, and evaluates horizontal (sigma_h) and vertical (sigma_z) dispersion widths and the ground-level Gaussian concentration (C_gl). Migrated from EnvironmentalTransport.jl@a48559c4 src/GaussianDispersion.jl:83. When coupled with Puff, lon/lat/z_agl are supplied by the Puff component; in standalone mode they are treated as constant parameters.
+
+## Reference
+
+_source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/GaussianDispersion.jl:83
+
+Upstream GaussianPGB is an MTK @component returning a purely algebraic System — all three output equations (sigma_h, sigma_z, C_gl) are algebraic assignments (~), not ODEs. There are no D(state)/dt terms. The component has three input variables marked input=true: lon(t), lat(t) (puff position, provided by Puff), and z_agl(t) (hypsometric height above ground, provided by an external data coupling such as GEOSFP or MERRA2). When coupled via EarthSciMLBase.couple(), these become shared symbolic variables with Puff/data connectors. In standalone mode they are held constant as parameters.
+
+Migration approach: purely algebraic ESM. All outputs (sigma_h, sigma_z, C_gl) are type=observed. The lon, lat, z_agl input variables are type=parameter (with physically representative defaults) for standalone simulation. When the Puff ESM and appropriate data connector ESMs are available, a coupling entry will tie these parameters to the corresponding Puff/data outputs.
+
+Intermediate observed variables (wind_speed, dTsurf, stab_cls, ay, az, bz, delta_lon, delta_lat, hav_a, hav_c, x) are exposed as named observed variables so they can be individually inspected and tested. The ESS runner evaluates observed variables in dependency order.
+
+Stability class encoding: stab_cls returns a floating-point integer 1.0-6.0 (A=1, B=2, C=3, D=4, E=5, F=6). Coefficient selectors use threshold comparisons (stab_cls < 1.5, < 2.5 etc.) to avoid exact floating-point equality, which is unreliable for class E/F at SWGDN boundaries.
+
+Briggs sigma_h formula: sigma_h = A_y * x * (1 + B_y * x)^(-0.5). B_y is class-independent (by=1e-4 m^-1) per EPA MMGRMA.
+
+Briggs sigma_z formula: sigma_z = A_z * x * (1 + B_z * x)^(-0.5) for classes A-D (unstable/neutral); sigma_z = A_z * x / (1 + B_z * x) for classes E-F (stable).
+
+Gaussian ground-level concentration: C_gl = exp(-z_agl^2 / (2*sigma_z^2)) / ((2*pi)^(3/2) * sigma_h^2 * sigma_z). At z_agl=0 this is the maximum surface concentration per unit puff mass.
+
+Haversine downwind distance: The great-circle distance from source (lon0, lat0) to current puff position (lon, lat) is computed via haversine: a = sin((lat-lat0)/2)^2 + cos(lat0)*cos(lat)*sin((lon-lon0)/2)^2; c = 2*atan(sqrt(a)/sqrt(1-a)); x = R*c. R=6.371e6 m (Earth mean radius).
+
+Unicode/Julia symbol normalization: Δz → dz (not used; GaussianPGB is Gaussian plume, not puff-KC), σ_h → sigma_h, σ_z → sigma_z, AY → AY, stab_cls integer 1-6 replaces character A-F.
+
+Tolerance (model-level rel=1e-8, abs=1e-12): for algebraic evaluation the integrator tolerance is not operative; the tolerance is specified for consistency with the ESM contract and future runner versions. Observed expressions are composed of elementary trig/exp functions; accumulated rounding is <5 ULP (<1e-15 relative) well inside rel=1e-8.
+
+Coupler identity: this model was serialized with the model-level field `coupletype: "GaussianPGBCoupler"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 ("informational label identifying this system's role in coupling"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lon` | `rad` | `0.0` | Puff longitude (radians). Supplied by Puff.x when coupled; held as constant parameter in standalone mode. |
+| `lat` | `rad` | `0.0` | Puff latitude (radians). Supplied by Puff.y when coupled; held as constant parameter in standalone mode. |
+| `z_agl` | `m` | `25.0` | Puff height above ground level (m). Supplied by an external data coupling (e.g. GEOSFP pressure-to-height) when coupled; held as constant parameter in standalone mode. |
+| `lon0` | `rad` | `0.0` | Emission source longitude (radians). Fixed for the lifetime of the trajectory. |
+| `lat0` | `rad` | `0.0` | Emission source latitude (radians). Fixed for the lifetime of the trajectory. |
+| `earth_radius` | `m` | `6371000.0` | Earth mean radius (m). Used in haversine downwind distance computation. |
+| `AY_A` |  | `0.22` | Briggs A_y coefficient for Pasquill stability class A (very unstable). |
+| `AY_B` |  | `0.16` | Briggs A_y coefficient for class B (unstable). |
+| `AY_C` |  | `0.11` | Briggs A_y coefficient for class C (slightly unstable). |
+| `AY_D` |  | `0.08` | Briggs A_y coefficient for class D (neutral). |
+| `AY_Ep` |  | `0.06` | Briggs A_y coefficient for class E (slightly stable). |
+| `AY_F` |  | `0.04` | Briggs A_y coefficient for class F (stable). |
+| `AZ_A` |  | `0.2` | Briggs A_z coefficient for class A. |
+| `AZ_B` |  | `0.12` | Briggs A_z coefficient for class B. |
+| `AZ_C` |  | `0.08` | Briggs A_z coefficient for class C. |
+| `AZ_D` |  | `0.06` | Briggs A_z coefficient for class D. |
+| `AZ_Ep` |  | `0.03` | Briggs A_z coefficient for class E. |
+| `AZ_F` |  | `0.016` | Briggs A_z coefficient for class F. |
+| `by` | `m^-1` | `0.0001` | Briggs B_y coefficient (class-independent, 1e-4 m^-1). Controls the far-field saturation of horizontal spread. |
+| `BZ_A` | `m^-1` | `0.0` | Briggs B_z coefficient for class A. |
+| `BZ_B` | `m^-1` | `0.0` | Briggs B_z coefficient for class B. |
+| `BZ_C` | `m^-1` | `0.0002` | Briggs B_z coefficient for class C. |
+| `BZ_D` | `m^-1` | `0.0015` | Briggs B_z coefficient for class D. |
+| `BZ_Ep` | `m^-1` | `0.0003` | Briggs B_z coefficient for class E. |
+| `BZ_F` | `m^-1` | `0.0003` | Briggs B_z coefficient for class F. |
+| `v2` | `m/s` | `2.0` | Wind-speed threshold 2 m/s for Pasquill classification. |
+| `v3` | `m/s` | `3.0` | Wind-speed threshold 3 m/s. |
+| `v5` | `m/s` | `5.0` | Wind-speed threshold 5 m/s. |
+| `v6` | `m/s` | `6.0` | Wind-speed threshold 6 m/s. |
+| `solrad_strong` | `W/m^2` | `925.0` | Solar radiation threshold for very strong insolation (≥925 W/m^2 → class A/B/C). |
+| `solrad_moder` | `W/m^2` | `675.0` | Solar radiation threshold for moderate insolation (675-925 W/m^2). |
+| `solrad_slight` | `W/m^2` | `175.0` | Solar radiation threshold for slight insolation (175-675 W/m^2). |
+| `solrad_night` | `W/m^2` | `10.0` | Solar radiation threshold for night (<10 W/m^2); 10-175 W/m^2 defaults to neutral class D. |
+| `cloudfrac_clear` |  | `0.5` | Cloud fraction threshold for clear sky (CLDTOT ≤ 0.5 → clear). Used for nighttime stability classification. |
+| `inversion_thresh` | `K` | `0.0` | Temperature difference threshold (T10M-T2M > 0 K) for surface inversion detection. Inversions drive class E or F at night. |
+| `U10M` | `m/s` | `3.0` | 10 m wind speed U component (eastward, m/s). Used to compute surface wind speed for stability classification. |
+| `V10M` | `m/s` | `0.0` | 10 m wind speed V component (northward, m/s). |
+| `SWGDN` | `W/m^2` | `700.0` | Surface downwelling shortwave radiation (W/m^2). Drives daytime stability class (A-D) via solar insolation thresholds. |
+| `CLDTOT` |  | `0.3` | Total cloud fraction (0-1). Used for nighttime stability classification: CLDTOT ≤ cloudfrac_clear → clear sky. |
+| `T2M` | `K` | `293.15` | 2 m air temperature (K). Used with T10M to compute surface temperature lapse dTsurf = T10M - T2M. |
+| `T10M` | `K` | `292.65` | 10 m air temperature (K). dTsurf = T10M - T2M > inversion_thresh indicates surface inversion. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `wind_speed` | `m/s` |  | Surface wind speed magnitude sqrt(U10M^2 + V10M^2) (m/s). Used for Pasquill stability classification. |
+| `dTsurf` | `K` |  | Surface temperature lapse T10M - T2M (K). Positive values indicate a surface temperature inversion; used for nighttime stability class E/F classification. |
+| `stab_cls` |  |  | Pasquill-Gifford stability class as floating-point integer 1.0-6.0 (A=1, B=2, C=3, D=4, E=5, F=6). Determined from SWGDN, CLDTOT, wind_speed, and dTsurf per EPA MMGRMA Table 6-7. |
+| `ay` |  |  | Briggs horizontal dispersion coefficient A_y (dimensionless) for the current stability class. |
+| `az` |  |  | Briggs vertical dispersion coefficient A_z (dimensionless) for the current stability class. |
+| `bz` | `m^-1` |  | Briggs vertical saturation coefficient B_z (m^-1) for the current stability class. Zero for classes A and B. |
+| `delta_lon` | `rad` |  | Longitude difference lon - lon0 (radians). Intermediate for haversine downwind distance. |
+| `delta_lat` | `rad` |  | Latitude difference lat - lat0 (radians). Intermediate for haversine downwind distance. |
+| `hav_a` |  |  | Haversine intermediate a = sin((lat-lat0)/2)^2 + cos(lat0)*cos(lat)*sin((lon-lon0)/2)^2. In [0,1]; equals sin^2(central_angle/2). |
+| `hav_c` | `rad` |  | Great-circle central angle c = 2*atan(sqrt(hav_a)/sqrt(1-hav_a)) (radians). The arc between source and puff. |
+| `x` | `m` |  | Haversine downwind distance x = R * hav_c (m). The great-circle surface distance from the emission source (lon0, lat0) to the current puff position (lon, lat). |
+| `sigma_h` | `m` |  | Horizontal Gaussian dispersion coefficient sigma_h (m). Computed from Briggs formula sigma_h = A_y * x * (1 + B_y * x)^(-0.5). |
+| `sigma_z` | `m` |  | Vertical Gaussian dispersion coefficient sigma_z (m). Uses sigma_z = A_z*x*(1+B_z*x)^(-0.5) for classes A-D; sigma_z = A_z*x/(1+B_z*x) for classes E-F (stable, stronger vertical confinement). |
+| `C_gl` | `m^-3` |  | Ground-level centerline Gaussian concentration per unit puff mass (m^-3). C_gl = exp(-z_agl^2/(2*sigma_z^2)) / ((2*pi)^(3/2) * sigma_h^2 * sigma_z). Maximum at z_agl=0 (puff at ground level). |
+
+## Observed expressions
+
+$$
+wind_{speed} = \sqrt{U10M^{2.0} + V10M^{2.0}}
+$$
+_Surface wind speed magnitude sqrt(U10M^2 + V10M^2) (m/s). Used for Pasquill stability classification._
+
+$$
+dTsurf = T10M - T2M
+$$
+_Surface temperature lapse T10M - T2M (K). Positive values indicate a surface temperature inversion; used for nighttime stability class E/F classification._
+
+$$
+stab_{cls} = \mathrm{ifelse}\left(\mathrm{<}\left(SWGDN, solrad_{night}\right), \mathrm{ifelse}\left(\mathrm{<=}\left(CLDTOT, cloudfrac_{clear}\right), \mathrm{ifelse}\left(\mathrm{>}\left(dTsurf, inversion_{thresh}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), 6.0, 5.0\right), 4.0\right), 4.0\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{strong}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v3\right), 1.0, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), 2.0, 3.0\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{moder}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), 1.0, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), 2.0, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v6\right), 3.0, 4.0\right)\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{slight}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), 2.0, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), 3.0, 4.0\right)\right), 4.0\right)\right)\right)\right)
+$$
+_Pasquill-Gifford stability class as floating-point integer 1.0-6.0 (A=1, B=2, C=3, D=4, E=5, F=6). Determined from SWGDN, CLDTOT, wind_speed, and dTsurf per EPA MMGRMA Table 6-7._
+
+$$
+ay = \mathrm{ifelse}\left(\mathrm{<}\left(SWGDN, solrad_{night}\right), \mathrm{ifelse}\left(\mathrm{<=}\left(CLDTOT, cloudfrac_{clear}\right), \mathrm{ifelse}\left(\mathrm{>}\left(dTsurf, inversion_{thresh}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AY_{F}, AY_{Ep}\right), AY_{D}\right), AY_{D}\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{strong}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v3\right), AY_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AY_{B}, AY_{C}\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{moder}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AY_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AY_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v6\right), AY_{C}, AY_{D}\right)\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{slight}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AY_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AY_{C}, AY_{D}\right)\right), AY_{D}\right)\right)\right)\right)
+$$
+_Briggs horizontal dispersion coefficient A_y (dimensionless) for the current stability class._
+
+$$
+az = \mathrm{ifelse}\left(\mathrm{<}\left(SWGDN, solrad_{night}\right), \mathrm{ifelse}\left(\mathrm{<=}\left(CLDTOT, cloudfrac_{clear}\right), \mathrm{ifelse}\left(\mathrm{>}\left(dTsurf, inversion_{thresh}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AZ_{F}, AZ_{Ep}\right), AZ_{D}\right), AZ_{D}\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{strong}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v3\right), AZ_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AZ_{B}, AZ_{C}\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{moder}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AZ_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AZ_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v6\right), AZ_{C}, AZ_{D}\right)\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{slight}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), AZ_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), AZ_{C}, AZ_{D}\right)\right), AZ_{D}\right)\right)\right)\right)
+$$
+_Briggs vertical dispersion coefficient A_z (dimensionless) for the current stability class._
+
+$$
+bz = \mathrm{ifelse}\left(\mathrm{<}\left(SWGDN, solrad_{night}\right), \mathrm{ifelse}\left(\mathrm{<=}\left(CLDTOT, cloudfrac_{clear}\right), \mathrm{ifelse}\left(\mathrm{>}\left(dTsurf, inversion_{thresh}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), BZ_{F}, BZ_{Ep}\right), BZ_{D}\right), BZ_{D}\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{strong}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v3\right), BZ_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), BZ_{B}, BZ_{C}\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{moder}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), BZ_{A}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), BZ_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v6\right), BZ_{C}, BZ_{D}\right)\right)\right), \mathrm{ifelse}\left(\mathrm{>=}\left(SWGDN, solrad_{slight}\right), \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v2\right), BZ_{B}, \mathrm{ifelse}\left(\mathrm{<}\left(wind_{speed}, v5\right), BZ_{C}, BZ_{D}\right)\right), BZ_{D}\right)\right)\right)\right)
+$$
+_Briggs vertical saturation coefficient B_z (m^-1) for the current stability class. Zero for classes A and B._
+
+$$
+delta_{lon} = lon - lon0
+$$
+_Longitude difference lon - lon0 (radians). Intermediate for haversine downwind distance._
+
+$$
+delta_{lat} = lat - lat0
+$$
+_Latitude difference lat - lat0 (radians). Intermediate for haversine downwind distance._
+
+$$
+hav_{a} = \sin\left(\frac{delta_{lat}}{2.0}\right)^{2.0} + \cos\left(lat0\right) \cdot \cos\left(lat\right) \cdot \sin\left(\frac{delta_{lon}}{2.0}\right)^{2.0}
+$$
+_Haversine intermediate a = sin((lat-lat0)/2)^2 + cos(lat0)*cos(lat)*sin((lon-lon0)/2)^2. In [0,1]; equals sin^2(central_angle/2)._
+
+$$
+hav_{c} = 2.0 \cdot \mathrm{atan}\left(\frac{\sqrt{hav_{a}}}{\sqrt{1.0 - hav_{a}}}\right)
+$$
+_Great-circle central angle c = 2*atan(sqrt(hav_a)/sqrt(1-hav_a)) (radians). The arc between source and puff._
+
+$$
+x = earth_{radius} \cdot hav_{c}
+$$
+_Haversine downwind distance x = R * hav_c (m). The great-circle surface distance from the emission source (lon0, lat0) to the current puff position (lon, lat)._
+
+$$
+sigma_{h} = ay \cdot x \cdot \left(1.0 + by \cdot x\right)^{-0.5}
+$$
+_Horizontal Gaussian dispersion coefficient sigma_h (m). Computed from Briggs formula sigma_h = A_y * x * (1 + B_y * x)^(-0.5)._
+
+$$
+sigma_{z} = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{and}\left(\mathrm{<}\left(SWGDN, solrad_{night}\right), \mathrm{<=}\left(CLDTOT, cloudfrac_{clear}\right)\right), \mathrm{>}\left(dTsurf, inversion_{thresh}\right)\right), \frac{az \cdot x}{1.0 + bz \cdot x}, az \cdot x \cdot \left(1.0 + bz \cdot x\right)^{-0.5}\right)
+$$
+_Vertical Gaussian dispersion coefficient sigma_z (m). Uses sigma_z = A_z*x*(1+B_z*x)^(-0.5) for classes A-D; sigma_z = A_z*x/(1+B_z*x) for classes E-F (stable, stronger vertical confinement)._
+
+$$
+C_{gl} = \frac{1.0}{15.749609945722419 \cdot sigma_{h}^{2.0} \cdot sigma_{z}} \cdot e^{\frac{\left(-1.0\right) \cdot z_{agl}^{2.0}}{2.0 \cdot sigma_{z}^{2.0}}}
+$$
+_Ground-level centerline Gaussian concentration per unit puff mass (m^-3). C_gl = exp(-z_agl^2/(2*sigma_z^2)) / ((2*pi)^(3/2) * sigma_h^2 * sigma_z). Maximum at z_agl=0 (puff at ground level)._
+
+## Analyses
+
+### sigma_vs_distance_class_d
+
+Horizontal and vertical dispersion coefficients sigma_h and sigma_z vs downwind distance x under neutral stability class D (SWGDN=50 W/m^2, U10M=3 m/s). lat varies from ~100 m to ~50 km north of source (lon0=lat0=0). Class D Briggs coefficients AY_D=0.08, AZ_D=0.06, BZ_D=0.0015 produce moderate spread. sigma_h grows as x*(1+1e-4*x)^(-0.5), sigma_z as x*(1+0.0015*x)^(-0.5) — sigma_z saturates faster than sigma_h due to larger BZ_D.
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `lat`
+
+![Horizontal dispersion coefficient sigma_h (m) vs downwind distance x (m) for neutral stability class D.](/plots/environmental_transport/gaussian/gaussianpgb/sigma_vs_distance_class_d-sigma_h_vs_x.png)
+
+![Vertical dispersion coefficient sigma_z (m) vs downwind distance x (m). sigma_z saturates more quickly than sigma_h due to larger B_z for class D.](/plots/environmental_transport/gaussian/gaussianpgb/sigma_vs_distance_class_d-sigma_z_vs_x.png)
+
+![Ground-level concentration C_gl (m^-3 per unit mass) vs downwind distance x under class D stability, z_agl=0. Monotonically decreasing as puff spreads.](/plots/environmental_transport/gaussian/gaussianpgb/sigma_vs_distance_class_d-C_gl_vs_x.png)
+
+### stability_effect_on_concentration
+
+Effect of solar radiation (and thus stability class) on ground-level concentration C_gl at a fixed downwind distance of ~1000 m (lat=1.5696e-4 rad). As SWGDN increases from night (0) to strong sun (1000 W/m^2), stability shifts from stable (F/E) to unstable (A/B/C), increasing both sigma_h and sigma_z and reducing C_gl. Wind speed fixed at U10M=3 m/s (class boundary E/D at night; A/B/C during day).
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `SWGDN`
+
+![Stability class (1=A very unstable ... 6=F stable) vs SWGDN solar radiation. Shows discrete class transitions as SWGDN crosses thresholds.](/plots/environmental_transport/gaussian/gaussianpgb/stability_effect_on_concentration-stab_cls_vs_SWGDN.png)
+
+![Ground-level concentration C_gl (m^-3) vs SWGDN. Daytime (SWGDN > 10): more unstable conditions (higher SWGDN) increase dispersion and decrease C_gl. Night (SWGDN < 10): stable conditions concentrate the plume.](/plots/environmental_transport/gaussian/gaussianpgb/stability_effect_on_concentration-C_gl_vs_SWGDN.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/GaussianDispersion.jl:83\n\nUpstream GaussianPGB is an MTK @component returning a purely algebraic System — all three output equations (sigma_h, sigma_z, C_gl) are algebraic assignments (~), not ODEs. There are no D(state)/dt terms. The component has three input variables marked input=true: lon(t), lat(t) (puff position, provided by Puff), and z_agl(t) (hypsometric height above ground, provided by an external data coupling such as GEOSFP or MERRA2). When coupled via EarthSciMLBase.couple(), these become shared symbolic variables with Puff/data connectors. In standalone mode they are held constant as parameters.\n\nMigration approach: purely algebraic ESM. All outputs (sigma_h, sigma_z, C_gl) are type=observed. The lon, lat, z_agl input variables are type=parameter (with physically representative defaults) for standalone simulation. When the Puff ESM and appropriate data connector ESMs are available, a coupling entry will tie these parameters to the corresponding Puff/data outputs.\n\nIntermediate observed variables (wind_speed, dTsurf, stab_cls, ay, az, bz, delta_lon, delta_lat, hav_a, hav_c, x) are exposed as named observed variables so they can be individually inspected and tested. The ESS runner evaluates observed variables in dependency order.\n\nStability class encoding: stab_cls returns a floating-point integer 1.0-6.0 (A=1, B=2, C=3, D=4, E=5, F=6). Coefficient selectors use threshold comparisons (stab_cls < 1.5, < 2.5 etc.) to avoid exact floating-point equality, which is unreliable for class E/F at SWGDN boundaries.\n\nBriggs sigma_h formula: sigma_h = A_y * x * (1 + B_y * x)^(-0.5). B_y is class-independent (by=1e-4 m^-1) per EPA MMGRMA.\n\nBriggs sigma_z formula: sigma_z = A_z * x * (1 + B_z * x)^(-0.5) for classes A-D (unstable/neutral); sigma_z = A_z * x / (1 + B_z * x) for classes E-F (stable).\n\nGaussian ground-level concentration: C_gl = exp(-z_agl^2 / (2*sigma_z^2)) / ((2*pi)^(3/2) * sigma_h^2 * sigma_z). At z_agl=0 this is the maximum surface concentration per unit puff mass.\n\nHaversine downwind distance: The great-circle distance from source (lon0, lat0) to current puff position (lon, lat) is computed via haversine: a = sin((lat-lat0)/2)^2 + cos(lat0)*cos(lat)*sin((lon-lon0)/2)^2; c = 2*atan(sqrt(a)/sqrt(1-a)); x = R*c. R=6.371e6 m (Earth mean radius).\n\nUnicode/Julia symbol normalization: Δz → dz (not used; GaussianPGB is Gaussian plume, not puff-KC), σ_h → sigma_h, σ_z → sigma_z, AY → AY, stab_cls integer 1-6 replaces character A-F.\n\nTolerance (model-level rel=1e-8, abs=1e-12): for algebraic evaluation the integrator tolerance is not operative; the tolerance is specified for consistency with the ESM contract and future runner versions. Observed expressions are composed of elementary trig/exp functions; accumulated rounding is <5 ULP (<1e-15 relative) well inside rel=1e-8.\n\nCoupler identity: this model was serialized with the model-level field `coupletype: \"GaussianPGBCoupler\"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 (\"informational label identifying this system's role in coupling\"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable."
+  },
+  "tolerance": {
+    "rel": 1e-08,
+    "abs": 1e-12
+  },
+  "variables": {
+    "lon": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Puff longitude (radians). Supplied by Puff.x when coupled; held as constant parameter in standalone mode."
+    },
+    "lat": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Puff latitude (radians). Supplied by Puff.y when coupled; held as constant parameter in standalone mode."
+    },
+    "z_agl": {
+      "type": "parameter",
+      "units": "m",
+      "default": 25.0,
+      "description": "Puff height above ground level (m). Supplied by an external data coupling (e.g. GEOSFP pressure-to-height) when coupled; held as constant parameter in standalone mode."
+    },
+    "lon0": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Emission source longitude (radians). Fixed for the lifetime of the trajectory."
+    },
+    "lat0": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Emission source latitude (radians). Fixed for the lifetime of the trajectory."
+    },
+    "earth_radius": {
+      "type": "parameter",
+      "units": "m",
+      "default": 6371000.0,
+      "description": "Earth mean radius (m). Used in haversine downwind distance computation."
+    },
+    "AY_A": {
+      "type": "parameter",
+      "default": 0.22,
+      "description": "Briggs A_y coefficient for Pasquill stability class A (very unstable)."
+    },
+    "AY_B": {
+      "type": "parameter",
+      "default": 0.16,
+      "description": "Briggs A_y coefficient for class B (unstable)."
+    },
+    "AY_C": {
+      "type": "parameter",
+      "default": 0.11,
+      "description": "Briggs A_y coefficient for class C (slightly unstable)."
+    },
+    "AY_D": {
+      "type": "parameter",
+      "default": 0.08,
+      "description": "Briggs A_y coefficient for class D (neutral)."
+    },
+    "AY_Ep": {
+      "type": "parameter",
+      "default": 0.06,
+      "description": "Briggs A_y coefficient for class E (slightly stable)."
+    },
+    "AY_F": {
+      "type": "parameter",
+      "default": 0.04,
+      "description": "Briggs A_y coefficient for class F (stable)."
+    },
+    "AZ_A": {
+      "type": "parameter",
+      "default": 0.2,
+      "description": "Briggs A_z coefficient for class A."
+    },
+    "AZ_B": {
+      "type": "parameter",
+      "default": 0.12,
+      "description": "Briggs A_z coefficient for class B."
+    },
+    "AZ_C": {
+      "type": "parameter",
+      "default": 0.08,
+      "description": "Briggs A_z coefficient for class C."
+    },
+    "AZ_D": {
+      "type": "parameter",
+      "default": 0.06,
+      "description": "Briggs A_z coefficient for class D."
+    },
+    "AZ_Ep": {
+      "type": "parameter",
+      "default": 0.03,
+      "description": "Briggs A_z coefficient for class E."
+    },
+    "AZ_F": {
+      "type": "parameter",
+      "default": 0.016,
+      "description": "Briggs A_z coefficient for class F."
+    },
+    "by": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0001,
+      "description": "Briggs B_y coefficient (class-independent, 1e-4 m^-1). Controls the far-field saturation of horizontal spread."
+    },
+    "BZ_A": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0,
+      "description": "Briggs B_z coefficient for class A."
+    },
+    "BZ_B": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0,
+      "description": "Briggs B_z coefficient for class B."
+    },
+    "BZ_C": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0002,
+      "description": "Briggs B_z coefficient for class C."
+    },
+    "BZ_D": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0015,
+      "description": "Briggs B_z coefficient for class D."
+    },
+    "BZ_Ep": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0003,
+      "description": "Briggs B_z coefficient for class E."
+    },
+    "BZ_F": {
+      "type": "parameter",
+      "units": "m^-1",
+      "default": 0.0003,
+      "description": "Briggs B_z coefficient for class F."
+    },
+    "v2": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 2.0,
+      "description": "Wind-speed threshold 2 m/s for Pasquill classification."
+    },
+    "v3": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 3.0,
+      "description": "Wind-speed threshold 3 m/s."
+    },
+    "v5": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 5.0,
+      "description": "Wind-speed threshold 5 m/s."
+    },
+    "v6": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 6.0,
+      "description": "Wind-speed threshold 6 m/s."
+    },
+    "solrad_strong": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 925.0,
+      "description": "Solar radiation threshold for very strong insolation (≥925 W/m^2 → class A/B/C)."
+    },
+    "solrad_moder": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 675.0,
+      "description": "Solar radiation threshold for moderate insolation (675-925 W/m^2)."
+    },
+    "solrad_slight": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 175.0,
+      "description": "Solar radiation threshold for slight insolation (175-675 W/m^2)."
+    },
+    "solrad_night": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 10.0,
+      "description": "Solar radiation threshold for night (<10 W/m^2); 10-175 W/m^2 defaults to neutral class D."
+    },
+    "cloudfrac_clear": {
+      "type": "parameter",
+      "default": 0.5,
+      "description": "Cloud fraction threshold for clear sky (CLDTOT ≤ 0.5 → clear). Used for nighttime stability classification."
+    },
+    "inversion_thresh": {
+      "type": "parameter",
+      "units": "K",
+      "default": 0.0,
+      "description": "Temperature difference threshold (T10M-T2M > 0 K) for surface inversion detection. Inversions drive class E or F at night."
+    },
+    "U10M": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 3.0,
+      "description": "10 m wind speed U component (eastward, m/s). Used to compute surface wind speed for stability classification."
+    },
+    "V10M": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "10 m wind speed V component (northward, m/s)."
+    },
+    "SWGDN": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 700.0,
+      "description": "Surface downwelling shortwave radiation (W/m^2). Drives daytime stability class (A-D) via solar insolation thresholds."
+    },
+    "CLDTOT": {
+      "type": "parameter",
+      "default": 0.3,
+      "description": "Total cloud fraction (0-1). Used for nighttime stability classification: CLDTOT ≤ cloudfrac_clear → clear sky."
+    },
+    "T2M": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.15,
+      "description": "2 m air temperature (K). Used with T10M to compute surface temperature lapse dTsurf = T10M - T2M."
+    },
+    "T10M": {
+      "type": "parameter",
+      "units": "K",
+      "default": 292.65,
+      "description": "10 m air temperature (K). dTsurf = T10M - T2M > inversion_thresh indicates surface inversion."
+    },
+    "wind_speed": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Surface wind speed magnitude sqrt(U10M^2 + V10M^2) (m/s). Used for Pasquill stability classification."
+    },
+    "dTsurf": {
+      "type": "unknown",
+      "units": "K",
+      "description": "Surface temperature lapse T10M - T2M (K). Positive values indicate a surface temperature inversion; used for nighttime stability class E/F classification."
+    },
+    "stab_cls": {
+      "type": "unknown",
+      "description": "Pasquill-Gifford stability class as floating-point integer 1.0-6.0 (A=1, B=2, C=3, D=4, E=5, F=6). Determined from SWGDN, CLDTOT, wind_speed, and dTsurf per EPA MMGRMA Table 6-7."
+    },
+    "ay": {
+      "type": "unknown",
+      "description": "Briggs horizontal dispersion coefficient A_y (dimensionless) for the current stability class."
+    },
+    "az": {
+      "type": "unknown",
+      "description": "Briggs vertical dispersion coefficient A_z (dimensionless) for the current stability class."
+    },
+    "bz": {
+      "type": "unknown",
+      "units": "m^-1",
+      "description": "Briggs vertical saturation coefficient B_z (m^-1) for the current stability class. Zero for classes A and B."
+    },
+    "delta_lon": {
+      "type": "unknown",
+      "units": "rad",
+      "description": "Longitude difference lon - lon0 (radians). Intermediate for haversine downwind distance."
+    },
+    "delta_lat": {
+      "type": "unknown",
+      "units": "rad",
+      "description": "Latitude difference lat - lat0 (radians). Intermediate for haversine downwind distance."
+    },
+    "hav_a": {
+      "type": "unknown",
+      "description": "Haversine intermediate a = sin((lat-lat0)/2)^2 + cos(lat0)*cos(lat)*sin((lon-lon0)/2)^2. In [0,1]; equals sin^2(central_angle/2)."
+    },
+    "hav_c": {
+      "type": "unknown",
+      "units": "rad",
+      "description": "Great-circle central angle c = 2*atan(sqrt(hav_a)/sqrt(1-hav_a)) (radians). The arc between source and puff."
+    },
+    "x": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Haversine downwind distance x = R * hav_c (m). The great-circle surface distance from the emission source (lon0, lat0) to the current puff position (lon, lat)."
+    },
+    "sigma_h": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Horizontal Gaussian dispersion coefficient sigma_h (m). Computed from Briggs formula sigma_h = A_y * x * (1 + B_y * x)^(-0.5)."
+    },
+    "sigma_z": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Vertical Gaussian dispersion coefficient sigma_z (m). Uses sigma_z = A_z*x*(1+B_z*x)^(-0.5) for classes A-D; sigma_z = A_z*x/(1+B_z*x) for classes E-F (stable, stronger vertical confinement)."
+    },
+    "C_gl": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Ground-level centerline Gaussian concentration per unit puff mass (m^-3). C_gl = exp(-z_agl^2/(2*sigma_z^2)) / ((2*pi)^(3/2) * sigma_h^2 * sigma_z). Maximum at z_agl=0 (puff at ground level)."
+    }
+  },
+  "tests": [
+    {
+      "id": "class_a_unstable",
+      "description": "Stability class A (very unstable): strong sun (SWGDN=950 >= 925 W/m^2) and low wind (U10M=1 m/s < v3=3 m/s) → class A. Puff at 1000 m north of source (lat=1.5696e-4 rad, lon=lon0=lat0=0). z_agl=0. Expected: stab_cls=1, sigma_h = AY_A*1000*(1+by*1000)^(-0.5) = 0.22*1000*(1.1)^(-0.5) = 209.7618 m; sigma_z = AZ_A*1000*(1+0)^(-0.5) = 200 m (BZ_A=0 → denominator 1); C_gl = exp(0)/((2pi)^(3/2)*sigma_h^2*sigma_z). Verifies class A selection, zero-BZ_A sigma_z, and C_gl formula at ground level.",
+      "parameter_overrides": {
+        "lon": 0.0,
+        "lat": 0.0001569612305760477,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 1.0,
+        "V10M": 0.0,
+        "SWGDN": 950.0,
+        "CLDTOT": 0.3,
+        "T2M": 293.15,
+        "T10M": 292.65,
+        "z_agl": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "stab_cls",
+          "time": 0,
+          "expected": 1.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        },
+        {
+          "variable": "x",
+          "time": 0,
+          "expected": 1000.0,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_h",
+          "time": 0,
+          "expected": 209.76176963403023,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_z",
+          "time": 0,
+          "expected": 200.0,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "C_gl",
+          "time": 0,
+          "expected": 7.215185901618299e-09,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    },
+    {
+      "id": "class_d_neutral",
+      "description": "Stability class D (neutral): low solar radiation (SWGDN=50 < 175 W/m^2 → default neutral), any wind → class D. Puff at 5000 m north (lat=7.848e-4 rad). z_agl=50 m. U10M=4, V10M=3 → wind_speed=5 m/s. Expected: stab_cls=4, sigma_h = 0.08*5000*(1+1e-4*5000)^(-0.5) = 326.6 m; sigma_z = 0.06*5000*(1+0.0015*5000)^(-0.5) = 60*(8.5)^(-0.5) = 102.9 m; C_gl includes exp(-50^2/(2*102.9^2)). Verifies class D selection, non-zero BZ_D sigma_z, and concentration at elevated height.",
+      "parameter_overrides": {
+        "lon": 0.0,
+        "lat": 0.0007848061528802386,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 4.0,
+        "V10M": 3.0,
+        "SWGDN": 50.0,
+        "CLDTOT": 0.3,
+        "T2M": 293.15,
+        "T10M": 292.65,
+        "z_agl": 50.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "stab_cls",
+          "time": 0,
+          "expected": 4.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        },
+        {
+          "variable": "x",
+          "time": 0,
+          "expected": 5000.0,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_h",
+          "time": 0,
+          "expected": 326.5986323710904,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_z",
+          "time": 0,
+          "expected": 102.89915108550531,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "C_gl",
+          "time": 0,
+          "expected": 5.140659109986362e-09,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    },
+    {
+      "id": "class_f_stable",
+      "description": "Stability class F (stable): night (SWGDN=5 < 10 W/m^2), clear sky (CLDTOT=0.3 ≤ 0.5), surface inversion (T10M=294.0 > T2M=293.15 → dTsurf=0.85>0), low wind (U10M=1 < v2=2) → class F. Puff at 500 m north (lat=7.848e-5 rad). z_agl=0. Expected: stab_cls=6; sigma_z = AZ_F*x/(1+BZ_F*x) (stable formula, >=5): 0.016*500/(1+0.0003*500) = 8/1.15 = 6.957 m; sigma_h = AY_F*x*(1+by*x)^(-0.5) = 0.04*500*(1.05)^(-0.5) = 19.52 m. Verifies nighttime class F selection and stable sigma_z formula.",
+      "parameter_overrides": {
+        "lon": 0.0,
+        "lat": 7.848061528802385e-05,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 1.0,
+        "V10M": 0.0,
+        "SWGDN": 5.0,
+        "CLDTOT": 0.3,
+        "T2M": 293.15,
+        "T10M": 294.0,
+        "z_agl": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "stab_cls",
+          "time": 0,
+          "expected": 6.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        },
+        {
+          "variable": "x",
+          "time": 0,
+          "expected": 500.0,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_h",
+          "time": 0,
+          "expected": 19.518001458970662,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_z",
+          "time": 0,
+          "expected": 6.956521739130435,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "C_gl",
+          "time": 0,
+          "expected": 2.395892668456125e-05,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    },
+    {
+      "id": "class_e_slightly_stable",
+      "description": "Stability class E (slightly stable): night (SWGDN=5 < 10), clear sky, inversion (T10M=294.5 > T2M=294.0 → dTsurf=0.5>0), moderate wind (U10M=3 ≥ v2=2) → class E (not F). Puff at 2000 m north (lat=3.139e-4 rad). z_agl=0. Expected: stab_cls=5; sigma_z = AZ_Ep*x/(1+BZ_Ep*x) = 0.03*2000/(1+0.0003*2000) = 60/1.6 = 37.5 m exactly. sigma_h = AY_Ep*x*(1+by*x)^(-0.5) = 0.06*2000*(1.2)^(-0.5) = 120/sqrt(1.2) = 109.545 m. Verifies class E selection (vs F at same conditions with lower wind), stable sigma_z formula, and exact BZ_Ep arithmetic.",
+      "parameter_overrides": {
+        "lon": 0.0,
+        "lat": 0.0003139224611520954,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 3.0,
+        "V10M": 0.0,
+        "SWGDN": 5.0,
+        "CLDTOT": 0.3,
+        "T2M": 294.0,
+        "T10M": 294.5,
+        "z_agl": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "stab_cls",
+          "time": 0,
+          "expected": 5.0,
+          "tolerance": {
+            "abs": 0.01
+          }
+        },
+        {
+          "variable": "x",
+          "time": 0,
+          "expected": 2000.0,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_h",
+          "time": 0,
+          "expected": 109.54451150103321,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "sigma_z",
+          "time": 0,
+          "expected": 37.5,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "C_gl",
+          "time": 0,
+          "expected": 1.410969687427577e-07,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    }
+  ],
+  "equations": [
+    {
+      "lhs": "wind_speed",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  "U10M",
+                  2.0
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  "V10M",
+                  2.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "dTsurf",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "T10M",
+          "T2M"
+        ]
+      }
+    },
+    {
+      "lhs": "stab_cls",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "SWGDN",
+              "solrad_night"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<=",
+                "args": [
+                  "CLDTOT",
+                  "cloudfrac_clear"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "dTsurf",
+                      "inversion_thresh"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      6.0,
+                      5.0
+                    ]
+                  },
+                  4.0
+                ]
+              },
+              4.0
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "SWGDN",
+                  "solrad_strong"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "wind_speed",
+                      "v3"
+                    ]
+                  },
+                  1.0,
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v5"
+                        ]
+                      },
+                      2.0,
+                      3.0
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "SWGDN",
+                      "solrad_moder"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      1.0,
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v5"
+                            ]
+                          },
+                          2.0,
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v6"
+                                ]
+                              },
+                              3.0,
+                              4.0
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "SWGDN",
+                          "solrad_slight"
+                        ]
+                      },
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v2"
+                            ]
+                          },
+                          2.0,
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v5"
+                                ]
+                              },
+                              3.0,
+                              4.0
+                            ]
+                          }
+                        ]
+                      },
+                      4.0
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "ay",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "SWGDN",
+              "solrad_night"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<=",
+                "args": [
+                  "CLDTOT",
+                  "cloudfrac_clear"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "dTsurf",
+                      "inversion_thresh"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "AY_F",
+                      "AY_Ep"
+                    ]
+                  },
+                  "AY_D"
+                ]
+              },
+              "AY_D"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "SWGDN",
+                  "solrad_strong"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "wind_speed",
+                      "v3"
+                    ]
+                  },
+                  "AY_A",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v5"
+                        ]
+                      },
+                      "AY_B",
+                      "AY_C"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "SWGDN",
+                      "solrad_moder"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "AY_A",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v5"
+                            ]
+                          },
+                          "AY_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v6"
+                                ]
+                              },
+                              "AY_C",
+                              "AY_D"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "SWGDN",
+                          "solrad_slight"
+                        ]
+                      },
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v2"
+                            ]
+                          },
+                          "AY_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v5"
+                                ]
+                              },
+                              "AY_C",
+                              "AY_D"
+                            ]
+                          }
+                        ]
+                      },
+                      "AY_D"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "az",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "SWGDN",
+              "solrad_night"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<=",
+                "args": [
+                  "CLDTOT",
+                  "cloudfrac_clear"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "dTsurf",
+                      "inversion_thresh"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "AZ_F",
+                      "AZ_Ep"
+                    ]
+                  },
+                  "AZ_D"
+                ]
+              },
+              "AZ_D"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "SWGDN",
+                  "solrad_strong"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "wind_speed",
+                      "v3"
+                    ]
+                  },
+                  "AZ_A",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v5"
+                        ]
+                      },
+                      "AZ_B",
+                      "AZ_C"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "SWGDN",
+                      "solrad_moder"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "AZ_A",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v5"
+                            ]
+                          },
+                          "AZ_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v6"
+                                ]
+                              },
+                              "AZ_C",
+                              "AZ_D"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "SWGDN",
+                          "solrad_slight"
+                        ]
+                      },
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v2"
+                            ]
+                          },
+                          "AZ_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v5"
+                                ]
+                              },
+                              "AZ_C",
+                              "AZ_D"
+                            ]
+                          }
+                        ]
+                      },
+                      "AZ_D"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "bz",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "SWGDN",
+              "solrad_night"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<=",
+                "args": [
+                  "CLDTOT",
+                  "cloudfrac_clear"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "dTsurf",
+                      "inversion_thresh"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "BZ_F",
+                      "BZ_Ep"
+                    ]
+                  },
+                  "BZ_D"
+                ]
+              },
+              "BZ_D"
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "SWGDN",
+                  "solrad_strong"
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "wind_speed",
+                      "v3"
+                    ]
+                  },
+                  "BZ_A",
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v5"
+                        ]
+                      },
+                      "BZ_B",
+                      "BZ_C"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">=",
+                    "args": [
+                      "SWGDN",
+                      "solrad_moder"
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": "<",
+                        "args": [
+                          "wind_speed",
+                          "v2"
+                        ]
+                      },
+                      "BZ_A",
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v5"
+                            ]
+                          },
+                          "BZ_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v6"
+                                ]
+                              },
+                              "BZ_C",
+                              "BZ_D"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "ifelse",
+                    "args": [
+                      {
+                        "op": ">=",
+                        "args": [
+                          "SWGDN",
+                          "solrad_slight"
+                        ]
+                      },
+                      {
+                        "op": "ifelse",
+                        "args": [
+                          {
+                            "op": "<",
+                            "args": [
+                              "wind_speed",
+                              "v2"
+                            ]
+                          },
+                          "BZ_B",
+                          {
+                            "op": "ifelse",
+                            "args": [
+                              {
+                                "op": "<",
+                                "args": [
+                                  "wind_speed",
+                                  "v5"
+                                ]
+                              },
+                              "BZ_C",
+                              "BZ_D"
+                            ]
+                          }
+                        ]
+                      },
+                      "BZ_D"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "delta_lon",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "lon",
+          "lon0"
+        ]
+      }
+    },
+    {
+      "lhs": "delta_lat",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "lat",
+          "lat0"
+        ]
+      }
+    },
+    {
+      "lhs": "hav_a",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "sin",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "delta_lat",
+                      2.0
+                    ]
+                  }
+                ]
+              },
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "cos",
+                "args": [
+                  "lat0"
+                ]
+              },
+              {
+                "op": "cos",
+                "args": [
+                  "lat"
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "sin",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "delta_lon",
+                          2.0
+                        ]
+                      }
+                    ]
+                  },
+                  2.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "hav_c",
+      "rhs": {
+        "op": "*",
+        "args": [
+          2.0,
+          {
+            "op": "atan",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "sqrt",
+                    "args": [
+                      "hav_a"
+                    ]
+                  },
+                  {
+                    "op": "sqrt",
+                    "args": [
+                      {
+                        "op": "-",
+                        "args": [
+                          1.0,
+                          "hav_a"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "x",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "earth_radius",
+          "hav_c"
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_h",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ay",
+          "x",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      "by",
+                      "x"
+                    ]
+                  }
+                ]
+              },
+              -0.5
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_z",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": "<",
+                    "args": [
+                      "SWGDN",
+                      "solrad_night"
+                    ]
+                  },
+                  {
+                    "op": "<=",
+                    "args": [
+                      "CLDTOT",
+                      "cloudfrac_clear"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": ">",
+                "args": [
+                  "dTsurf",
+                  "inversion_thresh"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "az",
+                  "x"
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      "bz",
+                      "x"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "az",
+              "x",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      1.0,
+                      {
+                        "op": "*",
+                        "args": [
+                          "bz",
+                          "x"
+                        ]
+                      }
+                    ]
+                  },
+                  -0.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_gl",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              1.0,
+              {
+                "op": "*",
+                "args": [
+                  15.749609945722419,
+                  {
+                    "op": "^",
+                    "args": [
+                      "sigma_h",
+                      2.0
+                    ]
+                  },
+                  "sigma_z"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      -1.0,
+                      {
+                        "op": "^",
+                        "args": [
+                          "z_agl",
+                          2.0
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      2.0,
+                      {
+                        "op": "^",
+                        "args": [
+                          "sigma_z",
+                          2.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "analyses": [
+    {
+      "id": "sigma_vs_distance_class_d",
+      "description": "Horizontal and vertical dispersion coefficients sigma_h and sigma_z vs downwind distance x under neutral stability class D (SWGDN=50 W/m^2, U10M=3 m/s). lat varies from ~100 m to ~50 km north of source (lon0=lat0=0). Class D Briggs coefficients AY_D=0.08, AZ_D=0.06, BZ_D=0.0015 produce moderate spread. sigma_h grows as x*(1+1e-4*x)^(-0.5), sigma_z as x*(1+0.0015*x)^(-0.5) — sigma_z saturates faster than sigma_h due to larger BZ_D.",
+      "initial_state": {},
+      "parameters": {
+        "lon": 0.0,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 3.0,
+        "V10M": 0.0,
+        "SWGDN": 50.0,
+        "CLDTOT": 0.3,
+        "T2M": 293.15,
+        "T10M": 292.65,
+        "z_agl": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "lat",
+            "range": {
+              "start": 1.569612e-05,
+              "stop": 0.007848062,
+              "count": 50,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "sigma_h_vs_x",
+          "type": "line",
+          "description": "Horizontal dispersion coefficient sigma_h (m) vs downwind distance x (m) for neutral stability class D.",
+          "x": {
+            "variable": "x",
+            "label": "Downwind distance x (m)"
+          },
+          "y": {
+            "variable": "sigma_h",
+            "label": "sigma_h (m)"
+          }
+        },
+        {
+          "id": "sigma_z_vs_x",
+          "type": "line",
+          "description": "Vertical dispersion coefficient sigma_z (m) vs downwind distance x (m). sigma_z saturates more quickly than sigma_h due to larger B_z for class D.",
+          "x": {
+            "variable": "x",
+            "label": "Downwind distance x (m)"
+          },
+          "y": {
+            "variable": "sigma_z",
+            "label": "sigma_z (m)"
+          }
+        },
+        {
+          "id": "C_gl_vs_x",
+          "type": "line",
+          "description": "Ground-level concentration C_gl (m^-3 per unit mass) vs downwind distance x under class D stability, z_agl=0. Monotonically decreasing as puff spreads.",
+          "x": {
+            "variable": "x",
+            "label": "Downwind distance x (m)"
+          },
+          "y": {
+            "variable": "C_gl",
+            "label": "C_gl (m^-3)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "stability_effect_on_concentration",
+      "description": "Effect of solar radiation (and thus stability class) on ground-level concentration C_gl at a fixed downwind distance of ~1000 m (lat=1.5696e-4 rad). As SWGDN increases from night (0) to strong sun (1000 W/m^2), stability shifts from stable (F/E) to unstable (A/B/C), increasing both sigma_h and sigma_z and reducing C_gl. Wind speed fixed at U10M=3 m/s (class boundary E/D at night; A/B/C during day).",
+      "initial_state": {},
+      "parameters": {
+        "lon": 0.0,
+        "lat": 0.0001569612305760477,
+        "lon0": 0.0,
+        "lat0": 0.0,
+        "U10M": 3.0,
+        "V10M": 0.0,
+        "CLDTOT": 0.3,
+        "T2M": 293.15,
+        "T10M": 294.0,
+        "z_agl": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "SWGDN",
+            "range": {
+              "start": 0.0,
+              "stop": 1000.0,
+              "count": 50,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "stab_cls_vs_SWGDN",
+          "type": "line",
+          "description": "Stability class (1=A very unstable ... 6=F stable) vs SWGDN solar radiation. Shows discrete class transitions as SWGDN crosses thresholds.",
+          "x": {
+            "variable": "SWGDN",
+            "label": "SWGDN (W/m^2)"
+          },
+          "y": {
+            "variable": "stab_cls",
+            "label": "Stability class (1=A ... 6=F)"
+          }
+        },
+        {
+          "id": "C_gl_vs_SWGDN",
+          "type": "line",
+          "description": "Ground-level concentration C_gl (m^-3) vs SWGDN. Daytime (SWGDN > 10): more unstable conditions (higher SWGDN) increase dispersion and decrease C_gl. Night (SWGDN < 10): stable conditions concentrate the plume.",
+          "x": {
+            "variable": "SWGDN",
+            "label": "SWGDN (W/m^2)"
+          },
+          "y": {
+            "variable": "C_gl",
+            "label": "C_gl (m^-3)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

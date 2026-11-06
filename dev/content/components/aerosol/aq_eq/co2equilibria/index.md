@@ -1,0 +1,795 @@
+---
+title: "CO2Equilibria"
+slug: "co2equilibria"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["aq_eq"]
+domain: "aerosol"
+subdomain: "aq_eq"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/aq_eq/co2.esm"
+reference: "Seinfeld, J. H., & Pandis, S. N. (2016). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 3rd ed. Wiley. Chapter 7, Section 7.3.2 (CO2 dissolution and dissociation, Eqs 7.14–7.24) and Table 7.4 (equilibrium-constant temperature dependence). ISBN 978-1-118-94740-1."
+description: "CO2 dissolution and dissociation equilibria with van't Hoff temperature dependence (Seinfeld & Pandis Ch 7 §7.3.2, Eqs 7.14–7.24). Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:140 (`CO2Equilibria` @component). Parameterized as observed-only: T, H_plus, p_CO2 are inputs and the carbonate-system species (CO2_aq, HCO3-, CO3^2-, total dissolved C, effective Henry constant) are algebraic outputs."
+tags: ["aerosol", "aq_eq", "model", "aqueous_equilibria", "observed-only", "seinfeld-pandis"]
+---
+
+## Description
+
+CO2 dissolution and dissociation equilibria with van't Hoff temperature dependence (Seinfeld & Pandis Ch 7 §7.3.2, Eqs 7.14–7.24). Migrated from Aerosol.jl@c8c640bb src/aqueous_equilibria.jl:140 (`CO2Equilibria` @component). Parameterized as observed-only: T, H_plus, p_CO2 are inputs and the carbonate-system species (CO2_aq, HCO3-, CO3^2-, total dissolved C, effective Henry constant) are algebraic outputs.
+
+## Reference
+
+_source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:140
+Upstream `CO2Equilibria` is an MTK `@component` where T, H_plus, and p_CO2 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the bead's `(S, observed-only)` classification. The seven algebraic equations are unchanged from upstream.
+
+Note on dH_Kc1: upstream Aerosol.jl literal is 7657.12 J/mol (1.83 kcal/mol per S&P Table 7.4 with 1 kcal = 4184 J nominally yields 7656.72; the upstream value is preserved verbatim for bit-for-bit fidelity with the source — see source_ref).
+
+Tolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/multiply/divide expressions of the van't Hoff K_c1/K_c2/H_CO2 closed forms across the atmospheric T range (273–318 K) and multi-decade [H+]/p_CO2 sweeps, including the H_CO2_eff sum which adds K_c1*K_c2/[H+]^2 (small for [H+]>1e-7 mol/m^3 but reaches O(1) at high pH)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.0` | Temperature |
+| `H_plus` | `mol/m^3` | `0.0001` | Hydrogen ion concentration (1e-4 mol/m^3 = pH 7 in pure water at 298 K) |
+| `p_CO2` | `Pa` | `40.0` | Partial pressure of CO2 (≈ 400 ppm at 1 atm = 40.5 Pa; rounded to 40 Pa) |
+| `R_gas` | `J/mol/K` | `8.314` | Gas constant |
+| `T_ref` | `K` | `298.0` | Reference temperature |
+| `H_CO2_298` | `mol/m^3/Pa` | `0.0003355539106834444` | Henry's law constant for CO2 at 298 K (3.4e-2 M/atm × 1000 mol·m⁻³/M ÷ 101325 Pa/atm) |
+| `dH_H_CO2` | `J/mol` | `-20292.4` | Heat of dissolution for CO2 (-4.85 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4) |
+| `K_c1_298` | `mol/m^3` | `0.00043` | First dissociation constant K_c1 at 298 K (4.3e-7 M × 1000 mol·m⁻³/M) |
+| `K_c2_298` | `mol/m^3` | `4.7e-08` | Second dissociation constant K_c2 at 298 K (4.7e-11 M × 1000 mol·m⁻³/M) |
+| `dH_Kc1` | `J/mol` | `7657.12` | Enthalpy for K_c1 (1.83 kcal/mol; upstream literal preserved verbatim per source_ref) |
+| `dH_Kc2` | `J/mol` | `14853.2` | Enthalpy for K_c2 (3.55 kcal/mol converted to J/mol) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `H_CO2` | `mol/m^3/Pa` |  | Henry's law constant for CO2 at temperature T |
+| `K_c1` | `mol/m^3` |  | First dissociation constant K_c1 at temperature T |
+| `K_c2` | `mol/m^3` |  | Second dissociation constant K_c2 at temperature T |
+| `CO2_aq` | `mol/m^3` |  | Aqueous CO2 concentration [CO2·H2O] |
+| `HCO3_minus` | `mol/m^3` |  | Bicarbonate concentration [HCO3-] |
+| `CO3_2minus` | `mol/m^3` |  | Carbonate concentration [CO3^2-] |
+| `C_total` | `mol/m^3` |  | Total dissolved inorganic carbon (CO2_aq + HCO3- + CO3^2-) |
+| `H_CO2_eff` | `mol/m^3/Pa` |  | Effective Henry's law constant for CO2 (S&P Eq 7.24) |
+
+## Observed expressions
+
+$$
+H_{CO2} = H_{CO2\,298} \cdot e^{\frac{dH_{H\,CO2}}{R_{gas}} \cdot \left(\frac{1}{T_{ref}} + \frac{-1}{T}\right)}
+$$
+_Henry's law constant for CO2 at temperature T_
+
+$$
+K_{c1} = K_{c1\,298} \cdot e^{\left(-1\right) \cdot \frac{dH_{Kc1}}{R_{gas}} \cdot \left(\frac{1}{T} + \frac{-1}{T_{ref}}\right)}
+$$
+_First dissociation constant K_c1 at temperature T_
+
+$$
+K_{c2} = K_{c2\,298} \cdot e^{\left(-1\right) \cdot \frac{dH_{Kc2}}{R_{gas}} \cdot \left(\frac{1}{T} + \frac{-1}{T_{ref}}\right)}
+$$
+_Second dissociation constant K_c2 at temperature T_
+
+$$
+CO2_{aq} = H_{CO2} \cdot p_{CO2}
+$$
+_Aqueous CO2 concentration [CO2·H2O]_
+
+$$
+HCO3_{minus} = \frac{K_{c1} \cdot CO2_{aq}}{H_{plus}}
+$$
+_Bicarbonate concentration [HCO3-]_
+
+$$
+CO3_{2minus} = \frac{K_{c2} \cdot HCO3_{minus}}{H_{plus}}
+$$
+_Carbonate concentration [CO3^2-]_
+
+$$
+C_{total} = CO2_{aq} + HCO3_{minus} + CO3_{2minus}
+$$
+_Total dissolved inorganic carbon (CO2_aq + HCO3- + CO3^2-)_
+
+$$
+H_{CO2\,eff} = H_{CO2} \cdot \left(1 + \frac{K_{c1}}{H_{plus}} + \frac{K_{c1} \cdot K_{c2}}{H_{plus}^{2}}\right)
+$$
+_Effective Henry's law constant for CO2 (S&P Eq 7.24)_
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: Aerosol.jl@c8c640bb:src/aqueous_equilibria.jl:140\nUpstream `CO2Equilibria` is an MTK `@component` where T, H_plus, and p_CO2 are `@variables` driven by a parent `AqueousEquilibria` system. For standalone serialization (and to make the component well-posed in isolation), they are declared as parameters here — matching the bead's `(S, observed-only)` classification. The seven algebraic equations are unchanged from upstream.\n\nNote on dH_Kc1: upstream Aerosol.jl literal is 7657.12 J/mol (1.83 kcal/mol per S&P Table 7.4 with 1 kcal = 4184 J nominally yields 7656.72; the upstream value is preserved verbatim for bit-for-bit fidelity with the source — see source_ref).\n\nTolerance rationale (model-level rel=1e-6): observed-only algebraic system (no ODE integration); 1e-6 covers float64 roundoff in the chained exp/multiply/divide expressions of the van't Hoff K_c1/K_c2/H_CO2 closed forms across the atmospheric T range (273–318 K) and multi-decade [H+]/p_CO2 sweeps, including the H_CO2_eff sum which adds K_c1*K_c2/[H+]^2 (small for [H+]>1e-7 mol/m^3 but reaches O(1) at high pH)."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature"
+    },
+    "H_plus": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 0.0001,
+      "description": "Hydrogen ion concentration (1e-4 mol/m^3 = pH 7 in pure water at 298 K)"
+    },
+    "p_CO2": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 40.0,
+      "description": "Partial pressure of CO2 (≈ 400 ppm at 1 atm = 40.5 Pa; rounded to 40 Pa)"
+    },
+    "R_gas": {
+      "type": "parameter",
+      "units": "J/mol/K",
+      "default": 8.314,
+      "description": "Gas constant"
+    },
+    "T_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Reference temperature"
+    },
+    "H_CO2_298": {
+      "type": "parameter",
+      "units": "mol/m^3/Pa",
+      "default": 0.0003355539106834444,
+      "description": "Henry's law constant for CO2 at 298 K (3.4e-2 M/atm × 1000 mol·m⁻³/M ÷ 101325 Pa/atm)"
+    },
+    "dH_H_CO2": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -20292.4,
+      "description": "Heat of dissolution for CO2 (-4.85 kcal/mol converted to J/mol; Seinfeld & Pandis Table 7.4)"
+    },
+    "K_c1_298": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 0.00043,
+      "description": "First dissociation constant K_c1 at 298 K (4.3e-7 M × 1000 mol·m⁻³/M)"
+    },
+    "K_c2_298": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 4.7e-08,
+      "description": "Second dissociation constant K_c2 at 298 K (4.7e-11 M × 1000 mol·m⁻³/M)"
+    },
+    "dH_Kc1": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": 7657.12,
+      "description": "Enthalpy for K_c1 (1.83 kcal/mol; upstream literal preserved verbatim per source_ref)"
+    },
+    "dH_Kc2": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": 14853.2,
+      "description": "Enthalpy for K_c2 (3.55 kcal/mol converted to J/mol)"
+    },
+    "H_CO2": {
+      "type": "unknown",
+      "units": "mol/m^3/Pa",
+      "description": "Henry's law constant for CO2 at temperature T"
+    },
+    "K_c1": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "First dissociation constant K_c1 at temperature T"
+    },
+    "K_c2": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Second dissociation constant K_c2 at temperature T"
+    },
+    "CO2_aq": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous CO2 concentration [CO2·H2O]"
+    },
+    "HCO3_minus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Bicarbonate concentration [HCO3-]"
+    },
+    "CO3_2minus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Carbonate concentration [CO3^2-]"
+    },
+    "C_total": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Total dissolved inorganic carbon (CO2_aq + HCO3- + CO3^2-)"
+    },
+    "H_CO2_eff": {
+      "type": "unknown",
+      "units": "mol/m^3/Pa",
+      "description": "Effective Henry's law constant for CO2 (S&P Eq 7.24)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "H_CO2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_CO2_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_H_CO2",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T_ref"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "K_c1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "K_c1_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_Kc1",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T_ref"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "K_c2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "K_c2_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_Kc2",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T_ref"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "CO2_aq",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_CO2",
+          "p_CO2"
+        ]
+      }
+    },
+    {
+      "lhs": "HCO3_minus",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "K_c1",
+              "CO2_aq"
+            ]
+          },
+          "H_plus"
+        ]
+      }
+    },
+    {
+      "lhs": "CO3_2minus",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "K_c2",
+              "HCO3_minus"
+            ]
+          },
+          "H_plus"
+        ]
+      }
+    },
+    {
+      "lhs": "C_total",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "CO2_aq",
+          "HCO3_minus",
+          "CO3_2minus"
+        ]
+      }
+    },
+    {
+      "lhs": "H_CO2_eff",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_CO2",
+          {
+            "op": "+",
+            "args": [
+              1,
+              {
+                "op": "/",
+                "args": [
+                  "K_c1",
+                  "H_plus"
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "K_c1",
+                      "K_c2"
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      "H_plus",
+                      2
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "self_consistency_298K_pH7",
+      "description": "Reference state: 298 K, pH 7 ([H+] = 1e-4 mol/m³), p_CO2 = 40 Pa (≈400 ppm). All temperature-dependent constants collapse to their 298 K values: H_CO2 = H_CO2_298, K_c1 = K_c1_298, K_c2 = K_c2_298. Validates the closed-form algebra at the reference point with no exp() drift.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "H_plus": 0.0001,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.0003355539106834444
+        },
+        {
+          "variable": "K_c1",
+          "time": 0.0,
+          "expected": 0.00043
+        },
+        {
+          "variable": "K_c2",
+          "time": 0.0,
+          "expected": 4.7e-08
+        },
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.013422156427337776
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 0.05771527263755243
+        },
+        {
+          "variable": "CO3_2minus",
+          "time": 0.0,
+          "expected": 2.712617813964964e-05
+        },
+        {
+          "variable": "C_total",
+          "time": 0.0,
+          "expected": 0.07116455524302986
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.0017791138810757466
+        }
+      ]
+    },
+    {
+      "id": "vant_hoff_273K_pH7",
+      "description": "Cold cloud water at 273.15 K, pH 7. Exothermic CO2 dissolution (ΔH = -4.85 kcal/mol) increases H_CO2 with cooling; K_c1 and K_c2 shift per their van't Hoff enthalpies. Exercises the cold-end T sweep.",
+      "parameter_overrides": {
+        "T": 273.15,
+        "H_plus": 0.0001,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.0007069168810207723
+        },
+        {
+          "variable": "K_c1",
+          "time": 0.0,
+          "expected": 0.00032460796806137697
+        },
+        {
+          "variable": "K_c2",
+          "time": 0.0,
+          "expected": 2.72415349942885e-08
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.0030022505182105727
+        }
+      ]
+    },
+    {
+      "id": "vant_hoff_310K_pH7",
+      "description": "Warm water at 310 K, pH 7. H_CO2 decreases with warming (exothermic dissolution); K_c1, K_c2 increase. Exercises the warm-end T sweep.",
+      "parameter_overrides": {
+        "T": 310.0,
+        "H_plus": 0.0001,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.00024438220555187627
+        },
+        {
+          "variable": "K_c1",
+          "time": 0.0,
+          "expected": 0.0004846467802289126
+        },
+        {
+          "variable": "K_c2",
+          "time": 0.0,
+          "expected": 5.9276595766723254e-08
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.0014294747625748952
+        }
+      ]
+    },
+    {
+      "id": "vant_hoff_318K_pH7",
+      "description": "Upper-range temperature for atmospheric aqueous-phase chemistry (45°C).",
+      "parameter_overrides": {
+        "T": 318.0,
+        "H_plus": 0.0001,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.00020046922438973815
+        },
+        {
+          "variable": "K_c1",
+          "time": 0.0,
+          "expected": 0.0005222575943612809
+        },
+        {
+          "variable": "K_c2",
+          "time": 0.0,
+          "expected": 6.85247903946315e-08
+        }
+      ]
+    },
+    {
+      "id": "acidic_pH4",
+      "description": "Acidic cloud water at pH 4 (typical polluted rain), 298 K, ambient p_CO2. Increased [H+] suppresses HCO3- and CO3^2- (1/[H+] and 1/[H+]^2 dependence), so H_CO2_eff → H_CO2 (the dissociation correction vanishes).",
+      "parameter_overrides": {
+        "T": 298.0,
+        "H_plus": 0.1,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.013422156427337776
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 5.771527263755243e-05
+        },
+        {
+          "variable": "CO3_2minus",
+          "time": 0.0,
+          "expected": 2.7126178139649634e-11
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.00033699679317753764
+        }
+      ]
+    },
+    {
+      "id": "basic_pH9",
+      "description": "Basic cloud water at pH 9, 298 K, ambient p_CO2. Reduced [H+] amplifies HCO3- (∝ 1/[H+]) and CO3^2- (∝ 1/[H+]^2); H_CO2_eff is dominated by the dissociation terms.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "H_plus": 1e-06,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.013422156427337776
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 5.771527263755243
+        },
+        {
+          "variable": "CO3_2minus",
+          "time": 0.0,
+          "expected": 0.2712617813964964
+        },
+        {
+          "variable": "C_total",
+          "time": 0.0,
+          "expected": 6.056211201579078
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.15140528003947692
+        }
+      ]
+    },
+    {
+      "id": "coupled_cold_acidic",
+      "description": "Cross-check: cold (273.15 K) AND acidic (pH 4). Combines the van't Hoff temperature shift on all three K constants with the [H+] sweep.",
+      "parameter_overrides": {
+        "T": 273.15,
+        "H_plus": 0.1,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.0007069168810207723
+        },
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.028276675240830895
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 9.178834093457564e-05
+        },
+        {
+          "variable": "H_CO2_eff",
+          "time": 0.0,
+          "expected": 0.0007092115901692506
+        }
+      ]
+    },
+    {
+      "id": "coupled_warm_basic",
+      "description": "Cross-check: warm (310 K) AND basic (pH 9). Both K_c1 and K_c2 shift up; carbonate-system speciation is dominated by HCO3- and CO3^2-.",
+      "parameter_overrides": {
+        "T": 310.0,
+        "H_plus": 1e-06,
+        "p_CO2": 40.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "H_CO2",
+          "time": 0.0,
+          "expected": 0.00024438220555187627
+        },
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.009775288222075051
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 4.737561962638284
+        },
+        {
+          "variable": "CO3_2minus",
+          "time": 0.0,
+          "expected": 0.28082654537911367
+        },
+        {
+          "variable": "C_total",
+          "time": 0.0,
+          "expected": 5.028163796239473
+        }
+      ]
+    },
+    {
+      "id": "high_p_CO2",
+      "description": "Elevated CO2 partial pressure (1000 ppm ≈ 101 Pa) at 298 K, pH 7. CO2_aq scales linearly with p_CO2 (Henry's law), and all derived speciation scales accordingly. Exercises the p_CO2 axis.",
+      "parameter_overrides": {
+        "T": 298.0,
+        "H_plus": 0.0001,
+        "p_CO2": 101.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "CO2_aq",
+          "time": 0.0,
+          "expected": 0.033890944979027886
+        },
+        {
+          "variable": "HCO3_minus",
+          "time": 0.0,
+          "expected": 0.1457310634098199
+        },
+        {
+          "variable": "C_total",
+          "time": 0.0,
+          "expected": 0.17969050198865041
+        }
+      ]
+    }
+  ],
+  "analyses": []
+}
+```
+
+</details>

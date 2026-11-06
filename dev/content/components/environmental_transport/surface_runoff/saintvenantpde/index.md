@@ -1,0 +1,719 @@
+---
+title: "SaintVenantPDE"
+slug: "saintvenantpde"
+domains: ["environmental_transport"]
+component_types: ["model"]
+subdomains: ["surface_runoff"]
+domain: "environmental_transport"
+subdomain: "surface_runoff"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/environmental_transport/surface_runoff/saint_venant.esm"
+reference: "10.1016/j.advwatres.2019.103499"
+description: "Full 1D Saint-Venant PDE system for surface overland flow: mass conservation ∂h̃/∂t = −∂q/∂l + (P − I) and momentum conservation ∂q/∂t = −∂F/∂l + g·h̃·(S₀ − Sᶠ), where the momentum flux F = q²/h̃ + g·h̃²/2 is an auxiliary (observed) PDE field. Migrated from EnvironmentalTransport.jl@a48559c4 src/surface_runoff.jl:117 (SaintVenantPDE builder). This is a DISCRETIZATION-AGNOSTIC leaf (esm-spec §9.7.10): the spatial fluxes are written with the rewrite-target spatial derivative op `D(·, wrt: l)` and the component imports NO discretization of its own, so it can be composed under different schemes. Its inline tests and examples inject a discretization (form C) — here the sibling adapter `saint_venant_upwind1_inflow.esm` (first-order upwind, per-variable inflow BC) — for that run only; the persisted leaf keeps its spatial `D` intact. The 1D spatial variable l is the along-slope coordinate; the sibling SurfaceRunoff component (surface_runoff_component.esm) is the single-node ODE reduction of this same PDE system with the spatial-divergence terms exposed as input parameters."
+tags: ["environmental_transport", "surface_runoff", "model", "surface-runoff", "overland-flow", "saint-venant", "pde", "hydrology", "manning-friction", "wang-2020", "method-of-lines", "discretization-agnostic"]
+---
+
+## Description
+
+Full 1D Saint-Venant PDE system for surface overland flow: mass conservation ∂h̃/∂t = −∂q/∂l + (P − I) and momentum conservation ∂q/∂t = −∂F/∂l + g·h̃·(S₀ − Sᶠ), where the momentum flux F = q²/h̃ + g·h̃²/2 is an auxiliary (observed) PDE field. Migrated from EnvironmentalTransport.jl@a48559c4 src/surface_runoff.jl:117 (SaintVenantPDE builder). This is a DISCRETIZATION-AGNOSTIC leaf (esm-spec §9.7.10): the spatial fluxes are written with the rewrite-target spatial derivative op `D(·, wrt: l)` and the component imports NO discretization of its own, so it can be composed under different schemes. Its inline tests and examples inject a discretization (form C) — here the sibling adapter `saint_venant_upwind1_inflow.esm` (first-order upwind, per-variable inflow BC) — for that run only; the persisted leaf keeps its spatial `D` intact. The 1D spatial variable l is the along-slope coordinate; the sibling SurfaceRunoff component (surface_runoff_component.esm) is the single-node ODE reduction of this same PDE system with the spatial-divergence terms exposed as input parameters.
+
+Migration to v0.8.0: the pre-0.8.0 `domains`/`system_kind`/`boundary_conditions` blocks are removed — the spatial extent now rides the injected grid's `index_sets` (the along-slope axis `l`), and the boundary conditions live INSIDE the injected discretization rule (esm-spec §9.6.8), not the component. The PDE-operator sugar `grad(·, dim: l)` is written as the equivalent spatial `D(·, wrt: l)`. The auxiliary momentum flux F_mom, an explicit PDESystem unknown upstream, is expressed here as an observed `aggregate` field over l (algebraically determined by h_tilde and q_flux each step); differentiating it as a named field is what lets the discretization rule lower ∂F/∂l. The Manning friction slope Sᶠ is likewise an observed field. The BOUNDARY treatment changed with the migration: the well-posed upwind formulation imposes a Dirichlet inflow at the upslope wall (l=0) — q_bc for the mass flux, F_bc = q_bc²/max(h_bc,h_min) + g·h_bc²/2 for the momentum flux — and a natural (backward-stencil) outflow at l=L, rather than the upstream's fixed-value Dirichlet at BOTH ends (over-specified for a hyperbolic system). With the default q_bc = 0 the upslope wall is a drainage divide (no mass inflow); the momentum inflow F_bc carries the hydrostatic pressure of the boundary film.
+
+## Reference
+
+- Wang, Z., Timlin, D., Kouznetsov, M., Fleisher, D., Li, S., Tully, K., & Reddy, V. (2020). Coupled model of surface runoff and surface-subsurface water movement. Advances in Water Resources, 137, 103499.
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `h_tilde` | `m` |  | Flow depth / ponded water height (Eq. 1a PDE state), a field over the along-slope axis l. Initial and upslope-inflow value h_bc (default 1 mm). Corresponds to h̃(t,l) in upstream Julia code. |
+| `q_flux` | `m^2/s` |  | Surface runoff flux per unit width (Eq. 1b PDE state), a field over l. Initial value q_bc; upslope inflow value q_bc (default 0). Corresponds to q_flux(t,l) in upstream Julia code. |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `g_grav` | `m/s^2` | `9.81` | Gravitational acceleration. Drives the momentum source g·h̃·(S₀−Sᶠ) and the pressure term g·h̃²/2 of the momentum flux. Encoded as type:parameter (schema has no constant type); never overridden. |
+| `n_ref` | `m^(-1/3)*s` | `1.0` | Reference Manning coefficient for non-dimensionalization (upstream default 1.0). Divides n_mann in the Manning slope so the squared base is dimensionless; the unit value changes no numbers. |
+| `q_ref` | `m^2/s` | `1.0` | Reference runoff flux for non-dimensionalization (upstream default 1.0). Divides q_flux in the Manning slope so the squared base is dimensionless. |
+| `h_ref` | `m` | `1.0` | Reference flow depth for non-dimensionalization (upstream default 1.0). Divides max(h̃,h_min) in the Manning slope so the (10/3)-power base is dimensionless. |
+| `S_0_slope` | `1` | `0.01` | Surface slope (dimensionless) along the flow direction l. Drives the momentum source term g·h̃·(S₀−Sᶠ); when S₀ > Sᶠ the flow accelerates. Upstream default 0.01 (1% slope). |
+| `n_mann` | `m^(-1/3)*s` | `0.03` | Manning roughness coefficient. Controls friction dissipation via the Manning slope Sᶠ; larger values produce larger Sᶠ and slower flow. Upstream default 0.03 (bare soil). |
+| `h_min` | `m` | `1e-05` | Minimum flow depth floor. Applied via max(h̃,h_min) in F and Sᶠ to prevent singularities as h̃→0. Upstream default 1e-5 m. |
+| `h_bc` | `m` | `0.001` | Upslope-inflow and initial flow depth. Applied as the l=0 inflow depth and as the t=0 initial film. Upstream default 1e-3 m (1 mm thin film). |
+| `q_bc` | `m^2/s` | `0.0` | Upslope-inflow and initial runoff flux. Applied as the l=0 inflow flux (0 at a drainage divide) and as the t=0 initial flux. Upstream default 0.0. |
+| `P_rate` | `m/s` | `1.9444444444444445e-05` | Precipitation flux density (source in the mass equation ∂h̃/∂t = −∂q/∂l + (P_rate − I_rate)). Upstream default 70 mm/hr = 70/1000/3600 ≈ 1.944e-5 m/s. |
+| `I_rate` | `m/s` | `0.0` | Infiltration flux density (sink in the mass equation). Upstream default 0.0 (pure surface flow). |
+| `dx` | `m` | `1.0` | Along-slope grid spacing = domain_length / N. The consumer-supplied geometry free name the injected cartesian_uniform_1d discretization resolves (grid contract). Default 1.0 m matches the upstream 100 m slope discretized at N=100 cells; a test/example injecting a different N should override dx = 100/N to stay consistent. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `F_mom` | `m^3/s^2` |  | Momentum flux auxiliary field F = q²/max(h̃,h_min) + g·h̃²/2 (Eq. 1b), an observed `aggregate` map over l — algebraically determined by h_tilde and q_flux at each along-slope cell. Named (rather than inlined) so the discretization rule can lower its spatial derivative ∂F/∂l. Its upslope-inflow wall value is F_bc. |
+| `S_f` | `1` |  | Manning friction slope Sᶠ = ((n_mann·q)/(n_ref·q_ref))² / (max(h̃,h_min)/h_ref)^(10/3), an observed `aggregate` field over l. Dimensionless; non-dimensionalized by reference constants n_ref=q_ref=h_ref=1.0 so the fractional-power base is a dimensionless ratio. Opposes the surface slope S₀ in the momentum source g·max(h̃,h_min)·(S₀−Sᶠ). |
+| `F_bc` | `m^3/s^2` |  | Upslope-inflow (Dirichlet) wall value of the momentum flux: F_bc = q_bc²/max(h_bc,h_min) + g·h_bc²/2 — consistent with the boundary flow state (h_bc, q_bc). A scalar the injected discretization rule reads for the l=0 inflow face of ∂F/∂l. At a drainage divide (q_bc=0) this is the hydrostatic pressure g·h_bc²/2 of the boundary film. |
+
+## Observed expressions
+
+$$
+F_{mom} = \mathrm{aggregate}\left(\right)
+$$
+_Momentum flux auxiliary field F = q²/max(h̃,h_min) + g·h̃²/2 (Eq. 1b), an observed `aggregate` map over l — algebraically determined by h_tilde and q_flux at each along-slope cell. Named (rather than inlined) so the discretization rule can lower its spatial derivative ∂F/∂l. Its upslope-inflow wall value is F_bc._
+
+$$
+S_{f} = \mathrm{aggregate}\left(\right)
+$$
+_Manning friction slope Sᶠ = ((n_mann·q)/(n_ref·q_ref))² / (max(h̃,h_min)/h_ref)^(10/3), an observed `aggregate` field over l. Dimensionless; non-dimensionalized by reference constants n_ref=q_ref=h_ref=1.0 so the fractional-power base is a dimensionless ratio. Opposes the surface slope S₀ in the momentum source g·max(h̃,h_min)·(S₀−Sᶠ)._
+
+$$
+F_{bc} = \frac{q_{bc}^{2.0}}{\mathrm{max}\left(h_{bc}, h_{min}\right)} + g_{grav} \cdot 0.5 \cdot h_{bc}^{2.0}
+$$
+_Upslope-inflow (Dirichlet) wall value of the momentum flux: F_bc = q_bc²/max(h_bc,h_min) + g·h_bc²/2 — consistent with the boundary flow state (h_bc, q_bc). A scalar the injected discretization rule reads for the l=0 inflow face of ∂F/∂l. At a drainage divide (q_bc=0) this is the hydrostatic pressure g·h_bc²/2 of the boundary film._
+
+## Equations
+
+$$
+\mathrm{ic}\left(h_{tilde}\right) = 0.001
+$$
+
+$$
+\mathrm{ic}\left(q_{flux}\right) = 0.0
+$$
+
+$$
+\mathrm{D}\left(h_{tilde}\right) = \left(-1.0\right) \cdot \mathrm{D}\left(q_{flux}\right) + P_{rate} - I_{rate}
+$$
+
+$$
+\mathrm{D}\left(q_{flux}\right) = \left(-1.0\right) \cdot \mathrm{D}\left(F_{mom}\right) + g_{grav} \cdot \mathrm{max}\left(h_{tilde}, h_{min}\right) \cdot \left(S_{0\,slope} - S_{f}\right)
+$$
+
+## Analyses
+
+### steady_rainfall_runoff
+
+Canonical steady rainfall over a 100 m slope (Wang et al. 2020 defaults): P=70 mm/hr, no infiltration, 1% slope, Manning n=0.03. From a 1 mm film at rest, rainfall accumulates and drives downslope runoff. Runnable via any PDE-capable ESS runner by injecting the upwind inflow discretization at N=100.
+
+**Time span:** 0.0 → 3600.0
+
+### flat_no_rain
+
+Zero precipitation, zero slope: P=0, I=0, S₀=0. Starting from a uniform 1 mm film at rest, the well-balanced discretization keeps h̃=h_bc, q=0 for all time (structural sanity check — the asserted counterpart is the flat_no_rain_rest test). Runnable by injecting the upwind inflow discretization at N=100.
+
+**Time span:** 0.0 → 600.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "h_tilde": {
+      "type": "unknown",
+      "units": "m",
+      "shape": [
+        "l"
+      ],
+      "description": "Flow depth / ponded water height (Eq. 1a PDE state), a field over the along-slope axis l. Initial and upslope-inflow value h_bc (default 1 mm). Corresponds to h̃(t,l) in upstream Julia code."
+    },
+    "q_flux": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "shape": [
+        "l"
+      ],
+      "description": "Surface runoff flux per unit width (Eq. 1b PDE state), a field over l. Initial value q_bc; upslope inflow value q_bc (default 0). Corresponds to q_flux(t,l) in upstream Julia code."
+    },
+    "F_mom": {
+      "type": "unknown",
+      "units": "m^3/s^2",
+      "shape": [
+        "l"
+      ],
+      "description": "Momentum flux auxiliary field F = q²/max(h̃,h_min) + g·h̃²/2 (Eq. 1b), an observed `aggregate` map over l — algebraically determined by h_tilde and q_flux at each along-slope cell. Named (rather than inlined) so the discretization rule can lower its spatial derivative ∂F/∂l. Its upslope-inflow wall value is F_bc."
+    },
+    "S_f": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "l"
+      ],
+      "description": "Manning friction slope Sᶠ = ((n_mann·q)/(n_ref·q_ref))² / (max(h̃,h_min)/h_ref)^(10/3), an observed `aggregate` field over l. Dimensionless; non-dimensionalized by reference constants n_ref=q_ref=h_ref=1.0 so the fractional-power base is a dimensionless ratio. Opposes the surface slope S₀ in the momentum source g·max(h̃,h_min)·(S₀−Sᶠ)."
+    },
+    "F_bc": {
+      "type": "unknown",
+      "units": "m^3/s^2",
+      "description": "Upslope-inflow (Dirichlet) wall value of the momentum flux: F_bc = q_bc²/max(h_bc,h_min) + g·h_bc²/2 — consistent with the boundary flow state (h_bc, q_bc). A scalar the injected discretization rule reads for the l=0 inflow face of ∂F/∂l. At a drainage divide (q_bc=0) this is the hydrostatic pressure g·h_bc²/2 of the boundary film."
+    },
+    "g_grav": {
+      "type": "parameter",
+      "units": "m/s^2",
+      "default": 9.81,
+      "description": "Gravitational acceleration. Drives the momentum source g·h̃·(S₀−Sᶠ) and the pressure term g·h̃²/2 of the momentum flux. Encoded as type:parameter (schema has no constant type); never overridden."
+    },
+    "n_ref": {
+      "type": "parameter",
+      "units": "m^(-1/3)*s",
+      "default": 1.0,
+      "description": "Reference Manning coefficient for non-dimensionalization (upstream default 1.0). Divides n_mann in the Manning slope so the squared base is dimensionless; the unit value changes no numbers."
+    },
+    "q_ref": {
+      "type": "parameter",
+      "units": "m^2/s",
+      "default": 1.0,
+      "description": "Reference runoff flux for non-dimensionalization (upstream default 1.0). Divides q_flux in the Manning slope so the squared base is dimensionless."
+    },
+    "h_ref": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1.0,
+      "description": "Reference flow depth for non-dimensionalization (upstream default 1.0). Divides max(h̃,h_min) in the Manning slope so the (10/3)-power base is dimensionless."
+    },
+    "S_0_slope": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.01,
+      "description": "Surface slope (dimensionless) along the flow direction l. Drives the momentum source term g·h̃·(S₀−Sᶠ); when S₀ > Sᶠ the flow accelerates. Upstream default 0.01 (1% slope)."
+    },
+    "n_mann": {
+      "type": "parameter",
+      "units": "m^(-1/3)*s",
+      "default": 0.03,
+      "description": "Manning roughness coefficient. Controls friction dissipation via the Manning slope Sᶠ; larger values produce larger Sᶠ and slower flow. Upstream default 0.03 (bare soil)."
+    },
+    "h_min": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-05,
+      "description": "Minimum flow depth floor. Applied via max(h̃,h_min) in F and Sᶠ to prevent singularities as h̃→0. Upstream default 1e-5 m."
+    },
+    "h_bc": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.001,
+      "description": "Upslope-inflow and initial flow depth. Applied as the l=0 inflow depth and as the t=0 initial film. Upstream default 1e-3 m (1 mm thin film)."
+    },
+    "q_bc": {
+      "type": "parameter",
+      "units": "m^2/s",
+      "default": 0.0,
+      "description": "Upslope-inflow and initial runoff flux. Applied as the l=0 inflow flux (0 at a drainage divide) and as the t=0 initial flux. Upstream default 0.0."
+    },
+    "P_rate": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 1.9444444444444445e-05,
+      "description": "Precipitation flux density (source in the mass equation ∂h̃/∂t = −∂q/∂l + (P_rate − I_rate)). Upstream default 70 mm/hr = 70/1000/3600 ≈ 1.944e-5 m/s."
+    },
+    "I_rate": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Infiltration flux density (sink in the mass equation). Upstream default 0.0 (pure surface flow)."
+    },
+    "dx": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1.0,
+      "description": "Along-slope grid spacing = domain_length / N. The consumer-supplied geometry free name the injected cartesian_uniform_1d discretization resolves (grid contract). Default 1.0 m matches the upstream 100 m slope discretized at N=100 cells; a test/example injecting a different N should override dx = 100/N to stay consistent."
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "ic",
+        "args": [
+          "h_tilde"
+        ]
+      },
+      "rhs": 0.001
+    },
+    {
+      "lhs": {
+        "op": "ic",
+        "args": [
+          "q_flux"
+        ]
+      },
+      "rhs": 0.0
+    },
+    {
+      "_comment": "Eq. 1a (Wang et al. 2020) — mass conservation: ∂h̃/∂t = −∂q/∂l + (P_rate − I_rate). The ponded depth rises with net precipitation over infiltration and falls as runoff drains downslope.",
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "h_tilde"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              {
+                "op": "D",
+                "args": [
+                  "q_flux"
+                ],
+                "wrt": "l"
+              }
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              "P_rate",
+              "I_rate"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "_comment": "Eq. 1b (Wang et al. 2020) — momentum conservation: ∂q/∂t = −∂F/∂l + g·max(h̃,h_min)·(S₀−Sᶠ). Runoff flux is driven by the slope−friction imbalance and reduced by the spatial divergence of momentum flux F.",
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "q_flux"
+        ]
+      },
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              -1.0,
+              {
+                "op": "D",
+                "args": [
+                  "F_mom"
+                ],
+                "wrt": "l"
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "g_grav",
+              {
+                "op": "max",
+                "args": [
+                  "h_tilde",
+                  "h_min"
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  "S_0_slope",
+                  "S_f"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "F_mom",
+      "rhs": {
+        "op": "aggregate",
+        "output_idx": [
+          "i"
+        ],
+        "args": [],
+        "ranges": {
+          "i": {
+            "from": "l"
+          }
+        },
+        "expr": {
+          "op": "+",
+          "args": [
+            {
+              "op": "/",
+              "args": [
+                {
+                  "op": "^",
+                  "args": [
+                    {
+                      "op": "index",
+                      "args": [
+                        "q_flux",
+                        "i"
+                      ]
+                    },
+                    2.0
+                  ]
+                },
+                {
+                  "op": "max",
+                  "args": [
+                    {
+                      "op": "index",
+                      "args": [
+                        "h_tilde",
+                        "i"
+                      ]
+                    },
+                    "h_min"
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "*",
+              "args": [
+                "g_grav",
+                0.5,
+                {
+                  "op": "^",
+                  "args": [
+                    {
+                      "op": "index",
+                      "args": [
+                        "h_tilde",
+                        "i"
+                      ]
+                    },
+                    2.0
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "S_f",
+      "rhs": {
+        "op": "aggregate",
+        "output_idx": [
+          "i"
+        ],
+        "args": [],
+        "ranges": {
+          "i": {
+            "from": "l"
+          }
+        },
+        "expr": {
+          "op": "/",
+          "args": [
+            {
+              "op": "^",
+              "args": [
+                {
+                  "op": "/",
+                  "args": [
+                    {
+                      "op": "*",
+                      "args": [
+                        "n_mann",
+                        {
+                          "op": "index",
+                          "args": [
+                            "q_flux",
+                            "i"
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "op": "*",
+                      "args": [
+                        "n_ref",
+                        "q_ref"
+                      ]
+                    }
+                  ]
+                },
+                2.0
+              ]
+            },
+            {
+              "op": "^",
+              "args": [
+                {
+                  "op": "/",
+                  "args": [
+                    {
+                      "op": "max",
+                      "args": [
+                        {
+                          "op": "index",
+                          "args": [
+                            "h_tilde",
+                            "i"
+                          ]
+                        },
+                        "h_min"
+                      ]
+                    },
+                    "h_ref"
+                  ]
+                },
+                3.3333333333333335
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "lhs": "F_bc",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  "q_bc",
+                  2.0
+                ]
+              },
+              {
+                "op": "max",
+                "args": [
+                  "h_bc",
+                  "h_min"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "g_grav",
+              0.5,
+              {
+                "op": "^",
+                "args": [
+                  "h_bc",
+                  2.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "flat_no_rain_rest",
+      "description": "Well-balanced rest state: flat slope (S₀=0), no rain (P=I=0), starting from a still film h̃=h_bc, q=0. The system must stay exactly at rest — the hydrostatic momentum flux F=g·h_bc²/2 is uniform (so ∂F/∂l=0 interior AND the l=0 inflow face (F[1]−F_bc)/dx=0 because F_bc=g·h_bc²/2), the mass flux q=0 everywhere, and Sᶠ=0. This pins the well-balancing of the per-variable inflow discretization, the l→makearray lowering, and the BC. Injects the first-order upwind inflow adapter at N=100 (dx=1). parameter_overrides use the flattened (model-prefixed) names.",
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "parameter_overrides": {
+        "SaintVenantPDE.P_rate": 0.0,
+        "SaintVenantPDE.I_rate": 0.0,
+        "SaintVenantPDE.S_0_slope": 0.0
+      },
+      "expression_template_imports": [
+        {
+          "ref": "./saint_venant_upwind1_inflow.esm",
+          "bindings": {
+            "N": 100
+          }
+        }
+      ],
+      "assertions": [
+        {
+          "variable": "q_flux",
+          "time": 600.0,
+          "expected": 0.0,
+          "reduce": "mean",
+          "tolerance": {
+            "abs": 1e-09
+          }
+        },
+        {
+          "variable": "h_tilde",
+          "time": 600.0,
+          "expected": 0.001,
+          "reduce": "mean",
+          "tolerance": {
+            "abs": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "steady_rain_mass_balance",
+      "description": "Short-horizon global mass balance under steady rainfall (Wang 2020 defaults: P=70 mm/hr, no infiltration, 1% slope, Manning n=0.03), starting from the still film. Over t∈[0,60 s] — before appreciable runoff drains past the downslope outlet — the along-slope mean depth must rise by ≈ P·t: mean(h̃)(60) ≈ h_bc + P·60 = 1e-3 + 1.9444e-5·60 = 2.1667e-3 m. This exercises the actual (non-trivial) dynamics — the mass-flux divergence, the nonlinear momentum flux, and the Manning friction — through the injected upwind discretization, and pins conservation of the mass equation's source balance. Stiff (gravity waves + Manning friction): the runner integrates with an implicit method. Tolerance allows the small early outflow and boundary-cell effects.",
+      "time_span": {
+        "start": 0.0,
+        "end": 60.0
+      },
+      "parameter_overrides": {
+        "SaintVenantPDE.P_rate": 1.9444444444444445e-05,
+        "SaintVenantPDE.I_rate": 0.0,
+        "SaintVenantPDE.S_0_slope": 0.01
+      },
+      "expression_template_imports": [
+        {
+          "ref": "./saint_venant_upwind1_inflow.esm",
+          "bindings": {
+            "N": 100
+          }
+        }
+      ],
+      "assertions": [
+        {
+          "variable": "h_tilde",
+          "time": 60.0,
+          "expected": 0.0021667,
+          "reduce": "mean",
+          "tolerance": {
+            "abs": 0.0001
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "steady_rainfall_runoff",
+      "description": "Canonical steady rainfall over a 100 m slope (Wang et al. 2020 defaults): P=70 mm/hr, no infiltration, 1% slope, Manning n=0.03. From a 1 mm film at rest, rainfall accumulates and drives downslope runoff. Runnable via any PDE-capable ESS runner by injecting the upwind inflow discretization at N=100.",
+      "expression_template_imports": [
+        {
+          "ref": "./saint_venant_upwind1_inflow.esm",
+          "bindings": {
+            "N": 100
+          }
+        }
+      ],
+      "parameters": {
+        "P_rate": 1.9444444444444445e-05,
+        "I_rate": 0.0,
+        "S_0_slope": 0.01,
+        "n_mann": 0.03,
+        "g_grav": 9.81,
+        "h_min": 1e-05,
+        "h_bc": 0.001,
+        "q_bc": 0.0,
+        "n_ref": 1.0,
+        "q_ref": 1.0,
+        "h_ref": 1.0,
+        "dx": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "plots": [
+        {
+          "id": "depth_profile_t1800",
+          "type": "field_snapshot",
+          "description": "Flow depth h̃(l) at t=1800 s (30 min): depth increases downslope as runoff collects.",
+          "at_time": 1800.0,
+          "x": {
+            "variable": "l",
+            "label": "Along-slope distance l (m)"
+          },
+          "y": {
+            "variable": "h_tilde",
+            "label": "Flow depth h̃ (m)"
+          },
+          "value": {
+            "variable": "h_tilde"
+          }
+        },
+        {
+          "id": "flux_profile_t3600",
+          "type": "field_snapshot",
+          "description": "Runoff flux q(l) at t=3600 s (1 hr): peak flux at the downslope outlet as water collected over the whole slope drains.",
+          "at_time": 3600.0,
+          "x": {
+            "variable": "l",
+            "label": "Along-slope distance l (m)"
+          },
+          "y": {
+            "variable": "q_flux",
+            "label": "Runoff flux q (m²/s)"
+          },
+          "value": {
+            "variable": "q_flux"
+          }
+        }
+      ],
+      "initial_state": {
+        "h_tilde": 0.001,
+        "q_flux": 0.0
+      }
+    },
+    {
+      "id": "flat_no_rain",
+      "description": "Zero precipitation, zero slope: P=0, I=0, S₀=0. Starting from a uniform 1 mm film at rest, the well-balanced discretization keeps h̃=h_bc, q=0 for all time (structural sanity check — the asserted counterpart is the flat_no_rain_rest test). Runnable by injecting the upwind inflow discretization at N=100.",
+      "expression_template_imports": [
+        {
+          "ref": "./saint_venant_upwind1_inflow.esm",
+          "bindings": {
+            "N": 100
+          }
+        }
+      ],
+      "parameters": {
+        "P_rate": 0.0,
+        "I_rate": 0.0,
+        "S_0_slope": 0.0,
+        "n_mann": 0.03,
+        "g_grav": 9.81,
+        "h_min": 1e-05,
+        "h_bc": 0.001,
+        "q_bc": 0.0,
+        "n_ref": 1.0,
+        "q_ref": 1.0,
+        "h_ref": 1.0,
+        "dx": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "plots": [
+        {
+          "id": "depth_static",
+          "type": "field_snapshot",
+          "description": "Flow depth h̃(l) at t=600 s: uniform at h_bc=1e-3 m (no forcing).",
+          "at_time": 600.0,
+          "x": {
+            "variable": "l",
+            "label": "Along-slope distance l (m)"
+          },
+          "y": {
+            "variable": "h_tilde",
+            "label": "Flow depth h̃ (m)"
+          },
+          "value": {
+            "variable": "h_tilde"
+          }
+        }
+      ],
+      "initial_state": {
+        "h_tilde": 0.001,
+        "q_flux": 0.0
+      }
+    }
+  ]
+}
+```
+
+</details>

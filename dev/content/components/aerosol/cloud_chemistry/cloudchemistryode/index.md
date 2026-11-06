@@ -1,0 +1,1312 @@
+---
+title: "CloudChemistryODE"
+slug: "cloudchemistryode"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["cloud_chemistry"]
+domain: "aerosol"
+subdomain: "cloud_chemistry"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/cloud_chemistry/cloud_chemistry_ode.esm"
+reference: "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Key equations: 7.33/7.34/7.35 (SO2 equilibria), 7.79 (O3 oxidation rate), 7.84 (H2O2 oxidation rate), 7.102 (Fe/Mn synergistic oxidation). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_chemistry.jl:422 (esm-tum)."
+description: "Dynamic cloud droplet chemistry: time evolution of sulfate concentration as S(IV) is oxidized to S(VI) via O3, H2O2, and Fe/Mn-catalyzed pathways (Seinfeld & Pandis 2006, Chapter 7, Eqs. 7.79-7.102). Gas-liquid equilibria (SO2, H2O2, O3) are assumed instantaneous; the sulfate ODE tracks the kinetic accumulation. Migrated from Aerosol.jl src/cloud_chemistry.jl:422."
+tags: ["aerosol", "cloud_chemistry", "model", "aqueous_phase", "sulfate", "ode"]
+---
+
+## Description
+
+Dynamic cloud droplet chemistry: time evolution of sulfate concentration as S(IV) is oxidized to S(VI) via O3, H2O2, and Fe/Mn-catalyzed pathways (Seinfeld & Pandis 2006, Chapter 7, Eqs. 7.79-7.102). Gas-liquid equilibria (SO2, H2O2, O3) are assumed instantaneous; the sulfate ODE tracks the kinetic accumulation. Migrated from Aerosol.jl src/cloud_chemistry.jl:422.
+
+## Reference
+
+Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Key equations: 7.33/7.34/7.35 (SO2 equilibria), 7.79 (O3 oxidation rate), 7.84 (H2O2 oxidation rate), 7.102 (Fe/Mn synergistic oxidation). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_chemistry.jl:422 (esm-tum).
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_chemistry.jl:422
+
+CloudChemistryODE is an ODE model for sulfate accumulation in a cloud droplet. It has one dynamic (ODE) state, SO4_2minus, and a system of algebraic equations capturing SO2/H2O2/O3 gas-liquid equilibria and S(IV) oxidation kinetics.
+
+Flattening: The original MTK model uses four subsystems (SO2Equilibria, H2O2Equilibria, O3Equilibria, SulfateFormation). All subsystem equations are inlined here. Constants that appeared as MTK @constants are promoted to parameters with fixed defaults. The T_ref parameter is shared across all van't Hoff temperature corrections.
+
+Unit conversions from upstream:
+  Henry's law constants: converted from M/atm to mol/(m³·Pa): × 1000/101325
+  Dissociation constants: converted from M to mol/m³: × 1000
+  O3/Mn rate constant k0: converted from M⁻¹s⁻¹ to m³/(mol·s): ÷ 1000
+  H2O2 rate constant k: converted from M⁻²s⁻¹ to m⁶/(mol²·s): ÷ 1e6
+  K_eq for H2O2: converted from M⁻¹ to m³/mol: ÷ 1000
+  FeMn rate constants: k_Mn/k_Fe: ÷ 1000; k_FeMn: ÷ 1e6
+
+Oxidation pathways:
+  R_O3  = (k0·[SO2·H2O] + k1·[HSO3⁻] + k2·[SO3²⁻]) · [O3(aq)]  (Eq 7.79)
+  R_H2O2 = k·[H⁺]·[H2O2]·[HSO3⁻] / (1 + K_eq·[H⁺])               (Eq 7.84)
+  R_FeMn = (k_Mn·[Mn²⁺] + k_Fe·[Fe³⁺] + k_FeMn·[Mn²⁺]·[Fe³⁺])·[S(IV)]  (Eq 7.102)
+  R_total = R_O3 + R_H2O2 + R_FeMn
+  d[SO4²⁻]/dt = R_total
+
+Tolerance rationale (model-level rel=1e-6 / abs=1e-14): The system has one ODE state (SO4_2minus) driven by algebraic R_total. R_total is O(1e-4) mol/m³/s at defaults, and SO4_2minus grows O(1e-2 to 0.4) mol/m³ over 300-3600 s. rel=1e-6 captures float64 roundoff in the van't Hoff exponentials and the nonlinear R_H2O2 denominator; abs=1e-14 floors the zero-metal-catalyst FeMn term._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `SO4_2minus` | `mol/m^3` | `0.0` | Sulfate concentration [SO4²⁻]; evolves via d[SO4²⁻]/dt = R_total (S(IV) oxidation) |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.0` | Temperature |
+| `pH_input` | `1` | `4.0` | Cloud droplet pH (input, dimensionless) |
+| `p_SO2` | `Pa` | `0.000101325` | Partial pressure of SO2 (1 ppb = 101325×10⁻⁹ Pa) |
+| `p_H2O2` | `Pa` | `0.000101325` | Partial pressure of H2O2 (1 ppb = 101325×10⁻⁹ Pa) |
+| `p_O3` | `Pa` | `0.00506625` | Partial pressure of O3 (50 ppb = 50×101325×10⁻⁹ Pa) |
+| `Fe_III` | `mol/m^3` | `0.0` | Fe(III) concentration in cloud droplet |
+| `Mn_II` | `mol/m^3` | `0.0` | Mn(II) concentration in cloud droplet |
+| `L` | `g/m^3` | `0.3` | Liquid water content |
+| `xi_SO2` | `1` | `1e-09` | SO2 gas-phase mixing ratio (dimensionless, 1 ppb = 1e-9) |
+| `R_gas` | `J/(mol*K)` | `8.314` | Universal gas constant |
+| `T_ref` | `K` | `298.0` | Reference temperature for van't Hoff equations (298.15 K rounded) |
+| `C_ref` | `mol/m^3` | `1000.0` | Reference concentration (1 mol/L = 1000 mol/m³); converts pH to [H⁺] in mol/m³ |
+| `H_SO2_298` | `mol/(m^3*Pa)` | `0.012139156180606956` | Henry's law constant for SO2 at 298 K (1.23 M/atm converted to SI) |
+| `dH_H_SO2` | `J/mol` | `-26150.0` | Enthalpy of dissolution for SO2 (−6.25 kcal/mol); negative = exothermic, more soluble at lower T |
+| `K_s1_298` | `mol/m^3` | `13.0` | First SO2 dissociation constant at 298 K: SO2·H2O ⇌ H⁺ + HSO3⁻ (1.3×10⁻² M converted to mol/m³) |
+| `K_s2_298` | `mol/m^3` | `6.599999999999999e-05` | Second SO2 dissociation constant at 298 K: HSO3⁻ ⇌ H⁺ + SO3²⁻ (6.6×10⁻⁸ M converted to mol/m³) |
+| `dH_Ks1` | `J/mol` | `-17405.44` | Enthalpy for K_s1 (−4.16 kcal/mol) |
+| `dH_Ks2` | `J/mol` | `-9330.32` | Enthalpy for K_s2 (−2.23 kcal/mol) |
+| `H_H2O2_298` | `mol/(m^3*Pa)` | `986.9232667160128` | Henry's law constant for H2O2 at 298 K (1×10⁵ M/atm converted to SI) |
+| `dH_H_H2O2` | `J/mol` | `-60668.0` | Enthalpy of dissolution for H2O2 (−14.5 kcal/mol) |
+| `H_O3_298` | `mol/(m^3*Pa)` | `0.0001085615593387614` | Henry's law constant for O3 at 298 K (1.1×10⁻² M/atm converted to SI) |
+| `dH_H_O3` | `J/mol` | `-21087.36` | Enthalpy of dissolution for O3 (−5.04 kcal/mol) |
+| `k0_O3` | `m^3/(mol*s)` | `24.0` | O3 oxidation rate constant for SO2·H2O (2.4×10⁴ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79) |
+| `k1_O3` | `m^3/(mol*s)` | `370.0` | O3 oxidation rate constant for HSO3⁻ (3.7×10⁵ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79) |
+| `k2_O3` | `m^3/(mol*s)` | `1500000.0` | O3 oxidation rate constant for SO3²⁻ (1.5×10⁹ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79); dominates at high pH |
+| `k_H2O2` | `m^6/(mol^2*s)` | `75.0` | H2O2 oxidation rate constant (7.5×10⁷ M⁻²s⁻¹ ÷ 10⁶; S&P Eq 7.84) |
+| `K_eq_H2O2` | `m^3/mol` | `0.013` | Equilibrium constant in H2O2 rate denominator (13 M⁻¹ ÷ 1000; S&P Eq 7.84) |
+| `k_Mn_SIV` | `m^3/(mol*s)` | `0.75` | Mn(II)-only term rate constant (750 M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.102) |
+| `k_Fe_SIV` | `m^3/(mol*s)` | `2.6` | Fe(III)-only term rate constant (2600 M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.102) |
+| `k_FeMn_SIV` | `m^6/(mol^2*s)` | `10000.0` | Fe/Mn synergistic rate constant (10¹⁰ M⁻²s⁻¹ ÷ 10⁶; S&P Eq 7.102); dominates when both metals present |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `H_plus` | `mol/m^3` |  | H⁺ concentration derived from input pH: H_plus = C_ref × 10^(−pH_input) |
+| `H_SO2` | `mol/(m^3*Pa)` |  | Temperature-dependent Henry's law constant for SO2 (van't Hoff) |
+| `K_s1` | `mol/m^3` |  | Temperature-dependent first SO2 dissociation constant (van't Hoff) |
+| `K_s2` | `mol/m^3` |  | Temperature-dependent second SO2 dissociation constant (van't Hoff) |
+| `SO2_aq` | `mol/m^3` |  | Aqueous SO2 concentration [SO2·H2O] from Henry's law: SO2_aq = H_SO2 × p_SO2 |
+| `HSO3_minus` | `mol/m^3` |  | Bisulfite concentration [HSO3⁻] from first dissociation equilibrium |
+| `SO3_2minus` | `mol/m^3` |  | Sulfite concentration [SO3²⁻] from second dissociation equilibrium |
+| `S_IV_total` | `mol/m^3` |  | Total S(IV) concentration: SO2_aq + HSO3_minus + SO3_2minus |
+| `H_H2O2` | `mol/(m^3*Pa)` |  | Temperature-dependent Henry's law constant for H2O2 (van't Hoff) |
+| `H2O2_aq` | `mol/m^3` |  | Aqueous H2O2 concentration from Henry's law |
+| `H_O3` | `mol/(m^3*Pa)` |  | Temperature-dependent Henry's law constant for O3 (van't Hoff) |
+| `O3_aq` | `mol/m^3` |  | Aqueous O3 concentration from Henry's law |
+| `R_O3` | `mol/(m^3*s)` |  | S(IV) oxidation rate by O3 (S&P Eq 7.79); increases strongly with pH via SO3²⁻ pathway |
+| `R_H2O2` | `mol/(m^3*s)` |  | S(IV) oxidation rate by H2O2 (S&P Eq 7.84); relatively pH-independent |
+| `R_FeMn` | `mol/(m^3*s)` |  | S(IV) oxidation rate by Fe/Mn-catalyzed O2 with synergism (S&P Eq 7.102) |
+| `R_total` | `mol/(m^3*s)` |  | Total S(IV) oxidation rate; drives sulfate ODE: d[SO4²⁻]/dt = R_total |
+
+## Observed expressions
+
+$$
+H_{plus} = C_{ref} \cdot 10.0^{\left(-1.0\right) \cdot pH_{input}}
+$$
+_H⁺ concentration derived from input pH: H_plus = C_ref × 10^(−pH_input)_
+
+$$
+H_{SO2} = H_{SO2\,298} \cdot e^{\frac{dH_{H\,SO2}}{R_{gas}} \cdot \left(\frac{1}{T_{ref}} + \frac{-1}{T}\right)}
+$$
+_Temperature-dependent Henry's law constant for SO2 (van't Hoff)_
+
+$$
+K_{s1} = K_{s1\,298} \cdot e^{\left(-1\right) \cdot \frac{dH_{Ks1}}{R_{gas}} \cdot \left(\frac{1}{T} + \frac{-1}{T_{ref}}\right)}
+$$
+_Temperature-dependent first SO2 dissociation constant (van't Hoff)_
+
+$$
+K_{s2} = K_{s2\,298} \cdot e^{\left(-1\right) \cdot \frac{dH_{Ks2}}{R_{gas}} \cdot \left(\frac{1}{T} + \frac{-1}{T_{ref}}\right)}
+$$
+_Temperature-dependent second SO2 dissociation constant (van't Hoff)_
+
+$$
+SO2_{aq} = H_{SO2} \cdot p_{SO2}
+$$
+_Aqueous SO2 concentration [SO2·H2O] from Henry's law: SO2_aq = H_SO2 × p_SO2_
+
+$$
+HSO3_{minus} = \frac{K_{s1} \cdot SO2_{aq}}{H_{plus}}
+$$
+_Bisulfite concentration [HSO3⁻] from first dissociation equilibrium_
+
+$$
+SO3_{2minus} = \frac{K_{s2} \cdot HSO3_{minus}}{H_{plus}}
+$$
+_Sulfite concentration [SO3²⁻] from second dissociation equilibrium_
+
+$$
+S_{IV\,total} = SO2_{aq} + HSO3_{minus} + SO3_{2minus}
+$$
+_Total S(IV) concentration: SO2_aq + HSO3_minus + SO3_2minus_
+
+$$
+H_{H2O2} = H_{H2O2\,298} \cdot e^{\frac{dH_{H\,H2O2}}{R_{gas}} \cdot \left(\frac{1}{T_{ref}} + \frac{-1}{T}\right)}
+$$
+_Temperature-dependent Henry's law constant for H2O2 (van't Hoff)_
+
+$$
+H2O2_{aq} = H_{H2O2} \cdot p_{H2O2}
+$$
+_Aqueous H2O2 concentration from Henry's law_
+
+$$
+H_{O3} = H_{O3\,298} \cdot e^{\frac{dH_{H\,O3}}{R_{gas}} \cdot \left(\frac{1}{T_{ref}} + \frac{-1}{T}\right)}
+$$
+_Temperature-dependent Henry's law constant for O3 (van't Hoff)_
+
+$$
+O3_{aq} = H_{O3} \cdot p_{O3}
+$$
+_Aqueous O3 concentration from Henry's law_
+
+$$
+R_{O3} = \left(k0_{O3} \cdot SO2_{aq} + k1_{O3} \cdot HSO3_{minus} + k2_{O3} \cdot SO3_{2minus}\right) \cdot O3_{aq}
+$$
+_S(IV) oxidation rate by O3 (S&P Eq 7.79); increases strongly with pH via SO3²⁻ pathway_
+
+$$
+R_{H2O2} = \frac{k_{H2O2} \cdot H_{plus} \cdot H2O2_{aq} \cdot HSO3_{minus}}{1.0 + K_{eq\,H2O2} \cdot H_{plus}}
+$$
+_S(IV) oxidation rate by H2O2 (S&P Eq 7.84); relatively pH-independent_
+
+$$
+R_{FeMn} = k_{Mn\,SIV} \cdot Mn_{II} \cdot S_{IV\,total} + k_{Fe\,SIV} \cdot Fe_{III} \cdot S_{IV\,total} + k_{FeMn\,SIV} \cdot Mn_{II} \cdot Fe_{III} \cdot S_{IV\,total}
+$$
+_S(IV) oxidation rate by Fe/Mn-catalyzed O2 with synergism (S&P Eq 7.102)_
+
+$$
+R_{total} = R_{O3} + R_{H2O2} + R_{FeMn}
+$$
+_Total S(IV) oxidation rate; drives sulfate ODE: d[SO4²⁻]/dt = R_total_
+
+## Equations
+
+$$
+\mathrm{D}\left(SO4_{2minus}\right) = R_{total}
+$$
+
+## Analyses
+
+### sulfate_accumulation_over_cloud_lifetime
+
+Sulfate concentration trajectory over a 1-hour cloud lifetime at default conditions (T=298 K, pH=4, 1 ppb SO2/H2O2, 50 ppb O3, no metals). SO4_2minus grows linearly since R_total is constant when inputs are fixed. Shows the H2O2 pathway dominance at pH=4.
+
+**Time span:** 0.0 → 3600.0
+
+![Linear sulfate accumulation at constant R_total.](/plots/aerosol/cloud_chemistry/cloudchemistryode/sulfate_accumulation_over_cloud_lifetime-sulfate_vs_time.png)
+
+![Constant oxidation rates from each pathway.](/plots/aerosol/cloud_chemistry/cloudchemistryode/sulfate_accumulation_over_cloud_lifetime-oxidation_rates_vs_time.png)
+
+### pH_sensitivity_sweep
+
+Sweep cloud droplet pH from 2 to 7 to show the strong pH dependence of the O3 pathway (dominates at high pH via SO3²⁻) vs. the near-pH-independent H2O2 pathway. Reproduces the S&P Fig. 7.8 qualitative behavior.
+
+**Time span:** 0.0 → 60.0
+
+**Swept over:** `pH_input`
+
+![O3 oxidation rate increases exponentially with pH.](/plots/aerosol/cloud_chemistry/cloudchemistryode/pH_sensitivity_sweep-R_O3_vs_pH.png)
+
+![H2O2 oxidation rate is nearly pH-independent.](/plots/aerosol/cloud_chemistry/cloudchemistryode/pH_sensitivity_sweep-R_H2O2_vs_pH.png)
+
+### temperature_sensitivity_sweep
+
+Sweep temperature from 270 to 310 K to show how lower temperatures increase gas-phase solubility (negative dissolution enthalpies) and thus accelerate aqueous-phase oxidation.
+
+**Time span:** 0.0 → 60.0
+
+**Swept over:** `T`
+
+![Total oxidation rate decreases with increasing temperature.](/plots/aerosol/cloud_chemistry/cloudchemistryode/temperature_sensitivity_sweep-R_total_vs_T.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Key equations: 7.33/7.34/7.35 (SO2 equilibria), 7.79 (O3 oxidation rate), 7.84 (H2O2 oxidation rate), 7.102 (Fe/Mn synergistic oxidation). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_chemistry.jl:422 (esm-tum).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_chemistry.jl:422\n\nCloudChemistryODE is an ODE model for sulfate accumulation in a cloud droplet. It has one dynamic (ODE) state, SO4_2minus, and a system of algebraic equations capturing SO2/H2O2/O3 gas-liquid equilibria and S(IV) oxidation kinetics.\n\nFlattening: The original MTK model uses four subsystems (SO2Equilibria, H2O2Equilibria, O3Equilibria, SulfateFormation). All subsystem equations are inlined here. Constants that appeared as MTK @constants are promoted to parameters with fixed defaults. The T_ref parameter is shared across all van't Hoff temperature corrections.\n\nUnit conversions from upstream:\n  Henry's law constants: converted from M/atm to mol/(m³·Pa): × 1000/101325\n  Dissociation constants: converted from M to mol/m³: × 1000\n  O3/Mn rate constant k0: converted from M⁻¹s⁻¹ to m³/(mol·s): ÷ 1000\n  H2O2 rate constant k: converted from M⁻²s⁻¹ to m⁶/(mol²·s): ÷ 1e6\n  K_eq for H2O2: converted from M⁻¹ to m³/mol: ÷ 1000\n  FeMn rate constants: k_Mn/k_Fe: ÷ 1000; k_FeMn: ÷ 1e6\n\nOxidation pathways:\n  R_O3  = (k0·[SO2·H2O] + k1·[HSO3⁻] + k2·[SO3²⁻]) · [O3(aq)]  (Eq 7.79)\n  R_H2O2 = k·[H⁺]·[H2O2]·[HSO3⁻] / (1 + K_eq·[H⁺])               (Eq 7.84)\n  R_FeMn = (k_Mn·[Mn²⁺] + k_Fe·[Fe³⁺] + k_FeMn·[Mn²⁺]·[Fe³⁺])·[S(IV)]  (Eq 7.102)\n  R_total = R_O3 + R_H2O2 + R_FeMn\n  d[SO4²⁻]/dt = R_total\n\nTolerance rationale (model-level rel=1e-6 / abs=1e-14): The system has one ODE state (SO4_2minus) driven by algebraic R_total. R_total is O(1e-4) mol/m³/s at defaults, and SO4_2minus grows O(1e-2 to 0.4) mol/m³ over 300-3600 s. rel=1e-6 captures float64 roundoff in the van't Hoff exponentials and the nonlinear R_H2O2 denominator; abs=1e-14 floors the zero-metal-catalyst FeMn term."
+  },
+  "tolerance": {
+    "rel": 1e-06,
+    "abs": 1e-14
+  },
+  "variables": {
+    "SO4_2minus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "default": 0.0,
+      "description": "Sulfate concentration [SO4²⁻]; evolves via d[SO4²⁻]/dt = R_total (S(IV) oxidation)"
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature"
+    },
+    "pH_input": {
+      "type": "parameter",
+      "units": "1",
+      "default": 4.0,
+      "description": "Cloud droplet pH (input, dimensionless)"
+    },
+    "p_SO2": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.000101325,
+      "description": "Partial pressure of SO2 (1 ppb = 101325×10⁻⁹ Pa)"
+    },
+    "p_H2O2": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.000101325,
+      "description": "Partial pressure of H2O2 (1 ppb = 101325×10⁻⁹ Pa)"
+    },
+    "p_O3": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.00506625,
+      "description": "Partial pressure of O3 (50 ppb = 50×101325×10⁻⁹ Pa)"
+    },
+    "Fe_III": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 0.0,
+      "description": "Fe(III) concentration in cloud droplet"
+    },
+    "Mn_II": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 0.0,
+      "description": "Mn(II) concentration in cloud droplet"
+    },
+    "L": {
+      "type": "parameter",
+      "units": "g/m^3",
+      "default": 0.3,
+      "description": "Liquid water content"
+    },
+    "xi_SO2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1e-09,
+      "description": "SO2 gas-phase mixing ratio (dimensionless, 1 ppb = 1e-9)"
+    },
+    "R_gas": {
+      "type": "parameter",
+      "units": "J/(mol*K)",
+      "default": 8.314,
+      "description": "Universal gas constant"
+    },
+    "T_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Reference temperature for van't Hoff equations (298.15 K rounded)"
+    },
+    "C_ref": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 1000.0,
+      "description": "Reference concentration (1 mol/L = 1000 mol/m³); converts pH to [H⁺] in mol/m³"
+    },
+    "H_SO2_298": {
+      "type": "parameter",
+      "units": "mol/(m^3*Pa)",
+      "default": 0.012139156180606956,
+      "description": "Henry's law constant for SO2 at 298 K (1.23 M/atm converted to SI)"
+    },
+    "dH_H_SO2": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -26150.0,
+      "description": "Enthalpy of dissolution for SO2 (−6.25 kcal/mol); negative = exothermic, more soluble at lower T"
+    },
+    "K_s1_298": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 13.0,
+      "description": "First SO2 dissociation constant at 298 K: SO2·H2O ⇌ H⁺ + HSO3⁻ (1.3×10⁻² M converted to mol/m³)"
+    },
+    "K_s2_298": {
+      "type": "parameter",
+      "units": "mol/m^3",
+      "default": 6.599999999999999e-05,
+      "description": "Second SO2 dissociation constant at 298 K: HSO3⁻ ⇌ H⁺ + SO3²⁻ (6.6×10⁻⁸ M converted to mol/m³)"
+    },
+    "dH_Ks1": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -17405.44,
+      "description": "Enthalpy for K_s1 (−4.16 kcal/mol)"
+    },
+    "dH_Ks2": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -9330.32,
+      "description": "Enthalpy for K_s2 (−2.23 kcal/mol)"
+    },
+    "H_H2O2_298": {
+      "type": "parameter",
+      "units": "mol/(m^3*Pa)",
+      "default": 986.9232667160128,
+      "description": "Henry's law constant for H2O2 at 298 K (1×10⁵ M/atm converted to SI)"
+    },
+    "dH_H_H2O2": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -60668.0,
+      "description": "Enthalpy of dissolution for H2O2 (−14.5 kcal/mol)"
+    },
+    "H_O3_298": {
+      "type": "parameter",
+      "units": "mol/(m^3*Pa)",
+      "default": 0.0001085615593387614,
+      "description": "Henry's law constant for O3 at 298 K (1.1×10⁻² M/atm converted to SI)"
+    },
+    "dH_H_O3": {
+      "type": "parameter",
+      "units": "J/mol",
+      "default": -21087.36,
+      "description": "Enthalpy of dissolution for O3 (−5.04 kcal/mol)"
+    },
+    "k0_O3": {
+      "type": "parameter",
+      "units": "m^3/(mol*s)",
+      "default": 24.0,
+      "description": "O3 oxidation rate constant for SO2·H2O (2.4×10⁴ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79)"
+    },
+    "k1_O3": {
+      "type": "parameter",
+      "units": "m^3/(mol*s)",
+      "default": 370.0,
+      "description": "O3 oxidation rate constant for HSO3⁻ (3.7×10⁵ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79)"
+    },
+    "k2_O3": {
+      "type": "parameter",
+      "units": "m^3/(mol*s)",
+      "default": 1500000.0,
+      "description": "O3 oxidation rate constant for SO3²⁻ (1.5×10⁹ M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.79); dominates at high pH"
+    },
+    "k_H2O2": {
+      "type": "parameter",
+      "units": "m^6/(mol^2*s)",
+      "default": 75.0,
+      "description": "H2O2 oxidation rate constant (7.5×10⁷ M⁻²s⁻¹ ÷ 10⁶; S&P Eq 7.84)"
+    },
+    "K_eq_H2O2": {
+      "type": "parameter",
+      "units": "m^3/mol",
+      "default": 0.013,
+      "description": "Equilibrium constant in H2O2 rate denominator (13 M⁻¹ ÷ 1000; S&P Eq 7.84)"
+    },
+    "k_Mn_SIV": {
+      "type": "parameter",
+      "units": "m^3/(mol*s)",
+      "default": 0.75,
+      "description": "Mn(II)-only term rate constant (750 M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.102)"
+    },
+    "k_Fe_SIV": {
+      "type": "parameter",
+      "units": "m^3/(mol*s)",
+      "default": 2.6,
+      "description": "Fe(III)-only term rate constant (2600 M⁻¹s⁻¹ ÷ 1000; S&P Eq 7.102)"
+    },
+    "k_FeMn_SIV": {
+      "type": "parameter",
+      "units": "m^6/(mol^2*s)",
+      "default": 10000.0,
+      "description": "Fe/Mn synergistic rate constant (10¹⁰ M⁻²s⁻¹ ÷ 10⁶; S&P Eq 7.102); dominates when both metals present"
+    },
+    "H_plus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "H⁺ concentration derived from input pH: H_plus = C_ref × 10^(−pH_input)"
+    },
+    "H_SO2": {
+      "type": "unknown",
+      "units": "mol/(m^3*Pa)",
+      "description": "Temperature-dependent Henry's law constant for SO2 (van't Hoff)"
+    },
+    "K_s1": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Temperature-dependent first SO2 dissociation constant (van't Hoff)"
+    },
+    "K_s2": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Temperature-dependent second SO2 dissociation constant (van't Hoff)"
+    },
+    "SO2_aq": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous SO2 concentration [SO2·H2O] from Henry's law: SO2_aq = H_SO2 × p_SO2"
+    },
+    "HSO3_minus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Bisulfite concentration [HSO3⁻] from first dissociation equilibrium"
+    },
+    "SO3_2minus": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Sulfite concentration [SO3²⁻] from second dissociation equilibrium"
+    },
+    "S_IV_total": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Total S(IV) concentration: SO2_aq + HSO3_minus + SO3_2minus"
+    },
+    "H_H2O2": {
+      "type": "unknown",
+      "units": "mol/(m^3*Pa)",
+      "description": "Temperature-dependent Henry's law constant for H2O2 (van't Hoff)"
+    },
+    "H2O2_aq": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous H2O2 concentration from Henry's law"
+    },
+    "H_O3": {
+      "type": "unknown",
+      "units": "mol/(m^3*Pa)",
+      "description": "Temperature-dependent Henry's law constant for O3 (van't Hoff)"
+    },
+    "O3_aq": {
+      "type": "unknown",
+      "units": "mol/m^3",
+      "description": "Aqueous O3 concentration from Henry's law"
+    },
+    "R_O3": {
+      "type": "unknown",
+      "units": "mol/(m^3*s)",
+      "description": "S(IV) oxidation rate by O3 (S&P Eq 7.79); increases strongly with pH via SO3²⁻ pathway"
+    },
+    "R_H2O2": {
+      "type": "unknown",
+      "units": "mol/(m^3*s)",
+      "description": "S(IV) oxidation rate by H2O2 (S&P Eq 7.84); relatively pH-independent"
+    },
+    "R_FeMn": {
+      "type": "unknown",
+      "units": "mol/(m^3*s)",
+      "description": "S(IV) oxidation rate by Fe/Mn-catalyzed O2 with synergism (S&P Eq 7.102)"
+    },
+    "R_total": {
+      "type": "unknown",
+      "units": "mol/(m^3*s)",
+      "description": "Total S(IV) oxidation rate; drives sulfate ODE: d[SO4²⁻]/dt = R_total"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "H_plus",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "C_ref",
+          {
+            "op": "^",
+            "args": [
+              10.0,
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  "pH_input"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "H_SO2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_SO2_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_H_SO2",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T_ref"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "K_s1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "K_s1_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_Ks1",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T_ref"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "K_s2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "K_s2_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  -1,
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_Ks2",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T_ref"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "SO2_aq",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_SO2",
+          "p_SO2"
+        ]
+      }
+    },
+    {
+      "lhs": "HSO3_minus",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "K_s1",
+              "SO2_aq"
+            ]
+          },
+          "H_plus"
+        ]
+      }
+    },
+    {
+      "lhs": "SO3_2minus",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "K_s2",
+              "HSO3_minus"
+            ]
+          },
+          "H_plus"
+        ]
+      }
+    },
+    {
+      "lhs": "S_IV_total",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "SO2_aq",
+          "HSO3_minus",
+          "SO3_2minus"
+        ]
+      }
+    },
+    {
+      "lhs": "H_H2O2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_H2O2_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_H_H2O2",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T_ref"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "H2O2_aq",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_H2O2",
+          "p_H2O2"
+        ]
+      }
+    },
+    {
+      "lhs": "H_O3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_O3_298",
+          {
+            "op": "exp",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "dH_H_O3",
+                      "R_gas"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1,
+                          "T_ref"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          -1,
+                          "T"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "O3_aq",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "H_O3",
+          "p_O3"
+        ]
+      }
+    },
+    {
+      "lhs": "R_O3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "k0_O3",
+                  "SO2_aq"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "k1_O3",
+                  "HSO3_minus"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "k2_O3",
+                  "SO3_2minus"
+                ]
+              }
+            ]
+          },
+          "O3_aq"
+        ]
+      }
+    },
+    {
+      "lhs": "R_H2O2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k_H2O2",
+              "H_plus",
+              "H2O2_aq",
+              "HSO3_minus"
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              1.0,
+              {
+                "op": "*",
+                "args": [
+                  "K_eq_H2O2",
+                  "H_plus"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "R_FeMn",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k_Mn_SIV",
+              "Mn_II",
+              "S_IV_total"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k_Fe_SIV",
+              "Fe_III",
+              "S_IV_total"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "k_FeMn_SIV",
+              "Mn_II",
+              "Fe_III",
+              "S_IV_total"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "R_total",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "R_O3",
+          "R_H2O2",
+          "R_FeMn"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "SO4_2minus"
+        ]
+      },
+      "rhs": "R_total"
+    }
+  ],
+  "tests": [
+    {
+      "id": "defaults_sulfate_accumulation",
+      "description": "Reference run at upstream Aerosol.jl CloudChemistryODE defaults: T=298 K, pH=4, p_SO2=1 ppb, p_H2O2=1 ppb, p_O3=50 ppb, no metals. Since all inputs are constant parameters, R_total is constant and SO4_2minus grows linearly: SO4(t) = R_total × t = 1.198889e-04 × t. Tests at t=0, 300, 3600 s. Also pins R_total=1.198889e-04 mol/m³/s (H2O2 pathway dominates: R_H2O2=1.1977e-04, R_O3=1.1962e-07).",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "assertions": [
+        {
+          "variable": "SO4_2minus",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        },
+        {
+          "variable": "SO4_2minus",
+          "time": 300.0,
+          "expected": 0.0359666764
+        },
+        {
+          "variable": "SO4_2minus",
+          "time": 3600.0,
+          "expected": 0.43160012
+        },
+        {
+          "variable": "R_total",
+          "time": 300.0,
+          "expected": 0.00011988892134611679
+        },
+        {
+          "variable": "R_H2O2",
+          "time": 300.0,
+          "expected": 0.00011976929991011679
+        },
+        {
+          "variable": "R_O3",
+          "time": 300.0,
+          "expected": 1.1962143599999992e-07
+        },
+        {
+          "variable": "R_FeMn",
+          "time": 300.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-14
+          }
+        }
+      ]
+    },
+    {
+      "id": "algebraic_equilibrium_at_defaults",
+      "description": "Pins key algebraic intermediate variables at default conditions (T=298K, pH=4). Verifies Henry's law equilibria and S(IV) dissociation cascade. At T_ref=298K all van't Hoff factors = 1, so H_SO2=H_SO2_298=1.213916e-02. At pH=4: H_plus=0.1000, HSO3_minus dominates S(IV) by ~130×.",
+      "time_span": {
+        "start": 0.0,
+        "end": 60.0
+      },
+      "assertions": [
+        {
+          "variable": "H_plus",
+          "time": 60.0,
+          "expected": 0.1
+        },
+        {
+          "variable": "H_SO2",
+          "time": 60.0,
+          "expected": 0.012139156180606956
+        },
+        {
+          "variable": "K_s1",
+          "time": 60.0,
+          "expected": 13.0
+        },
+        {
+          "variable": "K_s2",
+          "time": 60.0,
+          "expected": 6.6e-05
+        },
+        {
+          "variable": "SO2_aq",
+          "time": 60.0,
+          "expected": 1.2299999999999999e-06
+        },
+        {
+          "variable": "HSO3_minus",
+          "time": 60.0,
+          "expected": 0.00015989999999999996
+        },
+        {
+          "variable": "SO3_2minus",
+          "time": 60.0,
+          "expected": 1.0553399999999994e-07
+        },
+        {
+          "variable": "S_IV_total",
+          "time": 60.0,
+          "expected": 0.00016123553399999995
+        },
+        {
+          "variable": "H2O2_aq",
+          "time": 60.0,
+          "expected": 0.09999999999999999
+        },
+        {
+          "variable": "O3_aq",
+          "time": 60.0,
+          "expected": 5.499999999999999e-07
+        }
+      ]
+    },
+    {
+      "id": "higher_pH_increases_O3_pathway",
+      "description": "At pH=5 vs pH=4, the O3 oxidation rate increases dramatically because SO3²⁻ (with k2=1.5×10⁶ m³/(mol·s)) dominates over HSO3⁻ (k1=370). R_O3 at pH=5: 9.0320e-06 vs 1.1962e-07 at pH=4 (~75× larger). R_H2O2 is relatively pH-independent. Total R_total at pH=5: 1.2894e-04. SO4_2minus at 600 s = 7.736483e-02 mol/m³.",
+      "parameter_overrides": {
+        "pH_input": 5.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "assertions": [
+        {
+          "variable": "R_O3",
+          "time": 60.0,
+          "expected": 9.031967735999997e-06
+        },
+        {
+          "variable": "R_H2O2",
+          "time": 60.0,
+          "expected": 0.00011990941177646904
+        },
+        {
+          "variable": "R_total",
+          "time": 60.0,
+          "expected": 0.00012894137951246904
+        },
+        {
+          "variable": "SO4_2minus",
+          "time": 600.0,
+          "expected": 0.077364828
+        }
+      ]
+    },
+    {
+      "id": "lower_temperature_increases_solubility",
+      "description": "All three species (SO2, H2O2, O3) have negative enthalpies of dissolution, so they are more soluble at lower temperatures. At T=280 K vs 298 K, H_SO2 doubles from 1.2139e-02 to 2.3926e-02 mol/(m³·Pa) and R_total increases from 1.1989e-04 to 1.7906e-03 mol/(m³·s). SO4_2minus at 600 s = 1.074341e+00 mol/m³.",
+      "parameter_overrides": {
+        "T": 280.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "assertions": [
+        {
+          "variable": "H_SO2",
+          "time": 60.0,
+          "expected": 0.023925670142206007
+        },
+        {
+          "variable": "H_H2O2",
+          "time": 60.0,
+          "expected": 4763.550867474284
+        },
+        {
+          "variable": "H_O3",
+          "time": 60.0,
+          "expected": 0.0001876300896941435
+        },
+        {
+          "variable": "R_total",
+          "time": 60.0,
+          "expected": 0.0017905682009499795
+        },
+        {
+          "variable": "SO4_2minus",
+          "time": 600.0,
+          "expected": 1.07434092
+        }
+      ]
+    },
+    {
+      "id": "femn_synergism_enhances_rate",
+      "description": "With Fe=Mn=0.001 mol/m³ (1 µmol/L), the synergistic Fe/Mn term (k_FeMn=10⁴ m⁶/(mol²·s)) contributes to R_FeMn. R_FeMn=2.1525e-06 > 0. Total R_total=1.2204e-04 > 1.1989e-04 (no-metals baseline). Exercises S&P Eq 7.102 synergistic three-body rate.",
+      "parameter_overrides": {
+        "Fe_III": 0.001,
+        "Mn_II": 0.001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 600.0
+      },
+      "assertions": [
+        {
+          "variable": "R_FeMn",
+          "time": 60.0,
+          "expected": 2.1524943788999995e-06
+        },
+        {
+          "variable": "R_total",
+          "time": 60.0,
+          "expected": 0.0001220414157250168
+        },
+        {
+          "variable": "SO4_2minus",
+          "time": 600.0,
+          "expected": 0.073224849
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "sulfate_accumulation_over_cloud_lifetime",
+      "description": "Sulfate concentration trajectory over a 1-hour cloud lifetime at default conditions (T=298 K, pH=4, 1 ppb SO2/H2O2, 50 ppb O3, no metals). SO4_2minus grows linearly since R_total is constant when inputs are fixed. Shows the H2O2 pathway dominance at pH=4.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "plots": [
+        {
+          "id": "sulfate_vs_time",
+          "type": "line",
+          "description": "Linear sulfate accumulation at constant R_total.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "SO4_2minus",
+            "label": "[SO4²⁻] (mol/m³)"
+          }
+        },
+        {
+          "id": "oxidation_rates_vs_time",
+          "type": "line",
+          "description": "Constant oxidation rates from each pathway.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "R_total",
+            "label": "rate (mol/m³/s)"
+          },
+          "series": [
+            {
+              "name": "R_total",
+              "variable": "R_total"
+            },
+            {
+              "name": "R_H2O2",
+              "variable": "R_H2O2"
+            },
+            {
+              "name": "R_O3",
+              "variable": "R_O3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "pH_sensitivity_sweep",
+      "description": "Sweep cloud droplet pH from 2 to 7 to show the strong pH dependence of the O3 pathway (dominates at high pH via SO3²⁻) vs. the near-pH-independent H2O2 pathway. Reproduces the S&P Fig. 7.8 qualitative behavior.",
+      "time_span": {
+        "start": 0.0,
+        "end": 60.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "pH_input",
+            "range": {
+              "start": 2.0,
+              "stop": 7.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "R_O3_vs_pH",
+          "type": "line",
+          "description": "O3 oxidation rate increases exponentially with pH.",
+          "x": {
+            "variable": "pH_input",
+            "label": "pH"
+          },
+          "y": {
+            "variable": "R_O3",
+            "label": "R_O3 (mol/m³/s)"
+          }
+        },
+        {
+          "id": "R_H2O2_vs_pH",
+          "type": "line",
+          "description": "H2O2 oxidation rate is nearly pH-independent.",
+          "x": {
+            "variable": "pH_input",
+            "label": "pH"
+          },
+          "y": {
+            "variable": "R_H2O2",
+            "label": "R_H2O2 (mol/m³/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "temperature_sensitivity_sweep",
+      "description": "Sweep temperature from 270 to 310 K to show how lower temperatures increase gas-phase solubility (negative dissolution enthalpies) and thus accelerate aqueous-phase oxidation.",
+      "time_span": {
+        "start": 0.0,
+        "end": 60.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 270.0,
+              "stop": 310.0,
+              "count": 17,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "R_total_vs_T",
+          "type": "line",
+          "description": "Total oxidation rate decreases with increasing temperature.",
+          "x": {
+            "variable": "T",
+            "label": "T (K)"
+          },
+          "y": {
+            "variable": "R_total",
+            "label": "R_total (mol/m³/s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

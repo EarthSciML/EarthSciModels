@@ -1,0 +1,309 @@
+---
+title: "MeanMolecularSpeed"
+slug: "meanmolecularspeed"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["mass_transfer"]
+domain: "aerosol"
+subdomain: "mass_transfer"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/mass_transfer/mean_molecular_speed.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.24 — mean molecular speed c̄ = √(8kT/(πm_A)). Migrated from Aerosol.jl src/mass_transfer.jl `MeanMolecularSpeed` (esm-1i9)."
+description: "Mean molecular speed of gas molecules using kinetic theory (Seinfeld & Pandis 2006, Chapter 12, Eq. 12.24). Computes c̄ = √(8kT/(πm_A)) where m_A = M_A/N_Av is the molecular mass and k_B, N_Av are folded as numeric literals. Migrated from Aerosol.jl src/mass_transfer.jl `MeanMolecularSpeed` (esm-1i9)."
+tags: ["aerosol", "mass_transfer", "model", "mass-transfer", "kinetic-theory", "molecular-speed", "seinfeld-pandis"]
+---
+
+## Description
+
+Mean molecular speed of gas molecules using kinetic theory (Seinfeld & Pandis 2006, Chapter 12, Eq. 12.24). Computes c̄ = √(8kT/(πm_A)) where m_A = M_A/N_Av is the molecular mass and k_B, N_Av are folded as numeric literals. Migrated from Aerosol.jl src/mass_transfer.jl `MeanMolecularSpeed` (esm-1i9).
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.24 — mean molecular speed c̄ = √(8kT/(πm_A)). Migrated from Aerosol.jl src/mass_transfer.jl `MeanMolecularSpeed` (esm-1i9).
+
+_source_ref: Aerosol.jl@YeW6d:src/mass_transfer.jl:12
+
+Upstream `MeanMolecularSpeed` is an MTK `@component` with 2 constants (k_B=1.380649e-23 J/K, N_Av=6.02214076e23 mol⁻¹), 2 parameters (T=298.15 K, M_A=0.029 kg/mol), and 1 algebraic variable c_bar(t) [m/s]. The single equation is:
+  c_bar ~ sqrt(8 * k_B * T * N_Av / (π * M_A))
+
+The two constants k_B and N_Av appear only in the product k_B * N_Av = R (the universal gas constant, 8.314462618 J/(mol·K)); they are folded into the expression as their exact literal values from the source. π is inlined as the Float64 literal 3.141592653589793.
+
+Topological note: c_bar depends only on parameters T and M_A, so it resolves immediately with no ODE integration needed. The system is purely algebraic (observed variable only).
+
+Physics: Eq. 12.24 from kinetic theory — c̄ = √(8kT/(πm_A)) where m_A = M_A/N_Av is the molecular mass of species A. For air (M_A=0.029 kg/mol) at T=298.15 K, c̄ ≈ 466.56 m/s. Lighter molecules are faster (c̄ ∝ M_A^{-1/2}); hotter gas is faster (c̄ ∝ T^{1/2}). This is the thermal speed used in the Knudsen-number and uptake-coefficient calculations downstream.
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system with a single sqrt expression over products of parameters. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of magnitude headroom._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.15` | Temperature of the gas. Typical atmospheric range 200–320 K. Mean molecular speed scales as √T. |
+| `M_A` | `kg/mol` | `0.029` | Molar mass of species A. Default 0.029 kg/mol is representative of dry air. For individual trace gases use the species-specific value (e.g. 0.064 kg/mol for SO₂). Mean molecular speed scales as M_A^{-1/2}. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `c_bar` | `m/s` |  | Mean molecular speed: c̄ = √(8 k_B N_Av T / (π M_A)) = √(8 R T / (π M_A)). Positive-definite for T > 0. For air at 298 K, c̄ ≈ 466.56 m/s; for H₂ at 298 K, c̄ ≈ 1769.5 m/s. |
+
+## Observed expressions
+
+$$
+c_{bar} = \sqrt{\frac{8 \cdot 1.380649 \times 10^{-23} \cdot 6.02214076 \times 10^{23} \cdot T}{3.141592653589793 \cdot M_{A}}}
+$$
+_Mean molecular speed: c̄ = √(8 k_B N_Av T / (π M_A)) = √(8 R T / (π M_A)). Positive-definite for T > 0. For air at 298 K, c̄ ≈ 466.56 m/s; for H₂ at 298 K, c̄ ≈ 1769.5 m/s._
+
+## Analyses
+
+### speed_vs_temperature
+
+Sweep temperature from 200 K to 400 K at M_A=0.029 kg/mol. c̄ ∝ √T; the slope in a log-log plot is exactly 0.5. Covers the full atmospheric temperature range from the polar stratosphere to the tropical boundary layer.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![Mean molecular speed c̄ as a function of temperature T for dry air (M_A=0.029 kg/mol). Increases as √T.](/plots/aerosol/mass_transfer/meanmolecularspeed/speed_vs_temperature-cbar_vs_T.png)
+
+### speed_vs_molar_mass
+
+Sweep molar mass M_A from 0.002 kg/mol (H₂) to 0.131 kg/mol (Xe) at T=298.15 K. c̄ ∝ M_A^{-1/2}; lighter molecules are faster. Covers the range of atmospheric trace gases and noble gases.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `M_A`
+
+![Mean molecular speed c̄ as a function of molar mass M_A at 298.15 K. Decreases as M_A^{-1/2}; log-log slope is exactly -0.5.](/plots/aerosol/mass_transfer/meanmolecularspeed/speed_vs_molar_mass-cbar_vs_MA.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 12, Eq. 12.24 — mean molecular speed c̄ = √(8kT/(πm_A)). Migrated from Aerosol.jl src/mass_transfer.jl `MeanMolecularSpeed` (esm-1i9).",
+    "notes": "source_ref: Aerosol.jl@YeW6d:src/mass_transfer.jl:12\n\nUpstream `MeanMolecularSpeed` is an MTK `@component` with 2 constants (k_B=1.380649e-23 J/K, N_Av=6.02214076e23 mol⁻¹), 2 parameters (T=298.15 K, M_A=0.029 kg/mol), and 1 algebraic variable c_bar(t) [m/s]. The single equation is:\n  c_bar ~ sqrt(8 * k_B * T * N_Av / (π * M_A))\n\nThe two constants k_B and N_Av appear only in the product k_B * N_Av = R (the universal gas constant, 8.314462618 J/(mol·K)); they are folded into the expression as their exact literal values from the source. π is inlined as the Float64 literal 3.141592653589793.\n\nTopological note: c_bar depends only on parameters T and M_A, so it resolves immediately with no ODE integration needed. The system is purely algebraic (observed variable only).\n\nPhysics: Eq. 12.24 from kinetic theory — c̄ = √(8kT/(πm_A)) where m_A = M_A/N_Av is the molecular mass of species A. For air (M_A=0.029 kg/mol) at T=298.15 K, c̄ ≈ 466.56 m/s. Lighter molecules are faster (c̄ ∝ M_A^{-1/2}); hotter gas is faster (c̄ ∝ T^{1/2}). This is the thermal speed used in the Knudsen-number and uptake-coefficient calculations downstream.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with a single sqrt expression over products of parameters. Float64 round-off is ~1e-15 relative; rel=1e-9 leaves six orders of magnitude headroom."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.15,
+      "description": "Temperature of the gas. Typical atmospheric range 200–320 K. Mean molecular speed scales as √T."
+    },
+    "M_A": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.029,
+      "description": "Molar mass of species A. Default 0.029 kg/mol is representative of dry air. For individual trace gases use the species-specific value (e.g. 0.064 kg/mol for SO₂). Mean molecular speed scales as M_A^{-1/2}."
+    },
+    "c_bar": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean molecular speed: c̄ = √(8 k_B N_Av T / (π M_A)) = √(8 R T / (π M_A)). Positive-definite for T > 0. For air at 298 K, c̄ ≈ 466.56 m/s; for H₂ at 298 K, c̄ ≈ 1769.5 m/s."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "c_bar",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  1.380649e-23,
+                  6.02214076e+23,
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.141592653589793,
+                  "M_A"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "air_at_298K",
+      "description": "Default parameters: T=298.15 K, M_A=0.029 kg/mol (dry air). c̄ = √(8×1.380649e-23×6.02214076e23×298.15/(π×0.029)) ≈ 466.558 m/s. Anchors the model at standard atmospheric conditions.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "c_bar",
+          "time": 0.0,
+          "expected": 466.5579107928379,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "hot_air_373K",
+      "description": "T=373.15 K (boiling point of water), M_A=0.029 kg/mol. c̄ scales as √T: c̄(373.15)/c̄(298.15) = √(373.15/298.15) ≈ 1.1188. Expected ≈ 521.951 m/s. Exercises the √T dependence.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 373.15
+      },
+      "assertions": [
+        {
+          "variable": "c_bar",
+          "time": 0.0,
+          "expected": 521.9511679291727,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "hydrogen_at_298K",
+      "description": "T=298.15 K, M_A=0.002016 kg/mol (molecular hydrogen H₂). c̄ scales as M_A^{-1/2}: c̄(H₂)/c̄(air) = √(0.029/0.002016) ≈ 3.793. Expected ≈ 1769.54 m/s. Exercises the M_A^{-1/2} dependence with a light molecule.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "M_A": 0.002016
+      },
+      "assertions": [
+        {
+          "variable": "c_bar",
+          "time": 0.0,
+          "expected": 1769.5355524032916,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    },
+    {
+      "id": "cold_air_250K",
+      "description": "T=250.0 K (upper troposphere / lower stratosphere), M_A=0.029 kg/mol. Expected ≈ 427.226 m/s. Exercises sub-freezing temperature range relevant to aerosol nucleation studies.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 250.0
+      },
+      "assertions": [
+        {
+          "variable": "c_bar",
+          "time": 0.0,
+          "expected": 427.2264722573957,
+          "tolerance": {
+            "rel": 1e-09
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "speed_vs_temperature",
+      "description": "Sweep temperature from 200 K to 400 K at M_A=0.029 kg/mol. c̄ ∝ √T; the slope in a log-log plot is exactly 0.5. Covers the full atmospheric temperature range from the polar stratosphere to the tropical boundary layer.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 200.0,
+              "stop": 400.0,
+              "count": 41,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "cbar_vs_T",
+          "type": "line",
+          "description": "Mean molecular speed c̄ as a function of temperature T for dry air (M_A=0.029 kg/mol). Increases as √T.",
+          "x": {
+            "variable": "T",
+            "label": "Temperature T (K)"
+          },
+          "y": {
+            "variable": "c_bar",
+            "label": "Mean molecular speed c̄ (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "speed_vs_molar_mass",
+      "description": "Sweep molar mass M_A from 0.002 kg/mol (H₂) to 0.131 kg/mol (Xe) at T=298.15 K. c̄ ∝ M_A^{-1/2}; lighter molecules are faster. Covers the range of atmospheric trace gases and noble gases.",
+      "initial_state": {},
+      "parameters": {},
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "M_A",
+            "range": {
+              "start": 0.002,
+              "stop": 0.131,
+              "count": 50,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "cbar_vs_MA",
+          "type": "line",
+          "description": "Mean molecular speed c̄ as a function of molar mass M_A at 298.15 K. Decreases as M_A^{-1/2}; log-log slope is exactly -0.5.",
+          "x": {
+            "variable": "M_A",
+            "label": "Molar mass M_A (kg/mol)"
+          },
+          "y": {
+            "variable": "c_bar",
+            "label": "Mean molecular speed c̄ (m/s)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>
