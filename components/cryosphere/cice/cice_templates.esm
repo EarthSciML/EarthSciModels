@@ -1,0 +1,2936 @@
+{
+ "esm": "1.3.0",
+ "metadata": {
+  "name": "cice_templates",
+  "description": "Expression-template library for the CICE sea-ice component (stage 2 of the EqESM project): the pointwise physical laws of cesm3_cice6_6_3_22 (checkout stage1/cesm/components/cice), transcribed exactly for use by the thermodynamics, dynamics, transport, and coupling subcomponents. The library carries (a) the shortwave/albedo family of icepack_shortwave.F90: the ccsm3 bare-ice and snow albedos of compute_albedos (F90:466-597) with the thickness factor fh = min(atan(4 hi)/atan(4 ahmax), 1) (F90:541-542), the surface-temperature factor fT = min(Timelt-Tsfcn-1, 0) (F90:548-549), the fractional snow cover asnow = hs/(hs+snowpatch) (F90:575-579), and the absorbed/penetrating shortwave split of absorbed_solar (F90:701-896) with the visible-band extinction law fswpen*exp(-kappav*z) (F90:867) and i0vis = 0.70 (F90:769); (b) the thermodynamics family of icepack_therm_shared.F90 (surface_heat_flux F90:109-167, saturation humidity F90:152-154, liquidus Tmlt = -depressT*Sin F90:383-386, the Assur-1958 mushy liquidus of icepack_mushy_physics.F90:227-261 with the az1/az2 rational form and the Sb_liq break, the l_brine quadratic temperature-from-enthalpy F90:68-101, the fresh-ice and snow enthalpy inversions), of icepack_therm_bl99.F90 (the bubbly-brine Pringle et al. 2007 conductivity kilyr = max((2.11 - 0.011 T + 0.09 S/min(-puny,T)) rhoi/917, kimin) F90:918-924, the MU71 form F90:911-916, the interface conductances kh F90:927-959), of icepack_therm_vertical.F90 (the congelation enthalpy qbot F90:1432-1443, the ocean heat flux fbot of frzmlt_bottom_lateral F90:662-678 with the 0.006 transfer coefficient F90:674 and the Maykut-Perovich m1/m2 lateral law F90:637-640, 679-775), and of icepack_meltpond_lvl.F90 (the 'cesm' melt-pond volume change F90:154-174); (c) the atmosphere family of icepack_atmo.F90 (the constant boundary-layer scheme atmo_boundary_const F90:398-496: tau = rhoa*0.0012*wind F90:460, shcoef = senscoef cp_air rhoa wind and lhcoef = latncoef Lheat rhoa wind F90:493-494, ocean saturation humidity F90:483-484; and the similarity scheme atmo_boundary_layer F90:52-389: the neutral drag coefficient rdn = vonkar/log(zref/iceruf) F90:215, the high-frequency relative wind vmag = max(0.5, |Uatm-U|) F90:176-180 and 205-210, the stability parameter hol clamped to |hol| <= 10 F90:985-989, the unit stable step function F90:1015, the stable psi F90:1017-1019, the unstable momentum/scalar psi and capital_X F90:1040-1075, the exchange coefficients rd/rh/re F90:289-291, the 2-m psix2 correction F90:364-365, and the reference Tref/Qref/Uref F90:366-378; the do-while iteration of F90:269 is unrolled by the coupling component for the D-class natmiter = 5 with atmiter_conv = 0, which always runs the full 5 updates); and (d) the dynamics family of icepack_mechred.F90 (the Hibler 1979 ice strength P = Pstar vice exp(-Cstar (1-aice)) F90:1720; and the Rothrock 1975 potential-energy strength F90:1660-1712 with the ridge ITD of ridge_itd F90:779-1050: the cumulative distribution Gsum F90:848-889, the exponential participation function of krdg_partic = 1 F90:919-934, the exponential redistribution hrmin/hrexp/krdg of krdg_redist = 1 F90:1004-1010, and aksum F90:1031-1036, with the per-category strength sum h2rdg = hrmin^2 + 2 hrmin hrexp + 2 hrexp^2 F90:1697-1706), ice_dyn_shared.F90 (the strain-rate invariant Delta F90:2156-2159, the capped viscosity/replacement-pressure split of visc_replpress F90:2467-2471, the ocean-ice stress magnitude and seabed coefficient of stepu F90:931-937), and ice_dyn_evp.F90 (the classic-EVP stress relaxation maps for stressp, stressm, and stress12 F90:1584-1609). All templates are match-less pointwise laws invoked by name via apply_expression_template; the only shared-math dependencies are the two saturation-humidity laws and the shortwave attenuation law, which are factored and referenced by surface_heat_flux, shortwave_through_ice, layer_absorbed_shortwave, and sea_freezing_temperature (checked as an acyclic body-reference DAG at import, esm-spec 9.7.3). Constants are the icepack_parameters.F90 module values (rhoi = 917 F90:62, rhos = 330 F90:61, rhow = 1026 F90:65, rhofresh = 1000 F90:66, cp_ice = 2106 F90:74, cp_ocn = 4218 F90:75, Tffresh = 273.15 F90:82, Lsub = 2.835e6 F90:83, Lvap = 2.501e6 F90:84, Lfresh = Lsub - Lvap = 3.34e5 F90:74, depressT = 0.054 F90:77, kice = 2.03 F90:88, ksno = 0.30 F90:90, snowpatch = 0.02 F90:92, puny = 1e-11 F90:36, emissivity = 0.985 F90:156 (the D-class run overrides it to 0.95 in forcing_nml, which the coupling aggregation and the surface-heat balance use), stefan_boltzmann = 567e-10 F90:159, kappav = 1.4 F90:161, albocn = 0.06 F90:157, albicev = 0.78 F90:166, albicei = 0.36 F90:167, albsnowv = 0.98 F90:168, albsnowi = 0.70 F90:169, ahmax = 0.3 F90:170, ustar_min = 0.005 F90:99, Pstar = 2.75e4 F90:262, Cstar = 20 F90:264, cp_air = 1005 F90:281, qqqice = 11637800 F90:286, TTTice = 5897.8 F90:287, qqqocn = 627572.4 F90:288, TTTocn = 5107.4 F90:289, senscoef = 0.0012 F90:290, latncoef = 0.0015 F90:291, ice_ref_salinity = 4 F90:87, kimin = 0.10 and betak = 0.13 in icepack_therm_bl99.F90:34-35, and the melt-pond Td = 2, rexp = 0.01 in icepack_meltpond_lvl.F90:111-112), the dEdd shortwave tuning (dT_melt = 1, dalb_mlt = -0.075, dalb_mltv = -0.1, dalb_mlti = -0.15, i0vis = 0.70, icepack_shortwave.F90:511-518, 769), the similarity constants (vonkar = 0.4 F90:190, zref = 10 F90:284, iceruf = 0.0005 F90:285, zvir = 0.606 F90:283, cp_wv = 1.81e3 F90:282, gravit = 9.80616 F90:269, umin = 0.5 under highfreq = .true. F90:177, pih = pi/2 F90:80 and 2815), the Rothrock strength constants (Cf = 17 F90:261, Cp = 0.5 gravit (rhow-rhoi) rhoi/rhow F90:2814, Gstar = 0.15 and astar = 0.05 in icepack_mechred.F90:70-72, maxraft = 1 F90:74, and mu_rdg = 4 from the D-class ice_in namelist), and the Assur liquidus constants (az1_liq = -18.48, bz1_liq = 0, az2_liq = -10.3085, bz2_liq = 62.4, Sb_liq = 123.66702800276086, icepack_mushy_physics.F90:36-55); (e) the ktherm = 2 mushy-physics family of icepack_mushy_physics.F90 (the Assur liquidus pair liquidus_brine_salinity_mush F90:187-221 and liquidus_temperature_mush F90:227-261, the liquid fraction icepack_mushy_liquid_fraction F90:500-519, the enthalpy laws icepack_enthalpy_mush F90:267-288, enthalpy_mush_liquid_fraction F90:293-307, enthalpy_of_melting F90:313-325, and enthalpy_brine F90:330-342, the quadratic temperature-from-enthalpy icepack_mushy_temperature_mush F90:348-452 and temperature_mush_liquid_fraction F90:457-471, and the mush heat conductivity km = phi*(kb - ki) + ki with ki = 2.3 and kb = 0.5375 F90:476-494, 62-63); (f) the dEdd shortwave surface laws of icepack_shortwave.F90 (the snow fraction of shortwave_dEdd_set_snow F90:3448-3454 and the effective pond area of shortwave_dEdd_set_eff F90:3495-3637 with the infiltration, thin-pond, and snow-taper branches, plus the broadband band weights awtvdr/awtidr/awtvdf/awtidf of icepack_parameters.F90:218-221 used for the history albedos F90:1496-1498); and (g) the sea-level melt-pond volume law of icepack_meltpond_sealvl.F90 (compute_ponds_sealvl F90:50-265 with the 'hlid' Stefan lid growth/melt of frzpnd = 'hlid').\n\nConstants note (bugs.md #11): the D-class run is CESM-coupled, and the nuopc cap overrides a set of icepack parameters with CESM shared values at init (ice_comp_nuopc.F90:415-450): cp_ice = 2117.27 (SHR_CONST_CPICE), cp_ocn = 3996 (SHR_CONST_CPSW), cp_air = 1004.64 (SHR_CONST_CPDAIR), zvir = 0.6077930728241565 (SHR_CONST_ZVIR), Lsub = 2834700 (SHR_CONST_LATSUB), Lvap = 2501000 (unchanged), Lfresh = Lsub - Lvap = 333700 (vs the icepack defaults 2106/4218/1005/0.606/2835000/334000), snowpatch = 0.005, Tocnfrz = -1.836, rhoi/rhow/rhos/gravit/vonkar/stefan_boltzmann/cp_wv/Tffresh/pi unchanged (917/1026/330/9.80616/0.4/5.67e-8/1810/273.15). All templates below transcribe the RUN's values (as configured by the cap), not the icepack defaults, and the dump pins (thermo_state zTin/zTsn columns) verify them to round-off; the mushy quadratic constants embed cprho = cp_ocn*rhow = 4099896.",
+   "tags": [
+    "cryosphere",
+    "sea-ice",
+    "cice",
+    "expression-templates",
+    "cesm"
+   ],
+   "created": "2026-11-01T00:00:00Z",
+   "authors": [
+    "EqESM project contributors"
+   ],
+   "references": [
+    {
+     "citation": "Hunke, E. C., Allard, R., Bailey, D. A., Blain, P., Craig, A., Dupont, F., ... & Roberts, A. F. (2023). CICE-Consortium Icepack v1.2.4 and CICE v6.3.22: documentation and user's guide. Los Alamos National Laboratory (LA-UR-23-31851)."
+    },
+    {
+     "citation": "CESM (Community Earth System Model), ESCOMP/CESM: CICE sea-ice source (cesm3_cice6_6_3_22) - icepack_shortwave.F90, icepack_therm_shared.F90, icepack_therm_bl99.F90, icepack_mushy_physics.F90, icepack_therm_vertical.F90, icepack_meltpond_lvl.F90, icepack_meltpond_sealvl.F90, icepack_atmo.F90, icepack_mechred.F90, ice_dyn_shared.F90 - the reference implementation these components are transcribed from.",
+     "url": "https://github.com/ESCOMP/CESM"
+    },
+    {
+     "citation": "EarthSciModels - the authoritative .esm corpus this component lives in.",
+     "url": "https://github.com/EarthSciML/EarthSciModels"
+    }
+   ]
+ },
+ "expression_templates": {
+  "snow_cover_fraction": {
+   "description": "Fractional area of snow cover asnow (compute_albedos, icepack_shortwave.F90:574-579): asnow = hs/(hs + snowpatch) when the snow depth hs > puny, else 0. snowpatch = 0.005 m (the nuopc-cap override of the 0.02 m icepack default, ice_comp_nuopc.F90:415-450; bugs.md #11) and puny = 1e-11 (icepack_parameters.F90:36).",
+   "params": ["hs"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     { "op": ">", "args": ["hs", 1e-11] },
+     { "op": "/", "args": ["hs", { "op": "+", "args": ["hs", 0.005] }] },
+     0.0
+    ]
+   }
+  },
+  "thickness_albedo_factor": {
+   "description": "Piecewise-linear albedo dependence on ice thickness fh (compute_albedos, icepack_shortwave.F90:541-542): fh = min(atan(hi*4)/atan(ahmax*4), 1). ahmax = 0.3 m (icepack_parameters.F90:170); the Fortran's c4 = 4.0 is the constant of F90:38.",
+   "params": ["hi"],
+   "body": {
+    "op": "min",
+    "args": [
+     { "op": "/", "args": [
+       { "op": "atan", "args": [{ "op": "*", "args": ["hi", 4.0] }] },
+       { "op": "atan", "args": [{ "op": "*", "args": [0.3, 4.0] }] } ] },
+     1.0
+    ]
+   }
+  },
+  "surface_temperature_albedo_factor": {
+   "description": "Piecewise-linear albedo dependence on surface temperature fT (compute_albedos, icepack_shortwave.F90:548-549): fT = min((Timelt - Tsfcn)/dT_melt - 1, 0), with Timelt = 0 C (icepack_parameters.F90:85) and dT_melt = 1 (icepack_shortwave.F90:511).",
+   "params": ["Tsfcn"],
+   "body": {
+    "op": "min",
+    "args": [
+     { "op": "-", "args": [
+       { "op": "/", "args": [{ "op": "-", "args": [0.0, "Tsfcn"] }, 1.0] },
+       1.0 ] },
+     0.0
+    ]
+   }
+  },
+  "bare_ice_albedo": {
+   "description": "Bare-ice albedo with thickness and temperature dependence plus the ocean-albedo floor (compute_albedos, icepack_shortwave.F90:543-555): al = max(albice*fh + albocn*(1-fh) - dalb_mlt*fT, albocn). Used with (albice, dalb_mlt) = (albicev = 0.78, dalb_mlt = -0.075) for visible and (albicei = 0.36, dalb_mlt = -0.075) for near-IR (icepack_parameters.F90:166-167, icepack_shortwave.F90:512-513); albocn = 0.06 (F90:157).",
+   "params": ["albice", "dalb_mlt", "fh", "fT"],
+   "body": {
+    "op": "max",
+    "args": [
+     { "op": "-", "args": [
+       { "op": "+", "args": [
+         { "op": "*", "args": ["albice", "fh"] },
+         { "op": "*", "args": [0.06, { "op": "-", "args": [1.0, "fh"] }] } ] },
+       { "op": "*", "args": ["dalb_mlt", "fT"] } ] },
+     0.06
+    ]
+   }
+  },
+  "snow_albedo": {
+   "description": "Snow albedo with temperature dependence (compute_albedos, icepack_shortwave.F90:559-564): al = albsnow - dalb_mlt*fT. Used with (albsnow, dalb_mlt) = (albsnowv = 0.98, dalb_mltv = -0.1) for visible and (albsnowi = 0.70, dalb_mlti = -0.15) for near-IR (icepack_parameters.F90:168-169, icepack_shortwave.F90:515-516).",
+   "params": ["albsnow", "dalb_mlt", "fT"],
+   "body": { "op": "-", "args": ["albsnow", { "op": "*", "args": ["dalb_mlt", "fT"] }] }
+  },
+  "area_weighted_albedo": {
+   "description": "Ice/snow area-weighted albedo combining the bare-ice and snow albedos (compute_albedos, icepack_shortwave.F90:582-589): al = al_ice*(1-asnow) + al_snow*asnow. The Fortran applies it to the four direct/diffuse, visible/NIR combinations.",
+   "params": ["al_ice", "al_snow", "asnow"],
+   "body": {
+    "op": "+",
+    "args": [
+     { "op": "*", "args": ["al_ice", { "op": "-", "args": [1.0, "asnow"] }] },
+     { "op": "*", "args": ["al_snow", "asnow"] }
+    ]
+   }
+  },
+  "absorbed_shortwave": {
+   "description": "Total shortwave absorbed at the surface swabs (absorbed_solar, icepack_shortwave.F90:828-838): swabs = swvdr*((1-alvdrni)*(1-asnow) + (1-alvdrns)*asnow) + swvdf*((1-alvdfni)*(1-asnow) + (1-alvdfns)*asnow) + swidr*((1-alidrni)*(1-asnow) + (1-alidrns)*asnow) + swidf*((1-alidfni)*(1-asnow) + (1-alidfns)*asnow). All four solar bands are absorbed at the surface (no IR penetration in this parameterization).",
+   "params": ["swvdr", "swvdf", "swidr", "swidf", "alvdrni", "alvdfni", "alidrni", "alidfni", "alvdrns", "alvdfns", "alidrns", "alidfns", "asnow"],
+   "body": {
+    "op": "+",
+    "args": [
+     { "op": "*", "args": ["swvdr", { "op": "+", "args": [
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alvdrni"] }, { "op": "-", "args": [1.0, "asnow"] }] },
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alvdrns"] }, "asnow"] } ] }] },
+     { "op": "*", "args": ["swvdf", { "op": "+", "args": [
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alvdfni"] }, { "op": "-", "args": [1.0, "asnow"] }] },
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alvdfns"] }, "asnow"] } ] }] },
+     { "op": "*", "args": ["swidr", { "op": "+", "args": [
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alidrni"] }, { "op": "-", "args": [1.0, "asnow"] }] },
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alidrns"] }, "asnow"] } ] }] },
+     { "op": "*", "args": ["swidf", { "op": "+", "args": [
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alidfni"] }, { "op": "-", "args": [1.0, "asnow"] }] },
+       { "op": "*", "args": [{ "op": "-", "args": [1.0, "alidfns"] }, "asnow"] } ] }] }
+    ]
+   }
+  },
+  "penetrating_shortwave": {
+   "description": "Shortwave penetrating the surface into the ice interior fswpen (absorbed_solar, icepack_shortwave.F90:840-852): fswpen = i0vis*(swvdr*(1-alvdrni)*(1-asnow) + swvdf*(1-alvdfni)*(1-asnow)). Only visible radiation penetrates (i0vis = 0.70, F90:769); the near-IR terms are commented out in the Fortran (F90:844-845).",
+   "params": ["swvdr", "swvdf", "alvdrni", "alvdfni", "asnow"],
+   "body": {
+    "op": "*",
+    "args": [
+     0.7,
+     { "op": "+", "args": [
+       { "op": "*", "args": ["swvdr", { "op": "-", "args": [1.0, "alvdrni"] }, { "op": "-", "args": [1.0, "asnow"] }] },
+       { "op": "*", "args": ["swvdf", { "op": "-", "args": [1.0, "alvdfni"] }, { "op": "-", "args": [1.0, "asnow"] }] } ] }
+    ]
+   }
+  },
+  "shortwave_transmittance": {
+   "description": "Beer-Lambert transmittance of visible radiation through ice (absorbed_solar, icepack_shortwave.F90:867): tran = exp(-kappav*depth), with kappav = 1.4 m^-1 the visible extinction coefficient (icepack_parameters.F90:161). The Fortran evaluates it at layer bottoms depth = hilyr*k.",
+   "params": ["kappav", "depth"],
+   "body": { "op": "exp", "args": [{ "op": "-", "args": [{ "op": "*", "args": ["kappav", "depth"] }] }] }
+  },
+  "shortwave_through_ice": {
+   "description": "Shortwave transmitted through the ice into the ocean (absorbed_solar, icepack_shortwave.F90:883): fswthru = fswpen*exp(-kappav*hi), i.e. the shortwave_transmittance law evaluated at the total ice thickness hi.",
+   "params": ["fswpen", "kappav", "hi"],
+   "body": {
+    "op": "*",
+    "args": [
+     "fswpen",
+     { "op": "apply_expression_template", "args": [], "name": "shortwave_transmittance",
+       "bindings": { "kappav": "kappav", "depth": "hi" } }
+    ]
+   }
+  },
+  "layer_absorbed_shortwave": {
+   "description": "Shortwave absorbed within the ice layer between depths ztop and zbot (absorbed_solar, icepack_shortwave.F90:862-880): Iswabs = fswpen*(exp(-kappav*ztop) - exp(-kappav*zbot)) = fswpen*(trantop - tranbot) with the layer boundaries at hilyr*(k-1) and hilyr*k in the Fortran.",
+   "params": ["fswpen", "kappav", "ztop", "zbot"],
+   "body": {
+    "op": "*",
+    "args": [
+     "fswpen",
+     { "op": "-", "args": [
+       { "op": "apply_expression_template", "args": [], "name": "shortwave_transmittance",
+         "bindings": { "kappav": "kappav", "depth": "ztop" } },
+       { "op": "apply_expression_template", "args": [], "name": "shortwave_transmittance",
+         "bindings": { "kappav": "kappav", "depth": "zbot" } } ] }
+    ]
+   }
+  },
+  "saturation_specific_humidity_ice": {
+   "description": "Saturated surface specific humidity over ice Qsfc (surface_heat_flux, icepack_therm_shared.F90:152-154): Qsfc = qqqice*exp(-TTTice/TsfK)/rhoa with TsfK = Tsf + Tffresh. qqqice = 11637800, TTTice = 5897.8 (icepack_parameters.F90:286-287), Tffresh = 273.15 (F90:82). Tsf is in C, Qsfc in kg/kg.",
+   "params": ["Tsf", "rhoa"],
+   "body": {
+    "op": "/",
+    "args": [
+     { "op": "*", "args": [
+       {"op": "const", "args": [], "value": 11637800.0, "units": "kg/m^3"},
+       { "op": "exp", "args": [{ "op": "-", "args": [
+         { "op": "/", "args": [{"op": "const", "args": [], "value": 5897.8, "units": "K"}, { "op": "+", "args": ["Tsf", {"op": "const", "args": [], "value": 273.15, "units": "K"}] }] } ] }] } ] },
+     "rhoa"
+    ]
+   }
+  },
+  "saturation_specific_humidity_ocn": {
+   "description": "Saturated surface specific humidity over ocean ssq (atmo_boundary_const, icepack_atmo.F90:482-484): ssq = qqqocn*exp(-TTTocn/TsfK)/rhoa. qqqocn = 627572.4, TTTocn = 5107.4 (icepack_parameters.F90:288-289). The constant scheme uses the ocean saturation curve for both surface types (F90:483).",
+   "params": ["Tsf", "rhoa"],
+   "body": {
+    "op": "/",
+    "args": [
+     { "op": "*", "args": [
+       627572.4,
+       { "op": "exp", "args": [{ "op": "-", "args": [
+         { "op": "/", "args": [5107.4, { "op": "+", "args": ["Tsf", 273.15] }] } ] }] } ] },
+     "rhoa"
+    ]
+   }
+  },
+  "surface_heat_flux": {
+   "description": "Net flux to the top surface excluding the conductive flux fsurfn (surface_heat_flux, icepack_therm_shared.F90:147-165): fsurfn = fswsfc + emissivity*flw - emissivity*stefan_boltzmann*TsfK^4 + shcoef*(potT - TsfK) + lhcoef*(Qa - Qsfc), with TsfK = Tsf + Tffresh and Qsfc the ice saturation humidity (saturation_specific_humidity_ice). emissivity = 0.95, the D-class run's forcing_nml value (the nuopc override of the 0.985 icepack default, icepack_parameters.F90:156; bugs.md #11), stefan_boltzmann = 567e-10 (F90:159).",
+   "params": ["Tsf", "fswsfc", "rhoa", "flw", "potT", "Qa", "shcoef", "lhcoef"],
+   "body": {
+    "op": "+",
+    "args": [
+     "fswsfc",
+     { "op": "*", "args": [0.95, "flw"] },
+     { "op": "-", "args": [
+       { "op": "*", "args": [0.95, {"op": "const", "args": [], "value": 5.67e-8, "units": "W/m^2/K^4"},
+         { "op": "^", "args": [{ "op": "+", "args": ["Tsf", {"op": "const", "args": [], "value": 273.15, "units": "K"}] }, 4] }] } ] },
+     { "op": "*", "args": ["shcoef", { "op": "-", "args": ["potT", { "op": "+", "args": ["Tsf", {"op": "const", "args": [], "value": 273.15, "units": "K"}] }] }] },
+     { "op": "*", "args": ["lhcoef", { "op": "-", "args": ["Qa",
+       { "op": "apply_expression_template", "args": [], "name": "saturation_specific_humidity_ice",
+         "bindings": { "Tsf": "Tsf", "rhoa": "rhoa" } } ] }] }
+    ]
+   }
+  },
+  "liquidus_temperature": {
+   "description": "Liquidus temperature of the BL99 thermodynamics (icepack_liquidus_temperature, icepack_therm_shared.F90:383-386): Tmlt = -depressT*Sin, the ktherm /= 2 branch; depressT = 0.054 C/ppt (icepack_parameters.F90:77).",
+   "params": ["Sin"],
+   "body": { "op": "*", "args": [-0.054, "Sin"] }
+  },
+  "liquidus_temperature_mush": {
+   "description": "Liquidus temperature of the mushy thermodynamics from the Assur (1958) empirical relation (liquidus_temperature_mush, icepack_mushy_physics.F90:227-261): zTin = (Sbr/(M1_liq + N1_liq*Sbr) + O1_liq)*t_high + (Sbr/(M2_liq + N2_liq*Sbr) + O2_liq)*(1-t_high) with t_high = 1 for Sbr <= Sb_liq, M1_liq = az1_liq = -18.48, N1_liq = -az1p_liq = az1_liq/1000 = 0.01848, O1_liq = -bz1_liq/az1_liq = 0, M2_liq = az2_liq = -10.3085, N2_liq = -az2p_liq = 0.0103085, O2_liq = -bz2_liq/az2_liq = 62.4/10.3085, Sb_liq = 123.66702800276086 (F90:36-55, 249-259). The ifelse replaces the Fortran's merge with the same selection; both branches are finite on the two salinity ranges.",
+   "params": ["Sbr"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     { "op": "<=", "args": ["Sbr", {"op": "const", "args": [], "value": 123.66702800276086, "units": "ppt"}] },
+     { "op": "+", "args": [
+       { "op": "/", "args": ["Sbr", { "op": "+", "args": [{"op": "const", "args": [], "value": -18.48, "units": "ppt/degC"}, { "op": "*", "args": [{"op": "const", "args": [], "value": 0.01848, "units": "1/degC"}, "Sbr"] }] }] },
+       0.0 ] },
+     { "op": "+", "args": [
+       { "op": "/", "args": ["Sbr", { "op": "+", "args": [{"op": "const", "args": [], "value": -10.3085, "units": "ppt/degC"}, { "op": "*", "args": [{"op": "const", "args": [], "value": 0.0103085, "units": "1/degC"}, "Sbr"] }] }] },
+       { "op": "/", "args": [{"op": "const", "args": [], "value": 62.4, "units": "ppt"}, {"op": "const", "args": [], "value": 10.3085, "units": "ppt/degC"}] } ] }
+    ]
+   }
+  },
+  "sea_freezing_temperature": {
+   "description": "Ocean freezing temperature as imported under CESMCOUPLED (bugs.md #6; ice_import_export.F90:818-821): Tf = max(sss/(-18.48+0.01848*sss), -2.0), the Assur-1958 liquidus of shr_frz_freezetemp (share/shr_frz_mod.F90.in:94-105, the -2 C clamp of F90:104). The imported sss is already clamped to >= 0 (ice_import_export.F90:814-816). This is the same law as the mushy branch of icepack_sea_freezing_temperature (icepack_therm_shared.F90:404-406) for sss >= 0; the other icepack tfrz_option branches ('linear_salt', 'constant', 'minus1p8', icepack_parameters.F90:171) are not used in the coupled import path.",
+   "params": ["sss"],
+   "body": {
+    "op": "max",
+    "args": [
+     { "op": "/", "args": ["sss", { "op": "+", "args": [{"op": "const", "args": [], "value": -18.48, "units": "ppt/degC"}, { "op": "*", "args": [{"op": "const", "args": [], "value": 0.01848, "units": "1/degC"}, "sss"] }] }] },
+     {"op": "const", "args": [], "value": -2.0, "units": "degC"}
+    ]
+   }
+  },
+  "ice_temperature_from_enthalpy": {
+   "description": "Internal ice temperature from enthalpy (calculate_Tin_from_qin, icepack_therm_shared.F90:68-101): with brine (l_brine) the quadratic cp_ice*Tin^2 + ((cp_ocn-cp_ice)*Tmltk - qin/rhoi - Lfresh)*Tin + Lfresh*Tmltk = 0 solved by Tin = min((-bb1 - sqrt(bb1^2 - 4*cp_ice*cc1))/(2*cp_ice), Tmltk); fresh ice (l_brine = 0) Tin = (Lfresh + qin/rhoi)/cp_ice (F90:97-98). cp_ice = 2117.27, cp_ocn = 3996, rhoi = 917 (icepack_parameters.F90:74-75, 62; the nuopc-cap overrides of the icepack defaults 2106/4218, ice_comp_nuopc.F90:415-450; bugs.md #11), Lfresh = Lsub - Lvap = 333700 (F90:74, 83-84). The Fortran aborts on a negative discriminant (F90:90-94); the .esm skeleton cannot express the abort and notes it as a guard for the stage-2 tests.",
+   "params": ["qin", "Tmltk", "l_brine"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     { "op": ">", "args": ["l_brine", 0.5] },
+     { "op": "min", "args": [
+       { "op": "/", "args": [
+         { "op": "-", "args": [
+           { "op": "+", "args": [
+             333700.0,
+             { "op": "/", "args": ["qin", 917.0] },
+             { "op": "-", "args": [
+               { "op": "*", "args": [{ "op": "-", "args": [3996.0, 2117.27] }, "Tmltk"] } ] }
+           ] },
+           { "op": "sqrt", "args": [
+             { "op": "-", "args": [
+               { "op": "^", "args": [
+                 { "op": "+", "args": [
+                   { "op": "*", "args": [{ "op": "-", "args": [3996.0, 2117.27] }, "Tmltk"] },
+                   { "op": "-", "args": [{ "op": "/", "args": ["qin", 917.0] }] },
+                   { "op": "-", "args": [333700.0] } ] },
+                 2 ] },
+               { "op": "*", "args": [4.0, 2117.27, 333700.0, "Tmltk"] } ] }] }
+         ] },
+         { "op": "*", "args": [2.0, 2117.27] } ] },
+       "Tmltk" ] },
+     { "op": "/", "args": [
+       { "op": "+", "args": [333700.0, { "op": "/", "args": ["qin", 917.0] }] },
+       2117.27 ] }
+    ]
+   }
+  },
+  "snow_temperature_from_enthalpy": {
+   "description": "Snow layer temperature from enthalpy (fresh snow, icepack_therm_vertical.F90:888): zTsn = (Lfresh + zqsn/rhos)/cp_ice. rhos = 330 (icepack_parameters.F90:61); cp_ice = 2117.27 and Lfresh = 333700 are the D-class CESM-coupled runtime values (bugs.md #11), overriding the icepack defaults 2106/334000 via the nuopc cap (ice_comp_nuopc.F90:430,436-437: SHR_CONST_CPICE and SHR_CONST_LATSUB - SHR_CONST_LATVAP = 2834700 - 2501000), verified against the dumped zTsn to round-off.",
+   "params": ["qsn"],
+   "body": { "op": "/", "args": [
+     { "op": "+", "args": [{"op": "const", "args": [], "value": 333700.0, "units": "J/kg"}, { "op": "/", "args": ["qsn", {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"}] }] },
+     {"op": "const", "args": [], "value": 2117.27, "units": "J/kg/K"} ] }
+  },
+  "ice_enthalpy": {
+   "description": "Internal ice enthalpy from temperature, the inverse of calculate_Tin_from_qin (BL99 with brine, the functional form of the congelation enthalpy at icepack_therm_vertical.F90:1437-1439): qin = rhoi*(cp_ice*T - Lfresh + (cp_ocn-cp_ice)*Tmlts + Lfresh*Tmlts/T); fresh ice (l_brine = 0) qin = rhoi*(cp_ice*T - Lfresh). T in C, qin in J/m3. Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+   "params": ["zTin", "Tmlts", "l_brine"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     { "op": ">", "args": ["l_brine", 0.5] },
+     { "op": "*", "args": [917.0, { "op": "+", "args": [
+       { "op": "*", "args": [2117.27, "zTin"] },
+       { "op": "-", "args": [333700.0] },
+       { "op": "*", "args": [{ "op": "-", "args": [3996.0, 2117.27] }, "Tmlts"] },
+       { "op": "/", "args": [{ "op": "*", "args": [333700.0, "Tmlts"] }, "zTin"] } ] }] },
+     { "op": "*", "args": [917.0, { "op": "+", "args": [
+       { "op": "*", "args": [2117.27, "zTin"] },
+       { "op": "-", "args": [333700.0] } ] }] }
+    ]
+   }
+  },
+  "snow_enthalpy": {
+   "description": "Snow layer enthalpy from temperature (inverse of snow_temperature_from_enthalpy; the snow enthalpy is qsn = rhos*(cp_ice*Tsn - Lfresh), consistent with icepack_therm_vertical.F90:888). Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+   "params": ["zTsn"],
+   "body": { "op": "*", "args": [330.0, { "op": "+", "args": [
+     { "op": "*", "args": [2117.27, "zTsn"] },
+     { "op": "-", "args": [333700.0] } ] }] }
+  },
+  "ice_conductivity_bubbly": {
+   "description": "Thermal conductivity of saline ice, Pringle et al. (2007) 'bubbly brine' (conductivity, icepack_therm_bl99.F90:918-924): kilyr = max((2.11 - 0.011*T + 0.09*S/min(-puny,T))*rhoi/917, kimin). The Fortran multiplies by rhoi/917 (F90:922), unity for rhoi = 917 kg/m3 (icepack_parameters.F90:62); min(-puny, T) guards the S/T term as T approaches 0 (puny = 1e-11, F90:36), and kimin = 0.10 W/m/K (icepack_therm_bl99.F90:35). T in C, S in ppt.",
+   "params": ["zTin", "zSin"],
+   "body": {
+    "op": "max",
+    "args": [
+     { "op": "+", "args": [
+       2.11,
+       { "op": "-", "args": [{ "op": "*", "args": [0.011, "zTin"] }] },
+       { "op": "/", "args": [
+         { "op": "*", "args": [0.09, "zSin"] },
+         { "op": "min", "args": [-1e-11, "zTin"] } ] } ] },
+     0.1
+    ]
+   }
+  },
+  "ice_conductivity_mu71": {
+   "description": "Thermal conductivity of saline ice, Maykut-Untersteiner (1971) form with Wettlaufer (1991) constants (conductivity, icepack_therm_bl99.F90:911-916): kilyr = max(kice + betak*S/min(-puny,T), kimin), with kice = 2.03 (icepack_parameters.F90:88), betak = 0.13 (icepack_therm_bl99.F90:34), kimin = 0.10 (F90:35). Selected by conduct = 'MU71' (default 'bubbly').",
+   "params": ["zTin", "zSin"],
+   "body": {
+    "op": "max",
+    "args": [
+     { "op": "+", "args": [
+       2.03,
+       { "op": "/", "args": [
+         { "op": "*", "args": [0.13, "zSin"] },
+         { "op": "min", "args": [-1e-11, "zTin"] } ] } ] },
+     0.1
+    ]
+   }
+  },
+  "interface_conductivity": {
+   "description": "Effective conductivity at an interior layer interface (conductivity, icepack_therm_bl99.F90:956-959): kh = 2*k1*k2/((k1+k2)*h), the harmonic mean of the two layer conductivities over the layer thickness h (W/m2/K). The boundary forms are kh_top = 2*ksno/hslyr (F90:930), kh_snowice = 2*kslyr*kilyr(1)/(kslyr*hilyr + kilyr(1)*hslyr) (F90:931-933), and kh_bot = 2*kilyr(nilyr)/hilyr (F90:940).",
+   "params": ["k1", "k2", "h"],
+   "body": { "op": "/", "args": [
+     { "op": "*", "args": [2.0, "k1", "k2"] },
+     { "op": "*", "args": [{ "op": "+", "args": ["k1", "k2"] }, "h"] } ] }
+  },
+  "congelation_enthalpy": {
+   "description": "Enthalpy of new ice growing at the bottom (thickness_changes, icepack_therm_vertical.F90:1432-1443): with brine, qbot = -rhoi*(cp_ice*(Tmlts-Tbot) + Lfresh*(1-Tmlts/Tbot) - cp_ocn*Tmlts) capped at qbotmax = -0.5*rhoi*Lfresh (F90:1436-1440); fresh ice, qbot = -rhoi*(-cp_ice*Tbot + Lfresh) (F90:1442). Tmlts = -depressT*zSin(nilyr) is the liquidus at the bottom layer (F90:1432). Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+   "params": ["Tbot", "Tmlts", "l_brine"],
+   "body": {
+    "op": "ifelse",
+    "args": [
+     { "op": ">", "args": ["l_brine", 0.5] },
+     { "op": "min", "args": [
+       { "op": "-", "args": [
+         { "op": "*", "args": [917.0, { "op": "+", "args": [
+           { "op": "*", "args": [2117.27, { "op": "-", "args": ["Tmlts", "Tbot"] }] },
+           { "op": "*", "args": [333700.0, { "op": "-", "args": [1.0, { "op": "/", "args": ["Tmlts", "Tbot"] }] }] },
+           { "op": "-", "args": [{ "op": "*", "args": [3996.0, "Tmlts"] }] } ] }] } ] },
+       { "op": "*", "args": [-0.5, 917.0, 333700.0] } ] },
+     { "op": "-", "args": [
+       { "op": "*", "args": [917.0, { "op": "+", "args": [
+         { "op": "*", "args": [-2117.27, "Tbot"] },
+         333700.0 ] }] } ] }
+    ]
+   }
+  },
+  "ocean_heat_flux": {
+   "description": "Heat flux from the ocean to the ice bottom fbot (frzmlt_bottom_lateral, icepack_therm_vertical.F90:662-678): fbot = max(-cp_ocn*rhow*0.006*max(sst-Tbot, 0)*ustar, frzmlt), the Maykut-McPhee (1995) boundary-layer form with the 0.006 transfer coefficient (F90:672-674; the 'Cdn_ocn' fbot_xfer_type branch F90:668-671 is deferred). ustar is the skin friction velocity, floored at ustar_min = 0.005 m/s (F90:665-666, icepack_parameters.F90:99). Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+   "params": ["sst", "Tf", "ustar", "frzmlt"],
+   "body": {
+    "op": "max",
+    "args": [
+     { "op": "-", "args": [
+       { "op": "*", "args": [{"op": "const", "args": [], "value": 3996.0, "units": "J/kg/K"}, {"op": "const", "args": [], "value": 1026.0, "units": "kg/m^3"}, 0.006,
+         { "op": "max", "args": [{ "op": "-", "args": ["sst", "Tf"] }, 0.0] },
+         "ustar"] } ] },
+     "frzmlt"
+    ]
+   }
+  },
+  "meltpond_cesm_dvn": {
+   "description": "Change in melt pond volume over the ice-covered area of a category, 'cesm' pond option (compute_ponds_lvl, icepack_meltpond_lvl.F90:154-174): dvn = rfrac/rhofresh*(meltt*rhoi + melts*rhos + frain*dt)*aicen (F90:158-160, the use_smliq_pnd = false branch) reduced by the freeze-up term dvn = dvn - volpn*(1 - exp(rexp*dTs/Tp)) with Tp = Timelt - Td = -2 C and dTs = max(Tp - Tsfcn, 0) (F90:171-174). Td = 2, rexp = 0.01 (F90:111-112); rfrac is the meltwater retention fraction (namelist, default 0.85, icepack_parameters.F90:351); frain is the rain rate in m/s (Faxa_rain kg/m2/s divided by rhofresh).",
+   "params": ["rfrac", "meltt", "melts", "frain", "dt", "aicen", "volpn", "Tsfcn"],
+   "body": {
+    "op": "-",
+    "args": [
+     { "op": "*", "args": [
+       { "op": "/", "args": ["rfrac", 1000.0] },
+       { "op": "+", "args": [
+         { "op": "*", "args": ["meltt", 917.0] },
+         { "op": "*", "args": ["melts", 330.0] },
+         { "op": "*", "args": ["frain", "dt"] } ] },
+       "aicen" ] },
+     { "op": "*", "args": ["volpn", { "op": "-", "args": [1.0,
+       { "op": "exp", "args": [
+         { "op": "/", "args": [
+           { "op": "*", "args": [0.01, { "op": "max", "args": [
+             { "op": "-", "args": [
+               { "op": "-", "args": [0.0, 2.0] },
+               "Tsfcn" ] },
+             0.0 ] }] },
+           { "op": "-", "args": [0.0, 2.0] } ] }] } ] }] }
+    ]
+   }
+  },
+  "atmo_constant_tau": {
+   "description": "Atmosphere-ice momentum stress magnitude of the constant boundary-layer scheme (atmo_boundary_const, icepack_atmo.F90:460-464): tau = rhoa*0.0012*wind, with the stress components strx = tau*uatm, stry = tau*vatm (F90:463-464). The default atmbndy = 'similarity' scheme (icepack_atmo.F90:200-444, an iterative Monin-Obukhov solve) is deferred.",
+   "params": ["rhoa", "wind"],
+   "body": { "op": "*", "args": ["rhoa", {"op": "const", "args": [], "value": 0.0012, "units": "m/s"}, "wind"] }
+  },
+  "atmo_constant_shcoef": {
+   "description": "Sensible-heat transfer coefficient of the constant boundary-layer scheme (atmo_boundary_const, icepack_atmo.F90:493): shcoef = senscoef*cp_air*rhoa*wind, with senscoef = 0.0012 (icepack_parameters.F90:290) and cp_air = 1004.64 J/kg/K (SHR_CONST_CPDAIR, the nuopc-cap override of icepack's 1005, ice_comp_nuopc.F90:415-450; bugs.md #11; icepack_parameters.F90:281).",
+   "params": ["rhoa", "wind"],
+   "body": { "op": "*", "args": [0.0012, {"op": "const", "args": [], "value": 1004.64, "units": "J/kg/K"}, "rhoa", "wind"] }
+  },
+  "atmo_constant_lhcoef": {
+   "description": "Latent-heat transfer coefficient of the constant boundary-layer scheme (atmo_boundary_const, icepack_atmo.F90:494): lhcoef = latncoef*Lheat*rhoa*wind, with latncoef = 0.0015 (icepack_parameters.F90:291) and Lheat = Lsub = 2.835e6 J/kg for ice, Lvap = 2.501e6 J/kg for ocean (icepack_atmo.F90:472-476, icepack_parameters.F90:83-84).",
+   "params": ["rhoa", "wind", "Lheat"],
+   "body": { "op": "*", "args": [0.0015, "Lheat", "rhoa", "wind"] }
+  },
+  "atmo_neutral_drag": {
+   "description": "Neutral drag coefficient of the similarity scheme (atmo_boundary_layer, icepack_atmo.F90:215): rdn = vonkar/log(zref/iceruf), with vonkar = 0.4, zref = 10 m, and iceruf = 0.0005 m (icepack_parameters.F90:190, 284-285); the ice-branch Cdn_atm = rdn^2 (F90:216). The formdrag branch (F90:212-213) is inactive in the D-class run (formdrag = .false.).",
+   "params": [],
+   "body": { "op": "/", "args": [0.4, { "op": "log", "args": [{ "op": "/", "args": [10.0, 0.0005] }] }] }
+  },
+  "atmo_relative_wind": {
+   "description": "Magnitude of the wind relative to the ice (atmo_boundary_layer, icepack_atmo.F90:206-207): vmag_rel = sqrt((uatm-uvel)^2 + (vatm-vvel)^2).",
+   "params": ["uatm", "vatm", "uvel", "vvel"],
+   "body": { "op": "sqrt", "args": [
+     { "op": "+", "args": [
+       { "op": "^", "args": [{ "op": "-", "args": ["uatm", "uvel"] }, 2] },
+       { "op": "^", "args": [{ "op": "-", "args": ["vatm", "vvel"] }, 2] } ] }] }
+  },
+  "atmo_highfreq_vmag": {
+   "description": "High-frequency wind-ice speed difference (atmo_boundary_layer, icepack_atmo.F90:176-180, 205-210): vmag = max(umin, vmag_rel) with umin = 0.5 m/s under highfreq = .true. (the D-class setting; the low-frequency branch F90:208-209 would use umin = 1 against the scalar wind).",
+   "params": ["vmag_rel"],
+   "body": { "op": "max", "args": [{"op": "const", "args": [], "value": 0.5, "units": "m/s"}, "vmag_rel"] }
+  },
+  "atmo_stability_parameter": {
+   "description": "Monin-Obukhov stability parameter (compute_stability_parameter, icepack_atmo.F90:985-989): hol = vonkar*gravit*zlvl*(tstar/thva + qstar/(1/zvir + Qa))/ustar^2, clamped to |hol| <= 10 by the sign-preserving bound sign(min(abs(hol),10),hol), with vonkar = 0.4, gravit = 9.80616 (icepack_parameters.F90:190, 269), and zvir = 0.6077930728241565 (SHR_CONST_ZVIR, the nuopc-cap override of icepack's 0.606, ice_comp_nuopc.F90:415-450; bugs.md #11; icepack_parameters.F90:283).",
+   "params": ["zlvl", "thva", "ustar", "tstar", "qstar", "Qa"],
+   "body": { "op": "min", "args": [
+     { "op": "max", "args": [
+       { "op": "/", "args": [
+         { "op": "*", "args": [0.4, {"op": "const", "args": [], "value": 9.80616, "units": "m/s^2"}, "zlvl", { "op": "+", "args": [
+           { "op": "/", "args": ["tstar", "thva"] },
+           { "op": "/", "args": ["qstar", { "op": "+", "args": [{ "op": "/", "args": [1.0, 0.6077930728241565] }, "Qa"] }] } ] }] },
+         { "op": "^", "args": ["ustar", 2] }] },
+       -10.0 ]},
+     10.0 ]}
+  },
+  "atmo_stable": {
+   "description": "Unit step function of stability (compute_stability_function, icepack_atmo.F90:1015): stable = 1 for hol >= 0 and 0 for hol < 0, the Fortran's stable = 0.5 + sign(0.5, hol).",
+   "params": ["hol"],
+   "body": { "op": "ifelse", "args": [{ "op": ">=", "args": ["hol", 0.0] }, 1.0, 0.0] }
+  },
+  "atmo_psi_stable": {
+   "description": "Stable stability function (compute_stability_function, icepack_atmo.F90:1017-1019): psi_stable = -(0.7*hol + 0.75*(hol-14.3)*exp(-0.35*hol) + 10.7).",
+   "params": ["hol"],
+   "body": { "op": "-", "args": [{ "op": "+", "args": [
+     { "op": "*", "args": [0.7, "hol"] },
+     { "op": "*", "args": [0.75, { "op": "-", "args": ["hol", 14.3] },
+       { "op": "exp", "args": [{ "op": "-", "args": [{ "op": "*", "args": [0.35, "hol"] }] }] }] },
+     10.7 ]}] }
+  },
+  "atmo_capital_X": {
+   "description": "Argument of the unstable profile functions (capital_X, icepack_atmo.F90:1073): capital_X = sqrt(max(sqrt(abs(1 - 16*hol)), 1)).",
+   "params": ["hol"],
+   "body": { "op": "sqrt", "args": [
+     { "op": "max", "args": [
+       { "op": "sqrt", "args": [{ "op": "abs", "args": [{ "op": "-", "args": [1.0, { "op": "*", "args": [16.0, "hol"] }] }] }] },
+       1.0 ]}] }
+  },
+  "atmo_psi_momentum_unstable": {
+   "description": "Unstable momentum stability function (psi_momentum_unstable, icepack_atmo.F90:1040-1050): psi = log((1+xd*(2+xd))*(1+xd^2)/8) - 2*atan(xd) + pih, with xd = capital_X(hol) and pih = pi/2 (icepack_parameters.F90:80, 2815).",
+   "params": ["hol"],
+   "body": { "op": "+", "args": [
+     { "op": "-", "args": [
+       { "op": "log", "args": [{ "op": "/", "args": [
+         { "op": "*", "args": [
+           { "op": "+", "args": [1.0, { "op": "*", "args": [
+             { "op": "apply_expression_template", "args": [], "name": "atmo_capital_X", "bindings": { "hol": "hol" } },
+             { "op": "+", "args": [2.0, { "op": "apply_expression_template", "args": [], "name": "atmo_capital_X", "bindings": { "hol": "hol" } }] }] }] },
+           { "op": "+", "args": [1.0, { "op": "^", "args": [
+             { "op": "apply_expression_template", "args": [], "name": "atmo_capital_X", "bindings": { "hol": "hol" } }, 2] }] }] },
+         8.0 ]}] },
+       { "op": "*", "args": [2.0, { "op": "atan", "args": [
+         { "op": "apply_expression_template", "args": [], "name": "atmo_capital_X", "bindings": { "hol": "hol" } }] }] }] },
+     1.5707963267948966 ]}
+  },
+  "atmo_psi_scalar_unstable": {
+   "description": "Unstable scalar stability function (psi_scalar_unstable, icepack_atmo.F90:1055-1065): psi = 2*log((1+xd^2)/2), with xd = capital_X(hol).",
+   "params": ["hol"],
+   "body": { "op": "*", "args": [2.0, { "op": "log", "args": [{ "op": "/", "args": [
+     { "op": "+", "args": [1.0, { "op": "^", "args": [
+       { "op": "apply_expression_template", "args": [], "name": "atmo_capital_X", "bindings": { "hol": "hol" } }, 2] }] },
+     2.0 ]}] }] }
+  },
+  "atmo_psi_momentum": {
+   "description": "Momentum stability function with the stable/unstable blend (compute_stability_function, icepack_atmo.F90:1030): psi = psi_stable*stable + (1-stable)*psi_momentum_unstable (qty = 'momentum', F90:1021-1022).",
+   "params": ["hol", "stable"],
+   "body": { "op": "+", "args": [
+     { "op": "*", "args": ["stable", { "op": "apply_expression_template", "args": [], "name": "atmo_psi_stable", "bindings": { "hol": "hol" } }] },
+     { "op": "*", "args": [{ "op": "-", "args": [1.0, "stable"] },
+       { "op": "apply_expression_template", "args": [], "name": "atmo_psi_momentum_unstable", "bindings": { "hol": "hol" } }] }] }
+  },
+  "atmo_psi_scalar": {
+   "description": "Scalar (heat/water) stability function (compute_stability_function, icepack_atmo.F90:1030): psi = psi_stable*stable + (1-stable)*psi_scalar_unstable (qty = 'scalar', F90:1023-1024).",
+   "params": ["hol", "stable"],
+   "body": { "op": "+", "args": [
+     { "op": "*", "args": ["stable", { "op": "apply_expression_template", "args": [], "name": "atmo_psi_stable", "bindings": { "hol": "hol" } }] },
+     { "op": "*", "args": [{ "op": "-", "args": [1.0, "stable"] },
+       { "op": "apply_expression_template", "args": [], "name": "atmo_psi_scalar_unstable", "bindings": { "hol": "hol" } }] }] }
+  },
+  "atmo_exchange_coefficient": {
+   "description": "Transfer coefficient shifted to the measurement height and stability (atmo_boundary_layer, icepack_atmo.F90:289-291): rd = rdn/(1 + rdn/vonkar*(alz - psi)) for momentum; rh and re use the same form for scalars with the neutral rhn = ren = rdn first guess (F90:254-255).",
+   "params": ["rdn", "alz", "psi"],
+   "body": { "op": "/", "args": ["rdn", { "op": "+", "args": [1.0, { "op": "/", "args": [
+     { "op": "*", "args": ["rdn", { "op": "-", "args": ["alz", "psi"] }] }, 0.4] }] }] }
+  },
+  "atmo_psix2": {
+   "description": "2-m scalar stability function correction (atmo_boundary_layer, icepack_atmo.F90:364-365): psix2 = -5*hols*stable + (1-stable)*psi_scalar_unstable(hols), with hols = hol*zTrf/zlvl scaled to the zTrf = 2 m reference height (F90:164, 364).",
+   "params": ["hols", "stable"],
+   "body": { "op": "+", "args": [
+     { "op": "-", "args": [{ "op": "*", "args": [5.0, "hols", "stable"] }] },
+     { "op": "*", "args": [{ "op": "-", "args": [1.0, "stable"] },
+       { "op": "apply_expression_template", "args": [], "name": "atmo_psi_scalar_unstable", "bindings": { "hol": "hols" } }] }] }
+  },
+  "atmo_reference_temperature": {
+   "description": "2-m reference air temperature (atmo_boundary_layer, icepack_atmo.F90:366-369): Tref = potT - delt*(rh/vonkar)*(alzs + al2 - psixh + psix2) - 0.01*zTrf, the potential-to-actual temperature correction of F90:369 with zTrf = 2 m (F90:164).",
+   "params": ["potT", "delt", "rh", "alzs", "al2", "psixh", "psix2"],
+   "body": { "op": "-", "args": [
+     { "op": "-", "args": ["potT", { "op": "*", "args": ["delt", { "op": "/", "args": [
+       { "op": "*", "args": ["rh", { "op": "+", "args": ["alzs", "al2", { "op": "-", "args": ["psixh"] }, "psix2"] }] }, 0.4] }] }] },
+     {"op": "const", "args": [], "value": 0.02, "units": "K"} ]}
+  },
+  "atmo_reference_humidity": {
+   "description": "2-m reference specific humidity (atmo_boundary_layer, icepack_atmo.F90:370-372): Qref = Qa - delq*(re/vonkar)*(alzs + al2 - psixh + psix2).",
+   "params": ["Qa", "delq", "re", "alzs", "al2", "psixh", "psix2"],
+   "body": { "op": "-", "args": ["Qa", { "op": "*", "args": ["delq", { "op": "/", "args": [
+     { "op": "*", "args": ["re", { "op": "+", "args": ["alzs", "al2", { "op": "-", "args": ["psixh"] }, "psix2"] }] }, 0.4] }] }] }
+  },
+  "atmo_reference_wind": {
+   "description": "10-m reference wind speed (atmo_boundary_layer, icepack_atmo.F90:374-378): Uref = vmag_rel*rd/rdn under highfreq = .true. and the ice surface type (the else branch F90:377 uses vmag*rd/rdn).",
+   "params": ["vmag_rel", "rd", "rdn"],
+   "body": { "op": "*", "args": ["vmag_rel", { "op": "/", "args": ["rd", "rdn"] }] }
+  },
+  "ridge_cumulative_area": {
+   "description": "Cumulative thickness distribution of the ice participating in ridging (ridge_itd, icepack_mechred.F90:850-879): Gsum(n) = Gsum(n-1) + aicen(n) for aicen(n) > puny (negligible categories are skipped, F90:875-879), with the open-water term Gsum(0) = aice0 for aice0 > puny else 0 (F90:851-855). The esm is a nested prefix sum over m <= n (the Fortran recurrence); the caller applies the work = 1/Gsum(ncat) normalization of F90:884-889.",
+   "params": ["aice0", "aicen"],
+   "body": { "op": "+", "args": [
+     { "op": "ifelse", "args": [{ "op": ">", "args": ["aice0", 1e-11] }, "aice0", 0.0] },
+     { "op": "faq", "output_idx": ["n"], "ranges": { "n": { "from": "ncat" }, "m": { "from": "ncat" } },
+       "filter": { "op": "<=", "args": ["m", "n"] },
+       "expr": { "op": "ifelse", "args": [
+         { "op": ">", "args": [{ "op": "index", "args": ["aicen", "m"] }, 1e-11] },
+         { "op": "index", "args": ["aicen", "m"] }, 0.0] },
+       "args": ["aicen"] }] }
+  },
+  "ridge_participation_exponential": {
+   "description": "Exponential participation function of krdg_partic = 1 (ridge_itd, icepack_mechred.F90:919-934): apartic = (exp(-Gprev/astar) - exp(-G/astar))/(1 - exp(-astari)), the F90:929-933 normalized difference with astar = 0.05 and astari = 1/astar = 20 (icepack_mechred.F90:72, 829).",
+   "params": ["Gprev", "G"],
+   "body": { "op": "*", "args": [
+     { "op": "-", "args": [
+       { "op": "exp", "args": [{ "op": "-", "args": [{ "op": "/", "args": ["Gprev", 0.05] }] }] },
+       { "op": "exp", "args": [{ "op": "-", "args": [{ "op": "/", "args": ["G", 0.05] }] }] }] },
+     { "op": "/", "args": [1.0, { "op": "-", "args": [1.0, { "op": "exp", "args": [-20.0] }] }] }] }
+  },
+  "ridge_hrmin": {
+   "description": "Minimum ridge thickness (ridge_itd, icepack_mechred.F90:1008): hrmin = min(2*hi, hi + maxraft) for aicen > puny else 0, with hi = max(vicen/aicen, puny) (F90:1006-1007) and maxraft = 1 m (icepack_mechred.F90:74).",
+   "params": ["aicen", "hi_rdg"],
+   "body": { "op": "ifelse", "args": [{ "op": ">", "args": ["aicen", 1e-11] },
+     { "op": "min", "args": [{ "op": "*", "args": [2.0, "hi_rdg"] }, { "op": "+", "args": ["hi_rdg", 1.0] }] },
+     0.0 ]}
+  },
+  "ridge_hrexp": {
+   "description": "Ridge e-folding thickness (ridge_itd, icepack_mechred.F90:1009): hrexp = mu_rdg*sqrt(hi) for aicen > puny else 0, with mu_rdg = 4 from the D-class ice_in namelist (the tuned e-folding parameter of F90:988-1001).",
+   "params": ["aicen", "hi_rdg"],
+   "body": { "op": "ifelse", "args": [{ "op": ">", "args": ["aicen", 1e-11] },
+     { "op": "*", "args": [4.0, { "op": "sqrt", "args": ["hi_rdg"] }] },
+     0.0 ]}
+  },
+  "ridge_krdg": {
+   "description": "Mean ridge thickness over the thickness of ridging ice (ridge_itd, icepack_mechred.F90:1010): krdg = (hrmin + hrexp)/hi for aicen > puny, else the krdg = 1 default (F90:863).",
+   "params": ["aicen", "hi_rdg", "hrmin", "hrexp"],
+   "body": { "op": "ifelse", "args": [{ "op": ">", "args": ["aicen", 1e-11] },
+     { "op": "/", "args": [{ "op": "+", "args": ["hrmin", "hrexp"] }, "hi_rdg"] },
+     1.0 ]}
+  },
+  "ridge_strength_term": {
+   "description": "Per-category contribution to the Rothrock strength sum (icepack_ice_strength, icepack_mechred.F90:1697-1706): apartic*(h2rdg/krdg - hi^2) for aicen > puny and apartic > 0, else 0, with hi = vicen/aicen and the exponential-redistribution h2rdg = hrmin^2 + 2*hrmin*hrexp + 2*hrexp^2 (F90:1700-1702).",
+   "params": ["aicen", "vicen", "apartic", "hrmin", "hrexp", "krdg"],
+   "body": { "op": "ifelse", "args": [
+     { "op": "and", "args": [
+       { "op": ">", "args": ["aicen", 1e-11] },
+       { "op": ">", "args": ["apartic", 0.0] }] },
+     { "op": "*", "args": ["apartic", { "op": "+", "args": [
+       { "op": "-", "args": [{ "op": "^", "args": [{ "op": "/", "args": ["vicen", "aicen"] }, 2] }] },
+       { "op": "/", "args": [
+         { "op": "+", "args": [
+           { "op": "^", "args": ["hrmin", 2] },
+           { "op": "*", "args": [2.0, "hrmin", "hrexp"] },
+           { "op": "*", "args": [2.0, { "op": "^", "args": ["hrexp", 2] }] }] },
+         "krdg" ]}] }] },
+     0.0 ]}
+  },
+  "ice_strength_hibler": {
+   "description": "Ice strength of the Hibler (1979) formulation (icepack_ice_strength, icepack_mechred.F90:1720): strength = Pstar*vice*exp(-Cstar*(1-aice)), with Pstar = 2.75e4 N/m2 and Cstar = 20 (icepack_parameters.F90:262, 264). This is the kstrength /= 1 branch; the default kstrength = 1 Rothrock (1975) potential-energy form (F90:1660-1712) is carried by the ridge_cumulative_area, ridge_participation_exponential, ridge_hrmin, ridge_hrexp, ridge_krdg, and ridge_strength_term templates.",
+   "params": ["vice", "aice"],
+   "body": { "op": "*", "args": [{"op": "const", "args": [], "value": 27500.0, "units": "N/m^2"}, "vice",
+     { "op": "exp", "args": [{ "op": "-", "args": [
+       { "op": "*", "args": [20.0, { "op": "-", "args": [1.0, "aice"] }] } ] }] }] }
+  },
+  "strain_invariant_delta": {
+   "description": "Strain-rate invariant Delta of the elliptical yield curve (strain_rates, ice_dyn_shared.F90:2156-2159): Delta = sqrt(divu^2 + e_factor*(tension^2 + shear^2)), with e_factor = e_yieldcurve^2/e_plasticpot^4 (set_evp_parameters, F90:465).",
+   "params": ["divu", "tension", "shear", "e_factor"],
+   "body": { "op": "sqrt", "args": [
+     { "op": "+", "args": [
+       { "op": "^", "args": ["divu", 2] },
+       { "op": "*", "args": ["e_factor",
+         { "op": "+", "args": [
+           { "op": "^", "args": ["tension", 2] },
+           { "op": "^", "args": ["shear", 2] } ] }] } ] }] }
+  },
+  "viscosity_scale": {
+   "description": "Shared scale of the bulk viscosity, shear viscosity, and replacement pressure (visc_replpress, ice_dyn_shared.F90:2467-2468): tmpcalc = capping*strength/max(Delta, DminArea) + (1-capping)*strength/(Delta + DminArea). capping = 1 (default namelist) selects the capped form; DminArea is the minimum strain rate of the cell (DminTarea).",
+   "params": ["capping", "strength", "Delta", "DminArea"],
+   "body": { "op": "+", "args": [
+     { "op": "*", "args": ["capping",
+       { "op": "/", "args": ["strength", { "op": "max", "args": ["Delta", "DminArea"] }] }] },
+     { "op": "*", "args": [{ "op": "-", "args": [1.0, "capping"] },
+       { "op": "/", "args": ["strength", { "op": "+", "args": ["Delta", "DminArea"] }] }] } ] }
+  },
+  "bulk_viscosity": {
+   "description": "Twice the bulk viscosity (visc_replpress, ice_dyn_shared.F90:2469): zetax2 = (1+Ktens)*tmpcalc. Ktens = 0 by default (namelist, the Lemieux et al. 2016 tensile strength is off).",
+   "params": ["Ktens", "tmpcalc"],
+   "body": { "op": "*", "args": [{ "op": "+", "args": [1.0, "Ktens"] }, "tmpcalc"] }
+  },
+  "shear_viscosity": {
+   "description": "Twice the shear viscosity (visc_replpress, ice_dyn_shared.F90:2471): etax2 = epp2i*zetax2, with epp2i = 1/e_plasticpot^2 (set_evp_parameters, F90:464) and e_plasticpot = 2 (default namelist).",
+   "params": ["epp2i", "zetax2"],
+   "body": { "op": "*", "args": ["epp2i", "zetax2"] }
+  },
+  "replacement_pressure": {
+   "description": "Replacement pressure of the plastic potential (visc_replpress, ice_dyn_shared.F90:2470): rep_prs = (1-Ktens)*tmpcalc*Delta. With the default Ktens = 0 and capping = 1 this is rep_prs = strength*Delta/max(Delta, DminArea).",
+   "params": ["Ktens", "tmpcalc", "Delta"],
+   "body": { "op": "*", "args": [{ "op": "-", "args": [1.0, "Ktens"] }, "tmpcalc", "Delta"] }
+  },
+  "evp_stressp_update": {
+   "description": "Classic-EVP update of the sum stress stressp = sigma11 + sigma22 (stress, ice_dyn_evp.F90:1584-1591): stressp_new = (stressp*(1-arlx1i*revp) + arlx1i*(zetax2*divu - rep_prs))*denom1. For classic EVP (revp = 0, F90:473) this is the under-relaxed map toward the plastic target zetax2*divu - rep_prs; arlx1i = 1/(2*elasticDamp*ndte) and denom1 = 1/(1+arlx1i) (set_evp_parameters, ice_dyn_shared.F90:474-477).",
+   "params": ["stressp", "arlx1i", "revp", "zetax2", "divu", "rep_prs", "denom1"],
+   "body": { "op": "*", "args": [
+     { "op": "+", "args": [
+       { "op": "*", "args": ["stressp", { "op": "-", "args": [1.0, { "op": "*", "args": ["arlx1i", "revp"] }] }] },
+       { "op": "*", "args": ["arlx1i", { "op": "-", "args": [
+         { "op": "*", "args": ["zetax2", "divu"] }, "rep_prs" ] }] } ] },
+     "denom1" ] }
+  },
+  "evp_stressm_update": {
+   "description": "Classic-EVP update of the difference stress stressm = sigma11 - sigma22 (stress, ice_dyn_evp.F90:1593-1600): stressm_new = (stressm*(1-arlx1i*revp) + arlx1i*etax2*tension)*denom1, with the plastic target etax2*tension.",
+   "params": ["stressm", "arlx1i", "revp", "etax2", "tension", "denom1"],
+   "body": { "op": "*", "args": [
+     { "op": "+", "args": [
+       { "op": "*", "args": ["stressm", { "op": "-", "args": [1.0, { "op": "*", "args": ["arlx1i", "revp"] }] }] },
+       { "op": "*", "args": ["arlx1i", "etax2", "tension"] } ] },
+     "denom1" ] }
+  },
+  "evp_stress12_update": {
+   "description": "Classic-EVP update of the shear stress stress12 = sigma12 (stress, ice_dyn_evp.F90:1602-1609): stress12_new = (stress12*(1-arlx1i*revp) + arlx1i*0.5*etax2*shear)*denom1, with the plastic target 0.5*etax2*shear (the Fortran's p5 factor).",
+   "params": ["stress12", "arlx1i", "revp", "etax2", "shear", "denom1"],
+   "body": { "op": "*", "args": [
+     { "op": "+", "args": [
+       { "op": "*", "args": ["stress12", { "op": "-", "args": [1.0, { "op": "*", "args": ["arlx1i", "revp"] }] }] },
+       { "op": "*", "args": ["arlx1i", 0.5, "etax2", "shear"] } ] },
+     "denom1" ] }
+  },
+  "ocean_ice_stress_magnitude": {
+   "description": "Magnitude of the relative ocean-ice current times the drag (stepu, ice_dyn_shared.F90:931-932): vrel = aiX*rhow*Cw*sqrt((uocn-uvel)^2 + (vocn-vvel)^2). aiX is the ice concentration at the U point (aice), Cw the ocean-ice drag coefficient (dragio = 0.00536 default, icepack_parameters.F90:266), rhow = 1026 (F90:65).",
+   "params": ["aiX", "rhow", "Cw", "uocn", "vocn", "uvel", "vvel"],
+   "body": { "op": "*", "args": ["aiX", "rhow", "Cw", { "op": "sqrt", "args": [
+     { "op": "+", "args": [
+       { "op": "^", "args": [{ "op": "-", "args": ["uocn", "uvel"] }, 2] },
+       { "op": "^", "args": [{ "op": "-", "args": ["vocn", "vvel"] }, 2] } ] }] }] }
+  },
+  "seabed_stress_coefficient": {
+   "description": "Linear seabed stress coefficient (stepu, ice_dyn_shared.F90:937): Cb = TbU/(sqrt(uvel^2 + vvel^2) + u0), with TbU the seabed stress factor (nonzero only over landfast-ice grounding zones) and u0 = 5e-5 m/s the velocity floor (namelist, default 5e-5).",
+   "params": ["TbU", "uvel", "vvel", "u0"],
+   "body": { "op": "/", "args": ["TbU", { "op": "+", "args": [
+     { "op": "sqrt", "args": [
+       { "op": "+", "args": [
+         { "op": "^", "args": ["uvel", 2] },
+         { "op": "^", "args": ["vvel", 2] } ] }] },
+     "u0" ] }] }
+  },
+   "liquidus_brine_salinity_mush": {
+    "description": "Equilibrium brine salinity of the mushy thermodynamics (liquidus_brine_salinity_mush, icepack_mushy_physics.F90:187-221): Sbr = ((T + J1_liq)/(K1_liq*T + L1_liq))*t_high + ((T + J2_liq)/(K2_liq*T + L2_liq))*(1-t_high) with t_high = 1 for T > Tb_liq and the subzero mask lsubzero = 1 for T <= 0 (F90:213-219). J1_liq = bz1_liq/az1_liq = 0, K1_liq = c1/c1000 = 1e-3, L1_liq = (c1 + bz1p_liq)/az1_liq = -0.05411255411255411, J2_liq = bz2_liq/az2_liq = -6.053257020905078, K2_liq = 1e-3, L2_liq = (c1 + bz2p_liq)/az2_liq = -0.10306058107387107 (F90:36-55, 206-211); Tb_liq = -7.6362968855167352 (F90:47). The ifelse replaces the Fortran merges with the same selections; the T > 0 branch is masked to 0 by the subzero mask.",
+    "params": ["T"],
+    "body": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "<=",
+       "args": [
+        "T",
+        0.0
+       ]
+      },
+      {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": ">",
+         "args": [
+          "T",
+          {"op": "const", "args": [], "value": -7.636296885516735, "units": "degC"}
+         ]
+        },
+        {
+         "op": "/",
+         "args": [
+          "T",
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              {"op": "const", "args": [], "value": 0.001, "units": "1/ppt"},
+              "T"
+             ]
+            },
+            {"op": "const", "args": [], "value": -0.05411255411255411, "units": "degC/ppt"}
+           ]
+          }
+         ]
+        },
+        {
+         "op": "/",
+         "args": [
+          {
+           "op": "+",
+           "args": [
+            "T",
+            {"op": "const", "args": [], "value": -6.053257020905078, "units": "degC"}
+           ]
+          },
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              {"op": "const", "args": [], "value": 0.001, "units": "1/ppt"},
+              "T"
+             ]
+            },
+            {"op": "const", "args": [], "value": -0.10306058107387107, "units": "degC/ppt"}
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      0.0
+     ]
+    }
+   },
+   "icepack_mushy_liquid_fraction": {
+    "description": "Liquid fraction of the mush (icepack_mushy_liquid_fraction, icepack_mushy_physics.F90:500-519): phi = zSin/max(Sbr, zSin) with the brine salinity Sbr = max(liquidus_brine_salinity_mush(zTin), puny) (F90:516-517); the inner max keeps the liquidus finite at the freezing point and the outer max keeps phi <= 1 for supersaturated layers. puny = 1e-11 (icepack_parameters.F90:36).",
+    "params": ["T", "S"],
+    "body": {
+     "op": "/",
+     "args": [
+      "S",
+      {
+       "op": "max",
+       "args": [
+        {
+         "op": "max",
+         "args": [
+          {
+           "op": "apply_expression_template",
+           "args": [],
+           "name": "liquidus_brine_salinity_mush",
+           "bindings": {
+            "T": "T"
+           }
+          },
+          {"op": "const", "args": [], "value": 1e-11, "units": "ppt"}
+         ]
+        },
+        "S"
+       ]
+      }
+     ]
+    }
+   },
+   "icepack_enthalpy_mush": {
+    "description": "Enthalpy of the mush from temperature and bulk salinity (icepack_enthalpy_mush, icepack_mushy_physics.F90:267-288): zqin = phi*(cp_ocn*rhow - cp_ice*rhoi)*zTin + rhoi*cp_ice*zTin - (1-phi)*rhoi*Lfresh with phi = icepack_mushy_liquid_fraction(zTin, zSin) (F90:283-286). cp_ocn*rhow = 4099896, cp_ice*rhoi = 1941536.59, rhoi*Lfresh = 306002900 (the nuopc-cap values, ice_comp_nuopc.F90:415-450; bugs.md #11; icepack_parameters.F90:62, 74-75, 84); the difference cp_ocn*rhow - cp_ice*rhoi = 2158359.41.",
+    "params": ["T", "S"],
+    "body": {
+     "op": "+",
+     "args": [
+      {
+       "op": "+",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          {
+           "op": "apply_expression_template",
+           "args": [],
+           "name": "icepack_mushy_liquid_fraction",
+           "bindings": {
+            "T": "T",
+            "S": "S"
+           }
+          },
+          2158359.41,
+          "T"
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          1941536.59,
+          "T"
+         ]
+        }
+       ]
+      },
+      {
+       "op": "-",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          {
+           "op": "-",
+           "args": [
+            1.0,
+            {
+             "op": "apply_expression_template",
+             "args": [],
+             "name": "icepack_mushy_liquid_fraction",
+             "bindings": {
+              "T": "T",
+              "S": "S"
+             }
+            }
+           ]
+          },
+          306002900.0
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "enthalpy_mush_liquid_fraction": {
+    "description": "Enthalpy of the mush from temperature and liquid fraction (enthalpy_mush_liquid_fraction, icepack_mushy_physics.F90:293-307): zqin = phi*(cp_ocn*rhow - cp_ice*rhoi)*zTin + rhoi*cp_ice*zTin - (1-phi)*rhoi*Lfresh (F90:304-305). Used for the congelation-ice enthalpy qbotm = enthalpy_mush_liquid_fraction(Tbot, phi_i_mushy) (icepack_therm_vertical.F90:1413); phi_i_mushy = 0.45 in the D-class run (ice_in namelist, default 0.85 icepack_parameters.F90:139). Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+    "params": ["T", "phi"],
+    "body": {
+     "op": "+",
+     "args": [
+      {
+       "op": "+",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          "phi",
+          {"op": "const", "args": [], "value": 2158359.41, "units": "J/m^3/degC"},
+          "T"
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          {"op": "const", "args": [], "value": 1941536.59, "units": "J/m^3/degC"},
+          "T"
+         ]
+        }
+       ]
+      },
+      {
+       "op": "-",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          {
+           "op": "-",
+           "args": [
+            1.0,
+            "phi"
+           ]
+          },
+          {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3"}
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "enthalpy_of_melting": {
+    "description": "Enthalpy of melting of the mush from bulk salinity (enthalpy_of_melting, icepack_mushy_physics.F90:313-325): qm = cp_ocn*rhow*liquidus_temperature_mush(zSin) (F90:323), the energy needed to fully melt the mush; cp_ocn*rhow = 4099896 J/m3/C (the nuopc-cap value, ice_comp_nuopc.F90:415-450; bugs.md #11). This is the ktherm = 2 qmlt of thickness_changes (icepack_therm_vertical.F90:1283), zero in the BL99 formulation.",
+    "params": ["S"],
+    "body": {
+     "op": "*",
+     "args": [
+      {"op": "const", "args": [], "value": 4099896.0, "units": "J/m^3/degC"},
+      {
+       "op": "apply_expression_template",
+       "args": [],
+       "name": "liquidus_temperature_mush",
+       "bindings": {
+        "Sbr": "S"
+       }
+      }
+     ]
+    }
+   },
+   "enthalpy_brine": {
+    "description": "Enthalpy of the brine (fully liquid) from temperature (enthalpy_brine, icepack_mushy_physics.F90:330-342): qbr = cp_ocn*rhow*zTin (F90:340); cp_ocn*rhow = 4099896 J/m3/C (the nuopc-cap value, ice_comp_nuopc.F90:415-450; bugs.md #11).",
+    "params": ["T"],
+    "body": {
+     "op": "*",
+     "args": [
+      {"op": "const", "args": [], "value": 4099896.0, "units": "J/m^3/degC"},
+      "T"
+     ]
+    }
+   },
+   "icepack_mushy_temperature_mush": {
+    "description": "Temperature of the mush from enthalpy and bulk salinity (icepack_mushy_temperature_mush, icepack_mushy_physics.F90:348-452): the piecewise quadratic of the Assur liquidus inverted against the enthalpy, zTin = (-B + sqrt(max(B^2 - 4 A C, puny)))/(2 A) (F90:447) with A, B, C the quadratic coefficients of the higher/lower temperature regions selected by the break enthalpy qb = D_liq*zSin + E_liq (F90:433-445), and the fully-melted branch zTin = zqin*I_liq when zqin exceeds the just-melted enthalpy q0 of the salinity-dependent rational F1/G1/H1/F2/G2/H2 form (F90:427-430, 450). Constants (computed from the az/bz liquidus parameters of F90:36-55 and the D-class run cp/rho values as in F90:388-424, with cp_ocn = 3996, cp_ice = 2117.27, rhow = 1026, rhoi = 917, Lfresh = 333700, cprho = cp_ocn*rhow = 4099896 -- the nuopc-cap overrides of ice_comp_nuopc.F90:415-450, bugs.md #11; verified against the dumped zTin to round-off): AS1 = -39886.4818968, AC1 = -35879596.1832, BS1 = -3496574.182, BQ1 = 18.48, BC1 = 5654933592.0, CS1 = 306002900.0, CQ1 = 0.0, CC1 = 0.0; AS2 = -22249.447977985, AC2 = -20014329.938015003, BS2 = -861389.8574660001, BQ2 = 10.3085, BC2 = 3275582777.866, CS2 = 325097480.96, CQ2 = -62.4, CC2 = -19094580960.0; D_liq = 2341133.53765668, E_liq = -320829049.8153338; F1 = 221855844.15584415, G1 = -1000.0, H1 = 0.0; F2 = 397719939.8554591, G2 = -1000.0, H2 = 24817724.246980645; I_liq = 2.439086259749028e-07; Tb_liq = -7.6362968855167352, Sb_liq = 123.66702800276086. The ifelse replaces the Fortran merges (S_low, q_melt, t_high) with the same selections; the discriminant guard max(B^2 - 4 A C, puny) keeps the sqrt real as in F90:447.",
+    "params": ["qin", "S"],
+    "body": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": ">",
+       "args": [
+        "qin",
+        {
+         "op": "ifelse",
+         "args": [
+          {
+           "op": "<",
+           "args": [
+            "S",
+            {"op": "const", "args": [], "value": 123.66702800276086, "units": "ppt"}
+           ]
+          },
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "*",
+               "args": [
+                {"op": "const", "args": [], "value": 221855844.15584415, "units": "J/m^3"},
+                "S"
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {"op": "const", "args": [], "value": -1000.0, "units": "ppt"},
+                "S"
+               ]
+              }
+             ]
+            },
+            0.0
+           ]
+          },
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "*",
+               "args": [
+                {"op": "const", "args": [], "value": 397719939.8554591, "units": "J/m^3"},
+                "S"
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {"op": "const", "args": [], "value": -1000.0, "units": "ppt"},
+                "S"
+               ]
+              }
+             ]
+            },
+            {"op": "const", "args": [], "value": 24817724.246980645, "units": "J/m^3"}
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "op": "*",
+       "args": [
+        "qin",
+        {"op": "const", "args": [], "value": 2.439086259749028e-07, "units": "degC/(J/m^3)"}
+       ]
+      },
+      {
+       "op": "/",
+       "args": [
+        {
+         "op": "+",
+         "args": [
+          {
+           "op": "-",
+           "args": [
+            {
+             "op": "ifelse",
+             "args": [
+              {
+               "op": ">",
+               "args": [
+                "qin",
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 2341133.53765668, "units": "J/m^3/ppt"},
+                    "S"
+                   ]
+                  },
+                  {"op": "const", "args": [], "value": -320829049.8153338, "units": "J/m^3"}
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": -3496574.182, "units": "J/m^3/ppt"},
+                  "S"
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  18.48,
+                  "qin"
+                 ]
+                },
+                {"op": "const", "args": [], "value": 5654933592.0, "units": "J/m^3"}
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": -861389.8574660001, "units": "J/m^3/ppt"},
+                  "S"
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  10.3085,
+                  "qin"
+                 ]
+                },
+                {"op": "const", "args": [], "value": 3275582777.866, "units": "J/m^3"}
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          {
+           "op": "sqrt",
+           "args": [
+            {
+             "op": "max",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "^",
+                 "args": [
+                  {
+                   "op": "ifelse",
+                   "args": [
+                    {
+                     "op": ">",
+                     "args": [
+                      "qin",
+                      {
+                       "op": "+",
+                       "args": [
+                        {
+                         "op": "*",
+                         "args": [
+                          {"op": "const", "args": [], "value": 2341133.53765668, "units": "J/m^3/ppt"},
+                          "S"
+                         ]
+                        },
+                        {"op": "const", "args": [], "value": -320829049.8153338, "units": "J/m^3"}
+                       ]
+                      }
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": -3496574.182, "units": "J/m^3/ppt"},
+                        "S"
+                       ]
+                      },
+                      {
+                       "op": "*",
+                       "args": [
+                        18.48,
+                        "qin"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 5654933592.0, "units": "J/m^3"}
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": -861389.8574660001, "units": "J/m^3/ppt"},
+                        "S"
+                       ]
+                      },
+                      {
+                       "op": "*",
+                       "args": [
+                        10.3085,
+                        "qin"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 3275582777.866, "units": "J/m^3"}
+                     ]
+                    }
+                   ]
+                  },
+                  2
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  4.0,
+                  {
+                   "op": "ifelse",
+                   "args": [
+                    {
+                     "op": ">",
+                     "args": [
+                      "qin",
+                      {
+                       "op": "+",
+                       "args": [
+                        {
+                         "op": "*",
+                         "args": [
+                          {"op": "const", "args": [], "value": 2341133.53765668, "units": "J/m^3/ppt"},
+                          "S"
+                         ]
+                        },
+                        {"op": "const", "args": [], "value": -320829049.8153338, "units": "J/m^3"}
+                       ]
+                      }
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": -39886.4818968, "units": "J/m^3/degC/ppt"},
+                        "S"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": -35879596.1832, "units": "J/m^3/degC"}
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": -22249.447977985, "units": "J/m^3/degC/ppt"},
+                        "S"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": -20014329.938015003, "units": "J/m^3/degC"}
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "ifelse",
+                   "args": [
+                    {
+                     "op": ">",
+                     "args": [
+                      "qin",
+                      {
+                       "op": "+",
+                       "args": [
+                        {
+                         "op": "*",
+                         "args": [
+                          {"op": "const", "args": [], "value": 2341133.53765668, "units": "J/m^3/ppt"},
+                          "S"
+                         ]
+                        },
+                        {"op": "const", "args": [], "value": -320829049.8153338, "units": "J/m^3"}
+                       ]
+                      }
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3*degC/ppt"},
+                        "S"
+                       ]
+                      },
+                      {
+                       "op": "*",
+                       "args": [
+                        0.0,
+                        "qin"
+                       ]
+                      },
+                      0.0
+                     ]
+                    },
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": 325097480.96, "units": "J/m^3*degC/ppt"},
+                        "S"
+                       ]
+                      },
+                      {
+                       "op": "*",
+                       "args": [
+                        {"op": "const", "args": [], "value": -62.4, "units": "degC"},
+                        "qin"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": -19094580960.0, "units": "J/m^3*degC"}
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {"op": "const", "args": [], "value": 1e-11, "units": "J^2/m^6"}
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          2.0,
+          {
+           "op": "ifelse",
+           "args": [
+            {
+             "op": ">",
+             "args": [
+              "qin",
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": 2341133.53765668, "units": "J/m^3/ppt"},
+                  "S"
+                 ]
+                },
+                {"op": "const", "args": [], "value": -320829049.8153338, "units": "J/m^3"}
+               ]
+              }
+             ]
+            },
+            {
+             "op": "+",
+             "args": [
+              {
+               "op": "*",
+               "args": [
+                {"op": "const", "args": [], "value": -39886.4818968, "units": "J/m^3/degC/ppt"},
+                "S"
+               ]
+              },
+              {"op": "const", "args": [], "value": -35879596.1832, "units": "J/m^3/degC"}
+             ]
+            },
+            {
+             "op": "+",
+             "args": [
+              {
+               "op": "*",
+               "args": [
+                {"op": "const", "args": [], "value": -22249.447977985, "units": "J/m^3/degC/ppt"},
+                "S"
+               ]
+              },
+              {"op": "const", "args": [], "value": -20014329.938015003, "units": "J/m^3/degC"}
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "temperature_mush_liquid_fraction": {
+    "description": "Temperature of the mush from enthalpy and liquid fraction (temperature_mush_liquid_fraction, icepack_mushy_physics.F90:457-471): zTin = (zqin + (1-phi)*rhoi*Lfresh)/(phi*(cp_ocn*rhow - cp_ice*rhoi) + rhoi*cp_ice) (F90:468-469), the linear inverse of enthalpy_mush_liquid_fraction. Constants as in the D-class CESM-coupled run (nuopc-cap overrides, ice_comp_nuopc.F90:415-450; bugs.md #11; see file description).",
+    "params": ["qin", "phi"],
+    "body": {
+     "op": "/",
+     "args": [
+      {
+       "op": "+",
+       "args": [
+        "qin",
+        {
+         "op": "*",
+         "args": [
+          {
+           "op": "-",
+           "args": [
+            1.0,
+            "phi"
+           ]
+          },
+          306002900.0
+         ]
+        }
+       ]
+      },
+      {
+       "op": "+",
+       "args": [
+        {
+         "op": "*",
+         "args": [
+          "phi",
+          2158359.41
+         ]
+        },
+        1941536.59
+       ]
+      }
+     ]
+    }
+   },
+   "ice_conductivity_mush": {
+    "description": "Mush heat conductivity (heat_conductivity, icepack_mushy_physics.F90:476-494): km = phi*(kb - ki) + ki with the liquid fraction phi = icepack_mushy_liquid_fraction(zTin, zSin) (F90:490-492), ki = 2.3 W/m/K the fresh-ice conductivity and kb = 0.5375 W/m/K the brine conductivity (F90:62-63). This is the ktherm = 2 law used by the mushy thermodynamics; the ktherm = 1 MU71/bubbly laws remain the ice_conductivity_mu71/ice_conductivity_bubbly templates.",
+    "params": ["T", "S"],
+    "body": {
+     "op": "+",
+     "args": [
+      {
+       "op": "*",
+       "args": [
+        {
+         "op": "apply_expression_template",
+         "args": [],
+         "name": "icepack_mushy_liquid_fraction",
+         "bindings": {
+          "T": "T",
+          "S": "S"
+         }
+        },
+        {
+         "op": "-",
+         "args": [
+          {"op": "const", "args": [], "value": 0.5375, "units": "W/m/K"},
+          {"op": "const", "args": [], "value": 2.3, "units": "W/m/K"}
+         ]
+        }
+       ]
+      },
+      {"op": "const", "args": [], "value": 2.3, "units": "W/m/K"}
+     ]
+    }
+   },
+   "dEdd_snow_fraction": {
+    "description": "Horizontal snow fraction of the dEdd shortwave scheme (shortwave_dEdd_set_snow, icepack_shortwave.F90:3448-3454): fs = 1 when the snow depth hs = vsno/aice >= hs_min, reduced to min(hs/hs0, 1) when hs0 > puny. hs_min = 1e-4 m (icepack_parameters.F90:123); hs0 is the namelist transition depth (default 0.03 m F90:345, overridden to 0.0 in the D-class run, which leaves fs in {0, 1}); puny = 1e-11 (F90:36).",
+    "params": ["aice", "vsno", "hs0"],
+    "body": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": ">=",
+       "args": [
+        {
+         "op": "/",
+         "args": [
+          "vsno",
+          "aice"
+         ]
+        },
+        {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+       ]
+      },
+      {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": ">",
+         "args": [
+          "hs0",
+          {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+         ]
+        },
+        {
+         "op": "min",
+         "args": [
+          {
+           "op": "/",
+           "args": [
+            {
+             "op": "/",
+             "args": [
+              "vsno",
+              "aice"
+             ]
+            },
+            "hs0"
+           ]
+          },
+          1.0
+         ]
+        },
+        1.0
+       ]
+      },
+      0.0
+     ]
+    }
+   },
+   "dEdd_effective_pond": {
+    "description": "Effective pond area of the dEdd shortwave scheme (shortwave_dEdd_set_eff, icepack_shortwave.F90:3495-3637) for the sea-level pond tracer (tr_pond_sealvl, apondn = apndn) under snwredist = 'none' (the bulk-redistribution branch F90:3554-3578 is not exercised in the D-class run): apeffn = fpn after (i) the meltwater-use reduction fpn = (1 - ffracn)*apondn (F90:3603), (ii) the pond-ice snow taper asnow = min(spn/hs1, 1) applied only when dhs > puny and spn >= puny (F90:3606-3609; hs1 = 0.03 F90:346 is always > puny), (iii) the snow-infiltration branch (F90:3611-3628): rp = rhofresh*hpndn/(rhofresh*hpndn + rhos*hs), which zeroes the pond for rp < p15, otherwise remaps the pond depth by the retained-meltwater fraction hmx = hs*(rhofresh - rhos)/rhofresh with tmp = 1 for hpndn >= hmx, and (iv) the thin-pond mask fpn = 0 for hpn < hpmin (F90:3630-3635). The dhs input is the persistent snow-depth-difference tracer of F90:3591 with the initialization F90:3586-3590: dhs = hs - fsnow*dt when the lid ipn = apondn*ipndn exists and dhs < puny and fsnow*dt > hs_min (F90:3586-3588), spn = hs - dhs (F90:3589), and dhs reset to 0 when ipn*spn < puny (F90:3590); the taper condition uses the possibly-reset dhs with the pre-reset spn, exactly as in the Fortran. Constants: rhofresh = 1000, rhos = 330 (icepack_parameters.F90:66, 61), p15 = 0.15 (F90:59), hpmin = 0.005 (F90:242), hs1 = 0.03 (F90:346), hs_min = 1e-4 (F90:123), puny = 1e-11 (F90:36).",
+    "params": ["aicen", "vsnon", "apondn", "hpndn", "ipndn", "ffracn", "fsnow", "dt", "dhsn"],
+    "body": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": "<",
+       "args": [
+        {
+         "op": "ifelse",
+         "args": [
+          {
+           "op": ">",
+           "args": [
+            "hpndn",
+            {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+           ]
+          },
+          {
+           "op": "ifelse",
+           "args": [
+            {
+             "op": "<",
+             "args": [
+              {
+               "op": "/",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                  "hpndn"
+                 ]
+                },
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                    "hpndn"
+                   ]
+                  },
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                    {
+                     "op": "/",
+                     "args": [
+                      "vsnon",
+                      "aicen"
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              0.15
+             ]
+            },
+            0.0,
+            {
+             "op": "*",
+             "args": [
+              {
+               "op": "/",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                    "hpndn"
+                   ]
+                  },
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                    {
+                     "op": "/",
+                     "args": [
+                      "vsnon",
+                      "aicen"
+                     ]
+                    },
+                    {
+                     "op": "ifelse",
+                     "args": [
+                      {
+                       "op": ">=",
+                       "args": [
+                        "hpndn",
+                        {
+                         "op": "*",
+                         "args": [
+                          {
+                           "op": "/",
+                           "args": [
+                            "vsnon",
+                            "aicen"
+                           ]
+                          },
+                          0.67
+                         ]
+                        }
+                       ]
+                      },
+                      1.0,
+                      0.0
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                {
+                 "op": "-",
+                 "args": [
+                  {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                  {
+                   "op": "*",
+                   "args": [
+                    {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                    {
+                     "op": "-",
+                     "args": [
+                      1.0,
+                      {
+                       "op": "ifelse",
+                       "args": [
+                        {
+                         "op": ">=",
+                         "args": [
+                          "hpndn",
+                          {
+                           "op": "*",
+                           "args": [
+                            {
+                             "op": "/",
+                             "args": [
+                              "vsnon",
+                              "aicen"
+                             ]
+                            },
+                            0.67
+                           ]
+                          }
+                         ]
+                        },
+                        1.0,
+                        0.0
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "ifelse",
+               "args": [
+                {
+                 "op": ">=",
+                 "args": [
+                  "hpndn",
+                  {
+                   "op": "*",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      "vsnon",
+                      "aicen"
+                     ]
+                    },
+                    0.67
+                   ]
+                  }
+                 ]
+                },
+                1.0,
+                0.0
+               ]
+              }
+             ]
+            }
+           ]
+          },
+          "hpndn"
+         ]
+        },
+        {"op": "const", "args": [], "value": 0.005, "units": "m"}
+       ]
+      },
+      0.0,
+      {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": ">",
+         "args": [
+          "hpndn",
+          {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+         ]
+        },
+        {
+         "op": "ifelse",
+         "args": [
+          {
+           "op": "<",
+           "args": [
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "*",
+               "args": [
+                {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                "hpndn"
+               ]
+              },
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                  "hpndn"
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                  {
+                   "op": "/",
+                   "args": [
+                    "vsnon",
+                    "aicen"
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            0.15
+           ]
+          },
+          0.0,
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "*",
+             "args": [
+              {
+               "op": "-",
+               "args": [
+                1.0,
+                {
+                 "op": "ifelse",
+                 "args": [
+                  {
+                   "op": "and",
+                   "args": [
+                    {
+                     "op": ">",
+                     "args": [
+                      {
+                       "op": "ifelse",
+                       "args": [
+                        {
+                         "op": "<",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            {
+                             "op": "*",
+                             "args": [
+                              "apondn",
+                              "ipndn"
+                             ]
+                            },
+                            {
+                             "op": "-",
+                             "args": [
+                              {
+                               "op": "/",
+                               "args": [
+                                "vsnon",
+                                "aicen"
+                               ]
+                              },
+                              {
+                               "op": "ifelse",
+                               "args": [
+                                {
+                                 "op": "and",
+                                 "args": [
+                                  {
+                                   "op": ">",
+                                   "args": [
+                                    {
+                                     "op": "*",
+                                     "args": [
+                                      "apondn",
+                                      "ipndn"
+                                     ]
+                                    },
+                                    {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                                   ]
+                                  },
+                                  {
+                                   "op": "and",
+                                   "args": [
+                                    {
+                                     "op": "<",
+                                     "args": [
+                                      "dhsn",
+                                      {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                                     ]
+                                    },
+                                    {
+                                     "op": ">",
+                                     "args": [
+                                      {
+                                       "op": "*",
+                                       "args": [
+                                        "fsnow",
+                                        "dt"
+                                       ]
+                                      },
+                                      {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                                     ]
+                                    }
+                                   ]
+                                  }
+                                 ]
+                                },
+                                {
+                                 "op": "-",
+                                 "args": [
+                                  {
+                                   "op": "/",
+                                   "args": [
+                                    "vsnon",
+                                    "aicen"
+                                   ]
+                                  },
+                                  {
+                                   "op": "*",
+                                   "args": [
+                                    "fsnow",
+                                    "dt"
+                                   ]
+                                  }
+                                 ]
+                                },
+                                "dhsn"
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 1e-11, "units": "m^2"}
+                         ]
+                        },
+                        0.0,
+                        {
+                         "op": "ifelse",
+                         "args": [
+                          {
+                           "op": "and",
+                           "args": [
+                            {
+                             "op": ">",
+                             "args": [
+                              {
+                               "op": "*",
+                               "args": [
+                                "apondn",
+                                "ipndn"
+                               ]
+                              },
+                              {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                             ]
+                            },
+                            {
+                             "op": "and",
+                             "args": [
+                              {
+                               "op": "<",
+                               "args": [
+                                "dhsn",
+                                {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                               ]
+                              },
+                              {
+                               "op": ">",
+                               "args": [
+                                {
+                                 "op": "*",
+                                 "args": [
+                                  "fsnow",
+                                  "dt"
+                                 ]
+                                },
+                                {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          },
+                          {
+                           "op": "-",
+                           "args": [
+                            {
+                             "op": "/",
+                             "args": [
+                              "vsnon",
+                              "aicen"
+                             ]
+                            },
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            }
+                           ]
+                          },
+                          "dhsn"
+                         ]
+                        }
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                     ]
+                    },
+                    {
+                     "op": ">=",
+                     "args": [
+                      {
+                       "op": "-",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          "vsnon",
+                          "aicen"
+                         ]
+                        },
+                        {
+                         "op": "ifelse",
+                         "args": [
+                          {
+                           "op": "and",
+                           "args": [
+                            {
+                             "op": ">",
+                             "args": [
+                              {
+                               "op": "*",
+                               "args": [
+                                "apondn",
+                                "ipndn"
+                               ]
+                              },
+                              {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                             ]
+                            },
+                            {
+                             "op": "and",
+                             "args": [
+                              {
+                               "op": "<",
+                               "args": [
+                                "dhsn",
+                                {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                               ]
+                              },
+                              {
+                               "op": ">",
+                               "args": [
+                                {
+                                 "op": "*",
+                                 "args": [
+                                  "fsnow",
+                                  "dt"
+                                 ]
+                                },
+                                {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          },
+                          {
+                           "op": "-",
+                           "args": [
+                            {
+                             "op": "/",
+                             "args": [
+                              "vsnon",
+                              "aicen"
+                             ]
+                            },
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            }
+                           ]
+                          },
+                          "dhsn"
+                         ]
+                        }
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "min",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      {
+                       "op": "-",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          "vsnon",
+                          "aicen"
+                         ]
+                        },
+                        {
+                         "op": "ifelse",
+                         "args": [
+                          {
+                           "op": "and",
+                           "args": [
+                            {
+                             "op": ">",
+                             "args": [
+                              {
+                               "op": "*",
+                               "args": [
+                                "apondn",
+                                "ipndn"
+                               ]
+                              },
+                              {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                             ]
+                            },
+                            {
+                             "op": "and",
+                             "args": [
+                              {
+                               "op": "<",
+                               "args": [
+                                "dhsn",
+                                {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                               ]
+                              },
+                              {
+                               "op": ">",
+                               "args": [
+                                {
+                                 "op": "*",
+                                 "args": [
+                                  "fsnow",
+                                  "dt"
+                                 ]
+                                },
+                                {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                               ]
+                              }
+                             ]
+                            }
+                           ]
+                          },
+                          {
+                           "op": "-",
+                           "args": [
+                            {
+                             "op": "/",
+                             "args": [
+                              "vsnon",
+                              "aicen"
+                             ]
+                            },
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            }
+                           ]
+                          },
+                          "dhsn"
+                         ]
+                        }
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 0.03, "units": "m"}
+                     ]
+                    },
+                    1.0
+                   ]
+                  },
+                  0.0
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "-",
+               "args": [
+                1.0,
+                "ffracn"
+               ]
+              },
+              "apondn"
+             ]
+            },
+            {
+             "op": "ifelse",
+             "args": [
+              {
+               "op": ">=",
+               "args": [
+                "hpndn",
+                {
+                 "op": "*",
+                 "args": [
+                  {
+                   "op": "/",
+                   "args": [
+                    "vsnon",
+                    "aicen"
+                   ]
+                  },
+                  0.67
+                 ]
+                }
+               ]
+              },
+              1.0,
+              0.0
+             ]
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "op": "*",
+         "args": [
+          {
+           "op": "-",
+           "args": [
+            1.0,
+            {
+             "op": "ifelse",
+             "args": [
+              {
+               "op": "and",
+               "args": [
+                {
+                 "op": ">",
+                 "args": [
+                  {
+                   "op": "ifelse",
+                   "args": [
+                    {
+                     "op": "<",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        {
+                         "op": "*",
+                         "args": [
+                          "apondn",
+                          "ipndn"
+                         ]
+                        },
+                        {
+                         "op": "-",
+                         "args": [
+                          {
+                           "op": "/",
+                           "args": [
+                            "vsnon",
+                            "aicen"
+                           ]
+                          },
+                          {
+                           "op": "ifelse",
+                           "args": [
+                            {
+                             "op": "and",
+                             "args": [
+                              {
+                               "op": ">",
+                               "args": [
+                                {
+                                 "op": "*",
+                                 "args": [
+                                  "apondn",
+                                  "ipndn"
+                                 ]
+                                },
+                                {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                               ]
+                              },
+                              {
+                               "op": "and",
+                               "args": [
+                                {
+                                 "op": "<",
+                                 "args": [
+                                  "dhsn",
+                                  {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                                 ]
+                                },
+                                {
+                                 "op": ">",
+                                 "args": [
+                                  {
+                                   "op": "*",
+                                   "args": [
+                                    "fsnow",
+                                    "dt"
+                                   ]
+                                  },
+                                  {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                                 ]
+                                }
+                               ]
+                              }
+                             ]
+                            },
+                            {
+                             "op": "-",
+                             "args": [
+                              {
+                               "op": "/",
+                               "args": [
+                                "vsnon",
+                                "aicen"
+                               ]
+                              },
+                              {
+                               "op": "*",
+                               "args": [
+                                "fsnow",
+                                "dt"
+                               ]
+                              }
+                             ]
+                            },
+                            "dhsn"
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 1e-11, "units": "m^2"}
+                     ]
+                    },
+                    0.0,
+                    {
+                     "op": "ifelse",
+                     "args": [
+                      {
+                       "op": "and",
+                       "args": [
+                        {
+                         "op": ">",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            "apondn",
+                            "ipndn"
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                         ]
+                        },
+                        {
+                         "op": "and",
+                         "args": [
+                          {
+                           "op": "<",
+                           "args": [
+                            "dhsn",
+                            {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                           ]
+                          },
+                          {
+                           "op": ">",
+                           "args": [
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            },
+                            {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      },
+                      {
+                       "op": "-",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          "vsnon",
+                          "aicen"
+                         ]
+                        },
+                        {
+                         "op": "*",
+                         "args": [
+                          "fsnow",
+                          "dt"
+                         ]
+                        }
+                       ]
+                      },
+                      "dhsn"
+                     ]
+                    }
+                   ]
+                  },
+                  {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                 ]
+                },
+                {
+                 "op": ">=",
+                 "args": [
+                  {
+                   "op": "-",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      "vsnon",
+                      "aicen"
+                     ]
+                    },
+                    {
+                     "op": "ifelse",
+                     "args": [
+                      {
+                       "op": "and",
+                       "args": [
+                        {
+                         "op": ">",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            "apondn",
+                            "ipndn"
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                         ]
+                        },
+                        {
+                         "op": "and",
+                         "args": [
+                          {
+                           "op": "<",
+                           "args": [
+                            "dhsn",
+                            {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                           ]
+                          },
+                          {
+                           "op": ">",
+                           "args": [
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            },
+                            {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      },
+                      {
+                       "op": "-",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          "vsnon",
+                          "aicen"
+                         ]
+                        },
+                        {
+                         "op": "*",
+                         "args": [
+                          "fsnow",
+                          "dt"
+                         ]
+                        }
+                       ]
+                      },
+                      "dhsn"
+                     ]
+                    }
+                   ]
+                  },
+                  {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                 ]
+                }
+               ]
+              },
+              {
+               "op": "min",
+               "args": [
+                {
+                 "op": "/",
+                 "args": [
+                  {
+                   "op": "-",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      "vsnon",
+                      "aicen"
+                     ]
+                    },
+                    {
+                     "op": "ifelse",
+                     "args": [
+                      {
+                       "op": "and",
+                       "args": [
+                        {
+                         "op": ">",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            "apondn",
+                            "ipndn"
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                         ]
+                        },
+                        {
+                         "op": "and",
+                         "args": [
+                          {
+                           "op": "<",
+                           "args": [
+                            "dhsn",
+                            {"op": "const", "args": [], "value": 1e-11, "units": "m"}
+                           ]
+                          },
+                          {
+                           "op": ">",
+                           "args": [
+                            {
+                             "op": "*",
+                             "args": [
+                              "fsnow",
+                              "dt"
+                             ]
+                            },
+                            {"op": "const", "args": [], "value": 0.0001, "units": "m"}
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      },
+                      {
+                       "op": "-",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          "vsnon",
+                          "aicen"
+                         ]
+                        },
+                        {
+                         "op": "*",
+                         "args": [
+                          "fsnow",
+                          "dt"
+                         ]
+                        }
+                       ]
+                      },
+                      "dhsn"
+                     ]
+                    }
+                   ]
+                  },
+                  {"op": "const", "args": [], "value": 0.03, "units": "m"}
+                 ]
+                },
+                1.0
+               ]
+              },
+              0.0
+             ]
+            }
+           ]
+          },
+          {
+           "op": "-",
+           "args": [
+            1.0,
+            "ffracn"
+           ]
+          },
+          "apondn"
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "shortwave_band_weights": {
+    "description": "Broadband albedo of the dEdd scheme from the four band albedos (the history albedos albice/albsno/albpnd of shortwave_dEdd, icepack_shortwave.F90:1496-1498, 1544-1546, 1583-1585): al = awtvdr*alvdr + awtidr*alidr + awtvdf*alvdf + awtidf*alidf with the band weights awtvdr = 0.00318 (visible, direct), awtidr = 0.00182 (near-IR, direct), awtvdf = 0.63282 (visible, diffuse), awtidf = 0.36218 (near-IR, diffuse) (icepack_parameters.F90:218-221).",
+    "params": ["alvdr", "alidr", "alvdf", "alidf"],
+    "body": {
+     "op": "+",
+     "args": [
+      {
+       "op": "*",
+       "args": [
+        0.00318,
+        "alvdr"
+       ]
+      },
+      {
+       "op": "*",
+       "args": [
+        0.00182,
+        "alidr"
+       ]
+      },
+      {
+       "op": "*",
+       "args": [
+        0.63282,
+        "alvdf"
+       ]
+      },
+      {
+       "op": "*",
+       "args": [
+        0.36218,
+        "alidf"
+       ]
+      }
+     ]
+    }
+   },
+   "meltpond_sealvl_dvn": {
+    "description": "Change in the sea-level melt-pond volume of a category, 'hlid' pond option (compute_ponds_sealvl, icepack_meltpond_sealvl.F90:50-265): dvpondn = (meltt*rhoi + melts*rhos + frain*dt)/rhofresh (F90:157, the use_smliq_pnd = false branch) corrected by the refrozen-lid change dvpondn = dvpondn - dhlid*apnd*rhoi/rhofresh (F90:195). Under frzpnd = 'hlid' the lid starts at the existing lid thickness hlid = ipnd (F90:171): freeze-up (dvpondn = 0) grows the lid with the Stefan law bdt = -2*Ts*kice*dt/(rhoi*Lfresh) for Ts = Tair - Tffresh < 0, dhlid = 0.5*sqrt(bdt) over open water replaced by 0.5*bdt/hlid for extant ice (F90:176-178), capped by min(dhlid, hpnd*rhofresh/rhoi) (F90:179); melting (dvpondn != 0) shrinks the lid with dhlid = max(fsurfn*dt/(rhoi*Lfresh), 0) then dhlid = -min(dhlid, hlid) (F90:185-187). kice = 2.03 (icepack_parameters.F90:88), rhoi = 917, rhos = 330, rhofresh = 1000, Lfresh = 333700 (the nuopc-cap value, ice_comp_nuopc.F90:415-450; bugs.md #11), Tffresh = 273.15 (F90:62, 61, 66, 74, 82). The melt-branch ffrac computation (F90:188-193) does not feed dvpondn and the hypsometry/freeboard continuation with the tracer update apnd/hpnd/ipnd = hlid (F90:205-262) is done by the caller, so both are documented but not part of this template; following the meltpond_cesm_dvn convention, meltt/melts are supplied as continuous rates and the output is the per-step change (diagnostic, not pinned by the stage-2 tests).",
+    "params": ["meltt", "melts", "frain", "dt", "Tair", "fsurfn", "aicen", "vicen", "vsnon", "apnd", "hpnd", "ipnd", "dhsn"],
+    "body": {
+     "op": "ifelse",
+     "args": [
+      {
+       "op": ">",
+       "args": [
+        "aicen",
+        1e-11
+       ]
+      },
+      {
+       "op": "ifelse",
+       "args": [
+        {
+         "op": "<",
+         "args": [
+          {
+           "op": "/",
+           "args": [
+            "vicen",
+            "aicen"
+           ]
+          },
+          {"op": "const", "args": [], "value": 0.01, "units": "m"}
+         ]
+        },
+        0.0,
+        {
+         "op": "-",
+         "args": [
+          {
+           "op": "+",
+           "args": [
+            {
+             "op": "/",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "*",
+                 "args": [
+                  "meltt",
+                  {"op": "const", "args": [], "value": 917.0, "units": "kg/m^3"},
+                  "dt"
+                 ]
+                },
+                {
+                 "op": "*",
+                 "args": [
+                  "melts",
+                  {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                  "dt"
+                 ]
+                }
+               ]
+              },
+              {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"}
+             ]
+            },
+            {
+             "op": "*",
+             "args": [
+              "frain",
+              "dt"
+             ]
+            }
+           ]
+          },
+          {
+           "op": "*",
+           "args": [
+            {
+             "op": "ifelse",
+             "args": [
+              {
+               "op": "+",
+               "args": [
+                {
+                 "op": "+",
+                 "args": [
+                  {
+                   "op": "/",
+                   "args": [
+                    {
+                     "op": "+",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        "meltt",
+                        {"op": "const", "args": [], "value": 917.0, "units": "kg/m^3"},
+                        "dt"
+                       ]
+                      },
+                      {
+                       "op": "*",
+                       "args": [
+                        "melts",
+                        {"op": "const", "args": [], "value": 330.0, "units": "kg/m^3"},
+                        "dt"
+                       ]
+                      }
+                     ]
+                    },
+                    {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"}
+                   ]
+                  },
+                  {
+                   "op": "*",
+                   "args": [
+                    "frain",
+                    "dt"
+                   ]
+                  }
+                 ]
+                },
+                0.0
+               ]
+              },
+              {
+               "op": "ifelse",
+               "args": [
+                {
+                 "op": "<",
+                 "args": [
+                  {
+                   "op": "-",
+                   "args": [
+                    "Tair",
+                    {"op": "const", "args": [], "value": 273.15, "units": "K"}
+                   ]
+                  },
+                  0.0
+                 ]
+                },
+                {
+                 "op": "min",
+                 "args": [
+                  {
+                   "op": "ifelse",
+                   "args": [
+                    {
+                     "op": ">",
+                     "args": [
+                      "ipnd",
+                      {
+                       "op": "*",
+                       "args": [
+                        0.5,
+                        {
+                         "op": "sqrt",
+                         "args": [
+                          {
+                           "op": "/",
+                           "args": [
+                            {
+                             "op": "*",
+                             "args": [
+                              {
+                               "op": "-",
+                               "args": [
+                                {
+                                 "op": "-",
+                                 "args": [
+                                  "Tair",
+                                  {"op": "const", "args": [], "value": 273.15, "units": "K"}
+                                 ]
+                                }
+                               ]
+                              },
+                              2.0,
+                              {"op": "const", "args": [], "value": 2.03, "units": "W/m/K"},
+                              "dt"
+                             ]
+                            },
+                            {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3"}
+                           ]
+                          }
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    },
+                    {
+                     "op": "/",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        0.5,
+                        {
+                         "op": "/",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            {
+                             "op": "-",
+                             "args": [
+                              {
+                               "op": "-",
+                               "args": [
+                                "Tair",
+                                {"op": "const", "args": [], "value": 273.15, "units": "K"}
+                               ]
+                              }
+                             ]
+                            },
+                            2.0,
+                            {"op": "const", "args": [], "value": 2.03, "units": "W/m/K"},
+                            "dt"
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3"}
+                         ]
+                        }
+                       ]
+                      },
+                      "ipnd"
+                     ]
+                    },
+                    {
+                     "op": "*",
+                     "args": [
+                      0.5,
+                      {
+                       "op": "sqrt",
+                       "args": [
+                        {
+                         "op": "/",
+                         "args": [
+                          {
+                           "op": "*",
+                           "args": [
+                            {
+                             "op": "-",
+                             "args": [
+                              {
+                               "op": "-",
+                               "args": [
+                                "Tair",
+                                {"op": "const", "args": [], "value": 273.15, "units": "K"}
+                               ]
+                              }
+                             ]
+                            },
+                            2.0,
+                            {"op": "const", "args": [], "value": 2.03, "units": "W/m/K"},
+                            "dt"
+                           ]
+                          },
+                          {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3"}
+                         ]
+                        }
+                       ]
+                      }
+                     ]
+                    }
+                   ]
+                  },
+                  {
+                   "op": "*",
+                   "args": [
+                    "hpnd",
+                    {
+                     "op": "/",
+                     "args": [
+                      {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"},
+                      {"op": "const", "args": [], "value": 917.0, "units": "kg/m^3"}
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                },
+                0.0
+               ]
+              },
+              {
+               "op": "-",
+               "args": [
+                {
+                 "op": "min",
+                 "args": [
+                  {
+                   "op": "max",
+                   "args": [
+                    {
+                     "op": "/",
+                     "args": [
+                      {
+                       "op": "*",
+                       "args": [
+                        "fsurfn",
+                        "dt"
+                       ]
+                      },
+                      {"op": "const", "args": [], "value": 306002900.0, "units": "J/m^3"}
+                     ]
+                    },
+                    0.0
+                   ]
+                  },
+                  "ipnd"
+                 ]
+                }
+               ]
+              }
+             ]
+            },
+            "apnd",
+            {
+             "op": "/",
+             "args": [
+              {"op": "const", "args": [], "value": 917.0, "units": "kg/m^3"},
+              {"op": "const", "args": [], "value": 1000.0, "units": "kg/m^3"}
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      0.0
+     ]
+    }
+   }
+  }
+ }
