@@ -58,7 +58,8 @@ derivations of `datm_datamode_clmncep_advance` (F90:328-487):
 tbot units detector/clamp, wind split, qsat-capped specific humidity
 (esat polynomials), density, pressure zero-fill, the shortwave
 direct/diffuse split, the rain/snow ramp, the swnet albedo weighting, and
-the topo/z/lwdn fallbacks. `GSWP3Files` pins the netcdf reader path.
+the topo/z/lwdn fallbacks. `GSWP3Files` declares the netcdf-reader field
+wiring (source keys, file variables, shapes, selects).
 
 ## Data access (public NCAR archive)
 
