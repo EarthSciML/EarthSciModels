@@ -25,14 +25,15 @@ and the boundary/derivation tables in
 | file | content |
 |---|---|
 | `cdeps_templates.esm` | expression-template library of the shared pointwise laws: the esat water/ice polynomials (`esat_poly_water`/`esat_poly_ice` + the phase-selecting `esat`, datm_datamode_clmncep_mod.F90:545-586), `qsat`, `vapor_pressure`, `density` (RDAIR = 287.0423113650487), the cam3_5_55 `ratio_rvrf_nir`/`ratio_rvrf_vis` shortwave polynomials, `rain_snow_frac`, `wind_split` |
-| `cdeps_datm_gswp3.esm` | the component: `data_sources` (Solar/Precip/TPQW/topo), the `Streams` interpolation model, the `Clmncep` datamode transformation model, and the `GSWP3Files` netcdf-reader model; tests from the dump rows |
+| `cdeps_datm_gswp3.esm` | the component: `data_sources` (Solar/Precip/TPQW/topo on the public NCAR archive), the `Streams` interpolation model, the `Clmncep` datamode transformation model, and the `GSWP3Files` netcdf-reader wiring model; tests from the dump rows (51 assertions) |
 
 ## Model structure
 
 ```
-GSWP3v1 netCDF (0.5°, 3-hourly; topo 0.9x1.25°, static)
-   │  esm netcdf reader (metadata.esio_format = "netcdf", CONST sources,
-   │  time axis at "all", lat/lon fixed, extent -> N_REC metaparameter)
+GSWP3v1 netCDF on the NCAR inputdata server (0.5°, 3-hourly; topo 0.9x1.25°, static)
+   │  esm netcdf reader (metadata.esio_format = "netcdf", https url_templates
+   │  with {date:%Y-%m} placeholders, temporal blocks, time axis at "all",
+   │  lat/lon fixed, extent -> N_REC metaparameter)
    ▼
 GSWP3Files.*  (raw record values, shaped over index_sets.record)
    │  [the bilinear spatial map to the model grid is out of scope for
@@ -59,25 +60,50 @@ tbot units detector/clamp, wind split, qsat-capped specific humidity
 direct/diffuse split, the rain/snow ramp, the swnet albedo weighting, and
 the topo/z/lwdn fallbacks. `GSWP3Files` pins the netcdf reader path.
 
+## Data access (public NCAR archive)
+
+All four `data_sources` point at the **public NCAR CESM inputdata server**
+(`https://svn-ccsm-inputdata.cgd.ucar.edu/trunk/inputdata/atm/datm7/`), not
+at cluster-local paths, so anyone can load and consume the component. The
+three 3-hourly streams (Solar, Precip, TPQW) use the server's own monthly
+file naming with a `{date:%Y-%m}` placeholder
+(`atm_forcing.datm7.GSWP3.0.5d.v1.c170516/<Stream>/clmforc.GSWP3.c2011.0.5x0.5.<Solr|Prec|TPQWL>.{date:%Y-%m}.nc`),
+with `temporal.start = 1901-01-01`, `temporal.end = 2014-12-31`,
+`file_period = P1M`, `frequency = PT3H`, `records_per_file = 248` and
+`time_variable = "time"` — the exact holdings verified with `curl -sI`
+(HTTP 200 for every stream, 1901-01 through 2014-12; the topo file
+`topo_forcing/topodata_0.9x1.25_USGS_070110_stream_c151201.nc` is a single
+static file, `kind: static`, no `temporal` block). Each entry carries a
+`reference` block: Kim (2017), doi:10.20783/DIAS.501, and the archive URL.
+The 1991-01 files are the ones the reference run reads on 2000-01-01 via
+`taxmode=cycle, year_align=1991`.
+
 ## The data_sources recipe (esm 0.7.0 CLI, esio enabled)
 
-The netcdf reader is reached with **CONST** sources (no `temporal` block —
-DISCRETE sources fail the static checks in this CLI): `metadata.esio_format
-= "netcdf"`, a `file://` `url_template` (the 1991-01 GSWP3 files, which the
-reference run cycles on 2000-01-01 via `taxmode=cycle, year_align=1991`),
+The netcdf reader is reached through `metadata.esio_format = "netcdf"`,
 `select.axes` = `["all", {fixed: ilat}, {fixed: ilon}]` (0-based indices;
 the time axis MUST stay "all" — record selection is the Provider's, a
 `fixed` time axis is a reader error), and `extent.metaparameter` binding
 the delivered record count to a document `metaparameters` entry so the
 `index_sets.record` interval (size = the metaparameter) sizes the shaped
 parameters. A model parameter then declares `shape: ["record"]` and
-`update: {kind: "data", source: <key>, from: {file_variable: <var>}}`;
-assertions address records 1-based via `coords: {record: k}`. Each source
-needs its OWN extent metaparameter — the topo file delivers 1 record while
-the 3-hourly files deliver 248, and sources sharing one metaparameter must
-agree on the count. The netcdf reader delivers the file's native float32
-values widened to float64; the expected values in the tests are the exact
-widenings.
+`update: {kind: "data", source: <key>, from: {file_variable: <var>}}`.
+Each source needs its OWN extent metaparameter — the topo file delivers 1
+record while the 3-hourly files deliver 248, and sources sharing one
+metaparameter must agree on the count. The netcdf reader delivers the
+file's native float32 values widened to float64.
+
+**Runner caveat (Rust CLI):** the CLI materializes every data-fed parameter
+at build — `esm test` runs extent discovery for `GSWP3Files.*` even though
+no test reads those parameters, so with the https url_templates it needs
+network access to the NCAR archive at test time (no network ⇒ every test
+in the document errors at compile with the transport error). `esm validate`
+is offline. This is a property of the CLI's build (all providers prepared
+up front), not of the document: the previous `file://` form had the same
+build path, it just read local files. `GSWP3Files` therefore carries no
+inline tests — the raw-record assertions were dropped in the portability
+change (see [Testing](#testing)) — and numeric reader checks are a
+downstream consumer concern with data access.
 
 ## Testing
 
@@ -98,13 +124,21 @@ checkout is needed).
   significant digit), plus synthetic branch tuples for the tbot units
   detector (+273.15), the 180 K floor, the pbot zero→pstd fill, and the
   qsat cap (esat(10 °C) = 1227.073698721729 Pa → qsat = 7.5672320e-3).
-- **GSWP3Files tests** (1 test, 7 assertions): raw record 1 and record
-  248 values of FSDS, PRECTmms, TBOT and the single TOPO record through
-  the netcdf reader at the fixed cells.
+- **GSWP3Files tests** (none): the raw-record reader test
+  (`netcdf_records`, 7 assertions on records 1/248 of FSDS, PRECTmms, TBOT
+  and the single TOPO record through the netcdf reader at the fixed cells)
+  was dropped in the portability change so the component loads and tests
+  without live external data — the same convention as the earthsci_data
+  components (empty `tests`). The field wiring (source keys, file
+  variables, shapes, selects) is unchanged and is exercised by consumers
+  with data access.
 
-Total: 58 assertions, all passing. The dumps they pin were verified
-solution-neutral (bit-identical restart files vs the reference
-`I2000Clm60Sp_f19` run) and law-exact on every row
+Total: 51 assertions (Streams 7, Clmncep 44), all passing on the Rust CLI
+when the data-fed `GSWP3Files` parameters can be materialized — locally
+this means the `file://` form, or network access to the NCAR archive for
+the https form (see [Data access](#data-access-public-ncar-archive)). The
+dumps they pin were verified solution-neutral (bit-identical restart files
+vs the reference `I2000Clm60Sp_f19` run) and law-exact on every row
 (`stage1/analysis/check_datm_neutral.py`, `check_datm_laws.py`).
 
 ## Deferred / notes
@@ -156,5 +190,5 @@ Pa/K^n and the ×100 hPa→Pa scale dimensionless; the ratio_rvrf
 polynomials expand in s = swdn/2 [W/m^2] with coefficients in (m^2/W)^n;
 the ea formula's 5.95e-5 carries 1/Pa so the emissivity reads
 dimensionless; the rain ramp 0.5 carries 1/K; stebol carries
-W/(m^2 K^4). The 58 assertions are unchanged (same laws, same expected
+W/(m^2 K^4). The 51 assertions are unchanged (same laws, same expected
 values).
