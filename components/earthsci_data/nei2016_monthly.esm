@@ -127,6 +127,15 @@
   },
   "models": {
     "NEI2016MonthlyEmis": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "bilinear",
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: EarthSciData.jl:src/nei2016monthly.jl:358\n\nAll 69 species are observed (algebraic) variables — upstream test: \"NEI has no state variables.\"\n\ngt-p3ep(lookup) resolution:\n  diurnal_itp(t, lon): local_hour = datetime.hour(t+t_ref+floor(lon_deg/15)*3600)+1\n    → interp.linear(DIURNAL_FACTORS, [1..24], local_hour)\n  diurnal_itp_NOx / diurnal_itp_ISOP: same with NOx/ISOP factor arrays\n  dayofweek_itp_CO/NOx(t, lon): iso_weekday = (floor(t_local/86400)+3) mod 7+1\n    → interp.linear(DayofWeekFactors, [1..7], iso_weekday)\n  delp_dry_surface_itp(lon, lat): interp.bilinear 94×49 bilinear from JLD2 file\n\nSpecies from 'mrggrid_withbeis_withrwc' sector (verified by reading NCF header):\n  69 species including NO, NO2, CO, FORM, ISOP, ACET, SO2, NH3, and PM components.\n\nUnit conversion (runtime): native IOAPI units → kg/m²/s\n  data *= to_unit(attrib['units'])  # e.g. tons/day → kg/s per cell\n  data /= (XCELL * YCELL)  # 12000 × 12000 = 1.44e8 m²\n  → conservative regridding to target domain\n\n--- esm-3nc.3 pure-IO split ---\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration nei2016_monthly.esm carried this coupler model, a co-located data_loaders.NEI2016 block (with the now-removed `spatial` and `regridding` sub-blocks), AND a top-level `coupling` block that fed the model's 69 flux_<SP> parameters from the loader via param_to_var (from NEI2016.<SP> to NEI2016MonthlyEmis.flux_<SP>). In the 0.7.0 pure-IO form the loader was the separate file components/earthsci_data/nei2016_monthly_loader.esm, referenced as the subsystem `NEI2016`; at esm 1.0.0 it is the `NEI2016` entry in THIS file's `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Each emission observed references its field directly as NEI2016.<SP>, so the 69 flux_<SP> parameters and the top-level coupling block are removed (no external consumer referenced flux_<SP> — couplings/earthscidata_spatial_params.esm only routes lat/lon/lev).\nReprojection (RFC §6 step 2): NEI2016's native grid.crs.projection is 'lambert_conformal', so the reprojection rule selected by convention is ESD reprojection/lambert_conformal.esm (esd-47z.2), parameterized by the loader crs parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97} on a sphere of radius R=6370997 m — the same rule as wrf with a different parameter set.\nRegridding (RFC §6 step 3 / §5.2): every NEI2016 species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block. function_tables.delp_dry_surface_table stays top-level in this model file (RFC §8 gotcha).\n\nInline tests emptied (matching the era5/wrf reference migrations): the pre-migration model carried 7 inline tests, but (a) tests 6–7 set parameter_overrides on the now-removed flux_<SP> parameters, and (b) all 7 exercise observeds built on the `interp.bilinear` op (delp_dry_surface, the diurnal/day-of-week factor tables), which the canonical ESS Python runner does not yet support ('Unsupported operation: interp.bilinear') — the same reason era5's interp.bilinear-based `P` ships with empty inline tests and a load-only gate. The 7 scenarios are preserved here as informational live tests (require real NEI2016 12US1 NetCDF and interp.bilinear runner support; not run in CI):\n  1. diurnal_factor_6am_utc: t=21600 s, lon=0 → local_hour=7, diurnal_factor=DIURNAL_FACTORS[7]=1.45 (datetime.hour extraction, 1-based indexing).\n  2. diurnal_factor_6pm_utc: t=64800 s, lon=0 → local_hour=19, diurnal_factor=DIURNAL_FACTORS[19]=0.65.\n  3. day_of_week_sunday: t=0, lon=0, t_ref=2016-05-01 (Sunday, ISO 7) → day_of_week=7, dayofweek_co=0.683, dayofweek_nox=0.784.\n  4. delp_dry_surface_neg94_44: lon=-94.375°, lat=44.5° → delp_dry_surface≈14.721285536474896 (rel 1e-4).\n  5. delp_dry_surface_neg88_42: lon=-88.125°, lat=42.0° → delp_dry_surface≈14.8498301901334 (rel 1e-4).\n  6. zero_emission_above_surface: lev=2 (above surface) → every species observed is 0 via the ifelse(lev<2, …, 0) gate.\n  7. co_emission_surface_scaling: lev=1, lon=0, lat=40°N, t=21600, NEI2016.CO=1e-8 kg/m²/s → CO = NEI2016.CO/Δz*scale*dayofweek_co(0.683)*diurnal_factor(1.45)/(g0_100*delp_dry_surface) ≈ 6.89e-11 1/s (was flux_CO before the pure-IO split; the loader field NEI2016.CO now supplies the regridded flux)."
       },
@@ -1703,10 +1712,11 @@
         {
           "lhs": "diurnal_factor",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1736,7 +1746,7 @@
                   0.45
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1766,17 +1776,19 @@
                   24
                 ]
               },
-              "local_hour"
-            ]
+              "x": "local_hour",
+              "n": 24
+            }
           }
         },
         {
           "lhs": "diurnal_factor_nox",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1806,7 +1818,7 @@
                   0.5741503
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1836,17 +1848,19 @@
                   24
                 ]
               },
-              "local_hour"
-            ]
+              "x": "local_hour",
+              "n": 24
+            }
           }
         },
         {
           "lhs": "diurnal_factor_isop",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1876,7 +1890,7 @@
                   0
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1906,17 +1920,19 @@
                   24
                 ]
               },
-              "local_hour"
-            ]
+              "x": "local_hour",
+              "n": 24
+            }
           }
         },
         {
           "lhs": "dayofweek_co",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1929,7 +1945,7 @@
                   0.683
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1942,17 +1958,19 @@
                   7
                 ]
               },
-              "day_of_week"
-            ]
+              "x": "day_of_week",
+              "n": 7
+            }
           }
         },
         {
           "lhs": "dayofweek_nox",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1965,7 +1983,7 @@
                   0.784
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -1978,17 +1996,19 @@
                   7
                 ]
               },
-              "day_of_week"
-            ]
+              "x": "day_of_week",
+              "n": 7
+            }
           }
         },
         {
           "lhs": "delp_dry_surface",
           "rhs": {
-            "op": "fn",
-            "name": "interp.bilinear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "bilinear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -6788,7 +6808,7 @@
                   ]
                 ]
               },
-              {
+              "axis_x": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -6888,7 +6908,7 @@
                   -66.875
                 ]
               },
-              {
+              "axis_y": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -6943,9 +6963,11 @@
                   49.0
                 ]
               },
-              "lon_deg",
-              "lat_deg"
-            ]
+              "x": "lon_deg",
+              "y": "lat_deg",
+              "nx": 94,
+              "ny": 49
+            }
           }
         },
         {
@@ -6984,10 +7006,11 @@
             "op": "+",
             "args": [
               {
-                "op": "fn",
-                "name": "interp.linear",
-                "args": [
-                  {
+                "op": "apply_expression_template",
+                "args": [],
+                "name": "linear",
+                "bindings": {
+                  "table": {
                     "op": "const",
                     "args": [],
                     "value": [
@@ -7005,7 +7028,7 @@
                       31
                     ]
                   },
-                  {
+                  "axis": {
                     "op": "const",
                     "args": [],
                     "value": [
@@ -7023,18 +7046,20 @@
                       12
                     ]
                   },
-                  "month_utc"
-                ]
+                  "x": "month_utc",
+                  "n": 12
+                }
               },
               {
                 "op": "*",
                 "args": [
                   "is_leap_year_utc",
                   {
-                    "op": "fn",
-                    "name": "interp.linear",
-                    "args": [
-                      {
+                    "op": "apply_expression_template",
+                    "args": [],
+                    "name": "linear",
+                    "bindings": {
+                      "table": {
                         "op": "const",
                         "args": [],
                         "value": [
@@ -7052,7 +7077,7 @@
                           0
                         ]
                       },
-                      {
+                      "axis": {
                         "op": "const",
                         "args": [],
                         "value": [
@@ -7070,8 +7095,9 @@
                           12
                         ]
                       },
-                      "month_utc"
-                    ]
+                      "x": "month_utc",
+                      "n": 12
+                    }
                   }
                 ]
               }
