@@ -1,0 +1,1887 @@
+---
+title: "BoundaryLayerMixingKC"
+slug: "boundarylayermixingkc"
+domains: ["environmental_transport"]
+component_types: ["model"]
+domain: "environmental_transport"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/environmental_transport/boundary_layer_mixing_kc.esm"
+reference: "Draxler and Rolph (2003). NOAA ARL-224."
+description: "Kantha-Clayson & Garratt boundary-layer turbulence parameterization for Lagrangian particle dispersion, as described in NOAA ARL-224 and the HYSPLIT documentation. Computes turbulent velocity standard deviations (sigmaw, sigma_u, sigma_v), Lagrangian vertical time scale (TL_v), Monin-Obukhov length (Lmo), and convective velocity scale (wstar) from surface-layer similarity theory; integrates stochastic Langevin equations for the turbulent velocity components (wprime, uprime_x, uprime_y) and the resulting Lagrangian particle position (lon, lat, lev). The upstream Julia source uses a single @brownians Bw term on all three velocity ODEs (gt-kuxo gap); this ESM migrates the deterministic drift equations only. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/BoundaryLayerMixingKC.jl:15."
+tags: ["environmental_transport", "model", "boundary_layer", "turbulence", "lagrangian", "hysplit", "monin_obukhov", "kantha_clayson", "sde"]
+---
+
+## Description
+
+Kantha-Clayson & Garratt boundary-layer turbulence parameterization for Lagrangian particle dispersion, as described in NOAA ARL-224 and the HYSPLIT documentation. Computes turbulent velocity standard deviations (sigmaw, sigma_u, sigma_v), Lagrangian vertical time scale (TL_v), Monin-Obukhov length (Lmo), and convective velocity scale (wstar) from surface-layer similarity theory; integrates stochastic Langevin equations for the turbulent velocity components (wprime, uprime_x, uprime_y) and the resulting Lagrangian particle position (lon, lat, lev). The upstream Julia source uses a single @brownians Bw term on all three velocity ODEs (gt-kuxo gap); this ESM migrates the deterministic drift equations only. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/BoundaryLayerMixingKC.jl:15.
+
+## Reference
+
+Draxler and Rolph (2003). NOAA ARL-224.
+
+_source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/BoundaryLayerMixingKC.jl:15
+
+Upstream BoundaryLayerMixingKC is an MTK @component implementing the Kantha-Clayson & Garratt turbulence closure for HYSPLIT Lagrangian transport. It declares:
+  - 9 @constants (kappa, one, m0, m1, ms0, kms0, kms1e_8, S, offset) used as MTK unit sentinels
+  - 26 @parameters (PBLH, USTAR, HFLUX, EFLUX, PS, T2M, QV2M, z2lev, TL_h, TL_v_min, TL_v_max, Rd, cp, Lv, g, R_inv, KMIX0, TKEMIN, x_trans, y_trans, z_agl, lev_gnd, lev_top, w_damp)
+  - 20 @variables (wprime, sigmaw, sigma_u, sigma_v, TL_v, zi, wprime_ref, Tv2m, rho, wth, wq, wthv, wthv_eff, Lmo, wstar, uprime_x, uprime_y, lon, lat, lev)
+  - 1 @brownians Bw (single Wiener process for all three velocity components; upstream TODO notes intent to replace with separate Bx, By)
+
+Migration approach:
+  The 9 MTK @constants are substituted as literal values in expressions (kappa = 0.4 retained as named parameter for legibility; one=1.0, m0=0.0, m1=1.0, ms0=0.0, kms0=0.0, kms1e_8=1e-8, S=1.0, offset=0.05 inlined directly). All 14 non-ODE @variables (zi, Tv2m, rho, wth, wq, wthv, wthv_eff, Lmo, wstar, sigmaw, sigma_u, sigma_v, TL_v, wprime_ref) are migrated as `observed` type, with their expressions computed from parameters and ODE states. Three additional `observed` intermediates (zeta_clip, sigma_w2, sigma_u2) are added for readability; they correspond to Julia local variables zeta_clip, sigma_w2_expr, sigma_u2_expr. sigma_v2 is the same expression as sigma_u2 in both stable and unstable regimes (both use 0.36*wstar^2 unstable, and differ only by coefficient in stable: 4.0 vs 5.0 for USTAR^2 term). Unicode variable names mapped to ASCII: sigma_u (from Julia sigma_u), sigma_v (from Julia sigma_v).
+
+Key physics:
+  - Stability regime determined by Lmo: unstable (Lmo < 0), stable/neutral (Lmo >= 0)
+  - Within unstable regime: surface layer (zeta_clip < 0.1, uses Hanna 1982 USL / ARL-224 Eq. 92) vs mixed layer (Kantha-Clayson / ARL-224 Eq. 90)
+  - Lagrangian time scale TL_v clamped to [TL_v_min, TL_v_max] to prevent singular behavior
+  - wprime_ref implements boundary reflection: partial absorption at ground (lev <= lev_gnd + 0.05) and lid (lev >= lev_top - 0.05)
+
+TODO_GAP: gt-kuxo — Upstream Julia component uses `@brownians Bw` (single Wiener process) to add diffusion noise to the three velocity Langevin equations:
+  D(wprime)   ~ -(wprime/TL_v)   + sqrt(2*sigmaw^2/TL_v/1s) * Bw
+  D(uprime_x) ~ -(uprime_x/TL_h) + sqrt(2*sigma_u2/TL_h/1s) * Bw
+  D(uprime_y) ~ -(uprime_y/TL_h) + sqrt(2*sigma_v2/TL_h/1s) * Bw
+The ESM schema v0.4.0 has no `brownian` variable type (gap gt-kuxo). This ESM migrates the deterministic drift only:
+  D(wprime)/dt   = -wprime/TL_v
+  D(uprime_x)/dt = -uprime_x/TL_h
+  D(uprime_y)/dt = -uprime_y/TL_h
+The upstream source also contains a TODO noting that Bw should be replaced by separate Bx, By for uprime_x and uprime_y. When gt-kuxo is resolved, add three `brownian` variables (Bw, Bx, By) and restore the full SDE diffusion terms.
+
+Coupling: sigma_u and sigma_v are consumed by GaussianKC (as sigma_u_x, sigma_u_y) for Gaussian puff dispersion. When coupled, these are promoted to shared algebraic variables via connector equations.
+
+Tolerance rationale (rel=1e-6, abs=1e-10): algebraic outputs are smooth functions of bounded parameters; ODE drift terms are linear in state variables with constant (parameter-derived) coefficients. Relative tolerance 1e-6 gives margin well above roundoff while remaining tight enough to catch sign errors._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `wprime` | `m/s` | `0.0` | Turbulent vertical velocity fluctuation w' (m/s). ODE state governed by Langevin equation D(wprime)/dt = -wprime/TL_v (deterministic drift; Brownian noise term omitted — see TODO_GAP gt-kuxo). |
+| `uprime_x` | `m/s` | `0.0` | Turbulent horizontal velocity fluctuation in x (eastward, m/s). ODE state: D(uprime_x)/dt = -uprime_x/TL_h (deterministic drift; Brownian noise omitted). |
+| `uprime_y` | `m/s` | `0.0` | Turbulent horizontal velocity fluctuation in y (northward, m/s). ODE state: D(uprime_y)/dt = -uprime_y/TL_h (deterministic drift; Brownian noise omitted). |
+| `lon` | `1` | `0.0` | Lagrangian particle longitude coordinate (radians, dimensionless). ODE state: D(lon)/dt = uprime_x * x_trans. |
+| `lat` | `1` | `0.0` | Lagrangian particle latitude coordinate (radians, dimensionless). ODE state: D(lat)/dt = uprime_y * y_trans. |
+| `lev` | `1` | `1.0` | Lagrangian particle level coordinate (dimensionless level index). ODE state: D(lev)/dt = wprime_ref * z2lev. Boundary conditions applied via wprime_ref reflection. |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `kappa` | `1` | `0.4` | von Karman constant (dimensionless). Appears in the Monin-Obukhov length formula (ARL-224 Eq. 27). Upstream Julia @constants kappa = 0.4. |
+| `PBLH` | `m` | `1000.0` | Planetary boundary layer height (m). Input meteorological field; sets the upper bound of the boundary layer used in stability calculations. |
+| `USTAR` | `m/s` | `0.3` | Surface friction velocity u* (m/s). Input meteorological field; drives stable/neutral turbulence intensity (ARL-224 Eqs. 71-76). |
+| `HFLUX` | `W/m^2` | `0.0` | Surface sensible heat flux H (W/m^2). Positive upward (daytime unstable); negative downward (nighttime stable). Drives convective turbulence intensity. |
+| `EFLUX` | `W/m^2` | `0.0` | Surface latent heat flux LE (W/m^2). Positive upward. Contributes to the virtual temperature flux (moisture buoyancy correction). |
+| `PS` | `Pa` | `101325.0` | Surface air pressure (Pa). Used with T2M and Rd to compute surface air density rho. |
+| `T2M` | `K` | `293.15` | 2-metre air temperature (K). Used to compute virtual temperature Tv2m, air density rho, and wstar. |
+| `QV2M` | `1` | `0.009` | 2-metre specific humidity (dimensionless, kg/kg). Moisture correction in virtual temperature: Tv2m = T2M * (1 + 0.61 * QV2M). |
+| `z2lev` | `1/m` | `0.0` | Vertical coordinate gradient d(lev)/dz (1/m). Converts vertical turbulent velocity wprime_ref to level-coordinate velocity D(lev)/dt. |
+| `TL_h` | `s` | `10800.0` | Lagrangian time scale for horizontal velocity fluctuations (s). Default 3 h. Governs decorrelation of uprime_x, uprime_y: D(u)/dt = -u/TL_h + noise. |
+| `TL_v_min` | `s` | `5.0` | Minimum Lagrangian time scale for vertical turbulence (s). Clamps TL_v from below to prevent singular Langevin dynamics near the surface. |
+| `TL_v_max` | `s` | `1000.0` | Maximum Lagrangian time scale for vertical turbulence (s). Clamps TL_v from above to prevent unrealistically slow decorrelation. |
+| `Rd` | `J/(kg*K)` | `287.05` | Specific gas constant for dry air (J/(kg K)). Used to compute surface air density rho = PS / (Rd * Tv2m). |
+| `cp` | `J/(kg*K)` | `1004.0` | Specific heat capacity of dry air at constant pressure near 300 K (J/(kg K)). Converts surface sensible heat flux to kinematic form: wth = HFLUX / (rho * cp). |
+| `Lv` | `J/kg` | `2500000.0` | Latent heat of vaporization of water (J/kg). Converts surface latent heat flux to kinematic form: wq = EFLUX / (rho * Lv). |
+| `g` | `m/s^2` | `9.80665` | Gravitational acceleration (m/s^2). Appears in Monin-Obukhov length (ARL-224 Eq. 27) and convective velocity scale wstar (ARL-224 Eq. 28). |
+| `R_inv` | `1` | `0.2` | Heat-flux ratio at the inversion (dimensionless). Appears in the unstable mixed-layer sigma_w formula (ARL-224 Eq. 90): sigma_w2_UML = wstar^2 * zeta^(2/3) * (1-zeta)^(2/3) * (1 + 0.5*R_inv^(2/3)). |
+| `KMIX0` | `m` | `150.0` | Minimum mixing depth (m). The effective PBL height zi = max(PBLH, KMIX0) ensures a minimum well-mixed layer. |
+| `TKEMIN` | `m^2/s^2` | `0.001` | Minimum turbulent kinetic energy (m^2/s^2). Sets a floor on the vertical velocity variance: sigma_w2_min = (2/3) * TKEMIN (isotropic TKE partition). |
+| `x_trans` | `1/m` | `0.01` | Longitude scaling: d(lon)/d(x) in radians per meter (1/m). Converts zonal turbulent velocity uprime_x to longitude rate: D(lon)/dt = uprime_x * x_trans. |
+| `y_trans` | `1/m` | `0.01` | Latitude scaling: d(lat)/d(y) in radians per meter (1/m). Converts meridional turbulent velocity uprime_y to latitude rate: D(lat)/dt = uprime_y * y_trans. |
+| `z_agl` | `m` | `50.0` | Particle height above ground level (m). Used to compute the normalized height zeta_clip = z_agl / zi, which determines the stability sub-regime. |
+| `lev_gnd` | `1` | `1.0` | Level index of the ground surface (dimensionless). Boundary reflection condition triggers when lev <= lev_gnd + 0.05. |
+| `lev_top` | `1` | `72.0` | Top level index of the domain (dimensionless). Boundary reflection condition triggers when lev >= lev_top - 0.05. |
+| `w_damp` | `1` | `1.0` | Fraction of vertical velocity absorbed on boundary impact (dimensionless). 0.0 = perfect elastic bounce; 1.0 = complete absorption. wprime_ref = (1 - w_damp) * \|wprime\| at boundaries. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `zi` | `m` |  | Effective planetary boundary layer depth (m). zi = max(PBLH, KMIX0). Provides a minimum mixing depth floor. |
+| `Tv2m` | `K` |  | 2-metre virtual temperature (K). Tv2m = T2M * (1 + 0.61 * QV2M). Moisture-corrected temperature for density and buoyancy calculations. |
+| `rho` | `kg/m^3` |  | Surface air density (kg/m^3). rho = PS / (Rd * Tv2m). Used to convert heat and moisture fluxes from energy to kinematic units. |
+| `wth` | `K*m/s` |  | Kinematic sensible heat flux w'theta' (K m/s). wth = HFLUX / (rho * cp). ARL-224 Eq. 27. |
+| `wq` | `m/s` |  | Kinematic moisture flux w'q' (m/s). wq = EFLUX / (rho * Lv). Units m/s since q is dimensionless kg/kg. |
+| `wthv` | `K*m/s` |  | Kinematic virtual potential temperature flux w'theta_v' (K m/s). wthv = wth*(1+0.61*QV2M) + 0.61*T2M*wq. Combines sensible and moisture buoyancy contributions. |
+| `wthv_num` | `K*m/s` |  | Sign proxy for wthv: wthv_num = HFLUX*(1+0.61*QV2M)/cp + 0.61*T2M*EFLUX/Lv = rho*wthv. Since rho>0, sign(wthv_num)==sign(wthv), so wthv_num>0 iff Lmo<0 (unstable). Uses only multiplication/addition of parameters — no division by rho — so evaluates to 0 (not NaN) when SymPy substitutes 0 for all free symbols during Piecewise-condition simplification. |
+| `wthv_eff` | `K*m/s` |  | Effective virtual temperature flux (K m/s), bounded away from zero to prevent singular Lmo. wthv_eff = ifelse(wthv>=0, max(wthv,1e-8), min(wthv,-1e-8)). Stability branch uses wthv_num>=0 (sign proxy without rho division) to avoid NaN when SymPy substitutes 0 for all free symbols. |
+| `Lmo` | `m` |  | Monin-Obukhov length L (m). Lmo = -USTAR^3 * Tv2m / (kappa * g * wthv_eff). Negative in unstable conditions (upward heat flux), positive in stable conditions. ARL-224 Eq. 27. |
+| `wstar` | `m/s` |  | Deardorff convective velocity scale w* (m/s). wstar = (g/Tv2m * wthv * zi)^(1/3) when wthv > 0, else 0. ARL-224 Eq. 28. Stability condition uses wthv_num>0 (sign proxy, no rho division). |
+| `zeta_clip` | `1` |  | Normalized height within the PBL: zeta_clip = clamp(z_agl / max(zi, 1.0), 0, 1). Dimensionless stability coordinate (0 at surface, 1 at PBL top). Corresponds to Julia local variable zeta_clip. |
+| `sigma_w2` | `m^2/s^2` |  | Vertical turbulent velocity variance sigma_w^2 (m^2/s^2). Unstable surface layer (Lmo<0, zeta_clip<0.1): 1.74*USTAR^2*(1-3*z_agl/L_eff)^(2/3) (Hanna 1982, ARL-224 Eq.92). Unstable mixed layer: wstar^2*zeta^(2/3)*(1-zeta)^(2/3)*(1+0.5*R_inv^(2/3)) (ARL-224 Eq.90). Stable/neutral: 1.7*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq.71). Corresponds to Julia sigma_w2_expr. |
+| `sigmaw` | `m/s` |  | Standard deviation of turbulent vertical velocity sigma_w (m/s). sigmaw = sqrt(max(sigma_w2, (2/3)*TKEMIN)). Enters the Lagrangian time scale TL_v computation. |
+| `sigma_u2` | `m^2/s^2` |  | Horizontal x-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (Kantha-Clayson, ARL-224 Eq. 91). Stable/neutral: 4.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 72-73). Corresponds to Julia sigma_u2_expr. |
+| `sigma_u` | `m/s` |  | Standard deviation of turbulent horizontal x-velocity sigma_u (m/s). sigma_u = sqrt(sigma_u2). Consumed by GaussianKC as sigma_u_x when coupled. |
+| `sigma_v2` | `m^2/s^2` |  | Horizontal y-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (ARL-224 Eq. 93, same as sigma_u2). Stable/neutral: 5.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 75-76, coefficient 5.0 vs 4.0 for x). Corresponds to Julia sigma_v2_expr. |
+| `sigma_v` | `m/s` |  | Standard deviation of turbulent horizontal y-velocity sigma_v (m/s). sigma_v = sqrt(sigma_v2). Consumed by GaussianKC as sigma_u_y when coupled. |
+| `TL_v` | `s` |  | Lagrangian time scale for vertical velocity (s), clamped to [TL_v_min, TL_v_max]. Unstable: 0.15*zi/sigmaw*(1-exp(-5*zeta_clip)); Stable: 0.1*zi/sigmaw*zeta_clip^0.8. Hanna (1982), ARL-224 Eqs. 63, 66. |
+| `wprime_ref` | `m/s` |  | Reflected turbulent vertical velocity near boundaries (m/s). At ground (lev <= lev_gnd+0.05): wprime_ref = (1-w_damp)*\|wprime\|. At lid (lev >= lev_top-0.05): wprime_ref = -(1-w_damp)*\|wprime\|. Elsewhere: wprime_ref = wprime. |
+
+## Observed expressions
+
+$$
+zi = \mathrm{max}\left(PBLH, KMIX0\right)
+$$
+_Effective planetary boundary layer depth (m). zi = max(PBLH, KMIX0). Provides a minimum mixing depth floor._
+
+$$
+Tv2m = T2M \cdot \left(1.0 + 0.61 \cdot QV2M\right)
+$$
+_2-metre virtual temperature (K). Tv2m = T2M * (1 + 0.61 * QV2M). Moisture-corrected temperature for density and buoyancy calculations._
+
+$$
+rho = \frac{PS}{Rd \cdot Tv2m}
+$$
+_Surface air density (kg/m^3). rho = PS / (Rd * Tv2m). Used to convert heat and moisture fluxes from energy to kinematic units._
+
+$$
+wth = \frac{HFLUX}{rho \cdot cp}
+$$
+_Kinematic sensible heat flux w'theta' (K m/s). wth = HFLUX / (rho * cp). ARL-224 Eq. 27._
+
+$$
+wq = \frac{EFLUX}{rho \cdot Lv}
+$$
+_Kinematic moisture flux w'q' (m/s). wq = EFLUX / (rho * Lv). Units m/s since q is dimensionless kg/kg._
+
+$$
+wthv = wth \cdot \left(1.0 + 0.61 \cdot QV2M\right) + 0.61 \cdot T2M \cdot wq
+$$
+_Kinematic virtual potential temperature flux w'theta_v' (K m/s). wthv = wth*(1+0.61*QV2M) + 0.61*T2M*wq. Combines sensible and moisture buoyancy contributions._
+
+$$
+wthv_{num} = HFLUX \cdot \left(1.0 + 0.61 \cdot QV2M\right) \cdot \frac{1.0}{cp} + 0.61 \cdot T2M \cdot EFLUX \cdot \frac{1.0}{Lv}
+$$
+_Sign proxy for wthv: wthv_num = HFLUX*(1+0.61*QV2M)/cp + 0.61*T2M*EFLUX/Lv = rho*wthv. Since rho>0, sign(wthv_num)==sign(wthv), so wthv_num>0 iff Lmo<0 (unstable). Uses only multiplication/addition of parameters — no division by rho — so evaluates to 0 (not NaN) when SymPy substitutes 0 for all free symbols during Piecewise-condition simplification._
+
+$$
+wthv_{eff} = \mathrm{ifelse}\left(\mathrm{>=}\left(wthv_{num}, 0.0\right), \mathrm{max}\left(wthv, 1 \times 10^{-8}\right), \mathrm{min}\left(wthv, -1 \times 10^{-8}\right)\right)
+$$
+_Effective virtual temperature flux (K m/s), bounded away from zero to prevent singular Lmo. wthv_eff = ifelse(wthv>=0, max(wthv,1e-8), min(wthv,-1e-8)). Stability branch uses wthv_num>=0 (sign proxy without rho division) to avoid NaN when SymPy substitutes 0 for all free symbols._
+
+$$
+Lmo = \left(-1.0\right) \cdot \frac{USTAR^{3} \cdot Tv2m}{kappa \cdot g \cdot wthv_{eff}}
+$$
+_Monin-Obukhov length L (m). Lmo = -USTAR^3 * Tv2m / (kappa * g * wthv_eff). Negative in unstable conditions (upward heat flux), positive in stable conditions. ARL-224 Eq. 27._
+
+$$
+wstar = \mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), \left(\frac{g}{Tv2m} \cdot wthv \cdot zi\right)^{0.3333333333333333}, 0.0\right)
+$$
+_Deardorff convective velocity scale w* (m/s). wstar = (g/Tv2m * wthv * zi)^(1/3) when wthv > 0, else 0. ARL-224 Eq. 28. Stability condition uses wthv_num>0 (sign proxy, no rho division)._
+
+$$
+zeta_{clip} = \mathrm{max}\left(\mathrm{min}\left(\frac{z_{agl}}{\mathrm{max}\left(zi, 1.0\right)}, 1.0\right), 0.0\right)
+$$
+_Normalized height within the PBL: zeta_clip = clamp(z_agl / max(zi, 1.0), 0, 1). Dimensionless stability coordinate (0 at surface, 1 at PBL top). Corresponds to Julia local variable zeta_clip._
+
+$$
+sigma_{w2} = \mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), \mathrm{ifelse}\left(\mathrm{<}\left(zeta_{clip}, 0.1\right), 1.74 \cdot USTAR^{2} \cdot \mathrm{max}\left(1.0 + \left(-3.0\right) \cdot \frac{z_{agl}}{\mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), -1.0, 1.0\right) \cdot \mathrm{max}\left(\left|Lmo\right|, 1.0\right)}, 1 \times 10^{-6}\right)^{0.6666666666666666}, wstar^{2} \cdot \mathrm{max}\left(zeta_{clip}, 1 \times 10^{-6}\right)^{0.6666666666666666} \cdot \mathrm{max}\left(1.0 + \left(-1.0\right) \cdot zeta_{clip}, 1 \times 10^{-6}\right)^{0.6666666666666666} \cdot \left(1.0 + 0.5 \cdot R_{inv}^{0.6666666666666666}\right)\right), 1.7 \cdot USTAR^{2} \cdot \mathrm{max}\left(1.0 + \left(-1.0\right) \cdot zeta_{clip}, 0.0\right)^{1.5}\right)
+$$
+_Vertical turbulent velocity variance sigma_w^2 (m^2/s^2). Unstable surface layer (Lmo<0, zeta_clip<0.1): 1.74*USTAR^2*(1-3*z_agl/L_eff)^(2/3) (Hanna 1982, ARL-224 Eq.92). Unstable mixed layer: wstar^2*zeta^(2/3)*(1-zeta)^(2/3)*(1+0.5*R_inv^(2/3)) (ARL-224 Eq.90). Stable/neutral: 1.7*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq.71). Corresponds to Julia sigma_w2_expr._
+
+$$
+sigmaw = \sqrt{\mathrm{max}\left(sigma_{w2}, 0.6666666666666666 \cdot TKEMIN\right)}
+$$
+_Standard deviation of turbulent vertical velocity sigma_w (m/s). sigmaw = sqrt(max(sigma_w2, (2/3)*TKEMIN)). Enters the Lagrangian time scale TL_v computation._
+
+$$
+sigma_{u2} = \mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), 0.36 \cdot wstar^{2}, 4.0 \cdot USTAR^{2} \cdot \mathrm{max}\left(1.0 + \left(-1.0\right) \cdot zeta_{clip}, 0.0\right)^{1.5}\right)
+$$
+_Horizontal x-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (Kantha-Clayson, ARL-224 Eq. 91). Stable/neutral: 4.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 72-73). Corresponds to Julia sigma_u2_expr._
+
+$$
+sigma_{u} = \sqrt{sigma_{u2}}
+$$
+_Standard deviation of turbulent horizontal x-velocity sigma_u (m/s). sigma_u = sqrt(sigma_u2). Consumed by GaussianKC as sigma_u_x when coupled._
+
+$$
+sigma_{v2} = \mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), 0.36 \cdot wstar^{2}, 5.0 \cdot USTAR^{2} \cdot \mathrm{max}\left(1.0 + \left(-1.0\right) \cdot zeta_{clip}, 0.0\right)^{1.5}\right)
+$$
+_Horizontal y-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (ARL-224 Eq. 93, same as sigma_u2). Stable/neutral: 5.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 75-76, coefficient 5.0 vs 4.0 for x). Corresponds to Julia sigma_v2_expr._
+
+$$
+sigma_{v} = \sqrt{sigma_{v2}}
+$$
+_Standard deviation of turbulent horizontal y-velocity sigma_v (m/s). sigma_v = sqrt(sigma_v2). Consumed by GaussianKC as sigma_u_y when coupled._
+
+$$
+TL_{v} = \mathrm{max}\left(TL_{v\,min}, \mathrm{min}\left(TL_{v\,max}, \mathrm{ifelse}\left(\mathrm{>}\left(wthv_{num}, 0.0\right), 0.15 \cdot \frac{zi}{sigmaw} \cdot \left(1.0 + \left(-1.0\right) \cdot e^{\left(-5.0\right) \cdot zeta_{clip}}\right), 0.1 \cdot \frac{zi}{sigmaw} \cdot zeta_{clip}^{0.8}\right)\right)\right)
+$$
+_Lagrangian time scale for vertical velocity (s), clamped to [TL_v_min, TL_v_max]. Unstable: 0.15*zi/sigmaw*(1-exp(-5*zeta_clip)); Stable: 0.1*zi/sigmaw*zeta_clip^0.8. Hanna (1982), ARL-224 Eqs. 63, 66._
+
+$$
+wprime_{ref} = \mathrm{ifelse}\left(\mathrm{<=}\left(lev, lev_{gnd} + 0.05\right), \left(1.0 + \left(-1.0\right) \cdot w_{damp}\right) \cdot \left|wprime\right|, \mathrm{ifelse}\left(\mathrm{>=}\left(lev, lev_{top} + -0.05\right), \left(-1.0\right) \cdot \left(1.0 + \left(-1.0\right) \cdot w_{damp}\right) \cdot \left|wprime\right|, wprime\right)\right)
+$$
+_Reflected turbulent vertical velocity near boundaries (m/s). At ground (lev <= lev_gnd+0.05): wprime_ref = (1-w_damp)*|wprime|. At lid (lev >= lev_top-0.05): wprime_ref = -(1-w_damp)*|wprime|. Elsewhere: wprime_ref = wprime._
+
+## Equations
+
+$$
+\mathrm{D}\left(wprime\right) = \left(-1.0\right) \cdot \frac{wprime}{TL_{v}}
+$$
+
+$$
+\mathrm{D}\left(uprime_{x}\right) = \left(-1.0\right) \cdot \frac{uprime_{x}}{TL_{h}}
+$$
+
+$$
+\mathrm{D}\left(uprime_{y}\right) = \left(-1.0\right) \cdot \frac{uprime_{y}}{TL_{h}}
+$$
+
+$$
+\mathrm{D}\left(lon\right) = uprime_{x} \cdot x_{trans}
+$$
+
+$$
+\mathrm{D}\left(lat\right) = uprime_{y} \cdot y_{trans}
+$$
+
+$$
+\mathrm{D}\left(lev\right) = wprime_{ref} \cdot z2lev
+$$
+
+## Analyses
+
+### stability_regime_sweep
+
+Boundary-layer turbulence parameters (sigmaw, sigma_u, wstar, TL_v) as a function of surface sensible heat flux HFLUX over -100 to 300 W/m^2. Illustrates the transition from stable (HFLUX < 0, Lmo > 0) to neutral (HFLUX ~ 0) to convective (HFLUX > 0, Lmo < 0) regimes. USTAR=0.3 m/s, PBLH=1000 m, z_agl=50 m.
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `HFLUX`
+
+![Vertical velocity std dev sigmaw vs surface heat flux.](/plots/environmental_transport/boundarylayermixingkc/stability_regime_sweep-sigmaw_vs_hflux.png)
+
+![Horizontal velocity std dev sigma_u vs surface heat flux.](/plots/environmental_transport/boundarylayermixingkc/stability_regime_sweep-sigma_u_vs_hflux.png)
+
+![Convective velocity scale wstar vs surface heat flux. Zero for stable/neutral (HFLUX <= 0), grows as (HFLUX)^(1/3) for unstable.](/plots/environmental_transport/boundarylayermixingkc/stability_regime_sweep-wstar_vs_hflux.png)
+
+![Vertical Lagrangian time scale TL_v vs surface heat flux.](/plots/environmental_transport/boundarylayermixingkc/stability_regime_sweep-TL_v_vs_hflux.png)
+
+### particle_velocity_decay
+
+Time evolution of turbulent velocity components (wprime, uprime_x) and resulting particle level displacement under the deterministic Langevin drift. Initial conditions: wprime=1 m/s, uprime_x=0.5 m/s, lev=36 (interior domain). HFLUX=100 W/m^2 (unstable), z2lev=0.001. Shows exponential decay of velocity fluctuations: TL_v ~ 43 s for vertical, TL_h = 10800 s for horizontal.
+
+**Time span:** 0.0 → 200.0
+
+![Turbulent vertical velocity wprime decaying from 1 m/s with time scale TL_v ~ 43 s.](/plots/environmental_transport/boundarylayermixingkc/particle_velocity_decay-wprime_decay.png)
+
+![Zonal turbulent velocity uprime_x decaying from 0.5 m/s with time scale TL_h = 10800 s (very slow over this 200 s window).](/plots/environmental_transport/boundarylayermixingkc/particle_velocity_decay-uprime_x_decay.png)
+
+![Particle level coordinate lev(t) drifting upward from level 36 as wprime drives D(lev)/dt = wprime_ref * z2lev.](/plots/environmental_transport/boundarylayermixingkc/particle_velocity_decay-lev_trajectory.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Draxler and Rolph (2003). NOAA ARL-224.",
+    "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/BoundaryLayerMixingKC.jl:15\n\nUpstream BoundaryLayerMixingKC is an MTK @component implementing the Kantha-Clayson & Garratt turbulence closure for HYSPLIT Lagrangian transport. It declares:\n  - 9 @constants (kappa, one, m0, m1, ms0, kms0, kms1e_8, S, offset) used as MTK unit sentinels\n  - 26 @parameters (PBLH, USTAR, HFLUX, EFLUX, PS, T2M, QV2M, z2lev, TL_h, TL_v_min, TL_v_max, Rd, cp, Lv, g, R_inv, KMIX0, TKEMIN, x_trans, y_trans, z_agl, lev_gnd, lev_top, w_damp)\n  - 20 @variables (wprime, sigmaw, sigma_u, sigma_v, TL_v, zi, wprime_ref, Tv2m, rho, wth, wq, wthv, wthv_eff, Lmo, wstar, uprime_x, uprime_y, lon, lat, lev)\n  - 1 @brownians Bw (single Wiener process for all three velocity components; upstream TODO notes intent to replace with separate Bx, By)\n\nMigration approach:\n  The 9 MTK @constants are substituted as literal values in expressions (kappa = 0.4 retained as named parameter for legibility; one=1.0, m0=0.0, m1=1.0, ms0=0.0, kms0=0.0, kms1e_8=1e-8, S=1.0, offset=0.05 inlined directly). All 14 non-ODE @variables (zi, Tv2m, rho, wth, wq, wthv, wthv_eff, Lmo, wstar, sigmaw, sigma_u, sigma_v, TL_v, wprime_ref) are migrated as `observed` type, with their expressions computed from parameters and ODE states. Three additional `observed` intermediates (zeta_clip, sigma_w2, sigma_u2) are added for readability; they correspond to Julia local variables zeta_clip, sigma_w2_expr, sigma_u2_expr. sigma_v2 is the same expression as sigma_u2 in both stable and unstable regimes (both use 0.36*wstar^2 unstable, and differ only by coefficient in stable: 4.0 vs 5.0 for USTAR^2 term). Unicode variable names mapped to ASCII: sigma_u (from Julia sigma_u), sigma_v (from Julia sigma_v).\n\nKey physics:\n  - Stability regime determined by Lmo: unstable (Lmo < 0), stable/neutral (Lmo >= 0)\n  - Within unstable regime: surface layer (zeta_clip < 0.1, uses Hanna 1982 USL / ARL-224 Eq. 92) vs mixed layer (Kantha-Clayson / ARL-224 Eq. 90)\n  - Lagrangian time scale TL_v clamped to [TL_v_min, TL_v_max] to prevent singular behavior\n  - wprime_ref implements boundary reflection: partial absorption at ground (lev <= lev_gnd + 0.05) and lid (lev >= lev_top - 0.05)\n\nTODO_GAP: gt-kuxo — Upstream Julia component uses `@brownians Bw` (single Wiener process) to add diffusion noise to the three velocity Langevin equations:\n  D(wprime)   ~ -(wprime/TL_v)   + sqrt(2*sigmaw^2/TL_v/1s) * Bw\n  D(uprime_x) ~ -(uprime_x/TL_h) + sqrt(2*sigma_u2/TL_h/1s) * Bw\n  D(uprime_y) ~ -(uprime_y/TL_h) + sqrt(2*sigma_v2/TL_h/1s) * Bw\nThe ESM schema v0.4.0 has no `brownian` variable type (gap gt-kuxo). This ESM migrates the deterministic drift only:\n  D(wprime)/dt   = -wprime/TL_v\n  D(uprime_x)/dt = -uprime_x/TL_h\n  D(uprime_y)/dt = -uprime_y/TL_h\nThe upstream source also contains a TODO noting that Bw should be replaced by separate Bx, By for uprime_x and uprime_y. When gt-kuxo is resolved, add three `brownian` variables (Bw, Bx, By) and restore the full SDE diffusion terms.\n\nCoupling: sigma_u and sigma_v are consumed by GaussianKC (as sigma_u_x, sigma_u_y) for Gaussian puff dispersion. When coupled, these are promoted to shared algebraic variables via connector equations.\n\nTolerance rationale (rel=1e-6, abs=1e-10): algebraic outputs are smooth functions of bounded parameters; ODE drift terms are linear in state variables with constant (parameter-derived) coefficients. Relative tolerance 1e-6 gives margin well above roundoff while remaining tight enough to catch sign errors."
+  },
+  "tolerance": {
+    "rel": 1e-06,
+    "abs": 1e-10
+  },
+  "variables": {
+    "kappa": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.4,
+      "description": "von Karman constant (dimensionless). Appears in the Monin-Obukhov length formula (ARL-224 Eq. 27). Upstream Julia @constants kappa = 0.4."
+    },
+    "PBLH": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1000.0,
+      "description": "Planetary boundary layer height (m). Input meteorological field; sets the upper bound of the boundary layer used in stability calculations."
+    },
+    "USTAR": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.3,
+      "description": "Surface friction velocity u* (m/s). Input meteorological field; drives stable/neutral turbulence intensity (ARL-224 Eqs. 71-76)."
+    },
+    "HFLUX": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 0.0,
+      "description": "Surface sensible heat flux H (W/m^2). Positive upward (daytime unstable); negative downward (nighttime stable). Drives convective turbulence intensity."
+    },
+    "EFLUX": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 0.0,
+      "description": "Surface latent heat flux LE (W/m^2). Positive upward. Contributes to the virtual temperature flux (moisture buoyancy correction)."
+    },
+    "PS": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 101325.0,
+      "description": "Surface air pressure (Pa). Used with T2M and Rd to compute surface air density rho."
+    },
+    "T2M": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.15,
+      "description": "2-metre air temperature (K). Used to compute virtual temperature Tv2m, air density rho, and wstar."
+    },
+    "QV2M": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.009,
+      "description": "2-metre specific humidity (dimensionless, kg/kg). Moisture correction in virtual temperature: Tv2m = T2M * (1 + 0.61 * QV2M)."
+    },
+    "z2lev": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 0.0,
+      "description": "Vertical coordinate gradient d(lev)/dz (1/m). Converts vertical turbulent velocity wprime_ref to level-coordinate velocity D(lev)/dt."
+    },
+    "TL_h": {
+      "type": "parameter",
+      "units": "s",
+      "default": 10800.0,
+      "description": "Lagrangian time scale for horizontal velocity fluctuations (s). Default 3 h. Governs decorrelation of uprime_x, uprime_y: D(u)/dt = -u/TL_h + noise."
+    },
+    "TL_v_min": {
+      "type": "parameter",
+      "units": "s",
+      "default": 5.0,
+      "description": "Minimum Lagrangian time scale for vertical turbulence (s). Clamps TL_v from below to prevent singular Langevin dynamics near the surface."
+    },
+    "TL_v_max": {
+      "type": "parameter",
+      "units": "s",
+      "default": 1000.0,
+      "description": "Maximum Lagrangian time scale for vertical turbulence (s). Clamps TL_v from above to prevent unrealistically slow decorrelation."
+    },
+    "Rd": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 287.05,
+      "description": "Specific gas constant for dry air (J/(kg K)). Used to compute surface air density rho = PS / (Rd * Tv2m)."
+    },
+    "cp": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 1004.0,
+      "description": "Specific heat capacity of dry air at constant pressure near 300 K (J/(kg K)). Converts surface sensible heat flux to kinematic form: wth = HFLUX / (rho * cp)."
+    },
+    "Lv": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 2500000.0,
+      "description": "Latent heat of vaporization of water (J/kg). Converts surface latent heat flux to kinematic form: wq = EFLUX / (rho * Lv)."
+    },
+    "g": {
+      "type": "parameter",
+      "units": "m/s^2",
+      "default": 9.80665,
+      "description": "Gravitational acceleration (m/s^2). Appears in Monin-Obukhov length (ARL-224 Eq. 27) and convective velocity scale wstar (ARL-224 Eq. 28)."
+    },
+    "R_inv": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.2,
+      "description": "Heat-flux ratio at the inversion (dimensionless). Appears in the unstable mixed-layer sigma_w formula (ARL-224 Eq. 90): sigma_w2_UML = wstar^2 * zeta^(2/3) * (1-zeta)^(2/3) * (1 + 0.5*R_inv^(2/3))."
+    },
+    "KMIX0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 150.0,
+      "description": "Minimum mixing depth (m). The effective PBL height zi = max(PBLH, KMIX0) ensures a minimum well-mixed layer."
+    },
+    "TKEMIN": {
+      "type": "parameter",
+      "units": "m^2/s^2",
+      "default": 0.001,
+      "description": "Minimum turbulent kinetic energy (m^2/s^2). Sets a floor on the vertical velocity variance: sigma_w2_min = (2/3) * TKEMIN (isotropic TKE partition)."
+    },
+    "x_trans": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 0.01,
+      "description": "Longitude scaling: d(lon)/d(x) in radians per meter (1/m). Converts zonal turbulent velocity uprime_x to longitude rate: D(lon)/dt = uprime_x * x_trans."
+    },
+    "y_trans": {
+      "type": "parameter",
+      "units": "1/m",
+      "default": 0.01,
+      "description": "Latitude scaling: d(lat)/d(y) in radians per meter (1/m). Converts meridional turbulent velocity uprime_y to latitude rate: D(lat)/dt = uprime_y * y_trans."
+    },
+    "z_agl": {
+      "type": "parameter",
+      "units": "m",
+      "default": 50.0,
+      "description": "Particle height above ground level (m). Used to compute the normalized height zeta_clip = z_agl / zi, which determines the stability sub-regime."
+    },
+    "lev_gnd": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Level index of the ground surface (dimensionless). Boundary reflection condition triggers when lev <= lev_gnd + 0.05."
+    },
+    "lev_top": {
+      "type": "parameter",
+      "units": "1",
+      "default": 72.0,
+      "description": "Top level index of the domain (dimensionless). Boundary reflection condition triggers when lev >= lev_top - 0.05."
+    },
+    "w_damp": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Fraction of vertical velocity absorbed on boundary impact (dimensionless). 0.0 = perfect elastic bounce; 1.0 = complete absorption. wprime_ref = (1 - w_damp) * |wprime| at boundaries."
+    },
+    "wprime": {
+      "type": "unknown",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Turbulent vertical velocity fluctuation w' (m/s). ODE state governed by Langevin equation D(wprime)/dt = -wprime/TL_v (deterministic drift; Brownian noise term omitted — see TODO_GAP gt-kuxo)."
+    },
+    "uprime_x": {
+      "type": "unknown",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Turbulent horizontal velocity fluctuation in x (eastward, m/s). ODE state: D(uprime_x)/dt = -uprime_x/TL_h (deterministic drift; Brownian noise omitted)."
+    },
+    "uprime_y": {
+      "type": "unknown",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Turbulent horizontal velocity fluctuation in y (northward, m/s). ODE state: D(uprime_y)/dt = -uprime_y/TL_h (deterministic drift; Brownian noise omitted)."
+    },
+    "lon": {
+      "type": "unknown",
+      "units": "1",
+      "default": 0.0,
+      "description": "Lagrangian particle longitude coordinate (radians, dimensionless). ODE state: D(lon)/dt = uprime_x * x_trans."
+    },
+    "lat": {
+      "type": "unknown",
+      "units": "1",
+      "default": 0.0,
+      "description": "Lagrangian particle latitude coordinate (radians, dimensionless). ODE state: D(lat)/dt = uprime_y * y_trans."
+    },
+    "lev": {
+      "type": "unknown",
+      "units": "1",
+      "default": 1.0,
+      "description": "Lagrangian particle level coordinate (dimensionless level index). ODE state: D(lev)/dt = wprime_ref * z2lev. Boundary conditions applied via wprime_ref reflection."
+    },
+    "zi": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Effective planetary boundary layer depth (m). zi = max(PBLH, KMIX0). Provides a minimum mixing depth floor."
+    },
+    "Tv2m": {
+      "type": "unknown",
+      "units": "K",
+      "description": "2-metre virtual temperature (K). Tv2m = T2M * (1 + 0.61 * QV2M). Moisture-corrected temperature for density and buoyancy calculations."
+    },
+    "rho": {
+      "type": "unknown",
+      "units": "kg/m^3",
+      "description": "Surface air density (kg/m^3). rho = PS / (Rd * Tv2m). Used to convert heat and moisture fluxes from energy to kinematic units."
+    },
+    "wth": {
+      "type": "unknown",
+      "units": "K*m/s",
+      "description": "Kinematic sensible heat flux w'theta' (K m/s). wth = HFLUX / (rho * cp). ARL-224 Eq. 27."
+    },
+    "wq": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Kinematic moisture flux w'q' (m/s). wq = EFLUX / (rho * Lv). Units m/s since q is dimensionless kg/kg."
+    },
+    "wthv": {
+      "type": "unknown",
+      "units": "K*m/s",
+      "description": "Kinematic virtual potential temperature flux w'theta_v' (K m/s). wthv = wth*(1+0.61*QV2M) + 0.61*T2M*wq. Combines sensible and moisture buoyancy contributions."
+    },
+    "wthv_num": {
+      "type": "unknown",
+      "units": "K*m/s",
+      "description": "Sign proxy for wthv: wthv_num = HFLUX*(1+0.61*QV2M)/cp + 0.61*T2M*EFLUX/Lv = rho*wthv. Since rho>0, sign(wthv_num)==sign(wthv), so wthv_num>0 iff Lmo<0 (unstable). Uses only multiplication/addition of parameters — no division by rho — so evaluates to 0 (not NaN) when SymPy substitutes 0 for all free symbols during Piecewise-condition simplification."
+    },
+    "wthv_eff": {
+      "type": "unknown",
+      "units": "K*m/s",
+      "description": "Effective virtual temperature flux (K m/s), bounded away from zero to prevent singular Lmo. wthv_eff = ifelse(wthv>=0, max(wthv,1e-8), min(wthv,-1e-8)). Stability branch uses wthv_num>=0 (sign proxy without rho division) to avoid NaN when SymPy substitutes 0 for all free symbols."
+    },
+    "Lmo": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Monin-Obukhov length L (m). Lmo = -USTAR^3 * Tv2m / (kappa * g * wthv_eff). Negative in unstable conditions (upward heat flux), positive in stable conditions. ARL-224 Eq. 27."
+    },
+    "wstar": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Deardorff convective velocity scale w* (m/s). wstar = (g/Tv2m * wthv * zi)^(1/3) when wthv > 0, else 0. ARL-224 Eq. 28. Stability condition uses wthv_num>0 (sign proxy, no rho division)."
+    },
+    "zeta_clip": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Normalized height within the PBL: zeta_clip = clamp(z_agl / max(zi, 1.0), 0, 1). Dimensionless stability coordinate (0 at surface, 1 at PBL top). Corresponds to Julia local variable zeta_clip."
+    },
+    "sigma_w2": {
+      "type": "unknown",
+      "units": "m^2/s^2",
+      "description": "Vertical turbulent velocity variance sigma_w^2 (m^2/s^2). Unstable surface layer (Lmo<0, zeta_clip<0.1): 1.74*USTAR^2*(1-3*z_agl/L_eff)^(2/3) (Hanna 1982, ARL-224 Eq.92). Unstable mixed layer: wstar^2*zeta^(2/3)*(1-zeta)^(2/3)*(1+0.5*R_inv^(2/3)) (ARL-224 Eq.90). Stable/neutral: 1.7*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq.71). Corresponds to Julia sigma_w2_expr."
+    },
+    "sigmaw": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Standard deviation of turbulent vertical velocity sigma_w (m/s). sigmaw = sqrt(max(sigma_w2, (2/3)*TKEMIN)). Enters the Lagrangian time scale TL_v computation."
+    },
+    "sigma_u2": {
+      "type": "unknown",
+      "units": "m^2/s^2",
+      "description": "Horizontal x-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (Kantha-Clayson, ARL-224 Eq. 91). Stable/neutral: 4.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 72-73). Corresponds to Julia sigma_u2_expr."
+    },
+    "sigma_u": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Standard deviation of turbulent horizontal x-velocity sigma_u (m/s). sigma_u = sqrt(sigma_u2). Consumed by GaussianKC as sigma_u_x when coupled."
+    },
+    "sigma_v2": {
+      "type": "unknown",
+      "units": "m^2/s^2",
+      "description": "Horizontal y-direction turbulent velocity variance (m^2/s^2). Unstable: 0.36*wstar^2 (ARL-224 Eq. 93, same as sigma_u2). Stable/neutral: 5.0*USTAR^2*(1-zeta)^1.5 (ARL-224 Eq. 75-76, coefficient 5.0 vs 4.0 for x). Corresponds to Julia sigma_v2_expr."
+    },
+    "sigma_v": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Standard deviation of turbulent horizontal y-velocity sigma_v (m/s). sigma_v = sqrt(sigma_v2). Consumed by GaussianKC as sigma_u_y when coupled."
+    },
+    "TL_v": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Lagrangian time scale for vertical velocity (s), clamped to [TL_v_min, TL_v_max]. Unstable: 0.15*zi/sigmaw*(1-exp(-5*zeta_clip)); Stable: 0.1*zi/sigmaw*zeta_clip^0.8. Hanna (1982), ARL-224 Eqs. 63, 66."
+    },
+    "wprime_ref": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Reflected turbulent vertical velocity near boundaries (m/s). At ground (lev <= lev_gnd+0.05): wprime_ref = (1-w_damp)*|wprime|. At lid (lev >= lev_top-0.05): wprime_ref = -(1-w_damp)*|wprime|. Elsewhere: wprime_ref = wprime."
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "wprime"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          {
+            "op": "/",
+            "args": [
+              "wprime",
+              "TL_v"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "uprime_x"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          {
+            "op": "/",
+            "args": [
+              "uprime_x",
+              "TL_h"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "uprime_y"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          {
+            "op": "/",
+            "args": [
+              "uprime_y",
+              "TL_h"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "lon"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "uprime_x",
+          "x_trans"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "lat"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "uprime_y",
+          "y_trans"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "lev"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          "wprime_ref",
+          "z2lev"
+        ]
+      }
+    },
+    {
+      "lhs": "zi",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "PBLH",
+          "KMIX0"
+        ]
+      }
+    },
+    {
+      "lhs": "Tv2m",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "T2M",
+          {
+            "op": "+",
+            "args": [
+              1.0,
+              {
+                "op": "*",
+                "args": [
+                  0.61,
+                  "QV2M"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rho",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "PS",
+          {
+            "op": "*",
+            "args": [
+              "Rd",
+              "Tv2m"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wth",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "HFLUX",
+          {
+            "op": "*",
+            "args": [
+              "rho",
+              "cp"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wq",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "EFLUX",
+          {
+            "op": "*",
+            "args": [
+              "rho",
+              "Lv"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wthv",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "wth",
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.61,
+                      "QV2M"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.61,
+              "T2M",
+              "wq"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wthv_num",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "HFLUX",
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.61,
+                      "QV2M"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  "cp"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.61,
+              "T2M",
+              "EFLUX",
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  "Lv"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wthv_eff",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">=",
+            "args": [
+              "wthv_num",
+              0.0
+            ]
+          },
+          {
+            "op": "max",
+            "args": [
+              "wthv",
+              1e-08
+            ]
+          },
+          {
+            "op": "min",
+            "args": [
+              "wthv",
+              -1e-08
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Lmo",
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      "USTAR",
+                      3
+                    ]
+                  },
+                  "Tv2m"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "kappa",
+                  "g",
+                  "wthv_eff"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wstar",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wthv_num",
+              0.0
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "g",
+                      "Tv2m"
+                    ]
+                  },
+                  "wthv",
+                  "zi"
+                ]
+              },
+              0.3333333333333333
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "zeta_clip",
+      "rhs": {
+        "op": "max",
+        "args": [
+          {
+            "op": "min",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "z_agl",
+                  {
+                    "op": "max",
+                    "args": [
+                      "zi",
+                      1.0
+                    ]
+                  }
+                ]
+              },
+              1.0
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_w2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wthv_num",
+              0.0
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "<",
+                "args": [
+                  "zeta_clip",
+                  0.1
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  1.74,
+                  {
+                    "op": "^",
+                    "args": [
+                      "USTAR",
+                      2
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              1.0,
+                              {
+                                "op": "*",
+                                "args": [
+                                  -3.0,
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "z_agl",
+                                      {
+                                        "op": "*",
+                                        "args": [
+                                          {
+                                            "op": "ifelse",
+                                            "args": [
+                                              {
+                                                "op": ">",
+                                                "args": [
+                                                  "wthv_num",
+                                                  0.0
+                                                ]
+                                              },
+                                              -1.0,
+                                              1.0
+                                            ]
+                                          },
+                                          {
+                                            "op": "max",
+                                            "args": [
+                                              {
+                                                "op": "abs",
+                                                "args": [
+                                                  "Lmo"
+                                                ]
+                                              },
+                                              1.0
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          1e-06
+                        ]
+                      },
+                      0.6666666666666666
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      "wstar",
+                      2
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          "zeta_clip",
+                          1e-06
+                        ]
+                      },
+                      0.6666666666666666
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              1.0,
+                              {
+                                "op": "*",
+                                "args": [
+                                  -1.0,
+                                  "zeta_clip"
+                                ]
+                              }
+                            ]
+                          },
+                          1e-06
+                        ]
+                      },
+                      0.6666666666666666
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      1.0,
+                      {
+                        "op": "*",
+                        "args": [
+                          0.5,
+                          {
+                            "op": "^",
+                            "args": [
+                              "R_inv",
+                              0.6666666666666666
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.7,
+              {
+                "op": "^",
+                "args": [
+                  "USTAR",
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              -1.0,
+                              "zeta_clip"
+                            ]
+                          }
+                        ]
+                      },
+                      0.0
+                    ]
+                  },
+                  1.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "sigmaw",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "max",
+            "args": [
+              "sigma_w2",
+              {
+                "op": "*",
+                "args": [
+                  0.6666666666666666,
+                  "TKEMIN"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_u2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wthv_num",
+              0.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.36,
+              {
+                "op": "^",
+                "args": [
+                  "wstar",
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              4.0,
+              {
+                "op": "^",
+                "args": [
+                  "USTAR",
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              -1.0,
+                              "zeta_clip"
+                            ]
+                          }
+                        ]
+                      },
+                      0.0
+                    ]
+                  },
+                  1.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_u",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          "sigma_u2"
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_v2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "wthv_num",
+              0.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.36,
+              {
+                "op": "^",
+                "args": [
+                  "wstar",
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              5.0,
+              {
+                "op": "^",
+                "args": [
+                  "USTAR",
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              -1.0,
+                              "zeta_clip"
+                            ]
+                          }
+                        ]
+                      },
+                      0.0
+                    ]
+                  },
+                  1.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "sigma_v",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          "sigma_v2"
+        ]
+      }
+    },
+    {
+      "lhs": "TL_v",
+      "rhs": {
+        "op": "max",
+        "args": [
+          "TL_v_min",
+          {
+            "op": "min",
+            "args": [
+              "TL_v_max",
+              {
+                "op": "ifelse",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "wthv_num",
+                      0.0
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      0.15,
+                      {
+                        "op": "/",
+                        "args": [
+                          "zi",
+                          "sigmaw"
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              -1.0,
+                              {
+                                "op": "exp",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      -5.0,
+                                      "zeta_clip"
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      0.1,
+                      {
+                        "op": "/",
+                        "args": [
+                          "zi",
+                          "sigmaw"
+                        ]
+                      },
+                      {
+                        "op": "^",
+                        "args": [
+                          "zeta_clip",
+                          0.8
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "wprime_ref",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<=",
+            "args": [
+              "lev",
+              {
+                "op": "+",
+                "args": [
+                  "lev_gnd",
+                  0.05
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      -1.0,
+                      "w_damp"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "abs",
+                "args": [
+                  "wprime"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">=",
+                "args": [
+                  "lev",
+                  {
+                    "op": "+",
+                    "args": [
+                      "lev_top",
+                      -0.05
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  -1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      1.0,
+                      {
+                        "op": "*",
+                        "args": [
+                          -1.0,
+                          "w_damp"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "abs",
+                    "args": [
+                      "wprime"
+                    ]
+                  }
+                ]
+              },
+              "wprime"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "t0-unstable-thermodynamics",
+      "description": "At t=0 with HFLUX=100 W/m^2 (daytime unstable), verify thermodynamic chain: Tv2m from T2M/QV2M, rho from ideal gas, wthv from heat and moisture fluxes, Lmo negative (unstable), wstar from buoyancy flux, zi from max(PBLH,KMIX0), zeta_clip = z_agl/zi = 0.05 (surface layer), sigmaw from Hanna (1982) USL formula (ARL-224 Eq. 92), sigma_u = sigma_v from Kantha-Clayson (ARL-224 Eq. 91), TL_v from Hanna convective form (ARL-224 Eq. 66).",
+      "parameter_overrides": {
+        "HFLUX": 100.0,
+        "EFLUX": 0.0
+      },
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "assertions": [
+        {
+          "variable": "Tv2m",
+          "time": 0,
+          "expected": 294.76,
+          "tolerance": {
+            "rel": 0.001
+          }
+        },
+        {
+          "variable": "rho",
+          "time": 0,
+          "expected": 1.1976,
+          "tolerance": {
+            "rel": 0.001
+          }
+        },
+        {
+          "variable": "wthv",
+          "time": 0,
+          "expected": 0.08363,
+          "tolerance": {
+            "rel": 0.01
+          }
+        },
+        {
+          "variable": "Lmo",
+          "time": 0,
+          "expected": -24.27,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "wstar",
+          "time": 0,
+          "expected": 1.406,
+          "tolerance": {
+            "rel": 0.01
+          }
+        },
+        {
+          "variable": "zi",
+          "time": 0,
+          "expected": 1000.0,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        },
+        {
+          "variable": "zeta_clip",
+          "time": 0,
+          "expected": 0.05,
+          "tolerance": {
+            "abs": 1e-10
+          }
+        },
+        {
+          "variable": "sigmaw",
+          "time": 0,
+          "expected": 0.7635,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "sigma_u",
+          "time": 0,
+          "expected": 0.8437,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "sigma_v",
+          "time": 0,
+          "expected": 0.8437,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "TL_v",
+          "time": 0,
+          "expected": 43.46,
+          "tolerance": {
+            "rel": 0.03
+          }
+        }
+      ]
+    },
+    {
+      "id": "t0-stable-thermodynamics",
+      "description": "At t=0 with HFLUX=-50 W/m^2 (nighttime stable), verify Lmo positive (stable/neutral regime), and sigma_w/sigma_u/sigma_v/TL_v using stable/neutral parameterizations (ARL-224 Eqs. 71-76 and Hanna 1982 Eq. 63).",
+      "parameter_overrides": {
+        "HFLUX": -50.0,
+        "EFLUX": 0.0
+      },
+      "time_span": {
+        "start": 0,
+        "end": 0
+      },
+      "assertions": [
+        {
+          "variable": "Lmo",
+          "time": 0,
+          "expected": 48.51,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "sigmaw",
+          "time": 0,
+          "expected": 0.3764,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "sigma_u",
+          "time": 0,
+          "expected": 0.5774,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "sigma_v",
+          "time": 0,
+          "expected": 0.6455,
+          "tolerance": {
+            "rel": 0.02
+          }
+        },
+        {
+          "variable": "TL_v",
+          "time": 0,
+          "expected": 24.15,
+          "tolerance": {
+            "rel": 0.03
+          }
+        }
+      ]
+    },
+    {
+      "id": "wprime-langevin-decay",
+      "description": "With HFLUX=100 W/m^2 and initial wprime=1.0 m/s, the deterministic Langevin equation D(wprime)/dt = -wprime/TL_v gives exponential decay wprime(t) = exp(-t/TL_v). At t~TL_v the solution is ~e^(-1) = 0.3679. TL_v ~ 43.46 s from the unstable USL parameterization; at t=43.5 s, wprime ~ exp(-43.5/43.46) ~ 0.3676.",
+      "initial_conditions": {
+        "wprime": 1.0,
+        "lev": 36.0
+      },
+      "parameter_overrides": {
+        "HFLUX": 100.0,
+        "EFLUX": 0.0
+      },
+      "time_span": {
+        "start": 0,
+        "end": 43.5
+      },
+      "assertions": [
+        {
+          "variable": "wprime",
+          "time": 43.5,
+          "expected": 0.3676,
+          "tolerance": {
+            "rel": 0.03
+          }
+        }
+      ]
+    },
+    {
+      "id": "uprime-x-decay-and-lon-drift",
+      "description": "With HFLUX=100 W/m^2 and initial uprime_x=1.0 m/s, D(uprime_x)/dt = -uprime_x/TL_h gives uprime_x(t)=exp(-t/TL_h). D(lon)/dt = uprime_x*x_trans, so lon(t) = x_trans*TL_h*(1-exp(-t/TL_h)) = 108*(1-exp(-t/10800)). At t=100 s: uprime_x=exp(-100/10800)~0.9908, lon~108*(1-exp(-0.009259))~0.9958.",
+      "initial_conditions": {
+        "uprime_x": 1.0,
+        "lev": 36.0
+      },
+      "parameter_overrides": {
+        "HFLUX": 100.0,
+        "EFLUX": 0.0
+      },
+      "time_span": {
+        "start": 0,
+        "end": 100.0
+      },
+      "assertions": [
+        {
+          "variable": "uprime_x",
+          "time": 100.0,
+          "expected": 0.9908,
+          "tolerance": {
+            "rel": 0.005
+          }
+        },
+        {
+          "variable": "lon",
+          "time": 100.0,
+          "expected": 0.9958,
+          "tolerance": {
+            "rel": 0.01
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "stability_regime_sweep",
+      "description": "Boundary-layer turbulence parameters (sigmaw, sigma_u, wstar, TL_v) as a function of surface sensible heat flux HFLUX over -100 to 300 W/m^2. Illustrates the transition from stable (HFLUX < 0, Lmo > 0) to neutral (HFLUX ~ 0) to convective (HFLUX > 0, Lmo < 0) regimes. USTAR=0.3 m/s, PBLH=1000 m, z_agl=50 m.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "HFLUX",
+            "range": {
+              "start": -100.0,
+              "stop": 300.0,
+              "count": 40,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "sigmaw_vs_hflux",
+          "type": "line",
+          "description": "Vertical velocity std dev sigmaw vs surface heat flux.",
+          "x": {
+            "variable": "HFLUX",
+            "label": "HFLUX (W/m^2)"
+          },
+          "y": {
+            "variable": "sigmaw",
+            "label": "sigmaw (m/s)"
+          }
+        },
+        {
+          "id": "sigma_u_vs_hflux",
+          "type": "line",
+          "description": "Horizontal velocity std dev sigma_u vs surface heat flux.",
+          "x": {
+            "variable": "HFLUX",
+            "label": "HFLUX (W/m^2)"
+          },
+          "y": {
+            "variable": "sigma_u",
+            "label": "sigma_u (m/s)"
+          }
+        },
+        {
+          "id": "wstar_vs_hflux",
+          "type": "line",
+          "description": "Convective velocity scale wstar vs surface heat flux. Zero for stable/neutral (HFLUX <= 0), grows as (HFLUX)^(1/3) for unstable.",
+          "x": {
+            "variable": "HFLUX",
+            "label": "HFLUX (W/m^2)"
+          },
+          "y": {
+            "variable": "wstar",
+            "label": "wstar (m/s)"
+          }
+        },
+        {
+          "id": "TL_v_vs_hflux",
+          "type": "line",
+          "description": "Vertical Lagrangian time scale TL_v vs surface heat flux.",
+          "x": {
+            "variable": "HFLUX",
+            "label": "HFLUX (W/m^2)"
+          },
+          "y": {
+            "variable": "TL_v",
+            "label": "TL_v (s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "particle_velocity_decay",
+      "description": "Time evolution of turbulent velocity components (wprime, uprime_x) and resulting particle level displacement under the deterministic Langevin drift. Initial conditions: wprime=1 m/s, uprime_x=0.5 m/s, lev=36 (interior domain). HFLUX=100 W/m^2 (unstable), z2lev=0.001. Shows exponential decay of velocity fluctuations: TL_v ~ 43 s for vertical, TL_h = 10800 s for horizontal.",
+      "initial_state": {
+        "wprime": 1.0,
+        "uprime_x": 0.5,
+        "lev": 36.0
+      },
+      "parameters": {
+        "HFLUX": 100.0,
+        "EFLUX": 0.0,
+        "z2lev": 0.001
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 200.0
+      },
+      "plots": [
+        {
+          "id": "wprime_decay",
+          "type": "line",
+          "description": "Turbulent vertical velocity wprime decaying from 1 m/s with time scale TL_v ~ 43 s.",
+          "x": {
+            "variable": "t",
+            "label": "t (s)"
+          },
+          "y": {
+            "variable": "wprime",
+            "label": "wprime (m/s)"
+          }
+        },
+        {
+          "id": "uprime_x_decay",
+          "type": "line",
+          "description": "Zonal turbulent velocity uprime_x decaying from 0.5 m/s with time scale TL_h = 10800 s (very slow over this 200 s window).",
+          "x": {
+            "variable": "t",
+            "label": "t (s)"
+          },
+          "y": {
+            "variable": "uprime_x",
+            "label": "uprime_x (m/s)"
+          }
+        },
+        {
+          "id": "lev_trajectory",
+          "type": "line",
+          "description": "Particle level coordinate lev(t) drifting upward from level 36 as wprime drives D(lev)/dt = wprime_ref * z2lev.",
+          "x": {
+            "variable": "t",
+            "label": "t (s)"
+          },
+          "y": {
+            "variable": "lev",
+            "label": "lev (-)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

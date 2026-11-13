@@ -1,0 +1,220 @@
+---
+title: "BurningIndex"
+slug: "burningindex"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/burning_index.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 12 (Burning Index)."
+description: "Burning Index (BI) from the National Fire Danger Rating System (NFDRS). BI is numerically equivalent to 10 times the predicted flame length in feet. BI = 3.01 × (SC × ERC)^0.46, where SC is the spread component (m/s) and ERC is the energy release component (dimensionless). From Cohen & Deeming (1985), page 12."
+tags: ["wildland_fire", "nfdrs", "model", "fire_danger"]
+---
+
+## Description
+
+Burning Index (BI) from the National Fire Danger Rating System (NFDRS). BI is numerically equivalent to 10 times the predicted flame length in feet. BI = 3.01 × (SC × ERC)^0.46, where SC is the spread component (m/s) and ERC is the energy release component (dimensionless). From Cohen & Deeming (1985), page 12.
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:1231
+The Burning Index (BI) is calculated as BI = 3.01 × (SC × ERC)^0.46, where SC (spread component) is converted from m/s to ft/min for the calculation. The max(0.0, ...) ensures non-negative input to the power function. When fuels_wet > 0.5, BI is set to 0.0._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `ms_to_fpm` | `1` | `196.8504` | Numerical conversion: m/s to ft/min (dimensionless) |
+| `fuels_wet` | `1` | `0` | Flag: 1 if fuels wet or snow-covered (dimensionless) |
+| `ERC` | `1` |  | Energy release component (dimensionless) |
+| `SC` | `m/s` |  | Spread component |
+| `V_ref` | `m/s` | `1` | Reference velocity for non-dimensionalization |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `BI` | `1` |  | Burning index (dimensionless) |
+
+## Observed expressions
+
+$$
+BI = \mathrm{ifelse}\left(\mathrm{<}\left(0.5, fuels_{wet}\right), 0, 3.01 \cdot \mathrm{max}\left(0, \frac{ms_{to\,fpm} \cdot ERC \cdot SC}{V_{ref}}\right)^{0.46}\right)
+$$
+_Burning index (dimensionless)_
+
+## Analyses
+
+### default_burning_index
+
+Default BurningIndex run with typical fire danger conditions
+
+**Time span:** 0 → 1
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "tests": [
+    {
+      "parameter_overrides": {
+        "fuels_wet": 0,
+        "ERC": 20,
+        "SC": 0.254
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "id": "BurningIndex_normal_conditions",
+      "assertions": [
+        {
+          "expected": 72.2,
+          "time": 1,
+          "variable": "BI",
+          "tolerance": {
+            "abs": 0.1
+          }
+        }
+      ],
+      "description": "Test BI = 3.01 * (SC_fpm * ERC)^0.46 with SC=0.254 m/s (= 50 ft/min), ERC=20: BI = 3.01 * 1000^0.46 ≈ 72.20."
+    },
+    {
+      "parameter_overrides": {
+        "fuels_wet": 1,
+        "ERC": 20,
+        "SC": 0.254
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "id": "BurningIndex_wet_conditions",
+      "assertions": [
+        {
+          "expected": 0,
+          "time": 1,
+          "variable": "BI",
+          "tolerance": {
+            "abs": 0.001
+          }
+        }
+      ],
+      "description": "Test BI = 0 when fuels_wet = 1"
+    }
+  ],
+  "variables": {
+    "ms_to_fpm": {
+      "units": "1",
+      "default": 196.8504,
+      "type": "parameter",
+      "description": "Numerical conversion: m/s to ft/min (dimensionless)"
+    },
+    "fuels_wet": {
+      "units": "1",
+      "default": 0,
+      "type": "parameter",
+      "description": "Flag: 1 if fuels wet or snow-covered (dimensionless)"
+    },
+    "ERC": {
+      "units": "1",
+      "type": "parameter",
+      "description": "Energy release component (dimensionless)"
+    },
+    "SC": {
+      "units": "m/s",
+      "type": "parameter",
+      "description": "Spread component"
+    },
+    "V_ref": {
+      "units": "m/s",
+      "default": 1,
+      "type": "parameter",
+      "description": "Reference velocity for non-dimensionalization"
+    },
+    "BI": {
+      "units": "1",
+      "type": "unknown",
+      "description": "Burning index (dimensionless)"
+    }
+  },
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:1231\nThe Burning Index (BI) is calculated as BI = 3.01 × (SC × ERC)^0.46, where SC (spread component) is converted from m/s to ft/min for the calculation. The max(0.0, ...) ensures non-negative input to the power function. When fuels_wet > 0.5, BI is set to 0.0."
+  },
+  "equations": [
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0.5,
+              "fuels_wet"
+            ],
+            "op": "<"
+          },
+          0,
+          {
+            "args": [
+              3.01,
+              {
+                "args": [
+                  {
+                    "args": [
+                      0,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              "ms_to_fpm",
+                              "ERC",
+                              "SC"
+                            ],
+                            "op": "*"
+                          },
+                          "V_ref"
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "max"
+                  },
+                  0.46
+                ],
+                "op": "^"
+              }
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "BI"
+    }
+  ],
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "analyses": [
+    {
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "id": "default_burning_index",
+      "parameters": {
+        "fuels_wet": 0,
+        "ERC": 20,
+        "SC": 0.254
+      },
+      "description": "Default BurningIndex run with typical fire danger conditions"
+    }
+  ]
+}
+```
+
+</details>

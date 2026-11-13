@@ -1,0 +1,2195 @@
+---
+title: "DryDepositionAerosol"
+slug: "drydepositionaerosol"
+domains: ["atmospheric_deposition"]
+component_types: ["model"]
+domain: "atmospheric_deposition"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/atmospheric_deposition/dry_aerosol.esm"
+reference: "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.7 (particle dry deposition velocity). John Wiley & Sons, Inc."
+description: "ModelingToolkit implementation of particle (aerosol) dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.7. Computes the particle dry deposition velocity v [m/s] for a single aerosol size and the corresponding first-order deposition rate k = v/z [1/s], as a resistance network: v = 1/(R_a + R_b + R_a*R_b*V_s) + V_s, where R_a is the aerodynamic resistance (Eqs. 19.13-19.14), R_b is the quasi-laminar sublayer resistance (Eq. 19.27), and V_s is the gravitational settling velocity (Eq. 9.42). R_b combines Brownian diffusion (Schmidt number), inertial impaction (Stokes number) and interception, with land-use-dependent collector geometry from the Seinfeld & Pandis Table 19.2 characteristic-radius table. Migrated from AtmosphericDeposition.jl@e4468c79 src/dry_deposition.jl:1040 (the DryDepositionAerosol builder); its DryDepParticle kernel (src/dry_deposition.jl:272) and the whole helper chain (ra, mu, mfp, cc, vs, dParticle, sc, stSmooth/stVeg, RbParticle) are inlined. Purely algebraic: no differential states -- the 27 computed quantities are observed variables defined by inline expressions."
+tags: ["atmospheric_deposition", "model", "seinfeld-pandis", "sp-ch19", "dry-deposition", "aerosol", "deposition-velocity"]
+---
+
+## Description
+
+ModelingToolkit implementation of particle (aerosol) dry deposition from Seinfeld & Pandis (2006), Atmospheric Chemistry and Physics, 2nd ed., Chapter 19 (Dry Deposition), Eq. 19.7. Computes the particle dry deposition velocity v [m/s] for a single aerosol size and the corresponding first-order deposition rate k = v/z [1/s], as a resistance network: v = 1/(R_a + R_b + R_a*R_b*V_s) + V_s, where R_a is the aerodynamic resistance (Eqs. 19.13-19.14), R_b is the quasi-laminar sublayer resistance (Eq. 19.27), and V_s is the gravitational settling velocity (Eq. 9.42). R_b combines Brownian diffusion (Schmidt number), inertial impaction (Stokes number) and interception, with land-use-dependent collector geometry from the Seinfeld & Pandis Table 19.2 characteristic-radius table. Migrated from AtmosphericDeposition.jl@e4468c79 src/dry_deposition.jl:1040 (the DryDepositionAerosol builder); its DryDepParticle kernel (src/dry_deposition.jl:272) and the whole helper chain (ra, mu, mfp, cc, vs, dParticle, sc, stSmooth/stVeg, RbParticle) are inlined. Purely algebraic: no differential states -- the 27 computed quantities are observed variables defined by inline expressions.
+
+## Reference
+
+Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.7 (particle dry deposition velocity). John Wiley & Sons, Inc.
+
+_source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/dry_deposition.jl:1040
+
+Upstream `DryDepositionAerosol` is an MTK builder -- `System(eqs, t, [v; k], params)` with no subsystems -- carrying two equations: v ~ DryDepParticle(...) and k ~ v/z. `DryDepParticle` (src/dry_deposition.jl:272) is a plain Julia function, not a registered symbolic, so it and its entire helper chain (ra, mu, mfp, cc, vs, dParticle, sc, stSmooth, stVeg, RbParticle) are inlined here. There is no time derivative anywhere (no D operator); the component is purely algebraic, so every computed quantity migrates as a `type: observed` variable carrying its inline `expression`, the `equations` array is empty, and `system_kind` is left unset. This is the pure-algebraic convention (matching sibling observed-only migrations such as aerosol/radiative_forcing/cloud_albedo.esm): the ESS Python runner evaluates an observed-only model by direct expression sampling, with no ODE integration. The 27 observed expressions are written in a valid topological order; the runner re-sorts and substitutes them regardless.
+
+Resistance network. v is Eq. 19.7, v = 1/(R_a + R_b + R_a*R_b*V_s) + V_s, gated by ifelse(lev == 1, ..., 0) so deposition acts only in the surface layer. R_a (Ra) is the aerodynamic resistance of `ra`, Eqs. 19.13-19.14, with three stability regimes: the unstable branch (zeta < 0) uses the integrated similarity form, the stable branch (zeta > 0) adds the 4.7*(zeta - zeta_0) term, and the neutral branch is the bare log profile. The intermediate i_unstable (upstream `i`) is the domain guard from the source comment: eta and eta_0 evaluate (1 - 15*zeta)^(1/4), whose base is negative for zeta > 0; multiplying zeta by i_unstable (1 only when zeta < 0, else 0) forces the base to exactly 1 in the stable/neutral regimes, so the fractional power is always taken of a base >= 1. R_b (Rb) is RbParticle, Eq. 19.27, summing the Brownian term Sc^(-gamma), the impaction term (St/(alpha + St))^2 and the interception term 0.5*(Dp/A)^2, scaled by the rebound factor R1 = exp(-sqrt(St)). V_s (Vs) is the Cunningham-corrected Stokes settling velocity of `vs`, Eq. 9.42, with the upstream Dp > 20 um cutoff returning the 99999999 m/s sentinel.
+
+Neutral-stability guard. The default L = 0 is the neutral-stability sentinel and upstream `ra` writes zeta = ifelse(L/unit_m == 0, 0, z/L). The ESS Python runner lowers ifelse to a numpy select that evaluates every branch eagerly, rewrites any 1/L as L**(-1), and simplifies comparisons such as 0 < zeta -- so any guarded division by L, and even an ifelse(L==0,1,0) in the denominator, is reduced back to a bare 1/L that raises at L = 0 (float division by zero / 0.0**negative). zeta and zeta_0 are therefore reformulated as z*L/(L*L + 1e-300) and z0*L/(L*L + 1e-300): the 1e-300 floor is a plain non-zero constant the simplifier cannot drop, keeps the denominator strictly positive, and sits ~284 orders of magnitude below L*L for every physical L, so the expression rounds to z/L (resp. z0/L) for L != 0 and is exactly 0 for L = 0 -- the values the upstream guard produces, to within one ulp.
+
+Lookup tables. The three Seinfeld & Pandis land-use tables are migrated as `interp.linear` over column-major-flattened `const` vectors, matching the sibling wesley1989/surface_resistance.esm precedent. A_table (the 5x5 season x land-use characteristic collector radius, S&P Table 19.2) flattens column-major (Julia `vec`) to a 25-entry vector on the integer axis [1..25], queried at A_table_index = (SeinfeldLandUse - 1)*5 + SeinfeldSeason; the upstream *1.0e-3 mm-to-m factor is baked into the stored entries. alpha and gamma (5-entry, land-use only) are queried directly at SeinfeldLandUse on the axis [1..5]. SeinfeldSeason in 1..5 and SeinfeldLandUse in 1..5 are categorical integers, so every lookup lands exactly on an integer axis knot -- interp.linear returns the exact table entry with a zero blend weight, reproducing the upstream direct array indexing SA_F32[...][iSeason, iLandUse].
+
+Desert sentinel. A_table's land-use-4 (desert) column is `Inf` upstream -- a sentinel that makes the vegetation-collector terms vanish (term_3 = 0.5*(Dp/A)^2 -> 0, and the unused st_veg -> 0; the St Stokes-number ifelse selects st_smooth for desert anyway). JSON cannot encode Inf, so the five desert entries are stored as the finite sentinel 1.0e25. At a desert query interp.linear returns 1.0e25 exactly (zero blend weight); term_3 = 0.5*(Dp/1e25)^2 is about 3e-65, reproducing the upstream Inf -> 0 behaviour to ~60 digits. A column-major 1-D flatten (rather than interp.bilinear) is used so the desert column never participates in a blend that could cancel the sentinel.
+
+Float32 tables. The upstream tables are SA_F32 (Float32) static arrays. alpha and gamma have non-integer entries (0.8, 1.2, 1.3, 0.56, 0.54) that are not exact in Float32; each is stored as its exact Float64-promoted Float32 value (e.g. 0.8 -> 0.800000011920929) to reproduce upstream arithmetic. A_table's entries (2, 5, 10) are exact in Float32, so A_table*1e-3 is stored as the clean 0.002 / 0.005 / 0.01.
+
+Dropped declarations. `DryDepositionAerosol` declares WesleySeason and WesleyLandUse as @parameters and passes them to DryDepParticle, but DryDepParticle's body never references its iWesleySeason / iWesleyLandUse arguments -- they are dead -- so they are omitted from the migration. The upstream unit-one @constants (unit_m, unit_T, unit_convert_mu, unit_v) are identically 1 and the ESS runners do no dimensional analysis, so they fold away (e.g. ifelse(L/unit_m == 0, ...) becomes ifelse(L == 0, ...); Dp > 20e-6*unit_m becomes Dp > 2.0e-5). dH2O and its constants (T_unitless, unit_dH2O) belong to the gas-deposition pathway and are not part of this component.
+
+Constants. g, kappa (von Karman), k_B, M_air and R migrate as fixed-default parameters (ESM has no constant variable type). k_B and R use the schema-recognized physical-constant names with units J/K and J/(mol*K); their defaults are the upstream values (k_B = 1.3806488e-23, R = 8.3144621). pi is inlined as the literal 3.141592653589793 (Julia Float64 pi). The upstream component coupling tag `metadata = Dict(CoupleType => DryDepositionAerosolCoupler)` is informational only and, following the rig convention for migrated components, is not carried into a `coupletype` field.
+
+Inputs. lev, z, z0, u_star, L, Dp, Ts, P, rho_particle and rho_a carry the upstream `DryDepositionAerosol` @parameter defaults. SeinfeldSeason (default 1 = midsummer) and SeinfeldLandUse (default 3 = grass) are the integer S&P season and land-use indices (land use: 1 evergreen, 2 deciduous, 3 grass, 4 desert, 5 shrubs; season: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional).
+
+Units. ESM `units` fields are descriptive only; the runners perform no dimensional analysis.
+
+Tolerance rationale (model-level rel=1e-6): a closed-form algebraic system with no ODE integration -- each observed value is the Float64 evaluation of the inlined Eq. 19.7 cascade. rel=1e-6 absorbs round-off across the reciprocal-sum resistance chain and the libm exp / log / atan / pow evaluations, well above the agreement expected between conforming runners. The supercoarse Dp > 20 um regime is migrated faithfully (the `vs` sentinel branch) but not given a dedicated inline test, because there exp(-sqrt(St)) underflows and drives Rb to a non-finite value that JSON assertions cannot express; v itself stays finite at the V_s sentinel._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lev` | `1` | `1` | Index of the atmospheric layer; deposition acts only when lev = 1 (the surface layer). |
+| `z` | `m` | `50.0` | Height of the top of the surface layer. |
+| `z0` | `m` | `0.04` | Aerodynamic roughness length (upstream z_0). |
+| `u_star` | `m/s` | `0.44` | Friction velocity. |
+| `L` | `m` | `0.0` | Monin-Obukhov length. The value 0 is the neutral-stability sentinel. |
+| `Dp` | `m` | `8e-07` | Particle diameter. |
+| `Ts` | `K` | `298.0` | Surface air temperature. |
+| `P` | `Pa` | `101325.0` | Air pressure. |
+| `rho_particle` | `kg/m^3` | `1000.0` | Particle (aerosol) mass density (upstream rho_Particle). |
+| `rho_a` | `kg/m^3` | `1.2` | Air density (upstream rho_A). |
+| `SeinfeldSeason` | `1` | `1` | Seinfeld & Pandis season index 1-5: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional. Default: midsummer. |
+| `SeinfeldLandUse` | `1` | `3` | Seinfeld & Pandis land-use index 1-5: 1 evergreen, 2 deciduous, 3 grass, 4 desert, 5 shrubs. Default: grass. |
+| `g` | `m/s^2` | `9.81` | Gravitational acceleration (upstream @constant). |
+| `kappa` | `1` | `0.4` | Von Karman constant (upstream @constant kappa). |
+| `k_B` | `J/K` | `1.3806488e-23` | Boltzmann constant (upstream @constant). |
+| `M_air` | `kg/mol` | `0.02897` | Molecular weight of air (upstream @constant). |
+| `R` | `J/(mol*K)` | `8.3144621` | Ideal gas constant (upstream @constant). |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `zeta` | `1` |  | Stability parameter z/L of the surface layer, 0 in the neutral limit L = 0 (Eqs. 19.13-19.14). Written as z*L/(L*L + 1e-300): the 1e-300 floor keeps the denominator strictly positive (so neither the value nor any comparison on it ever divides by L = 0), and is far below the rounding scale of L*L for every physical L, so for L != 0 this equals z/L and for L = 0 it equals 0. |
+| `zeta_0` | `1` |  | Stability parameter z_0/L at the roughness height, 0 in the neutral limit L = 0. Written as z0*L/(L*L + 1e-300) for the same strictly-positive-denominator reason as zeta. |
+| `ra_neutral_stable` | `s/m` |  | Aerodynamic resistance in the neutral/stable regimes (zeta >= 0): the log profile, plus the 4.7*(zeta - zeta_0) correction when stable (upstream r_a_1). |
+| `i_unstable` | `1` |  | Domain-guard indicator: 1 when the layer is unstable (zeta < 0), else 0. Forces the base of eta / eta_0 to 1 in the stable/neutral regimes (upstream src comment at ra). |
+| `eta_0` | `1` |  | Similarity variable (1 - 15*zeta_0)^(1/4) at the roughness height, used in the unstable aerodynamic resistance. |
+| `eta` | `1` |  | Similarity variable (1 - 15*zeta)^(1/4) at the surface-layer top, used in the unstable aerodynamic resistance. |
+| `Ra` | `s/m` |  | Aerodynamic resistance to dry deposition (Eqs. 19.13-19.14): unstable integrated-similarity form when zeta < 0, else ra_neutral_stable. |
+| `mu` | `kg/(m*s)` |  | Dynamic viscosity of air from the Sutherland relation (upstream `mu`); unit_T and unit_convert_mu folded away. |
+| `mfp` | `m` |  | Mean free path of air (S&P Eq. 9.6, upstream `mfp`). |
+| `Cc` | `1` |  | Cunningham slip correction factor (S&P Eq. 9.34, upstream `cc`). |
+| `Vs` | `m/s` |  | Gravitational settling (terminal) velocity (S&P Eq. 9.42, upstream `vs`); the 99999999 m/s sentinel for Dp > 20 um, where Stokes settling no longer applies. |
+| `A_table_index` | `1` |  | Flattened (column-major) lookup coordinate into the 25-entry season x land-use characteristic-radius table: (SeinfeldLandUse - 1)*5 + SeinfeldSeason. |
+| `A_collector` | `m` |  | Characteristic radius of surface collectors (S&P Table 19.2, upstream A_table * 1e-3). 1e25 for desert land use, the finite stand-in for the upstream Inf sentinel. |
+| `st_smooth` | `1` |  | Stokes number for smooth / bluff-roughness surfaces (S&P Eq. 19.23, upstream `stSmooth`). |
+| `st_veg` | `1` |  | Stokes number for vegetated surfaces (S&P Eq. 19.24, upstream `stVeg`). |
+| `St` | `1` |  | Selected Stokes number: st_smooth for desert land use (index 4), else st_veg. |
+| `D_brownian` | `m^2/s` |  | Brownian diffusivity of the particle from the Stokes-Einstein-Sutherland relation (S&P Eq. 9.73, upstream `dParticle`). |
+| `Sc` | `1` |  | Schmidt number of the particle (upstream `sc`). |
+| `alpha` | `1` |  | Land-use impaction-efficiency parameter (S&P Table 19.2, upstream alpha_table). |
+| `gamma` | `1` |  | Land-use Brownian-diffusion exponent (S&P Table 19.2, upstream gamma_table). |
+| `R1` | `1` |  | Particle-rebound correction factor exp(-sqrt(St)) of the sublayer resistance (Eq. 19.27). |
+| `term_1` | `1` |  | Brownian-diffusion collection term Sc^(-gamma) of the sublayer resistance (Eq. 19.27). |
+| `term_2` | `1` |  | Inertial-impaction collection term (St/(alpha + St))^2 of the sublayer resistance (Eq. 19.27). |
+| `term_3` | `1` |  | Interception collection term 0.5*(Dp/A_collector)^2 of the sublayer resistance (Eq. 19.27); ~0 for desert land use. |
+| `Rb` | `s/m` |  | Quasi-laminar sublayer resistance to particle dry deposition (S&P Eq. 19.27, upstream `RbParticle`). |
+| `v` | `m/s` |  | Particle dry deposition velocity (S&P Eq. 19.7); 0 above the surface layer (lev != 1). |
+| `k` | `1/s` |  | First-order particle dry deposition rate, v/z. |
+
+## Observed expressions
+
+$$
+zeta = \frac{z \cdot L}{L \cdot L + 1 \times 10^{-300}}
+$$
+_Stability parameter z/L of the surface layer, 0 in the neutral limit L = 0 (Eqs. 19.13-19.14). Written as z*L/(L*L + 1e-300): the 1e-300 floor keeps the denominator strictly positive (so neither the value nor any comparison on it ever divides by L = 0), and is far below the rounding scale of L*L for every physical L, so for L != 0 this equals z/L and for L = 0 it equals 0._
+
+$$
+zeta_{0} = \frac{z0 \cdot L}{L \cdot L + 1 \times 10^{-300}}
+$$
+_Stability parameter z_0/L at the roughness height, 0 in the neutral limit L = 0. Written as z0*L/(L*L + 1e-300) for the same strictly-positive-denominator reason as zeta._
+
+$$
+ra_{neutral\,stable} = \mathrm{ifelse}\left(\mathrm{<}\left(0, zeta\right), \frac{1}{kappa \cdot u_{star}} \cdot \left(\ln\left(\frac{z}{z0}\right) + 4.7 \cdot \left(zeta - zeta_{0}\right)\right), \frac{1}{kappa \cdot u_{star}} \cdot \ln\left(\frac{z}{z0}\right)\right)
+$$
+_Aerodynamic resistance in the neutral/stable regimes (zeta >= 0): the log profile, plus the 4.7*(zeta - zeta_0) correction when stable (upstream r_a_1)._
+
+$$
+i_{unstable} = \mathrm{ifelse}\left(\mathrm{<}\left(zeta, 0\right), 1, 0\right)
+$$
+_Domain-guard indicator: 1 when the layer is unstable (zeta < 0), else 0. Forces the base of eta / eta_0 to 1 in the stable/neutral regimes (upstream src comment at ra)._
+
+$$
+eta_{0} = \left(1 - 15 \cdot zeta_{0} \cdot i_{unstable}\right)^{0.25}
+$$
+_Similarity variable (1 - 15*zeta_0)^(1/4) at the roughness height, used in the unstable aerodynamic resistance._
+
+$$
+eta = \left(1 - 15 \cdot zeta \cdot i_{unstable}\right)^{0.25}
+$$
+_Similarity variable (1 - 15*zeta)^(1/4) at the surface-layer top, used in the unstable aerodynamic resistance._
+
+$$
+Ra = \mathrm{ifelse}\left(\mathrm{<}\left(zeta, 0\right), \frac{1}{kappa \cdot u_{star}} \cdot \left(\ln\left(\frac{z}{z0}\right) + \ln\left(\frac{\left(eta_{0}^{2} + 1\right) \cdot \left(eta_{0} + 1\right)^{2}}{\left(eta^{2} + 1\right) \cdot \left(eta + 1\right)^{2}}\right) + 2 \cdot \left(\mathrm{atan}\left(eta\right) - \mathrm{atan}\left(eta_{0}\right)\right)\right), ra_{neutral\,stable}\right)
+$$
+_Aerodynamic resistance to dry deposition (Eqs. 19.13-19.14): unstable integrated-similarity form when zeta < 0, else ra_neutral_stable._
+
+$$
+mu = \frac{1.458 \times 10^{-6} \cdot Ts^{1.5}}{Ts + 110.4}
+$$
+_Dynamic viscosity of air from the Sutherland relation (upstream `mu`); unit_T and unit_convert_mu folded away._
+
+$$
+mfp = \frac{2 \cdot mu}{P \cdot \frac{8 \cdot M_{air}}{3.141592653589793 \cdot R \cdot Ts}^{0.5}}
+$$
+_Mean free path of air (S&P Eq. 9.6, upstream `mfp`)._
+
+$$
+Cc = 1 + \frac{2 \cdot mfp}{Dp} \cdot \left(1.257 + 0.4 \cdot e^{\frac{\left(-1.1\right) \cdot Dp}{2 \cdot mfp}}\right)
+$$
+_Cunningham slip correction factor (S&P Eq. 9.34, upstream `cc`)._
+
+$$
+Vs = \mathrm{ifelse}\left(\mathrm{>}\left(Dp, 2 \times 10^{-5}\right), 99999999.0, \frac{Dp^{2} \cdot rho_{particle} \cdot g \cdot Cc}{18 \cdot mu}\right)
+$$
+_Gravitational settling (terminal) velocity (S&P Eq. 9.42, upstream `vs`); the 99999999 m/s sentinel for Dp > 20 um, where Stokes settling no longer applies._
+
+$$
+A_{table\,index} = \left(SeinfeldLandUse - 1\right) \cdot 5 + SeinfeldSeason
+$$
+_Flattened (column-major) lookup coordinate into the 25-entry season x land-use characteristic-radius table: (SeinfeldLandUse - 1)*5 + SeinfeldSeason._
+
+$$
+A_{collector} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), A_{table\,index}\right)
+$$
+_Characteristic radius of surface collectors (S&P Table 19.2, upstream A_table * 1e-3). 1e25 for desert land use, the finite stand-in for the upstream Inf sentinel._
+
+$$
+st_{smooth} = \frac{Vs \cdot u_{star}^{2} \cdot rho_{a}}{g \cdot mu}
+$$
+_Stokes number for smooth / bluff-roughness surfaces (S&P Eq. 19.23, upstream `stSmooth`)._
+
+$$
+st_{veg} = \frac{Vs \cdot u_{star}}{g \cdot A_{collector}}
+$$
+_Stokes number for vegetated surfaces (S&P Eq. 19.24, upstream `stVeg`)._
+
+$$
+St = \mathrm{ifelse}\left(SeinfeldLandUse = 4, st_{smooth}, st_{veg}\right)
+$$
+_Selected Stokes number: st_smooth for desert land use (index 4), else st_veg._
+
+$$
+D_{brownian} = \frac{k_{B} \cdot Ts \cdot Cc}{3 \cdot 3.141592653589793 \cdot mu \cdot Dp}
+$$
+_Brownian diffusivity of the particle from the Stokes-Einstein-Sutherland relation (S&P Eq. 9.73, upstream `dParticle`)._
+
+$$
+Sc = \frac{mu}{rho_{a} \cdot D_{brownian}}
+$$
+_Schmidt number of the particle (upstream `sc`)._
+
+$$
+alpha = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), SeinfeldLandUse\right)
+$$
+_Land-use impaction-efficiency parameter (S&P Table 19.2, upstream alpha_table)._
+
+$$
+gamma = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), SeinfeldLandUse\right)
+$$
+_Land-use Brownian-diffusion exponent (S&P Table 19.2, upstream gamma_table)._
+
+$$
+R1 = e^{-St^{0.5}}
+$$
+_Particle-rebound correction factor exp(-sqrt(St)) of the sublayer resistance (Eq. 19.27)._
+
+$$
+term_{1} = Sc^{-gamma}
+$$
+_Brownian-diffusion collection term Sc^(-gamma) of the sublayer resistance (Eq. 19.27)._
+
+$$
+term_{2} = \frac{St}{alpha + St}^{2}
+$$
+_Inertial-impaction collection term (St/(alpha + St))^2 of the sublayer resistance (Eq. 19.27)._
+
+$$
+term_{3} = 0.5 \cdot \frac{Dp}{A_{collector}}^{2}
+$$
+_Interception collection term 0.5*(Dp/A_collector)^2 of the sublayer resistance (Eq. 19.27); ~0 for desert land use._
+
+$$
+Rb = \frac{1}{3 \cdot u_{star} \cdot \left(term_{1} + term_{2} + term_{3}\right) \cdot R1}
+$$
+_Quasi-laminar sublayer resistance to particle dry deposition (S&P Eq. 19.27, upstream `RbParticle`)._
+
+$$
+v = \mathrm{ifelse}\left(lev = 1, \frac{1}{Ra + Rb + Ra \cdot Rb \cdot Vs} + Vs, 0\right)
+$$
+_Particle dry deposition velocity (S&P Eq. 19.7); 0 above the surface layer (lev != 1)._
+
+$$
+k = \frac{v}{z}
+$$
+_First-order particle dry deposition rate, v/z._
+
+## Analyses
+
+### deposition_velocity_vs_particle_diameter
+
+Particle dry deposition velocity v as a function of particle diameter Dp for midsummer grass at neutral stability. Sweeping Dp logarithmically from 1 nm to 10 um traces the classic U-shaped curve: Brownian diffusion drives v up at the fine end, inertial impaction and gravitational settling drive it up at the coarse end, and v reaches its minimum in the 0.1-1 um accumulation mode.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `Dp`
+
+### deposition_velocity_vs_friction_velocity
+
+Particle dry deposition velocity v as a function of friction velocity u_star for a 0.8 um aerosol over midsummer grass at neutral stability. Stronger turbulence lowers both the aerodynamic resistance Ra and the quasi-laminar sublayer resistance Rb, so v rises with u_star.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `u_star`
+
+### deposition_velocity_over_diameter_and_turbulence
+
+Particle dry deposition velocity v over midsummer grass as a joint function of particle diameter Dp and friction velocity u_star. Surfaces how the size-resolved deposition curve shifts with turbulence: the accumulation-mode minimum is shallowest, and the coarse and fine ends steepest, at high u_star.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `Dp`, `u_star`
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H., & Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change (2nd ed.), Ch. 19, Eq. 19.7 (particle dry deposition velocity). John Wiley & Sons, Inc.",
+    "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/dry_deposition.jl:1040\n\nUpstream `DryDepositionAerosol` is an MTK builder -- `System(eqs, t, [v; k], params)` with no subsystems -- carrying two equations: v ~ DryDepParticle(...) and k ~ v/z. `DryDepParticle` (src/dry_deposition.jl:272) is a plain Julia function, not a registered symbolic, so it and its entire helper chain (ra, mu, mfp, cc, vs, dParticle, sc, stSmooth, stVeg, RbParticle) are inlined here. There is no time derivative anywhere (no D operator); the component is purely algebraic, so every computed quantity migrates as a `type: observed` variable carrying its inline `expression`, the `equations` array is empty, and `system_kind` is left unset. This is the pure-algebraic convention (matching sibling observed-only migrations such as aerosol/radiative_forcing/cloud_albedo.esm): the ESS Python runner evaluates an observed-only model by direct expression sampling, with no ODE integration. The 27 observed expressions are written in a valid topological order; the runner re-sorts and substitutes them regardless.\n\nResistance network. v is Eq. 19.7, v = 1/(R_a + R_b + R_a*R_b*V_s) + V_s, gated by ifelse(lev == 1, ..., 0) so deposition acts only in the surface layer. R_a (Ra) is the aerodynamic resistance of `ra`, Eqs. 19.13-19.14, with three stability regimes: the unstable branch (zeta < 0) uses the integrated similarity form, the stable branch (zeta > 0) adds the 4.7*(zeta - zeta_0) term, and the neutral branch is the bare log profile. The intermediate i_unstable (upstream `i`) is the domain guard from the source comment: eta and eta_0 evaluate (1 - 15*zeta)^(1/4), whose base is negative for zeta > 0; multiplying zeta by i_unstable (1 only when zeta < 0, else 0) forces the base to exactly 1 in the stable/neutral regimes, so the fractional power is always taken of a base >= 1. R_b (Rb) is RbParticle, Eq. 19.27, summing the Brownian term Sc^(-gamma), the impaction term (St/(alpha + St))^2 and the interception term 0.5*(Dp/A)^2, scaled by the rebound factor R1 = exp(-sqrt(St)). V_s (Vs) is the Cunningham-corrected Stokes settling velocity of `vs`, Eq. 9.42, with the upstream Dp > 20 um cutoff returning the 99999999 m/s sentinel.\n\nNeutral-stability guard. The default L = 0 is the neutral-stability sentinel and upstream `ra` writes zeta = ifelse(L/unit_m == 0, 0, z/L). The ESS Python runner lowers ifelse to a numpy select that evaluates every branch eagerly, rewrites any 1/L as L**(-1), and simplifies comparisons such as 0 < zeta -- so any guarded division by L, and even an ifelse(L==0,1,0) in the denominator, is reduced back to a bare 1/L that raises at L = 0 (float division by zero / 0.0**negative). zeta and zeta_0 are therefore reformulated as z*L/(L*L + 1e-300) and z0*L/(L*L + 1e-300): the 1e-300 floor is a plain non-zero constant the simplifier cannot drop, keeps the denominator strictly positive, and sits ~284 orders of magnitude below L*L for every physical L, so the expression rounds to z/L (resp. z0/L) for L != 0 and is exactly 0 for L = 0 -- the values the upstream guard produces, to within one ulp.\n\nLookup tables. The three Seinfeld & Pandis land-use tables are migrated as `interp.linear` over column-major-flattened `const` vectors, matching the sibling wesley1989/surface_resistance.esm precedent. A_table (the 5x5 season x land-use characteristic collector radius, S&P Table 19.2) flattens column-major (Julia `vec`) to a 25-entry vector on the integer axis [1..25], queried at A_table_index = (SeinfeldLandUse - 1)*5 + SeinfeldSeason; the upstream *1.0e-3 mm-to-m factor is baked into the stored entries. alpha and gamma (5-entry, land-use only) are queried directly at SeinfeldLandUse on the axis [1..5]. SeinfeldSeason in 1..5 and SeinfeldLandUse in 1..5 are categorical integers, so every lookup lands exactly on an integer axis knot -- interp.linear returns the exact table entry with a zero blend weight, reproducing the upstream direct array indexing SA_F32[...][iSeason, iLandUse].\n\nDesert sentinel. A_table's land-use-4 (desert) column is `Inf` upstream -- a sentinel that makes the vegetation-collector terms vanish (term_3 = 0.5*(Dp/A)^2 -> 0, and the unused st_veg -> 0; the St Stokes-number ifelse selects st_smooth for desert anyway). JSON cannot encode Inf, so the five desert entries are stored as the finite sentinel 1.0e25. At a desert query interp.linear returns 1.0e25 exactly (zero blend weight); term_3 = 0.5*(Dp/1e25)^2 is about 3e-65, reproducing the upstream Inf -> 0 behaviour to ~60 digits. A column-major 1-D flatten (rather than interp.bilinear) is used so the desert column never participates in a blend that could cancel the sentinel.\n\nFloat32 tables. The upstream tables are SA_F32 (Float32) static arrays. alpha and gamma have non-integer entries (0.8, 1.2, 1.3, 0.56, 0.54) that are not exact in Float32; each is stored as its exact Float64-promoted Float32 value (e.g. 0.8 -> 0.800000011920929) to reproduce upstream arithmetic. A_table's entries (2, 5, 10) are exact in Float32, so A_table*1e-3 is stored as the clean 0.002 / 0.005 / 0.01.\n\nDropped declarations. `DryDepositionAerosol` declares WesleySeason and WesleyLandUse as @parameters and passes them to DryDepParticle, but DryDepParticle's body never references its iWesleySeason / iWesleyLandUse arguments -- they are dead -- so they are omitted from the migration. The upstream unit-one @constants (unit_m, unit_T, unit_convert_mu, unit_v) are identically 1 and the ESS runners do no dimensional analysis, so they fold away (e.g. ifelse(L/unit_m == 0, ...) becomes ifelse(L == 0, ...); Dp > 20e-6*unit_m becomes Dp > 2.0e-5). dH2O and its constants (T_unitless, unit_dH2O) belong to the gas-deposition pathway and are not part of this component.\n\nConstants. g, kappa (von Karman), k_B, M_air and R migrate as fixed-default parameters (ESM has no constant variable type). k_B and R use the schema-recognized physical-constant names with units J/K and J/(mol*K); their defaults are the upstream values (k_B = 1.3806488e-23, R = 8.3144621). pi is inlined as the literal 3.141592653589793 (Julia Float64 pi). The upstream component coupling tag `metadata = Dict(CoupleType => DryDepositionAerosolCoupler)` is informational only and, following the rig convention for migrated components, is not carried into a `coupletype` field.\n\nInputs. lev, z, z0, u_star, L, Dp, Ts, P, rho_particle and rho_a carry the upstream `DryDepositionAerosol` @parameter defaults. SeinfeldSeason (default 1 = midsummer) and SeinfeldLandUse (default 3 = grass) are the integer S&P season and land-use indices (land use: 1 evergreen, 2 deciduous, 3 grass, 4 desert, 5 shrubs; season: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional).\n\nUnits. ESM `units` fields are descriptive only; the runners perform no dimensional analysis.\n\nTolerance rationale (model-level rel=1e-6): a closed-form algebraic system with no ODE integration -- each observed value is the Float64 evaluation of the inlined Eq. 19.7 cascade. rel=1e-6 absorbs round-off across the reciprocal-sum resistance chain and the libm exp / log / atan / pow evaluations, well above the agreement expected between conforming runners. The supercoarse Dp > 20 um regime is migrated faithfully (the `vs` sentinel branch) but not given a dedicated inline test, because there exp(-sqrt(St)) underflows and drives Rb to a non-finite value that JSON assertions cannot express; v itself stays finite at the V_s sentinel."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "lev": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1,
+      "description": "Index of the atmospheric layer; deposition acts only when lev = 1 (the surface layer)."
+    },
+    "z": {
+      "type": "parameter",
+      "units": "m",
+      "default": 50.0,
+      "description": "Height of the top of the surface layer."
+    },
+    "z0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.04,
+      "description": "Aerodynamic roughness length (upstream z_0)."
+    },
+    "u_star": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.44,
+      "description": "Friction velocity."
+    },
+    "L": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.0,
+      "description": "Monin-Obukhov length. The value 0 is the neutral-stability sentinel."
+    },
+    "Dp": {
+      "type": "parameter",
+      "units": "m",
+      "default": 8e-07,
+      "description": "Particle diameter."
+    },
+    "Ts": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Surface air temperature."
+    },
+    "P": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 101325.0,
+      "description": "Air pressure."
+    },
+    "rho_particle": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle (aerosol) mass density (upstream rho_Particle)."
+    },
+    "rho_a": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1.2,
+      "description": "Air density (upstream rho_A)."
+    },
+    "SeinfeldSeason": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1,
+      "description": "Seinfeld & Pandis season index 1-5: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional. Default: midsummer."
+    },
+    "SeinfeldLandUse": {
+      "type": "parameter",
+      "units": "1",
+      "default": 3,
+      "description": "Seinfeld & Pandis land-use index 1-5: 1 evergreen, 2 deciduous, 3 grass, 4 desert, 5 shrubs. Default: grass."
+    },
+    "g": {
+      "type": "parameter",
+      "units": "m/s^2",
+      "default": 9.81,
+      "description": "Gravitational acceleration (upstream @constant)."
+    },
+    "kappa": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.4,
+      "description": "Von Karman constant (upstream @constant kappa)."
+    },
+    "k_B": {
+      "type": "parameter",
+      "units": "J/K",
+      "default": 1.3806488e-23,
+      "description": "Boltzmann constant (upstream @constant)."
+    },
+    "M_air": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.02897,
+      "description": "Molecular weight of air (upstream @constant)."
+    },
+    "R": {
+      "type": "parameter",
+      "units": "J/(mol*K)",
+      "default": 8.3144621,
+      "description": "Ideal gas constant (upstream @constant)."
+    },
+    "zeta": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stability parameter z/L of the surface layer, 0 in the neutral limit L = 0 (Eqs. 19.13-19.14). Written as z*L/(L*L + 1e-300): the 1e-300 floor keeps the denominator strictly positive (so neither the value nor any comparison on it ever divides by L = 0), and is far below the rounding scale of L*L for every physical L, so for L != 0 this equals z/L and for L = 0 it equals 0."
+    },
+    "zeta_0": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stability parameter z_0/L at the roughness height, 0 in the neutral limit L = 0. Written as z0*L/(L*L + 1e-300) for the same strictly-positive-denominator reason as zeta."
+    },
+    "ra_neutral_stable": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Aerodynamic resistance in the neutral/stable regimes (zeta >= 0): the log profile, plus the 4.7*(zeta - zeta_0) correction when stable (upstream r_a_1)."
+    },
+    "i_unstable": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Domain-guard indicator: 1 when the layer is unstable (zeta < 0), else 0. Forces the base of eta / eta_0 to 1 in the stable/neutral regimes (upstream src comment at ra)."
+    },
+    "eta_0": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Similarity variable (1 - 15*zeta_0)^(1/4) at the roughness height, used in the unstable aerodynamic resistance."
+    },
+    "eta": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Similarity variable (1 - 15*zeta)^(1/4) at the surface-layer top, used in the unstable aerodynamic resistance."
+    },
+    "Ra": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Aerodynamic resistance to dry deposition (Eqs. 19.13-19.14): unstable integrated-similarity form when zeta < 0, else ra_neutral_stable."
+    },
+    "mu": {
+      "type": "unknown",
+      "units": "kg/(m*s)",
+      "description": "Dynamic viscosity of air from the Sutherland relation (upstream `mu`); unit_T and unit_convert_mu folded away."
+    },
+    "mfp": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Mean free path of air (S&P Eq. 9.6, upstream `mfp`)."
+    },
+    "Cc": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cunningham slip correction factor (S&P Eq. 9.34, upstream `cc`)."
+    },
+    "Vs": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Gravitational settling (terminal) velocity (S&P Eq. 9.42, upstream `vs`); the 99999999 m/s sentinel for Dp > 20 um, where Stokes settling no longer applies."
+    },
+    "A_table_index": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Flattened (column-major) lookup coordinate into the 25-entry season x land-use characteristic-radius table: (SeinfeldLandUse - 1)*5 + SeinfeldSeason."
+    },
+    "A_collector": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Characteristic radius of surface collectors (S&P Table 19.2, upstream A_table * 1e-3). 1e25 for desert land use, the finite stand-in for the upstream Inf sentinel."
+    },
+    "st_smooth": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stokes number for smooth / bluff-roughness surfaces (S&P Eq. 19.23, upstream `stSmooth`)."
+    },
+    "st_veg": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Stokes number for vegetated surfaces (S&P Eq. 19.24, upstream `stVeg`)."
+    },
+    "St": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Selected Stokes number: st_smooth for desert land use (index 4), else st_veg."
+    },
+    "D_brownian": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusivity of the particle from the Stokes-Einstein-Sutherland relation (S&P Eq. 9.73, upstream `dParticle`)."
+    },
+    "Sc": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Schmidt number of the particle (upstream `sc`)."
+    },
+    "alpha": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Land-use impaction-efficiency parameter (S&P Table 19.2, upstream alpha_table)."
+    },
+    "gamma": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Land-use Brownian-diffusion exponent (S&P Table 19.2, upstream gamma_table)."
+    },
+    "R1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Particle-rebound correction factor exp(-sqrt(St)) of the sublayer resistance (Eq. 19.27)."
+    },
+    "term_1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Brownian-diffusion collection term Sc^(-gamma) of the sublayer resistance (Eq. 19.27)."
+    },
+    "term_2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Inertial-impaction collection term (St/(alpha + St))^2 of the sublayer resistance (Eq. 19.27)."
+    },
+    "term_3": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Interception collection term 0.5*(Dp/A_collector)^2 of the sublayer resistance (Eq. 19.27); ~0 for desert land use."
+    },
+    "Rb": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Quasi-laminar sublayer resistance to particle dry deposition (S&P Eq. 19.27, upstream `RbParticle`)."
+    },
+    "v": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Particle dry deposition velocity (S&P Eq. 19.7); 0 above the surface layer (lev != 1)."
+    },
+    "k": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "First-order particle dry deposition rate, v/z."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "zeta",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "z",
+              "L"
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "L",
+                  "L"
+                ]
+              },
+              1e-300
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "zeta_0",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "z0",
+              "L"
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "L",
+                  "L"
+                ]
+              },
+              1e-300
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "ra_neutral_stable",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              0,
+              "zeta"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      "kappa",
+                      "u_star"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "log",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "z",
+                          "z0"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      4.7,
+                      {
+                        "op": "-",
+                        "args": [
+                          "zeta",
+                          "zeta_0"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      "kappa",
+                      "u_star"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "log",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "z",
+                      "z0"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "i_unstable",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "zeta",
+              0
+            ]
+          },
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "lhs": "eta_0",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              1,
+              {
+                "op": "*",
+                "args": [
+                  15,
+                  "zeta_0",
+                  "i_unstable"
+                ]
+              }
+            ]
+          },
+          0.25
+        ]
+      }
+    },
+    {
+      "lhs": "eta",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              1,
+              {
+                "op": "*",
+                "args": [
+                  15,
+                  "zeta",
+                  "i_unstable"
+                ]
+              }
+            ]
+          },
+          0.25
+        ]
+      }
+    },
+    {
+      "lhs": "Ra",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "zeta",
+              0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      "kappa",
+                      "u_star"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "log",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "z",
+                          "z0"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "log",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "eta_0",
+                                      2
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "+",
+                                    "args": [
+                                      "eta_0",
+                                      1
+                                    ]
+                                  },
+                                  2
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "*",
+                            "args": [
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "eta",
+                                      2
+                                    ]
+                                  },
+                                  1
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  {
+                                    "op": "+",
+                                    "args": [
+                                      "eta",
+                                      1
+                                    ]
+                                  },
+                                  2
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      2,
+                      {
+                        "op": "-",
+                        "args": [
+                          {
+                            "op": "atan",
+                            "args": [
+                              "eta"
+                            ]
+                          },
+                          {
+                            "op": "atan",
+                            "args": [
+                              "eta_0"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "ra_neutral_stable"
+        ]
+      }
+    },
+    {
+      "lhs": "mu",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              1.458e-06,
+              {
+                "op": "^",
+                "args": [
+                  "Ts",
+                  1.5
+                ]
+              }
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              "Ts",
+              110.4
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "mfp",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "mu"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "P",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          8,
+                          "M_air"
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          3.141592653589793,
+                          "R",
+                          "Ts"
+                        ]
+                      }
+                    ]
+                  },
+                  0.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Cc",
+      "rhs": {
+        "op": "+",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      2,
+                      "mfp"
+                    ]
+                  },
+                  "Dp"
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  1.257,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.4,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  -1.1,
+                                  "Dp"
+                                ]
+                              },
+                              {
+                                "op": "*",
+                                "args": [
+                                  2,
+                                  "mfp"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Vs",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "Dp",
+              2e-05
+            ]
+          },
+          99999999.0,
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      "Dp",
+                      2
+                    ]
+                  },
+                  "rho_particle",
+                  "g",
+                  "Cc"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  18,
+                  "mu"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "A_table_index",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  "SeinfeldLandUse",
+                  1
+                ]
+              },
+              5
+            ]
+          },
+          "SeinfeldSeason"
+        ]
+      }
+    },
+    {
+      "lhs": "A_collector",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              0.002,
+              0.002,
+              0.002,
+              0.002,
+              0.002,
+              0.005,
+              0.005,
+              0.01,
+              0.01,
+              0.005,
+              0.002,
+              0.002,
+              0.005,
+              0.002,
+              0.002,
+              1e+25,
+              1e+25,
+              1e+25,
+              1e+25,
+              1e+25,
+              0.01,
+              0.01,
+              0.01,
+              0.01,
+              0.01
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ]
+          },
+          "A_table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "st_smooth",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "Vs",
+              {
+                "op": "^",
+                "args": [
+                  "u_star",
+                  2
+                ]
+              },
+              "rho_a"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "g",
+              "mu"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "st_veg",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "Vs",
+              "u_star"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "g",
+              "A_collector"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "St",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "SeinfeldLandUse",
+              4
+            ]
+          },
+          "st_smooth",
+          "st_veg"
+        ]
+      }
+    },
+    {
+      "lhs": "D_brownian",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "k_B",
+              "Ts",
+              "Cc"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              3.141592653589793,
+              "mu",
+              "Dp"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Sc",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "mu",
+          {
+            "op": "*",
+            "args": [
+              "rho_a",
+              "D_brownian"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "alpha",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1.0,
+              0.800000011920929,
+              1.2000000476837158,
+              50.0,
+              1.2999999523162842
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "SeinfeldLandUse"
+        ]
+      }
+    },
+    {
+      "lhs": "gamma",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              0.5600000023841858,
+              0.5600000023841858,
+              0.5400000214576721,
+              0.5400000214576721,
+              0.5400000214576721
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          "SeinfeldLandUse"
+        ]
+      }
+    },
+    {
+      "lhs": "R1",
+      "rhs": {
+        "op": "exp",
+        "args": [
+          {
+            "op": "-",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  "St",
+                  0.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "term_1",
+      "rhs": {
+        "op": "^",
+        "args": [
+          "Sc",
+          {
+            "op": "-",
+            "args": [
+              "gamma"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "term_2",
+      "rhs": {
+        "op": "^",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "St",
+              {
+                "op": "+",
+                "args": [
+                  "alpha",
+                  "St"
+                ]
+              }
+            ]
+          },
+          2
+        ]
+      }
+    },
+    {
+      "lhs": "term_3",
+      "rhs": {
+        "op": "*",
+        "args": [
+          0.5,
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "Dp",
+                  "A_collector"
+                ]
+              },
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Rb",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              3,
+              "u_star",
+              {
+                "op": "+",
+                "args": [
+                  "term_1",
+                  "term_2",
+                  "term_3"
+                ]
+              },
+              "R1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "v",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "==",
+            "args": [
+              "lev",
+              1
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "+",
+                    "args": [
+                      "Ra",
+                      "Rb",
+                      {
+                        "op": "*",
+                        "args": [
+                          "Ra",
+                          "Rb",
+                          "Vs"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "Vs"
+            ]
+          },
+          0
+        ]
+      }
+    },
+    {
+      "lhs": "k",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "v",
+          "z"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_grass_midsummer",
+      "description": "Default case: a 0.8 um aerosol depositing onto midsummer grass (SeinfeldSeason=1, SeinfeldLandUse=3), neutral stability (L=0), all parameters at the upstream DryDepositionAerosol defaults. Pins the full Eq. 19.7 cascade from the aerodynamic resistance through the deposition velocity. v is re-checked at t=1 s to confirm the system is time-invariant (purely algebraic).",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Ra",
+          "time": 0.0,
+          "expected": 40.516470626683784
+        },
+        {
+          "variable": "mu",
+          "time": 0.0,
+          "expected": 1.8365222177118288e-05
+        },
+        {
+          "variable": "mfp",
+          "time": 0.0,
+          "expected": 6.643401132906948e-08
+        },
+        {
+          "variable": "Cc",
+          "time": 0.0,
+          "expected": 1.2088571903835552
+        },
+        {
+          "variable": "Vs",
+          "time": 0.0,
+          "expected": 2.2959122625324298e-05
+        },
+        {
+          "variable": "A_collector",
+          "time": 0.0,
+          "expected": 0.002
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.0005148834839522268
+        },
+        {
+          "variable": "D_brownian",
+          "time": 0.0,
+          "expected": 3.5918416393193584e-11
+        },
+        {
+          "variable": "Sc",
+          "time": 0.0,
+          "expected": 426086.4857384236
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 849.3445918950064
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0011457331839425675
+        },
+        {
+          "variable": "v",
+          "time": 1.0,
+          "expected": 0.0011457331839425675
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 2.291466367885135e-05
+        }
+      ]
+    },
+    {
+      "id": "upstream_drydepparticle_anchor",
+      "description": "The configuration of AtmosphericDeposition.jl's drydep_test.jl DryDepParticle test (z=20 m, z0=0.02 m, evergreen land use index 1) at a 1 um particle. The upstream test asserts the velocity is within a loose 0.015 m/s band of the literature value 0.0002 m/s; this migration pins the exact algorithm value.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 20.0,
+        "z0": 0.02,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 1e-06,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Ra",
+          "time": 0.0,
+          "expected": 39.24860953967123
+        },
+        {
+          "variable": "Cc",
+          "time": 0.0,
+          "expected": 1.167028594215202
+        },
+        {
+          "variable": "Vs",
+          "time": 0.0,
+          "expected": 3.463233810695372e-05
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.0007766681328776572
+        },
+        {
+          "variable": "Sc",
+          "time": 0.0,
+          "expected": 551697.8274604002
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 1277.5083605045559
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.000793073724223562
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 3.96536862111781e-05
+        }
+      ]
+    },
+    {
+      "id": "fine_particle_evergreen",
+      "description": "A fine 10 nm (Dp=1e-8 m) aerosol over an evergreen forest. At this size Brownian diffusion dominates: the slip-correction factor Cc is large (~22.6), the Schmidt number is small, the sublayer resistance Rb collapses, and the deposition velocity v is an order of magnitude above the accumulation-mode minimum.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 20.0,
+        "z0": 0.02,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 1e-08,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Cc",
+          "time": 0.0,
+          "expected": 22.59395252273215
+        },
+        {
+          "variable": "Vs",
+          "time": 0.0,
+          "expected": 6.704903434400587e-08
+        },
+        {
+          "variable": "D_brownian",
+          "time": 0.0,
+          "expected": 5.370619465295475e-08
+        },
+        {
+          "variable": "Sc",
+          "time": 0.0,
+          "expected": 284.9643679497453
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 1.503648068876788e-06
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 17.97385914365418
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.017475705489978052
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 0.0008737852744989026
+        }
+      ]
+    },
+    {
+      "id": "coarse_particle_evergreen",
+      "description": "A coarse 10 um (Dp=1e-5 m) aerosol over an evergreen forest. Inertial impaction and gravitational settling dominate: the settling velocity Vs and the Stokes number St are large, and the deposition velocity rises again above the accumulation-mode minimum.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 20.0,
+        "z0": 0.02,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 1e-05,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Cc",
+          "time": 0.0,
+          "expected": 1.016701510448128
+        },
+        {
+          "variable": "Vs",
+          "time": 0.0,
+          "expected": 0.00301712834100423
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.06766240927838231
+        },
+        {
+          "variable": "Sc",
+          "time": 0.0,
+          "expected": 6332705.650539515
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 234.85193351994351
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.006329359878097312
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 0.0003164679939048656
+        }
+      ]
+    },
+    {
+      "id": "desert_landuse",
+      "description": "A 0.8 um aerosol over desert (SeinfeldLandUse=4). The desert branch exercises the A_collector 1e25 sentinel (upstream Inf): the Stokes-number ifelse selects st_smooth rather than st_veg, and the interception term collapses to ~0. alpha is the large desert impaction value 50.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 4
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "A_table_index",
+          "time": 0.0,
+          "expected": 16
+        },
+        {
+          "variable": "A_collector",
+          "time": 0.0,
+          "expected": 1e+25
+        },
+        {
+          "variable": "alpha",
+          "time": 0.0,
+          "expected": 50.0
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.02960579261224418
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 986.085201011979
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0009961771830953518
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 1.9923543661907037e-05
+        }
+      ]
+    },
+    {
+      "id": "unstable_stratification",
+      "description": "A 0.8 um aerosol over midsummer grass with an unstable surface layer (L=-50 m, so zeta=-1). The unstable branch of the aerodynamic resistance (Eqs. 19.13-19.14) is taken: enhanced convective mixing lowers Ra below its neutral value, raising the deposition velocity.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": -50.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Ra",
+          "time": 0.0,
+          "expected": 34.375953454599696
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 849.3445918950064
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0011536808641150783
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 2.307361728230157e-05
+        }
+      ]
+    },
+    {
+      "id": "stable_stratification",
+      "description": "A 0.8 um aerosol over midsummer grass with a stable surface layer (L=200 m, so zeta=0.25). The stable branch of the aerodynamic resistance adds the 4.7*(zeta-zeta_0) term, raising Ra above its neutral value and lowering the deposition velocity.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 200.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Ra",
+          "time": 0.0,
+          "expected": 47.18726608122924
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 849.3445918950064
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0011372248196944183
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 2.2744496393888367e-05
+        }
+      ]
+    },
+    {
+      "id": "deciduous_autumn",
+      "description": "A 0.8 um aerosol over an autumn deciduous forest (SeinfeldSeason=2, SeinfeldLandUse=2) at a cooler 295 K and a denser 1500 kg/m^3 particle. Exercises the season axis of the A_table lookup: A_collector = 0.005 m here, distinct from the grass value, and alpha is the deciduous value 0.8.",
+      "parameter_overrides": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 8e-07,
+        "Ts": 295.0,
+        "P": 101325.0,
+        "rho_particle": 1500.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 2,
+        "SeinfeldLandUse": 2
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "mu",
+          "time": 0.0,
+          "expected": 1.8222451524644062e-05
+        },
+        {
+          "variable": "Cc",
+          "time": 0.0,
+          "expected": 1.206180616865411
+        },
+        {
+          "variable": "Vs",
+          "time": 0.0,
+          "expected": 3.463165743042412e-05
+        },
+        {
+          "variable": "A_table_index",
+          "time": 0.0,
+          "expected": 7
+        },
+        {
+          "variable": "A_collector",
+          "time": 0.0,
+          "expected": 0.005
+        },
+        {
+          "variable": "alpha",
+          "time": 0.0,
+          "expected": 0.800000011920929
+        },
+        {
+          "variable": "St",
+          "time": 0.0,
+          "expected": 0.00031066114718423263
+        },
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 1093.207496642624
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0009154887704771684
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 1.8309775409543368e-05
+        }
+      ]
+    },
+    {
+      "id": "aloft_level_zero_dep",
+      "description": "Above the surface layer (lev=2): the Eq. 19.7 ifelse(lev==1, ...) gate returns 0, so the deposition velocity v and the rate k are both zero, while the resistance intermediates (Ra, Rb, ...) are still computed normally.",
+      "parameter_overrides": {
+        "lev": 2,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "Rb",
+          "time": 0.0,
+          "expected": 849.3445918950064
+        },
+        {
+          "variable": "v",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "k",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "deposition_velocity_vs_particle_diameter",
+      "description": "Particle dry deposition velocity v as a function of particle diameter Dp for midsummer grass at neutral stability. Sweeping Dp logarithmically from 1 nm to 10 um traces the classic U-shaped curve: Brownian diffusion drives v up at the fine end, inertial impaction and gravitational settling drive it up at the coarse end, and v reaches its minimum in the 0.1-1 um accumulation mode.",
+      "initial_state": {},
+      "parameters": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "u_star": 0.44,
+        "L": 0.0,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "Dp",
+            "range": {
+              "start": 1e-09,
+              "stop": 1e-05,
+              "count": 25,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "v_vs_Dp",
+          "type": "line",
+          "description": "Dry deposition velocity v versus particle diameter Dp.",
+          "x": {
+            "variable": "Dp",
+            "label": "Particle diameter (m)"
+          },
+          "y": {
+            "variable": "v",
+            "label": "Deposition velocity v (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deposition_velocity_vs_friction_velocity",
+      "description": "Particle dry deposition velocity v as a function of friction velocity u_star for a 0.8 um aerosol over midsummer grass at neutral stability. Stronger turbulence lowers both the aerodynamic resistance Ra and the quasi-laminar sublayer resistance Rb, so v rises with u_star.",
+      "initial_state": {},
+      "parameters": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "L": 0.0,
+        "Dp": 8e-07,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "u_star",
+            "range": {
+              "start": 0.1,
+              "stop": 1.0,
+              "count": 19,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "v_vs_u_star",
+          "type": "line",
+          "description": "Dry deposition velocity v versus friction velocity u_star.",
+          "x": {
+            "variable": "u_star",
+            "label": "Friction velocity (m/s)"
+          },
+          "y": {
+            "variable": "v",
+            "label": "Deposition velocity v (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "deposition_velocity_over_diameter_and_turbulence",
+      "description": "Particle dry deposition velocity v over midsummer grass as a joint function of particle diameter Dp and friction velocity u_star. Surfaces how the size-resolved deposition curve shifts with turbulence: the accumulation-mode minimum is shallowest, and the coarse and fine ends steepest, at high u_star.",
+      "initial_state": {},
+      "parameters": {
+        "lev": 1,
+        "z": 50.0,
+        "z0": 0.04,
+        "L": 0.0,
+        "Ts": 298.0,
+        "P": 101325.0,
+        "rho_particle": 1000.0,
+        "rho_a": 1.2,
+        "SeinfeldSeason": 1,
+        "SeinfeldLandUse": 3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "Dp",
+            "range": {
+              "start": 1e-09,
+              "stop": 1e-05,
+              "count": 13,
+              "scale": "log"
+            }
+          },
+          {
+            "parameter": "u_star",
+            "range": {
+              "start": 0.1,
+              "stop": 1.0,
+              "count": 7,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "v_heatmap",
+          "type": "heatmap",
+          "description": "Dry deposition velocity v over particle diameter Dp and friction velocity u_star.",
+          "x": {
+            "variable": "Dp",
+            "label": "Particle diameter (m)"
+          },
+          "y": {
+            "variable": "u_star",
+            "label": "Friction velocity (m/s)"
+          },
+          "value": {
+            "variable": "v",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

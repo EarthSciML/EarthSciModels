@@ -1,0 +1,1371 @@
+---
+title: "AerosolDynamics"
+slug: "aerosoldynamics"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["dynamics"]
+domain: "aerosol"
+subdomain: "dynamics"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/dynamics/aerosol_dynamics.esm"
+reference: "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13 — condensation (Eqs. 13.11-13.13), Brownian coagulation coefficient (Table 13.1, Eq. 13.47), monodisperse coagulation dynamics (Eqs. 13.65-13.67). Source: Aerosol.jl src/dynamics.jl:279 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-540)."
+description: "Combined aerosol population dynamics: condensation growth (DiameterGrowthRate) and Brownian coagulation (BrownianCoagulationCoefficient + MonodisperseCoagulation), coupled so that the Fuchs-form coagulation coefficient K_12 drives the number-concentration ODE and the shared temperature T and particle density ρ_p parameterize both growth and coagulation. Implements Seinfeld & Pandis (2006) Ch. 13 Eqs. 13.11-13.13 (condensation), 13.47 and Table 13.1 (coagulation coefficient), and 13.65-13.67 (number-concentration dynamics). Migrated from Aerosol.jl src/dynamics.jl:279 (esm-540)."
+tags: ["aerosol", "dynamics", "model", "condensation", "coagulation", "brownian", "fuchs", "seinfeld-pandis"]
+---
+
+## Description
+
+Combined aerosol population dynamics: condensation growth (DiameterGrowthRate) and Brownian coagulation (BrownianCoagulationCoefficient + MonodisperseCoagulation), coupled so that the Fuchs-form coagulation coefficient K_12 drives the number-concentration ODE and the shared temperature T and particle density ρ_p parameterize both growth and coagulation. Implements Seinfeld & Pandis (2006) Ch. 13 Eqs. 13.11-13.13 (condensation), 13.47 and Table 13.1 (coagulation coefficient), and 13.65-13.67 (number-concentration dynamics). Migrated from Aerosol.jl src/dynamics.jl:279 (esm-540).
+
+## Reference
+
+Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13 — condensation (Eqs. 13.11-13.13), Brownian coagulation coefficient (Table 13.1, Eq. 13.47), monodisperse coagulation dynamics (Eqs. 13.65-13.67). Source: Aerosol.jl src/dynamics.jl:279 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-540).
+
+_Source: Aerosol.jl@c8c640bb:src/dynamics.jl:279
+
+Upstream AerosolDynamics is an MTK @component that composes three subsystems — DiameterGrowthRate (growth), BrownianCoagulationCoefficient (coag_coeff), MonodisperseCoagulation (coag) — with coupling equations that share T and ρ_p across growth and coag_coeff, and route coag_coeff.K_12 into coag.K.
+
+This ESM flattens all three subsystems into a single model:
+- DiameterGrowthRate parameters D_diff, M_i, Δp are kept; its T and ρ_p are replaced by the shared top-level T and ρ_p. The constant R_gas=8.314 J/(mol·K) is folded into the A expression. D_p, I_D, A remain as state-type variables (following diameter_growth.esm convention).
+- BrownianCoagulationCoefficient parameters μ, λ_air, D_p1, D_p2 are kept; its T and ρ_p are replaced by the shared top-level T and ρ_p. Constants k_B=1.380649e-23 and π=3.14159265358979 are folded into the observed expressions. All 15 derived variables (m_1, m_2, Kn_1, Kn_2, C_c1, C_c2, D_1, D_2, c_bar_1, c_bar_2, l_1, l_2, g_1, g_2, K_12) are observed with inline expressions, matching brownian_coag_coeff.esm.
+- MonodisperseCoagulation parameter N_0 is kept; its K parameter is REMOVED (replaced by the observed K_12). The ODE D(N)/dt = -0.5·K_12·N² and algebraic τ_c = 2/(K_12·N_0) use K_12 directly.
+
+The tracker feature tag coupling.couple refers to the upstream MTK composition (three subsystems connected via equations); in the flat ESM this is expressed by having the equations of all three subsystems coexist in a single model with shared parameters, following the same pattern as condensation_evaporation.esm (which likewise flattens two coupled subsystems).
+
+D_p (ODE state from condensation) and N (ODE state from coagulation) are independent — the condensation ODE uses D_p but not N; the coagulation ODE uses N and K_12 (which depends only on parameters). This means the two dynamics can be tested in isolation by clamping the other.
+
+Default parameter values come from the upstream subsystems: T=298.0 K, ρ_p=1000.0 kg/m³, D_diff=1e-5 m²/s, M_i=0.1 kg/mol, Δp=1e-4 Pa, μ=1.83e-5 Pa·s, λ_air=6.86e-8 m, D_p1=D_p2=1e-7 m, N_0=1e12 m⁻³.
+
+At default conditions: A=1.6145e-16 m²/s, K_12=1.4910e-15 m³/s, τ_c=1341.4 s.
+
+Tolerance rationale (model-level rel=1e-4): same as diameter_growth.esm — absorbs Tsit5↔LSODA truncation over 1200 s for the D_p ODE and covers both ODEs. The coagulation N ODE is smoother (power-law decay) and converges faster; rel=1e-4 is conservative._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `D_p` | `m` |  | Particle diameter. ODE state: D(D_p)/dt = I_D = A/D_p. Grows monotonically under constant supersaturation. Analytical solution: D_p(t)² = D_p(0)² + 2·A·t (Eq. 13.21). |
+| `N` | `m^-3` |  | Total aerosol number concentration. ODE state: D(N)/dt = -0.5·K_12·N² (Eq. 13.65). Decays under Brownian coagulation with the Fuchs-form coefficient K_12. Analytical solution: N(t) = N_0/(1 + t/τ_c) (Eq. 13.66). |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T` | `K` | `298.0` | Temperature. Shared between condensation growth (enters growth parameter A ∝ 1/T) and Brownian coagulation coefficient (enters Brownian diffusivities D_1, D_2 ∝ T and mean thermal speeds c_bar ∝ √T). |
+| `ρ_p` | `kg/m^3` | `1000.0` | Particle density. Shared between condensation (A ∝ 1/ρ_p, Eq. 13.12) and Brownian coagulation coefficient (particle masses m_1, m_2 ∝ ρ_p, which enter mean thermal speeds c_bar ∝ 1/√m ∝ 1/√ρ_p). |
+| `D_diff` | `m^2/s` | `1e-05` | Diffusion coefficient of condensing species. Enters the growth parameter A = 4·D_diff·M_i·Δp/(R_gas·T·ρ_p) (Eq. 13.12). |
+| `M_i` | `kg/mol` | `0.1` | Molecular weight of condensing species. Enters A ∝ M_i (Eq. 13.12). |
+| `Δp` | `Pa` | `0.0001` | Vapor pressure difference p_i - p_eq driving condensation. Enters A ∝ Δp (Eq. 13.12). |
+| `μ` | `Pa*s` | `1.83e-05` | Dynamic viscosity of air. Enters Brownian diffusion coefficients D_1, D_2 via the Cunningham-corrected Stokes-Einstein relation (Table 13.1, Eq. 13.47). |
+| `λ_air` | `m` | `6.86e-08` | Mean free path of air. Used to compute Knudsen numbers Kn_1, Kn_2 = 2λ_air/D_p, which control the Cunningham slip correction (Table 13.1). |
+| `D_p1` | `m` | `1e-07` | Diameter of particle 1 in the Brownian coagulation pair. Controls Kn_1 and hence C_c1, D_1, c_bar_1, l_1, g_1, and the Fuchs coagulation coefficient K_12 (Table 13.1). Independent of the condensation ODE state D_p. |
+| `D_p2` | `m` | `1e-07` | Diameter of particle 2 in the Brownian coagulation pair. Symmetric role to D_p1. At D_p1=D_p2, K_12 gives the self-coagulation rate. |
+| `N_0` | `m^-3` | `1000000000000.0` | Initial total number concentration. Used to define the characteristic coagulation time τ_c = 2/(K_12·N_0) (Eq. 13.67) and sets the initial condition for the N ODE. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `I_D` | `m/s` |  | Diameter growth rate: I_D = A/D_p (Eq. 13.13). Algebraic — determined by the growth parameter A and the current diameter D_p. Decreases as D_p grows (larger particles grow more slowly in diameter). |
+| `A` | `m^2/s` |  | Growth parameter A = 4·D_diff·M_i·Δp/(R_gas·T·ρ_p) (Eq. 13.12). Algebraic — constant when parameters are fixed. Determines the rate of D_p² growth: D_p² = D_p0² + 2·A·t. |
+| `τ_c` | `s` |  | Characteristic coagulation time τ_c = 2/(K_12·N_0) (Eq. 13.67). Algebraic — constant when parameters are fixed. At t=τ_c, N = N_0/2. Controls the timescale of number-concentration decay. |
+| `m_1` | `kg` |  | Mass of particle 1: m_1 = ρ_p·(π/6)·D_p1³. π/6 = 0.5235987755982988 is folded as a literal. Enters mean thermal velocity c_bar_1 via c_bar ∝ 1/√m. |
+| `m_2` | `kg` |  | Mass of particle 2: m_2 = ρ_p·(π/6)·D_p2³. Symmetric role to m_1. |
+| `Kn_1` | `1` |  | Knudsen number for particle 1: Kn_1 = 2·λ_air/D_p1 (Table 13.1). Controls the transition between continuum (Kn≪1) and free-molecular (Kn≫1) regimes for the slip correction C_c1. |
+| `Kn_2` | `1` |  | Knudsen number for particle 2: Kn_2 = 2·λ_air/D_p2 (Table 13.1). Symmetric role to Kn_1. |
+| `C_c1` | `1` |  | Cunningham slip correction for particle 1: C_c1 = 1 + Kn_1·(1.257 + 0.4·exp(-1.1/Kn_1)) (Table 13.1). Corrects Brownian diffusivity for non-continuum effects. Approaches 1 for large particles (Kn→0); increases strongly for small particles (Kn→∞). |
+| `C_c2` | `1` |  | Cunningham slip correction for particle 2: C_c2 = 1 + Kn_2·(1.257 + 0.4·exp(-1.1/Kn_2)) (Table 13.1). Symmetric role to C_c1. |
+| `D_1` | `m^2/s` |  | Brownian diffusion coefficient of particle 1: D_1 = k_B·T·C_c1/(3π·μ·D_p1) (Eq. 13.47, Table 13.1). k_B=1.380649e-23 J/K and π=3.14159265358979 are folded as literals. Increases with temperature and decreases with particle size and viscosity. |
+| `D_2` | `m^2/s` |  | Brownian diffusion coefficient of particle 2: D_2 = k_B·T·C_c2/(3π·μ·D_p2) (Eq. 13.47). Symmetric role to D_1. |
+| `c_bar_1` | `m/s` |  | Mean thermal velocity of particle 1: c_bar_1 = √(8·k_B·T/(π·m_1)) (Table 13.1). Determines the particle mean free path l_1 = 8·D_1/(π·c_bar_1). |
+| `c_bar_2` | `m/s` |  | Mean thermal velocity of particle 2: c_bar_2 = √(8·k_B·T/(π·m_2)) (Table 13.1). Symmetric role to c_bar_1. |
+| `l_1` | `m` |  | Mean free path of particle 1: l_1 = 8·D_1/(π·c_bar_1) (Table 13.1). Enters the Fuchs interpolation parameter g_1. |
+| `l_2` | `m` |  | Mean free path of particle 2: l_2 = 8·D_2/(π·c_bar_2) (Table 13.1). Symmetric role to l_1. |
+| `g_1` | `m` |  | Fuchs interpolation parameter for particle 1: g_1 = [(D_p1+l_1)³ - (D_p1²+l_1²)^(3/2)] / (3·D_p1·l_1) - D_p1 (Table 13.1). Measures the effective interaction radius accounting for particle mean free path. |
+| `g_2` | `m` |  | Fuchs interpolation parameter for particle 2: g_2 = [(D_p2+l_2)³ - (D_p2²+l_2²)^(3/2)] / (3·D_p2·l_2) - D_p2 (Table 13.1). Symmetric role to g_1. |
+| `K_12` | `m^3/s` |  | Brownian coagulation coefficient (Fuchs form, Table 13.1): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)·(D_p1+D_p2))]. Valid across continuum, transition, and free-molecular regimes. Feeds directly into the N ODE and τ_c in place of the upstream coag.K parameter. |
+
+## Observed expressions
+
+$$
+I_{D} = \frac{A}{D_{p}}
+$$
+_Diameter growth rate: I_D = A/D_p (Eq. 13.13). Algebraic — determined by the growth parameter A and the current diameter D_p. Decreases as D_p grows (larger particles grow more slowly in diameter)._
+
+$$
+A = \frac{4 \cdot D_{diff} \cdot M_{i} \cdot Δp}{8.314 \cdot T \cdot ρ_{p}}
+$$
+_Growth parameter A = 4·D_diff·M_i·Δp/(R_gas·T·ρ_p) (Eq. 13.12). Algebraic — constant when parameters are fixed. Determines the rate of D_p² growth: D_p² = D_p0² + 2·A·t._
+
+$$
+τ_{c} = \frac{2}{K_{12} \cdot N_{0}}
+$$
+_Characteristic coagulation time τ_c = 2/(K_12·N_0) (Eq. 13.67). Algebraic — constant when parameters are fixed. At t=τ_c, N = N_0/2. Controls the timescale of number-concentration decay._
+
+$$
+m_{1} = ρ_{p} \cdot 0.5235987755982988 \cdot D_{p1}^{3}
+$$
+_Mass of particle 1: m_1 = ρ_p·(π/6)·D_p1³. π/6 = 0.5235987755982988 is folded as a literal. Enters mean thermal velocity c_bar_1 via c_bar ∝ 1/√m._
+
+$$
+m_{2} = ρ_{p} \cdot 0.5235987755982988 \cdot D_{p2}^{3}
+$$
+_Mass of particle 2: m_2 = ρ_p·(π/6)·D_p2³. Symmetric role to m_1._
+
+$$
+Kn_{1} = \frac{2 \cdot λ_{air}}{D_{p1}}
+$$
+_Knudsen number for particle 1: Kn_1 = 2·λ_air/D_p1 (Table 13.1). Controls the transition between continuum (Kn≪1) and free-molecular (Kn≫1) regimes for the slip correction C_c1._
+
+$$
+Kn_{2} = \frac{2 \cdot λ_{air}}{D_{p2}}
+$$
+_Knudsen number for particle 2: Kn_2 = 2·λ_air/D_p2 (Table 13.1). Symmetric role to Kn_1._
+
+$$
+C_{c1} = 1 + Kn_{1} \cdot \left(1.257 + 0.4 \cdot e^{\frac{-1.1}{Kn_{1}}}\right)
+$$
+_Cunningham slip correction for particle 1: C_c1 = 1 + Kn_1·(1.257 + 0.4·exp(-1.1/Kn_1)) (Table 13.1). Corrects Brownian diffusivity for non-continuum effects. Approaches 1 for large particles (Kn→0); increases strongly for small particles (Kn→∞)._
+
+$$
+C_{c2} = 1 + Kn_{2} \cdot \left(1.257 + 0.4 \cdot e^{\frac{-1.1}{Kn_{2}}}\right)
+$$
+_Cunningham slip correction for particle 2: C_c2 = 1 + Kn_2·(1.257 + 0.4·exp(-1.1/Kn_2)) (Table 13.1). Symmetric role to C_c1._
+
+$$
+D_{1} = \frac{1.380649 \times 10^{-23} \cdot T \cdot C_{c1}}{3 \cdot 3.14159265358979 \cdot μ \cdot D_{p1}}
+$$
+_Brownian diffusion coefficient of particle 1: D_1 = k_B·T·C_c1/(3π·μ·D_p1) (Eq. 13.47, Table 13.1). k_B=1.380649e-23 J/K and π=3.14159265358979 are folded as literals. Increases with temperature and decreases with particle size and viscosity._
+
+$$
+D_{2} = \frac{1.380649 \times 10^{-23} \cdot T \cdot C_{c2}}{3 \cdot 3.14159265358979 \cdot μ \cdot D_{p2}}
+$$
+_Brownian diffusion coefficient of particle 2: D_2 = k_B·T·C_c2/(3π·μ·D_p2) (Eq. 13.47). Symmetric role to D_1._
+
+$$
+c_{bar\,1} = \sqrt{\frac{8 \cdot 1.380649 \times 10^{-23} \cdot T}{3.14159265358979 \cdot m_{1}}}
+$$
+_Mean thermal velocity of particle 1: c_bar_1 = √(8·k_B·T/(π·m_1)) (Table 13.1). Determines the particle mean free path l_1 = 8·D_1/(π·c_bar_1)._
+
+$$
+c_{bar\,2} = \sqrt{\frac{8 \cdot 1.380649 \times 10^{-23} \cdot T}{3.14159265358979 \cdot m_{2}}}
+$$
+_Mean thermal velocity of particle 2: c_bar_2 = √(8·k_B·T/(π·m_2)) (Table 13.1). Symmetric role to c_bar_1._
+
+$$
+l_{1} = \frac{8 \cdot D_{1}}{3.14159265358979 \cdot c_{bar\,1}}
+$$
+_Mean free path of particle 1: l_1 = 8·D_1/(π·c_bar_1) (Table 13.1). Enters the Fuchs interpolation parameter g_1._
+
+$$
+l_{2} = \frac{8 \cdot D_{2}}{3.14159265358979 \cdot c_{bar\,2}}
+$$
+_Mean free path of particle 2: l_2 = 8·D_2/(π·c_bar_2) (Table 13.1). Symmetric role to l_1._
+
+$$
+g_{1} = \frac{1}{3 \cdot D_{p1} \cdot l_{1}} \cdot \left(\left(D_{p1} + l_{1}\right)^{3} - \left(D_{p1}^{2} + l_{1}^{2}\right)^{1.5}\right) - D_{p1}
+$$
+_Fuchs interpolation parameter for particle 1: g_1 = [(D_p1+l_1)³ - (D_p1²+l_1²)^(3/2)] / (3·D_p1·l_1) - D_p1 (Table 13.1). Measures the effective interaction radius accounting for particle mean free path._
+
+$$
+g_{2} = \frac{1}{3 \cdot D_{p2} \cdot l_{2}} \cdot \left(\left(D_{p2} + l_{2}\right)^{3} - \left(D_{p2}^{2} + l_{2}^{2}\right)^{1.5}\right) - D_{p2}
+$$
+_Fuchs interpolation parameter for particle 2: g_2 = [(D_p2+l_2)³ - (D_p2²+l_2²)^(3/2)] / (3·D_p2·l_2) - D_p2 (Table 13.1). Symmetric role to g_1._
+
+$$
+K_{12} = \frac{2 \cdot 3.14159265358979 \cdot \left(D_{1} + D_{2}\right) \cdot \left(D_{p1} + D_{p2}\right)}{\frac{D_{p1} + D_{p2}}{D_{p1} + D_{p2} + 2 \cdot \sqrt{g_{1}^{2} + g_{2}^{2}}} + \frac{8 \cdot \left(D_{1} + D_{2}\right)}{\sqrt{c_{bar\,1}^{2} + c_{bar\,2}^{2}} \cdot \left(D_{p1} + D_{p2}\right)}}
+$$
+_Brownian coagulation coefficient (Fuchs form, Table 13.1): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)·(D_p1+D_p2))]. Valid across continuum, transition, and free-molecular regimes. Feeds directly into the N ODE and τ_c in place of the upstream coag.K parameter._
+
+## Equations
+
+$$
+\mathrm{D}\left(D_{p}\right) = I_{D}
+$$
+
+$$
+\mathrm{D}\left(N\right) = \left(-0.5\right) \cdot K_{12} \cdot N^{2}
+$$
+
+## Analyses
+
+### condensation_growth_curves
+
+Diameter growth by condensation for three initial particle sizes (0.2 µm, 0.5 µm, 2.0 µm) at standard conditions (T=298 K, ρ_p=1000 kg/m³, Δp=1e-4 Pa). Reproduces Figure 13.2 from Seinfeld & Pandis (2006). Smaller particles grow faster in diameter because I_D = A/D_p decreases with D_p. The coagulation ODE (N) runs simultaneously but is independent of D_p in this model.
+
+**Time span:** 0 → 1200
+
+![D_p(t) over 20 min for initial D_p=0.2 µm — fastest growing of the three Figure 13.2 curves.](/plots/aerosol/dynamics/aerosoldynamics/condensation_growth_curves-Dp_vs_time_0p2um.png)
+
+![Diameter growth rate I_D(t) = A/D_p decreasing as D_p grows.](/plots/aerosol/dynamics/aerosoldynamics/condensation_growth_curves-ID_vs_time.png)
+
+### coagulation_decay_curve
+
+Number-concentration decay under Brownian coagulation at default conditions. K_12 ≈ 1.491e-15 m³/s (from Fuchs formula at D_p1=D_p2=100 nm) gives τ_c ≈ 1341 s ≈ 22 min. N decays from 10¹² to ~5×10¹¹ m⁻³ by t=τ_c and ~2.5×10¹¹ m⁻³ by t=3·τ_c, following the analytical N(t)=N_0/(1+t/τ_c).
+
+**Time span:** 0.0 → 4000.0
+
+![Total number concentration N(t) decaying under Brownian coagulation. Follows N_0/(1+t/τ_c) with τ_c≈1341 s.](/plots/aerosol/dynamics/aerosoldynamics/coagulation_decay_curve-N_vs_time.png)
+
+![Characteristic coagulation time τ_c = 2/(K_12·N_0) — constant throughout (K_12 and N_0 are parameters).](/plots/aerosol/dynamics/aerosoldynamics/coagulation_decay_curve-tau_c_stability.png)
+
+### combined_dynamics_overview
+
+Both condensation and coagulation running simultaneously over 1200 s at default parameters. D_p grows (condensation adds volume to each particle) while N decays (coagulation reduces particle count). The two ODEs are independent in this model — K_12 depends only on D_p1/D_p2 (fixed parameters, not the ODE state D_p), and the D_p ODE depends only on A and D_p itself. Shows the complementary nature of the two processes.
+
+**Time span:** 0 → 1200
+
+![Particle diameter D_p(t) growing by condensation while coagulation simultaneously reduces N.](/plots/aerosol/dynamics/aerosoldynamics/combined_dynamics_overview-Dp_combined.png)
+
+![Number concentration N(t) decaying by coagulation while condensation simultaneously grows D_p.](/plots/aerosol/dynamics/aerosoldynamics/combined_dynamics_overview-N_combined.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H. and Pandis, S. N. (2006) Atmospheric Chemistry and Physics, 2nd Edition, Chapter 13 — condensation (Eqs. 13.11-13.13), Brownian coagulation coefficient (Table 13.1, Eq. 13.47), monodisperse coagulation dynamics (Eqs. 13.65-13.67). Source: Aerosol.jl src/dynamics.jl:279 @ commit c8c640bb636b22f2425460e9ed5cba50793bfee1 (esm-540).",
+    "notes": "Source: Aerosol.jl@c8c640bb:src/dynamics.jl:279\n\nUpstream AerosolDynamics is an MTK @component that composes three subsystems — DiameterGrowthRate (growth), BrownianCoagulationCoefficient (coag_coeff), MonodisperseCoagulation (coag) — with coupling equations that share T and ρ_p across growth and coag_coeff, and route coag_coeff.K_12 into coag.K.\n\nThis ESM flattens all three subsystems into a single model:\n- DiameterGrowthRate parameters D_diff, M_i, Δp are kept; its T and ρ_p are replaced by the shared top-level T and ρ_p. The constant R_gas=8.314 J/(mol·K) is folded into the A expression. D_p, I_D, A remain as state-type variables (following diameter_growth.esm convention).\n- BrownianCoagulationCoefficient parameters μ, λ_air, D_p1, D_p2 are kept; its T and ρ_p are replaced by the shared top-level T and ρ_p. Constants k_B=1.380649e-23 and π=3.14159265358979 are folded into the observed expressions. All 15 derived variables (m_1, m_2, Kn_1, Kn_2, C_c1, C_c2, D_1, D_2, c_bar_1, c_bar_2, l_1, l_2, g_1, g_2, K_12) are observed with inline expressions, matching brownian_coag_coeff.esm.\n- MonodisperseCoagulation parameter N_0 is kept; its K parameter is REMOVED (replaced by the observed K_12). The ODE D(N)/dt = -0.5·K_12·N² and algebraic τ_c = 2/(K_12·N_0) use K_12 directly.\n\nThe tracker feature tag coupling.couple refers to the upstream MTK composition (three subsystems connected via equations); in the flat ESM this is expressed by having the equations of all three subsystems coexist in a single model with shared parameters, following the same pattern as condensation_evaporation.esm (which likewise flattens two coupled subsystems).\n\nD_p (ODE state from condensation) and N (ODE state from coagulation) are independent — the condensation ODE uses D_p but not N; the coagulation ODE uses N and K_12 (which depends only on parameters). This means the two dynamics can be tested in isolation by clamping the other.\n\nDefault parameter values come from the upstream subsystems: T=298.0 K, ρ_p=1000.0 kg/m³, D_diff=1e-5 m²/s, M_i=0.1 kg/mol, Δp=1e-4 Pa, μ=1.83e-5 Pa·s, λ_air=6.86e-8 m, D_p1=D_p2=1e-7 m, N_0=1e12 m⁻³.\n\nAt default conditions: A=1.6145e-16 m²/s, K_12=1.4910e-15 m³/s, τ_c=1341.4 s.\n\nTolerance rationale (model-level rel=1e-4): same as diameter_growth.esm — absorbs Tsit5↔LSODA truncation over 1200 s for the D_p ODE and covers both ODEs. The coagulation N ODE is smoother (power-law decay) and converges faster; rel=1e-4 is conservative."
+  },
+  "tolerance": {
+    "rel": 0.0001
+  },
+  "variables": {
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 298.0,
+      "description": "Temperature. Shared between condensation growth (enters growth parameter A ∝ 1/T) and Brownian coagulation coefficient (enters Brownian diffusivities D_1, D_2 ∝ T and mean thermal speeds c_bar ∝ √T)."
+    },
+    "ρ_p": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Particle density. Shared between condensation (A ∝ 1/ρ_p, Eq. 13.12) and Brownian coagulation coefficient (particle masses m_1, m_2 ∝ ρ_p, which enter mean thermal speeds c_bar ∝ 1/√m ∝ 1/√ρ_p)."
+    },
+    "D_diff": {
+      "type": "parameter",
+      "units": "m^2/s",
+      "default": 1e-05,
+      "description": "Diffusion coefficient of condensing species. Enters the growth parameter A = 4·D_diff·M_i·Δp/(R_gas·T·ρ_p) (Eq. 13.12)."
+    },
+    "M_i": {
+      "type": "parameter",
+      "units": "kg/mol",
+      "default": 0.1,
+      "description": "Molecular weight of condensing species. Enters A ∝ M_i (Eq. 13.12)."
+    },
+    "Δp": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.0001,
+      "description": "Vapor pressure difference p_i - p_eq driving condensation. Enters A ∝ Δp (Eq. 13.12)."
+    },
+    "μ": {
+      "type": "parameter",
+      "units": "Pa*s",
+      "default": 1.83e-05,
+      "description": "Dynamic viscosity of air. Enters Brownian diffusion coefficients D_1, D_2 via the Cunningham-corrected Stokes-Einstein relation (Table 13.1, Eq. 13.47)."
+    },
+    "λ_air": {
+      "type": "parameter",
+      "units": "m",
+      "default": 6.86e-08,
+      "description": "Mean free path of air. Used to compute Knudsen numbers Kn_1, Kn_2 = 2λ_air/D_p, which control the Cunningham slip correction (Table 13.1)."
+    },
+    "D_p1": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-07,
+      "description": "Diameter of particle 1 in the Brownian coagulation pair. Controls Kn_1 and hence C_c1, D_1, c_bar_1, l_1, g_1, and the Fuchs coagulation coefficient K_12 (Table 13.1). Independent of the condensation ODE state D_p."
+    },
+    "D_p2": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1e-07,
+      "description": "Diameter of particle 2 in the Brownian coagulation pair. Symmetric role to D_p1. At D_p1=D_p2, K_12 gives the self-coagulation rate."
+    },
+    "N_0": {
+      "type": "parameter",
+      "units": "m^-3",
+      "default": 1000000000000.0,
+      "description": "Initial total number concentration. Used to define the characteristic coagulation time τ_c = 2/(K_12·N_0) (Eq. 13.67) and sets the initial condition for the N ODE."
+    },
+    "D_p": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Particle diameter. ODE state: D(D_p)/dt = I_D = A/D_p. Grows monotonically under constant supersaturation. Analytical solution: D_p(t)² = D_p(0)² + 2·A·t (Eq. 13.21)."
+    },
+    "I_D": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Diameter growth rate: I_D = A/D_p (Eq. 13.13). Algebraic — determined by the growth parameter A and the current diameter D_p. Decreases as D_p grows (larger particles grow more slowly in diameter)."
+    },
+    "A": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Growth parameter A = 4·D_diff·M_i·Δp/(R_gas·T·ρ_p) (Eq. 13.12). Algebraic — constant when parameters are fixed. Determines the rate of D_p² growth: D_p² = D_p0² + 2·A·t."
+    },
+    "N": {
+      "type": "unknown",
+      "units": "m^-3",
+      "description": "Total aerosol number concentration. ODE state: D(N)/dt = -0.5·K_12·N² (Eq. 13.65). Decays under Brownian coagulation with the Fuchs-form coefficient K_12. Analytical solution: N(t) = N_0/(1 + t/τ_c) (Eq. 13.66)."
+    },
+    "τ_c": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Characteristic coagulation time τ_c = 2/(K_12·N_0) (Eq. 13.67). Algebraic — constant when parameters are fixed. At t=τ_c, N = N_0/2. Controls the timescale of number-concentration decay."
+    },
+    "m_1": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Mass of particle 1: m_1 = ρ_p·(π/6)·D_p1³. π/6 = 0.5235987755982988 is folded as a literal. Enters mean thermal velocity c_bar_1 via c_bar ∝ 1/√m."
+    },
+    "m_2": {
+      "type": "unknown",
+      "units": "kg",
+      "description": "Mass of particle 2: m_2 = ρ_p·(π/6)·D_p2³. Symmetric role to m_1."
+    },
+    "Kn_1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Knudsen number for particle 1: Kn_1 = 2·λ_air/D_p1 (Table 13.1). Controls the transition between continuum (Kn≪1) and free-molecular (Kn≫1) regimes for the slip correction C_c1."
+    },
+    "Kn_2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Knudsen number for particle 2: Kn_2 = 2·λ_air/D_p2 (Table 13.1). Symmetric role to Kn_1."
+    },
+    "C_c1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cunningham slip correction for particle 1: C_c1 = 1 + Kn_1·(1.257 + 0.4·exp(-1.1/Kn_1)) (Table 13.1). Corrects Brownian diffusivity for non-continuum effects. Approaches 1 for large particles (Kn→0); increases strongly for small particles (Kn→∞)."
+    },
+    "C_c2": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Cunningham slip correction for particle 2: C_c2 = 1 + Kn_2·(1.257 + 0.4·exp(-1.1/Kn_2)) (Table 13.1). Symmetric role to C_c1."
+    },
+    "D_1": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusion coefficient of particle 1: D_1 = k_B·T·C_c1/(3π·μ·D_p1) (Eq. 13.47, Table 13.1). k_B=1.380649e-23 J/K and π=3.14159265358979 are folded as literals. Increases with temperature and decreases with particle size and viscosity."
+    },
+    "D_2": {
+      "type": "unknown",
+      "units": "m^2/s",
+      "description": "Brownian diffusion coefficient of particle 2: D_2 = k_B·T·C_c2/(3π·μ·D_p2) (Eq. 13.47). Symmetric role to D_1."
+    },
+    "c_bar_1": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean thermal velocity of particle 1: c_bar_1 = √(8·k_B·T/(π·m_1)) (Table 13.1). Determines the particle mean free path l_1 = 8·D_1/(π·c_bar_1)."
+    },
+    "c_bar_2": {
+      "type": "unknown",
+      "units": "m/s",
+      "description": "Mean thermal velocity of particle 2: c_bar_2 = √(8·k_B·T/(π·m_2)) (Table 13.1). Symmetric role to c_bar_1."
+    },
+    "l_1": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Mean free path of particle 1: l_1 = 8·D_1/(π·c_bar_1) (Table 13.1). Enters the Fuchs interpolation parameter g_1."
+    },
+    "l_2": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Mean free path of particle 2: l_2 = 8·D_2/(π·c_bar_2) (Table 13.1). Symmetric role to l_1."
+    },
+    "g_1": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Fuchs interpolation parameter for particle 1: g_1 = [(D_p1+l_1)³ - (D_p1²+l_1²)^(3/2)] / (3·D_p1·l_1) - D_p1 (Table 13.1). Measures the effective interaction radius accounting for particle mean free path."
+    },
+    "g_2": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Fuchs interpolation parameter for particle 2: g_2 = [(D_p2+l_2)³ - (D_p2²+l_2²)^(3/2)] / (3·D_p2·l_2) - D_p2 (Table 13.1). Symmetric role to g_1."
+    },
+    "K_12": {
+      "type": "unknown",
+      "units": "m^3/s",
+      "description": "Brownian coagulation coefficient (Fuchs form, Table 13.1): K_12 = 2π(D_1+D_2)(D_p1+D_p2) / [(D_p1+D_p2)/(D_p1+D_p2+2√(g_1²+g_2²)) + 8(D_1+D_2)/(√(c_bar_1²+c_bar_2²)·(D_p1+D_p2))]. Valid across continuum, transition, and free-molecular regimes. Feeds directly into the N ODE and τ_c in place of the upstream coag.K parameter."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "A",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              4,
+              "D_diff",
+              "M_i",
+              "Δp"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              8.314,
+              "T",
+              "ρ_p"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "I_D",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "A",
+          "D_p"
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "D_p"
+        ]
+      },
+      "rhs": "I_D"
+    },
+    {
+      "lhs": "τ_c",
+      "rhs": {
+        "op": "/",
+        "args": [
+          2,
+          {
+            "op": "*",
+            "args": [
+              "K_12",
+              "N_0"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": {
+        "op": "D",
+        "wrt": "t",
+        "args": [
+          "N"
+        ]
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -0.5,
+          "K_12",
+          {
+            "op": "^",
+            "args": [
+              "N",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "m_1",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ρ_p",
+          0.5235987755982988,
+          {
+            "op": "^",
+            "args": [
+              "D_p1",
+              3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "m_2",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "ρ_p",
+          0.5235987755982988,
+          {
+            "op": "^",
+            "args": [
+              "D_p2",
+              3
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "Kn_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "λ_air"
+            ]
+          },
+          "D_p1"
+        ]
+      }
+    },
+    {
+      "lhs": "Kn_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              "λ_air"
+            ]
+          },
+          "D_p2"
+        ]
+      }
+    },
+    {
+      "lhs": "C_c1",
+      "rhs": {
+        "op": "+",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              "Kn_1",
+              {
+                "op": "+",
+                "args": [
+                  1.257,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.4,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              -1.1,
+                              "Kn_1"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "C_c2",
+      "rhs": {
+        "op": "+",
+        "args": [
+          1,
+          {
+            "op": "*",
+            "args": [
+              "Kn_2",
+              {
+                "op": "+",
+                "args": [
+                  1.257,
+                  {
+                    "op": "*",
+                    "args": [
+                      0.4,
+                      {
+                        "op": "exp",
+                        "args": [
+                          {
+                            "op": "/",
+                            "args": [
+                              -1.1,
+                              "Kn_2"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "D_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              1.380649e-23,
+              "T",
+              "C_c1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              3.14159265358979,
+              "μ",
+              "D_p1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "D_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              1.380649e-23,
+              "T",
+              "C_c2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3,
+              3.14159265358979,
+              "μ",
+              "D_p2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_bar_1",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  1.380649e-23,
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.14159265358979,
+                  "m_1"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "c_bar_2",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  8,
+                  1.380649e-23,
+                  "T"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  3.14159265358979,
+                  "m_2"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "l_1",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              8,
+              "D_1"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3.14159265358979,
+              "c_bar_1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "l_2",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              8,
+              "D_2"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              3.14159265358979,
+              "c_bar_2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "g_1",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "D_p1",
+                      "l_1"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "l_1"
+                        ]
+                      },
+                      3
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "D_p1",
+                              2
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "l_1",
+                              2
+                            ]
+                          }
+                        ]
+                      },
+                      1.5
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "D_p1"
+        ]
+      }
+    },
+    {
+      "lhs": "g_2",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "D_p2",
+                      "l_2"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p2",
+                          "l_2"
+                        ]
+                      },
+                      3
+                    ]
+                  },
+                  {
+                    "op": "^",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "D_p2",
+                              2
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "l_2",
+                              2
+                            ]
+                          }
+                        ]
+                      },
+                      1.5
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "D_p2"
+        ]
+      }
+    },
+    {
+      "lhs": "K_12",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              2,
+              3.14159265358979,
+              {
+                "op": "+",
+                "args": [
+                  "D_1",
+                  "D_2"
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  "D_p1",
+                  "D_p2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      "D_p1",
+                      "D_p2"
+                    ]
+                  },
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "D_p2"
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          2,
+                          {
+                            "op": "sqrt",
+                            "args": [
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "g_1",
+                                      2
+                                    ]
+                                  },
+                                  {
+                                    "op": "^",
+                                    "args": [
+                                      "g_2",
+                                      2
+                                    ]
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      8,
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_1",
+                          "D_2"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "sqrt",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              {
+                                "op": "^",
+                                "args": [
+                                  "c_bar_1",
+                                  2
+                                ]
+                              },
+                              {
+                                "op": "^",
+                                "args": [
+                                  "c_bar_2",
+                                  2
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "+",
+                        "args": [
+                          "D_p1",
+                          "D_p2"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "condensation_growth_standard",
+      "description": "Condensation growth at default parameters (T=298 K, ρ_p=1000 kg/m³, D_diff=1e-5 m²/s, M_i=0.1 kg/mol, Δp=1e-4 Pa). Initial D_p=0.2 µm. Verifies D_p(t) against the analytical Eq. 13.21 solution D_p(t)²=D_p0²+2At, and checks the growth rate I_D=A/D_p. Also pins A and K_12 as constant algebraic quantities. The coagulation ODE (N) evolves independently and does not affect D_p. Mirrors the diameter_growth.esm 'figure_13_2_small_particle_growth_curve' test at the same tolerance (rel=1e-4 absorbs Tsit5↔LSODA truncation over 1200 s).",
+      "time_span": {
+        "start": 0,
+        "end": 1200
+      },
+      "initial_conditions": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "A",
+          "time": 0,
+          "expected": 1.61448385758315e-16
+        },
+        {
+          "variable": "A",
+          "time": 1200,
+          "expected": 1.61448385758315e-16
+        },
+        {
+          "variable": "K_12",
+          "time": 0,
+          "expected": 1.491012954151819e-15
+        },
+        {
+          "variable": "K_12",
+          "time": 1200,
+          "expected": 1.491012954151819e-15
+        },
+        {
+          "variable": "D_p",
+          "time": 0,
+          "expected": 2e-07
+        },
+        {
+          "variable": "D_p",
+          "time": 300,
+          "expected": 3.699581482478647e-07
+        },
+        {
+          "variable": "D_p",
+          "time": 600,
+          "expected": 4.83464644943121e-07
+        },
+        {
+          "variable": "D_p",
+          "time": 1200,
+          "expected": 6.538165842344135e-07
+        },
+        {
+          "variable": "I_D",
+          "time": 0,
+          "expected": 8.072419287915751e-10
+        },
+        {
+          "variable": "I_D",
+          "time": 300,
+          "expected": 4.363963505681399e-10
+        },
+        {
+          "variable": "I_D",
+          "time": 1200,
+          "expected": 2.46932227862288e-10
+        }
+      ]
+    },
+    {
+      "id": "coagulation_decay_standard",
+      "description": "Coagulation dynamics at default parameters. K_12 is computed from the Fuchs formula at D_p1=D_p2=1e-7 m, T=298 K, ρ_p=1000 kg/m³, μ=1.83e-5 Pa·s, λ_air=6.86e-8 m, giving K_12≈1.491e-15 m³/s and τ_c≈1341 s. N decays according to N(t)=N_0/(1+t/τ_c) (Eq. 13.66). Verifies τ_c constant and N at three time points against the analytical solution. The condensation ODE (D_p) is independent and does not affect N. Tolerance rel=1e-4 covers the ODE solver truncation error for the -0.5·K_12·N² rate law.",
+      "time_span": {
+        "start": 0.0,
+        "end": 4000.0
+      },
+      "initial_conditions": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 1.491012954151819e-15
+        },
+        {
+          "variable": "τ_c",
+          "time": 0.0,
+          "expected": 1341.369968940159
+        },
+        {
+          "variable": "τ_c",
+          "time": 4000.0,
+          "expected": 1341.369968940159
+        },
+        {
+          "variable": "N",
+          "time": 0.0,
+          "expected": 1000000000000.0
+        },
+        {
+          "variable": "N",
+          "time": 1000.0,
+          "expected": 572899621481.9985
+        },
+        {
+          "variable": "N",
+          "time": 2000.0,
+          "expected": 401443115074.0397
+        },
+        {
+          "variable": "N",
+          "time": 4000.0,
+          "expected": 251128451451.7698
+        }
+      ]
+    },
+    {
+      "id": "temperature_coupling",
+      "description": "Raises temperature from 298 K to 350 K. Both condensation and coagulation respond: A decreases (A∝1/T, from 1.6145e-16 to 1.3746e-16 m²/s) and K_12 increases (D_1,D_2∝T, c_bar∝√T; net K_12 increases from 1.491e-15 to 1.727e-15 m³/s) and τ_c decreases (from 1341 s to 1158 s). Verifies that the shared T parameter correctly propagates into both the growth parameter A and the Brownian diffusion chain. Values match diameter_growth.esm 'temperature_sensitivity' (A) and brownian_coag_coeff.esm 'temperature_sensitivity' (K_12).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 350.0
+      },
+      "initial_conditions": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "A",
+          "time": 0.0,
+          "expected": 1.374617684456511e-16
+        },
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 1.72734439475969e-15
+        },
+        {
+          "variable": "τ_c",
+          "time": 0.0,
+          "expected": 1157.846695810908
+        },
+        {
+          "variable": "I_D",
+          "time": 0.0,
+          "expected": 6.873088422282554e-10
+        }
+      ]
+    },
+    {
+      "id": "density_coupling",
+      "description": "Raises particle density from 1000 to 1500 kg/m³. Condensation: A decreases by factor 2/3 (A∝1/ρ_p, from 1.6145e-16 to 1.0763e-16 m²/s). Coagulation: K_12 changes because m_1, m_2 ∝ ρ_p affects c_bar_1, c_bar_2 ∝ 1/√m ∝ 1/√ρ_p, which affects l_1, l_2 and g_1, g_2. Verifies that the shared ρ_p correctly propagates into the A equation and into the BCC observed-variable chain.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "ρ_p": 1500.0
+      },
+      "initial_conditions": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "assertions": [
+        {
+          "variable": "A",
+          "time": 0.0,
+          "expected": 1.0763225717221e-16
+        },
+        {
+          "variable": "K_12",
+          "time": 0.0,
+          "expected": 1.437637994748854e-15
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "condensation_growth_curves",
+      "description": "Diameter growth by condensation for three initial particle sizes (0.2 µm, 0.5 µm, 2.0 µm) at standard conditions (T=298 K, ρ_p=1000 kg/m³, Δp=1e-4 Pa). Reproduces Figure 13.2 from Seinfeld & Pandis (2006). Smaller particles grow faster in diameter because I_D = A/D_p decreases with D_p. The coagulation ODE (N) runs simultaneously but is independent of D_p in this model.",
+      "time_span": {
+        "start": 0,
+        "end": 1200
+      },
+      "initial_state": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "plots": [
+        {
+          "id": "Dp_vs_time_0p2um",
+          "type": "line",
+          "description": "D_p(t) over 20 min for initial D_p=0.2 µm — fastest growing of the three Figure 13.2 curves.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          }
+        },
+        {
+          "id": "ID_vs_time",
+          "type": "line",
+          "description": "Diameter growth rate I_D(t) = A/D_p decreasing as D_p grows.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "I_D",
+            "label": "I_D (m/s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "coagulation_decay_curve",
+      "description": "Number-concentration decay under Brownian coagulation at default conditions. K_12 ≈ 1.491e-15 m³/s (from Fuchs formula at D_p1=D_p2=100 nm) gives τ_c ≈ 1341 s ≈ 22 min. N decays from 10¹² to ~5×10¹¹ m⁻³ by t=τ_c and ~2.5×10¹¹ m⁻³ by t=3·τ_c, following the analytical N(t)=N_0/(1+t/τ_c).",
+      "time_span": {
+        "start": 0.0,
+        "end": 4000.0
+      },
+      "initial_state": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "plots": [
+        {
+          "id": "N_vs_time",
+          "type": "line",
+          "description": "Total number concentration N(t) decaying under Brownian coagulation. Follows N_0/(1+t/τ_c) with τ_c≈1341 s.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "N",
+            "label": "N (m⁻³)"
+          }
+        },
+        {
+          "id": "tau_c_stability",
+          "type": "line",
+          "description": "Characteristic coagulation time τ_c = 2/(K_12·N_0) — constant throughout (K_12 and N_0 are parameters).",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "τ_c",
+            "label": "τ_c (s)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "combined_dynamics_overview",
+      "description": "Both condensation and coagulation running simultaneously over 1200 s at default parameters. D_p grows (condensation adds volume to each particle) while N decays (coagulation reduces particle count). The two ODEs are independent in this model — K_12 depends only on D_p1/D_p2 (fixed parameters, not the ODE state D_p), and the D_p ODE depends only on A and D_p itself. Shows the complementary nature of the two processes.",
+      "time_span": {
+        "start": 0,
+        "end": 1200
+      },
+      "initial_state": {
+        "D_p": 2e-07,
+        "N": 1000000000000.0
+      },
+      "plots": [
+        {
+          "id": "Dp_combined",
+          "type": "line",
+          "description": "Particle diameter D_p(t) growing by condensation while coagulation simultaneously reduces N.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "D_p",
+            "label": "D_p (m)"
+          }
+        },
+        {
+          "id": "N_combined",
+          "type": "line",
+          "description": "Number concentration N(t) decaying by coagulation while condensation simultaneously grows D_p.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "N",
+            "label": "N (m⁻³)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

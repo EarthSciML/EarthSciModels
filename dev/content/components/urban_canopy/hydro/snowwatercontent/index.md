@@ -1,0 +1,636 @@
+---
+title: "SnowWaterContent"
+slug: "snowwatercontent"
+domains: ["urban_canopy"]
+component_types: ["model"]
+subdomains: ["hydro"]
+domain: "urban_canopy"
+subdomain: "hydro"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/urban_canopy/hydro/snow_water_content.esm"
+reference: "Oleson, K. W., et al. (2010). Technical Description of version 4.0 of the Community Land Model (CLM). NCAR Technical Note NCAR/TN-478+STR. Chapter 5 (Snow Hydrology), Section 5.1.2, Eqs. 5.15–5.22, pp. 116–117."
+description: "Volumetric ice/liquid contents and outgoing liquid-water flux for a snow layer (Oleson et al. 2010, CLM4 Tech Note Ch. 5, Eqs. 5.18–5.20). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:119 (`SnowWaterContent` @component). Parameterized as observed-only: w_ice, w_liq, dz are inputs (parameters); theta_ice, theta_liq, q_liq_out are algebraic outputs."
+tags: ["urban_canopy", "hydro", "model", "hydrology", "snow", "observed-only", "clm4"]
+---
+
+## Description
+
+Volumetric ice/liquid contents and outgoing liquid-water flux for a snow layer (Oleson et al. 2010, CLM4 Tech Note Ch. 5, Eqs. 5.18–5.20). Migrated from UrbanCanopy.jl@9200edd4 src/hydrology.jl:119 (`SnowWaterContent` @component). Parameterized as observed-only: w_ice, w_liq, dz are inputs (parameters); theta_ice, theta_liq, q_liq_out are algebraic outputs.
+
+## Reference
+
+_source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:119
+Upstream `SnowWaterContent` is an MTK `@component` whose three inputs (w_ice, w_liq, Δz) are `@parameters` and whose three outputs (θ_ice, θ_liq, q_liq_out) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical structure preserved here. Unicode `Δz` is rendered as ASCII `dz` and `θ_ice`/`θ_liq` as `theta_ice`/`theta_liq`, matching the ASCII naming convention used by the other migrated UrbanCanopy components in this rig (see e.g. components/urban_canopy/hydro/snow_compaction.esm `eta`/`dz`).
+
+The upstream `@constants` block (ρ_liq, ρ_ice, S_r, zero_kgpm2s, one_s) is preserved as parameters with the upstream default values. zero_kgpm2s and one_s are kept in the equations to maintain 1:1 fidelity with the upstream MTK unit-checking pattern (the same convention used by impervious_runoff.esm for its `zero_kgpm2s`/`one_s` literals — `one_s` carries the seconds dimension that converts the per-step kg/m^2 expression into the kg/(m^2*s) flux, and `zero_kgpm2s` is the unit-balanced zero-flux comparison value for the `max` floor).
+
+Observability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig.
+
+Tolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are simple products, divisions, `min` and `max` clamps — round-off is at the 1e-15 level. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on volumetric snow contents (m^3/m^3, O(1e-2)–1) or layer fluxes (kg/(m^2*s), O(1e-1)–O(1e2)). Tighter `abs: 1e-12` is asserted on q_liq_out outputs in dry branches where the value is exactly zero by construction so the assertion does not silently accept a stuck-at-1e-3 regression._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `rho_liq` | `kg/m^3` | `1000.0` | Density of liquid water (Oleson et al. 2010 Table 1.4; ρ_liq in upstream Julia source) |
+| `rho_ice` | `kg/m^3` | `917.0` | Density of ice (Oleson et al. 2010 Table 1.4; ρ_ice in upstream Julia source) |
+| `S_r` | `1` | `0.033` | Irreducible water saturation (dimensionless; Oleson et al. 2010 Eq. 5.18) |
+| `zero_kgpm2s` | `kg/(m^2*s)` | `0.0` | Zero flux for unit-balanced max comparison (upstream `@constants` literal) |
+| `one_s` | `s` | `1.0` | Unit time for rate conversion (upstream `@constants` literal — converts per-step kg/m^2 into per-second flux) |
+| `w_liq` | `kg/m^2` | `2.0` | Mass of liquid water in snow layer |
+| `w_ice` | `kg/m^2` | `5.0` | Mass of ice in snow layer |
+| `dz` | `m` | `0.1` | Snow layer thickness (Δz in upstream Julia source) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `theta_ice` | `m^3/m^3` |  | Volumetric ice content in snow layer (Oleson Eq. 5.19; θ_ice in upstream Julia source) |
+| `theta_liq` | `m^3/m^3` |  | Volumetric liquid water content in snow layer (Oleson Eq. 5.20; θ_liq in upstream Julia source) |
+| `q_liq_out` | `kg/(m^2*s)` |  | Water flow out of snow layer (Oleson Eq. 5.18) |
+
+## Observed expressions
+
+$$
+theta_{ice} = \mathrm{min}\left(\frac{w_{ice}}{dz \cdot rho_{ice}}, 1.0\right)
+$$
+_Volumetric ice content in snow layer (Oleson Eq. 5.19; θ_ice in upstream Julia source)_
+
+$$
+theta_{liq} = \mathrm{min}\left(\frac{w_{liq}}{dz \cdot rho_{liq}}, 1.0 - theta_{ice}\right)
+$$
+_Volumetric liquid water content in snow layer (Oleson Eq. 5.20; θ_liq in upstream Julia source)_
+
+$$
+q_{liq\,out} = \mathrm{max}\left(\frac{rho_{liq} \cdot \left(theta_{liq} - S_{r} \cdot \left(1.0 - theta_{ice}\right)\right) \cdot dz}{one_{s}}, zero_{kgpm2s}\right)
+$$
+_Water flow out of snow layer (Oleson Eq. 5.18)_
+
+## Analyses
+
+### theta_ice_vs_w_ice_full_curve
+
+Sweep w_ice across a CLMU-representative range (0–150 kg/m^2, 31 points) at fixed dz = 0.1 m and zero liquid loading. Surfaces the two-regime structure of Oleson et al. 2010 Eq. 5.19: a linear ramp theta_ice = w_ice/(rho_ice*dz) below the saturation kink at w_ice = rho_ice*dz = 91.7 kg/m^2, then the min-clamp plateau theta_ice = 1.0 m^3/m^3 above it. The kink is the canonical visualization of the volumetric-ice cap that prevents the snow column from over-packing.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `w_ice`
+
+![theta_ice vs w_ice (dz=0.1, rho_ice=917): linear ramp up to w_ice = 91.7 kg/m^2, then the Eq. 5.19 min-clamp plateau at 1.0 m^3/m^3.](/plots/urban_canopy/hydro/snowwatercontent/theta_ice_vs_w_ice_full_curve-theta_ice_curve.png)
+
+### q_liq_out_vs_w_liq_dry_sublayer
+
+Sweep w_liq across a CLMU-representative range (0–15 kg/m^2, 31 points) at fixed w_ice = 5 kg/m^2 and dz = 0.1 m (theta_ice ≈ 0.0545). Surfaces the irreducible-water floor in Oleson et al. 2010 Eq. 5.18: q_liq_out stays clamped at zero below the threshold w_liq = rho_liq*dz*S_r*(1-theta_ice) ≈ 3.12 kg/m^2, then ramps linearly with slope rho_liq*dz/one_s = 100 kg/(m^2*s) per unit theta_liq. The threshold reproduces the well-known 'storage-then-release' behavior of CLM4's irreducible-saturation snow scheme.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `w_liq`
+
+![q_liq_out vs w_liq at w_ice=5, dz=0.1: zero below the irreducible-water threshold (~3.12 kg/m^2), linear above, per Eq. 5.18.](/plots/urban_canopy/hydro/snowwatercontent/q_liq_out_vs_w_liq_dry_sublayer-q_liq_out_curve.png)
+
+### q_liq_out_heatmap_w_ice_w_liq
+
+Two-dimensional sweep over (w_ice, w_liq) at fixed dz = 0.1 m, spanning a CLMU-typical snow-column range (w_ice 0–100, w_liq 0–15 kg/m^2; 21x16 grid). Surfaces the irreducible-water threshold curve w_liq = rho_liq*dz*S_r*(1 - min(w_ice/(rho_ice*dz), 1)) — outflow is zero below it and grows linearly above — and shows how the porosity cap (Eq. 5.20) shrinks the effective storage as w_ice approaches saturation. The dry-tongue along high w_ice reproduces CLM's behavior where a near-saturated ice column suppresses meltwater drainage even when liquid mass is present.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `w_ice`, `w_liq`
+
+![q_liq_out(w_ice, w_liq) at dz=0.1: zero-flux region below the Eq. 5.18 irreducible-water threshold, increasing toward the upper-left (high w_liq, low w_ice) corner. Iso-flux contours bend at the theta_ice = 1 clamp (w_ice = 91.7) where the porosity cap activates.](/plots/urban_canopy/hydro/snowwatercontent/q_liq_out_heatmap_w_ice_w_liq-q_liq_out_surface.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: UrbanCanopy.jl@9200edd4f15609f20339d3a7d104de8064544310:src/hydrology.jl:119\nUpstream `SnowWaterContent` is an MTK `@component` whose three inputs (w_ice, w_liq, Δz) are `@parameters` and whose three outputs (θ_ice, θ_liq, q_liq_out) are time-indexed `@variables` with algebraic-only equations (no derivatives). Identical structure preserved here. Unicode `Δz` is rendered as ASCII `dz` and `θ_ice`/`θ_liq` as `theta_ice`/`theta_liq`, matching the ASCII naming convention used by the other migrated UrbanCanopy components in this rig (see e.g. components/urban_canopy/hydro/snow_compaction.esm `eta`/`dz`).\n\nThe upstream `@constants` block (ρ_liq, ρ_ice, S_r, zero_kgpm2s, one_s) is preserved as parameters with the upstream default values. zero_kgpm2s and one_s are kept in the equations to maintain 1:1 fidelity with the upstream MTK unit-checking pattern (the same convention used by impervious_runoff.esm for its `zero_kgpm2s`/`one_s` literals — `one_s` carries the seconds dimension that converts the per-step kg/m^2 expression into the kg/(m^2*s) flux, and `zero_kgpm2s` is the unit-balanced zero-flux comparison value for the `max` floor).\n\nObservability classification: this component is functionally observed-only — every output variable is given by a single algebraic equation in terms of the parameters (and the `(t)` time index has no role since there is no derivative). Test scenarios use `time_span: [0, 1]` and sample at t=0 to mirror the convention used by the other observed-only ESM files in this rig.\n\nTolerance rationale (model-level rel=1e-9): observed-only algebraic system (no ODE integration); the equations are simple products, divisions, `min` and `max` clamps — round-off is at the 1e-15 level. 1e-9 leaves comfortable headroom above ULP roundoff and is well below any plausible physical-discrimination scale on volumetric snow contents (m^3/m^3, O(1e-2)–1) or layer fluxes (kg/(m^2*s), O(1e-1)–O(1e2)). Tighter `abs: 1e-12` is asserted on q_liq_out outputs in dry branches where the value is exactly zero by construction so the assertion does not silently accept a stuck-at-1e-3 regression."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "rho_liq": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 1000.0,
+      "description": "Density of liquid water (Oleson et al. 2010 Table 1.4; ρ_liq in upstream Julia source)"
+    },
+    "rho_ice": {
+      "type": "parameter",
+      "units": "kg/m^3",
+      "default": 917.0,
+      "description": "Density of ice (Oleson et al. 2010 Table 1.4; ρ_ice in upstream Julia source)"
+    },
+    "S_r": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.033,
+      "description": "Irreducible water saturation (dimensionless; Oleson et al. 2010 Eq. 5.18)"
+    },
+    "zero_kgpm2s": {
+      "type": "parameter",
+      "units": "kg/(m^2*s)",
+      "default": 0.0,
+      "description": "Zero flux for unit-balanced max comparison (upstream `@constants` literal)"
+    },
+    "one_s": {
+      "type": "parameter",
+      "units": "s",
+      "default": 1.0,
+      "description": "Unit time for rate conversion (upstream `@constants` literal — converts per-step kg/m^2 into per-second flux)"
+    },
+    "w_liq": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 2.0,
+      "description": "Mass of liquid water in snow layer"
+    },
+    "w_ice": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 5.0,
+      "description": "Mass of ice in snow layer"
+    },
+    "dz": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0.1,
+      "description": "Snow layer thickness (Δz in upstream Julia source)"
+    },
+    "theta_ice": {
+      "type": "unknown",
+      "units": "m^3/m^3",
+      "description": "Volumetric ice content in snow layer (Oleson Eq. 5.19; θ_ice in upstream Julia source)"
+    },
+    "theta_liq": {
+      "type": "unknown",
+      "units": "m^3/m^3",
+      "description": "Volumetric liquid water content in snow layer (Oleson Eq. 5.20; θ_liq in upstream Julia source)"
+    },
+    "q_liq_out": {
+      "type": "unknown",
+      "units": "kg/(m^2*s)",
+      "description": "Water flow out of snow layer (Oleson Eq. 5.18)"
+    }
+  },
+  "equations": [
+    {
+      "lhs": "theta_ice",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "w_ice",
+              {
+                "op": "*",
+                "args": [
+                  "dz",
+                  "rho_ice"
+                ]
+              }
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "theta_liq",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "w_liq",
+              {
+                "op": "*",
+                "args": [
+                  "dz",
+                  "rho_liq"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "-",
+            "args": [
+              1.0,
+              "theta_ice"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "q_liq_out",
+      "rhs": {
+        "op": "max",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "rho_liq",
+                  {
+                    "op": "-",
+                    "args": [
+                      "theta_liq",
+                      {
+                        "op": "*",
+                        "args": [
+                          "S_r",
+                          {
+                            "op": "-",
+                            "args": [
+                              1.0,
+                              "theta_ice"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "dz"
+                ]
+              },
+              "one_s"
+            ]
+          },
+          "zero_kgpm2s"
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_dry_layer",
+      "description": "Default parameter values (w_ice=5, w_liq=2, dz=0.1): a moderately icy layer with little liquid. theta_ice = 5/(0.1*917) = 0.05452562704471101. theta_liq = min(2/(0.1*1000), 1-theta_ice) = 0.02 (well below the saturation cap 0.945). The Eq. 5.18 inner expression (theta_liq - S_r*(1-theta_ice)) = 0.02 - 0.033*0.9454743... = -0.01120... is negative, so the max-floor activates: q_liq_out = 0. Reproduces upstream `hydrology_test.jl:410` first sub-case.",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 5.0,
+        "w_liq": 2.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 0.05452562704471101
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.02
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "wet_layer_outflow",
+      "description": "Higher water content with little ice (w_ice=1, w_liq=10, dz=0.1) drives nontrivial outflow. theta_ice = 1/91.7 = 0.0109051..., theta_liq = min(0.1, 0.989...) = 0.1. The inner expression (0.1 - 0.033*(1-0.0109051)) = 0.1 - 0.0326401... = 0.0673599... > 0, so q_liq_out = 1000 * 0.0673599 * 0.1 / 1 = 6.735987 kg/(m^2*s). Reproduces upstream `hydrology_test.jl:410` second sub-case (the `prob_wet` remake).",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 1.0,
+        "w_liq": 10.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 0.010905125408942203
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.1
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 6.73598691384951
+        }
+      ]
+    },
+    {
+      "id": "saturated_ice_clamp",
+      "description": "Excessive ice mass triggers the theta_ice clamp at 1.0 (m^3/m^3 cap). w_ice=200, dz=0.1 → w_ice/(dz*rho_ice) = 2.18 → min(2.18, 1.0) = 1.0. Then theta_liq = min(w_liq/(dz*rho_liq), 1-1) = min(0.02, 0) = 0. q_liq_out: inner = 0 - 0.033*0 = 0 → max(0, 0) = 0. Verifies the upper bound on theta_ice (Eq. 5.19 saturation cap) and that the cap propagates correctly into theta_liq's effective-porosity term (Eq. 5.20).",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 200.0,
+        "w_liq": 2.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 1.0
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "saturated_liquid_clamp",
+      "description": "Excessive liquid water triggers the theta_liq clamp at (1 - theta_ice) (Eq. 5.20 effective-porosity cap). w_ice=5, w_liq=200, dz=0.1: theta_ice = 0.05452562..., min(2.0, 0.94547...) selects the porosity branch → theta_liq = 0.94547437295528898. q_liq_out: inner = (1-S_r) * (1-theta_ice) = 0.967 * 0.94547... = 0.91427..., * 1000 * 0.1 / 1 = 91.4273718647764 kg/(m^2*s). Verifies the porosity cap and confirms (1-S_r)*(1-theta_ice) algebra.",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 5.0,
+        "w_liq": 200.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 0.05452562704471101
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.945474372955289
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 91.42737186477646
+        }
+      ]
+    },
+    {
+      "id": "thicker_layer_no_outflow",
+      "description": "Thicker layer dilutes ice/liquid contents below the irreducible-water threshold so q_liq_out remains floored at zero. w_ice=20, w_liq=8, dz=0.5: theta_ice = 20/(0.5*917) = 0.0436205..., theta_liq = min(8/500, 1-0.0436205) = 0.016. Inner = 0.016 - 0.033*(1-0.0436205) = 0.016 - 0.031560084... = -0.01556..., max(., 0) = 0. Verifies the dz scaling on theta_ice and the irreducible-water floor at a larger layer thickness.",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 20.0,
+        "w_liq": 8.0,
+        "dz": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 0.04362050163576881
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.016
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-12
+          }
+        }
+      ]
+    },
+    {
+      "id": "thin_layer_strong_outflow",
+      "description": "Thin layer with high liquid loading drives the largest outflow regime. w_ice=2, w_liq=5, dz=0.05: theta_ice = 2/(0.05*917) = 0.04362050163576881, theta_liq = min(5/50, 1-0.0436...) = 0.1. Inner = 0.1 - 0.033*(1-0.0436205) = 0.1 - 0.031560525... = 0.068439475..., q_liq_out = 1000 * 0.06843947655 * 0.05 / 1 ≈ 3.42197382 kg/(m^2*s). Verifies the dz multiplication in the flux equation (Eq. 5.18) at small dz.",
+      "parameter_overrides": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 2.0,
+        "w_liq": 5.0,
+        "dz": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "theta_ice",
+          "time": 0.0,
+          "expected": 0.04362050163576881
+        },
+        {
+          "variable": "theta_liq",
+          "time": 0.0,
+          "expected": 0.1
+        },
+        {
+          "variable": "q_liq_out",
+          "time": 0.0,
+          "expected": 3.4219738276990186
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "theta_ice_vs_w_ice_full_curve",
+      "description": "Sweep w_ice across a CLMU-representative range (0–150 kg/m^2, 31 points) at fixed dz = 0.1 m and zero liquid loading. Surfaces the two-regime structure of Oleson et al. 2010 Eq. 5.19: a linear ramp theta_ice = w_ice/(rho_ice*dz) below the saturation kink at w_ice = rho_ice*dz = 91.7 kg/m^2, then the min-clamp plateau theta_ice = 1.0 m^3/m^3 above it. The kink is the canonical visualization of the volumetric-ice cap that prevents the snow column from over-packing.",
+      "initial_state": {},
+      "parameters": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_liq": 0.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "w_ice",
+            "range": {
+              "start": 0.0,
+              "stop": 150.0,
+              "count": 31,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "theta_ice_curve",
+          "type": "line",
+          "description": "theta_ice vs w_ice (dz=0.1, rho_ice=917): linear ramp up to w_ice = 91.7 kg/m^2, then the Eq. 5.19 min-clamp plateau at 1.0 m^3/m^3.",
+          "x": {
+            "variable": "w_ice",
+            "label": "w_ice (kg/m^2)"
+          },
+          "y": {
+            "variable": "theta_ice",
+            "label": "theta_ice (m^3/m^3)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_liq_out_vs_w_liq_dry_sublayer",
+      "description": "Sweep w_liq across a CLMU-representative range (0–15 kg/m^2, 31 points) at fixed w_ice = 5 kg/m^2 and dz = 0.1 m (theta_ice ≈ 0.0545). Surfaces the irreducible-water floor in Oleson et al. 2010 Eq. 5.18: q_liq_out stays clamped at zero below the threshold w_liq = rho_liq*dz*S_r*(1-theta_ice) ≈ 3.12 kg/m^2, then ramps linearly with slope rho_liq*dz/one_s = 100 kg/(m^2*s) per unit theta_liq. The threshold reproduces the well-known 'storage-then-release' behavior of CLM4's irreducible-saturation snow scheme.",
+      "initial_state": {},
+      "parameters": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "w_ice": 5.0,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "w_liq",
+            "range": {
+              "start": 0.0,
+              "stop": 15.0,
+              "count": 31,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "q_liq_out_curve",
+          "type": "line",
+          "description": "q_liq_out vs w_liq at w_ice=5, dz=0.1: zero below the irreducible-water threshold (~3.12 kg/m^2), linear above, per Eq. 5.18.",
+          "x": {
+            "variable": "w_liq",
+            "label": "w_liq (kg/m^2)"
+          },
+          "y": {
+            "variable": "q_liq_out",
+            "label": "q_liq_out (kg/(m^2*s))"
+          }
+        }
+      ]
+    },
+    {
+      "id": "q_liq_out_heatmap_w_ice_w_liq",
+      "description": "Two-dimensional sweep over (w_ice, w_liq) at fixed dz = 0.1 m, spanning a CLMU-typical snow-column range (w_ice 0–100, w_liq 0–15 kg/m^2; 21x16 grid). Surfaces the irreducible-water threshold curve w_liq = rho_liq*dz*S_r*(1 - min(w_ice/(rho_ice*dz), 1)) — outflow is zero below it and grows linearly above — and shows how the porosity cap (Eq. 5.20) shrinks the effective storage as w_ice approaches saturation. The dry-tongue along high w_ice reproduces CLM's behavior where a near-saturated ice column suppresses meltwater drainage even when liquid mass is present.",
+      "initial_state": {},
+      "parameters": {
+        "rho_liq": 1000.0,
+        "rho_ice": 917.0,
+        "S_r": 0.033,
+        "dz": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "w_ice",
+            "range": {
+              "start": 0.0,
+              "stop": 100.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          },
+          {
+            "parameter": "w_liq",
+            "range": {
+              "start": 0.0,
+              "stop": 15.0,
+              "count": 16,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "q_liq_out_surface",
+          "type": "heatmap",
+          "description": "q_liq_out(w_ice, w_liq) at dz=0.1: zero-flux region below the Eq. 5.18 irreducible-water threshold, increasing toward the upper-left (high w_liq, low w_ice) corner. Iso-flux contours bend at the theta_ice = 1 clamp (w_ice = 91.7) where the porosity cap activates.",
+          "x": {
+            "variable": "w_ice",
+            "label": "w_ice (kg/m^2)"
+          },
+          "y": {
+            "variable": "w_liq",
+            "label": "w_liq (kg/m^2)"
+          },
+          "value": {
+            "variable": "q_liq_out",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

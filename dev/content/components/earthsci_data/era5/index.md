@@ -1,0 +1,249 @@
+---
+title: "ERA5"
+slug: "era5"
+domains: ["earthsci_data"]
+component_types: ["model"]
+domain: "earthsci_data"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/earthsci_data/era5_single.esm"
+reference: "10.1002/qj.3803"
+description: "ERA5 SINGLE-LEVEL (surface) regridding model — the coupler half of the era5 single-level loader+regridding-model split. Exposes ERA5 near-surface fields — 10 m wind (u10, v10), 2 m temperature (t2m), 2 m dewpoint (d2m) — on the simulation's target grid for coupling into EarthSciML systems. This is the single-level counterpart of era5.esm (pressure-level); it is preferred where genuine near-surface met is needed over terrain, because a 1000 hPa pressure level is at/below ground over elevated terrain."
+tags: ["earthsci_data", "model", "meteorology", "reanalysis", "era5", "ecmwf", "single_levels", "surface", "global", "regridding_model", "longlat"]
+---
+
+## Description
+
+ERA5 SINGLE-LEVEL (surface) regridding model — the coupler half of the era5 single-level loader+regridding-model split. Exposes ERA5 near-surface fields — 10 m wind (u10, v10), 2 m temperature (t2m), 2 m dewpoint (d2m) — on the simulation's target grid for coupling into EarthSciML systems. This is the single-level counterpart of era5.esm (pressure-level); it is preferred where genuine near-surface met is needed over terrain, because a 1000 hPa pressure level is at/below ground over elevated terrain.
+
+Structure: it declares the pure-I/O source inline: at 0.7.0 the loader was the separate file components/earthsci_data/era5_single_loader.esm, mounted as the subsystem `sl`; at esm 1.0.0 it is the `ERA5_sl` entry in this file's own `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Loader fields are referenced as ERA5.sl.<var> (e.g. ERA5.sl.u10). Reprojection (longlat identity) and regridding onto a consuming grid are expressed at the COUPLING EDGE as coupling expressions (esm-spec §8.6/§10.5) via the earthscidiscretizations reprojection/ and regridding/ template libraries — see the wildlandfire.esm assembler.
+
+Relative humidity is NOT a single-level ERA5 variable; consumers DERIVE RH from t2m + d2m via the Magnus/Tetens formula (see the wildlandfire Era5Regrid model).
+
+Unlike the pressure-level model this file carries NO `lev` parameter, NO pressure `P` observed, and NO pressure-level lookup table — single-level surface fields have no vertical dimension. The time-interpolation machinery (t_interp_ref, dt_interp, w_time) and the lat/lon coordinate metrics (δxδlon, δyδlat) are unchanged.
+
+## Reference
+
+_Single-level ERA5 regridding model. At 0.7.0 it declared the pure-I/O loader components/earthsci_data/era5_single_loader.esm as the subsystem `sl`; at esm 1.0.0 that source is the `ERA5_sl` entry in THIS file's `data_sources` and the standalone file is gone. Fields are ERA5.sl.{t2m,u10,v10,d2m}.
+
+Kept from the pressure-level model: lon/lat (grid-point coordinates, radians), t_ref (file-time epoch), the time-interpolation parameters t_interp_ref/dt_interp and the continuous weight w_time (records_per_sample=2 bracketing blend), and the lat/lon coordinate metrics δxδlon/δyδlat.
+
+Removed (no vertical dimension in single-level data): the `lev` pressure-level index parameter, the `P` pressure observed, and the era5_pressure_levels_pa function table.
+
+Reprojection is the longlat identity; regridding onto the consuming grid is a coupling expression (esm-spec §8.6). RH is derived downstream from t2m + d2m via the Magnus formula._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lon` | `rad` | `0.0` | Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid. |
+| `lat` | `rad` | `0.0` | Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid. |
+| `t_ref` | `s` | `0.0` | Reference epoch (seconds since the Julian date epoch) from which the ERA5 file time axis (valid_time) is offset. Set from DomainInfo.get_tref(domaininfo) at construction time. |
+| `t_interp_ref` | `s` | `0.0` | TIME INTERPOLATION (loader records_per_sample=2): simulation-clock time (s) of any cadence anchor of the interpolated loader — i.e. a time at which a fresh ERA5 record lands, so the interpolation weight is 0 there. Together with dt_interp it lets the model locate the current time within its bracketing pair WITHOUT the runtime injecting timestamps. Set once by the runner; for a run whose t=0 coincides with an ERA5 hour, 0.0 is correct. |
+| `dt_interp` | `s` | `3600.0` | TIME INTERPOLATION: the loader's cadence step (s) between the two bracketing records — ERA5 is hourly, so 3600. Set by the runner to match the loader frequency. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so the model's weight phase agrees with which two records the provider loaded. |
+| `t2m` | `K` |  | 2 m air temperature (K). ERA5 single-level short name 't2m'. |
+| `u10` | `m/s` |  | 10 m U wind component — zonal wind (m/s). ERA5 single-level short name 'u10'. |
+| `v10` | `m/s` |  | 10 m V wind component — meridional wind (m/s). ERA5 single-level short name 'v10'. |
+| `d2m` | `K` |  | 2 m dewpoint temperature (K). ERA5 single-level short name 'd2m'. Relative humidity is DERIVED downstream via the Magnus formula from t2m + d2m (there is no 'r'/relative-humidity variable in the single-level product). |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `w_time` | `1` |  | TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear). |
+| `δxδlon` | `m/rad` |  | Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains. |
+| `δyδlat` | `m/rad` |  | Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains. |
+
+## Observed expressions
+
+$$
+w_{time} = \frac{t - t_{interp\,ref}}{dt_{interp}} - \mathrm{floor}\left(\frac{t - t_{interp\,ref}}{dt_{interp}}\right)
+$$
+_TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear)._
+
+$$
+δxδlon = 6378134.3 \cdot \cos\left(lat\right)
+$$
+_Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains._
+
+$$
+δyδlat = 6378166.0
+$$
+_Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "Single-level ERA5 regridding model. At 0.7.0 it declared the pure-I/O loader components/earthsci_data/era5_single_loader.esm as the subsystem `sl`; at esm 1.0.0 that source is the `ERA5_sl` entry in THIS file's `data_sources` and the standalone file is gone. Fields are ERA5.sl.{t2m,u10,v10,d2m}.\n\nKept from the pressure-level model: lon/lat (grid-point coordinates, radians), t_ref (file-time epoch), the time-interpolation parameters t_interp_ref/dt_interp and the continuous weight w_time (records_per_sample=2 bracketing blend), and the lat/lon coordinate metrics δxδlon/δyδlat.\n\nRemoved (no vertical dimension in single-level data): the `lev` pressure-level index parameter, the `P` pressure observed, and the era5_pressure_levels_pa function table.\n\nReprojection is the longlat identity; regridding onto the consuming grid is a coupling expression (esm-spec §8.6). RH is derived downstream from t2m + d2m via the Magnus formula."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "lon": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Longitude of the model grid point (radians). Coupled to the simulation domain's longitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid."
+    },
+    "lat": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Latitude of the model grid point (radians). Coupled to the simulation domain's latitude coordinate via param_to_var when composed into a CoupledSystem. The runtime regridder converts radians to degrees for spatial interpolation against the ERA5 0.25°×0.25° grid."
+    },
+    "t_ref": {
+      "type": "parameter",
+      "units": "s",
+      "default": 0.0,
+      "description": "Reference epoch (seconds since the Julian date epoch) from which the ERA5 file time axis (valid_time) is offset. Set from DomainInfo.get_tref(domaininfo) at construction time."
+    },
+    "t_interp_ref": {
+      "type": "parameter",
+      "units": "s",
+      "default": 0.0,
+      "description": "TIME INTERPOLATION (loader records_per_sample=2): simulation-clock time (s) of any cadence anchor of the interpolated loader — i.e. a time at which a fresh ERA5 record lands, so the interpolation weight is 0 there. Together with dt_interp it lets the model locate the current time within its bracketing pair WITHOUT the runtime injecting timestamps. Set once by the runner; for a run whose t=0 coincides with an ERA5 hour, 0.0 is correct."
+    },
+    "dt_interp": {
+      "type": "parameter",
+      "units": "s",
+      "default": 3600.0,
+      "description": "TIME INTERPOLATION: the loader's cadence step (s) between the two bracketing records — ERA5 is hourly, so 3600. Set by the runner to match the loader frequency. Must equal the EarthSciIO LoaderTemporal.frequency the provider brackets on, so the model's weight phase agrees with which two records the provider loaded."
+    },
+    "w_time": {
+      "type": "unknown",
+      "units": "1",
+      "description": "TIME INTERPOLATION weight in [0,1): the fractional position of the current simulation time t within its bracketing pair of ERA5 records, w = frac((t - t_interp_ref)/dt_interp) = u - floor(u). Because it reads the simulation clock `t` it is CONTINUOUS (per-step): w ramps 0→1 across each cadence interval and resets to 0 at the next record, so a consumer that blends the two bracketing fields as (1 - w_time)*F0 + w_time*F1 gets a value that varies smoothly in time between the hourly ERA5 records. Consumers: wildlandfire Era5Regrid conservatively regrids BOTH bracket records at the (discrete) hourly cadence and blends the two fire-grid fields with w_time (regrid-then-blend == blend-then-regrid, conservative regrid being linear)."
+    },
+    "δxδlon": {
+      "type": "unknown",
+      "units": "m/rad",
+      "description": "Coordinate metric: x-distance per unit longitude (m rad⁻¹). δxδlon = lon2m·cos(lat) where lon2m ≈ 6378134.3 m rad⁻¹ (equatorial circumference metric). Emitted only in lat/lon coordinate domains."
+    },
+    "δyδlat": {
+      "type": "unknown",
+      "units": "m/rad",
+      "description": "Coordinate metric: y-distance per unit latitude (m rad⁻¹). δyδlat = lat2meters ≈ 6378166.0 m rad⁻¹. Constant. Emitted only in lat/lon coordinate domains."
+    },
+    "t2m": {
+      "type": "parameter",
+      "units": "K",
+      "description": "2 m air temperature (K). ERA5 single-level short name 't2m'.",
+      "update": {
+        "kind": "data",
+        "source": "ERA5_sl",
+        "from": {
+          "file_variable": "t2m",
+          "description": "2 m air temperature (K). ERA5 single-level short name 't2m'."
+        }
+      }
+    },
+    "u10": {
+      "type": "parameter",
+      "units": "m/s",
+      "description": "10 m U wind component — zonal wind (m/s). ERA5 single-level short name 'u10'.",
+      "update": {
+        "kind": "data",
+        "source": "ERA5_sl",
+        "from": {
+          "file_variable": "u10",
+          "description": "10 m U wind component — zonal wind (m/s). ERA5 single-level short name 'u10'."
+        }
+      }
+    },
+    "v10": {
+      "type": "parameter",
+      "units": "m/s",
+      "description": "10 m V wind component — meridional wind (m/s). ERA5 single-level short name 'v10'.",
+      "update": {
+        "kind": "data",
+        "source": "ERA5_sl",
+        "from": {
+          "file_variable": "v10",
+          "description": "10 m V wind component — meridional wind (m/s). ERA5 single-level short name 'v10'."
+        }
+      }
+    },
+    "d2m": {
+      "type": "parameter",
+      "units": "K",
+      "description": "2 m dewpoint temperature (K). ERA5 single-level short name 'd2m'. Relative humidity is DERIVED downstream via the Magnus formula from t2m + d2m (there is no 'r'/relative-humidity variable in the single-level product).",
+      "update": {
+        "kind": "data",
+        "source": "ERA5_sl",
+        "from": {
+          "file_variable": "d2m",
+          "description": "2 m dewpoint temperature (K). ERA5 single-level short name 'd2m'. Relative humidity is DERIVED downstream via the Magnus formula from t2m + d2m (there is no 'r'/relative-humidity variable in the single-level product)."
+        }
+      }
+    }
+  },
+  "equations": [
+    {
+      "lhs": "w_time",
+      "rhs": {
+        "op": "-",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  "t",
+                  "t_interp_ref"
+                ]
+              },
+              "dt_interp"
+            ]
+          },
+          {
+            "op": "floor",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "t",
+                      "t_interp_ref"
+                    ]
+                  },
+                  "dt_interp"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "δxδlon",
+      "rhs": {
+        "op": "*",
+        "args": [
+          6378134.3,
+          {
+            "op": "cos",
+            "args": [
+              "lat"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "δyδlat",
+      "rhs": 6378166.0
+    }
+  ],
+  "tests": []
+}
+```
+
+</details>

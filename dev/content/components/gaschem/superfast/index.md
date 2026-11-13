@@ -1,0 +1,2179 @@
+---
+title: "SuperFast"
+slug: "superfast"
+domains: ["gaschem"]
+component_types: ["reaction_system"]
+domain: "gaschem"
+component_type: "reaction_system"
+esm_version: "1.0.0"
+esm_path: "components/gaschem/superfast.esm"
+reference: "10.5194/gmd-11-4155-2018"
+description: "SuperFast gas-phase atmospheric chemistry mechanism from GasChem.jl. 12 active species + 3 quasi-constant reservoirs (O2/CH4/H2O; constant=true per ESS gt-ertm), 27 reactions covering tropospheric ozone chemistry. Regenerated from the upstream MTK ReactionSystem via mtk2esm (ESS gt-dod2). Fractional stoichiometries preserved directly (ESS gt-1e96); rate-law wrappers (arrhenius, third-body falloff, JPL 15-10 OH+CO, H2O-dependent HO2+HO2) inlined as Expression trees."
+tags: ["gaschem", "reaction_system", "gas-phase chemistry", "tropospheric", "ozone", "photochemistry"]
+---
+
+## Description
+
+SuperFast gas-phase atmospheric chemistry mechanism from GasChem.jl. 12 active species + 3 quasi-constant reservoirs (O2/CH4/H2O; constant=true per ESS gt-ertm), 27 reactions covering tropospheric ozone chemistry. Regenerated from the upstream MTK ReactionSystem via mtk2esm (ESS gt-dod2). Fractional stoichiometries preserved directly (ESS gt-1e96); rate-law wrappers (arrhenius, third-body falloff, JPL 15-10 OH+CO, H2O-dependent HO2+HO2) inlined as Expression trees.
+
+## Reference
+
+Brown-Steiner, B., Selin, N. E., Prinn, R. G., Tilmes, S., Emmons, L., Lamarque, J.-F., and Cameron-Smith, P.: Evaluating simplified chemical mechanisms within present-day simulations of the Community Earth System Model version 1.2 with CAM4 (CESM1.2 CAM-chem): MOZART-4 vs. Reduced Hydrocarbon vs. Super-Fast chemistry, Geoscientific Model Development, 11, 4155-4174, 2018.
+
+_Source: GasChem.jl src/SuperFast.jl @ 8c12c048482b515fb8eb2110bf8ab4b4f4e71309. Regenerated via mtk2esm (ESS gt-dod2) during mdl-xa2; previously hand-written in mdl-dkw. Fractional stoichiometries (CH3O2+CH3O2 -> 2.0 CH2O + 0.8 HO2; ISOP+O3 -> 0.87 CH2O + 1.86 CH3O2 + 0.06 HO2 + 0.05 CO; H2O+NO2 -> 0.5 HNO3; ISOP+OH -> ISOP + 0.5 OH) are preserved directly (gt-1e96). O2, CH4, H2O travel as isconstantspecies parameters in the upstream MTK model and are serialized as ESM species with constant=true (gt-ertm). Rate-law wrappers (arrh, arr_3rd, rate_2HO2, rate_OH_CO, rate_toppb) are inlined as closed-form expressions in T, P, and the H2O reservoir species, rather than preserved as composed sub-systems — the composed form yielded unresolved `<subsys>.k(t)` references in the reaction rates.
+
+HO2 + HO2 (R4) water-vapour enhancement: upstream SuperFast.jl writes the factor as 1 + 1.4e-21*H2O*H2O_ppb_molec_cm3*exp(2200/T), multiplying by the water mixing ratio twice, and the inlined rate here carried the same H2O^2. The JPL form is 1 + 1.4e-21*[H2O]*exp(2200/T) with [H2O] the water number density (molec/cm^3), which is what R4 now uses (the 8.428e-7*P/(8314000*T) prefactor converts H2O from ppb to molec/cm^3 once). At the defaults the factor drops from ~3.2e7 to 2.74; with the squared term HO2 + HO2 was the dominant HO2 sink by seven orders of magnitude and held HO2/OH near 0.003, against ~7 now. The test expected values were regenerated after the fix: the Python and Rust bindings agree on every assertion to <=1e-8 relative, except the near-zero ISOP values (<=6e-4, inside their 5e-3 tolerance). See also superfast_ratelaws.esm, rate_2HO2._
+- **DOI**: 10.5194/gmd-11-4155-2018
+- **URL**: https://gmd.copernicus.org/articles/11/4155/2018/
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `jNO2` | `1/s` | `0.0149` | Photolysis NO2 |
+| `T` | `K` | `280` | Temperature |
+| `P` | `Pa` | `101325` | Pressure |
+| `jH2COb` | `1/s` | `0.00014` | Photolysis CH2O (molecular channel) |
+| `jH2COa` | `1/s` | `0.00014` | Photolysis CH2O (radical channel) |
+| `jH2O2` | `1/s` | `1.0097e-05` | Photolysis H2O2 |
+| `jCH3OOH` | `1/s` | `8.9573e-06` | Photolysis CH3OOH |
+| `jO32OH` | `1/s` | `0.000227` | Photolysis O3 + hv -> 2 OH (simplified, incl O1D+H2O) |
+
+## Species
+
+| Species | Units | Default | Constant | Description |
+| --- | --- | --- | --- | --- |
+| `O2` | `ppb` | `209500000` | yes | Molecular oxygen (constant reservoir) |
+| `NO` | `ppb` | `0.0004` |  | Nitric oxide |
+| `CO` | `ppb` | `100` |  | Carbon monoxide |
+| `ISOP` | `ppb` | `1e-11` |  | Isoprene |
+| `HNO3` | `ppb` | `4e-06` |  | Nitric acid |
+| `NO2` | `ppb` | `0.0004` |  | Nitrogen dioxide |
+| `HO2` | `ppb` | `4e-06` |  | Hydroperoxyl radical |
+| `CH3OOH` | `ppb` | `4e-06` |  | Methyl hydroperoxide |
+| `OH` | `ppb` | `4e-06` |  | Hydroxyl radical |
+| `O3` | `ppb` | `40` |  | Ozone |
+| `CH4` | `ppb` | `1700` | yes | Methane (constant reservoir) |
+| `H2O` | `ppb` | `18390000` | yes | Water vapor (constant reservoir) |
+| `H2O2` | `ppb` | `4e-06` |  | Hydrogen peroxide |
+| `CH3O2` | `ppb` | `4e-06` |  | Methyl peroxy radical |
+| `CH2O` | `ppb` | `4e-06` |  | Formaldehyde |
+
+## Expression Templates
+
+### `arrh_per_molecule`
+
+**Parameters:** `A`, `B`
+
+$$
+\frac{A \cdot P \cdot e^{\frac{B}{T}}}{8314000 \cdot T}
+$$
+
+## Reactions
+
+| ID | Substrates | | Products | Rate |
+| --- | --- | --- | --- | --- |
+| `R1` | `O3` + `OH` | → | `HO2` + `O2` | $$\mathrm{arrh_per_molecule}\left(A=1023.4, B=-940\right)$$ |
+| `R2` | `O3` + `HO2` | → | `OH` + 2 `O2` | $$\mathrm{arrh_per_molecule}\left(A=6.02, B=-490\right)$$ |
+| `R3` | `HO2` + `OH` | → | `H2O` + `O2` | $$\mathrm{arrh_per_molecule}\left(A=28896, B=250\right)$$ |
+| `R4` | 2 `HO2` | → | `H2O2` + `O2` | $$\left(\frac{180.6 \cdot P \cdot e^{\frac{460}{T}}}{8314000 \cdot T} + \frac{761048.4 \cdot P^{2} \cdot e^{\frac{920}{T}}}{69122596000000 \cdot T^{2}}\right) \cdot \left(1 + \frac{8.428 \times 10^{-7} \cdot P \cdot H2O \cdot e^{\frac{2200}{T}}}{8314000 \cdot T}\right)$$ |
+| `R5` | `H2O2` + `OH` | → | `H2O` + `HO2` | $$\frac{1083.6 \cdot e^{0} \cdot P}{8314000 \cdot T}$$ |
+| `R6` | `NO` + `O3` | → | `NO2` + `O2` | $$\mathrm{arrh_per_molecule}\left(A=1806, B=-1500\right)$$ |
+| `R7` | `NO` + `HO2` | → | `NO2` + `OH` | $$\mathrm{arrh_per_molecule}\left(A=1986.6000000000001, B=270\right)$$ |
+| `R8` | `NO2` + `OH` | → | `HNO3` | $$\frac{652327200 \cdot e^{0} \cdot P^{2} \cdot 0.6^{\frac{1}{1 + \log_{10}\left(\frac{5423448340800000 \cdot P \cdot \frac{300}{T}^{3}}{1165130478176000000 \cdot T}\right)^{2}}} \cdot \frac{300}{T}^{3}}{69122596000000 \cdot T^{2} \cdot \left(1 + \frac{5423448340800000 \cdot P \cdot \frac{300}{T}^{3}}{1165130478176000000 \cdot T}\right)}$$ |
+| `R9` | `CH4` + `OH` | → | `H2O` + `CH3O2` | $$\mathrm{arrh_per_molecule}\left(A=1474.8999999999999, B=-1775\right)$$ |
+| `R10` | `CO` + `OH` | → | `HO2` | $$\frac{641455080 \cdot P^{2} \cdot 0.6^{\frac{1}{1 + \log_{10}\left(\frac{5333057535120000 \cdot P \cdot \frac{300}{T}^{1.3}}{45772983071199992 \cdot T^{2}}\right)^{2}}} \cdot e^{0}}{69122596000000 \cdot T^{3} \cdot \left(1 + \frac{5333057535120000 \cdot P \cdot \frac{300}{T}^{1.3}}{45772983071199992 \cdot T^{2}}\right)} + \frac{90.3 \cdot P \cdot e^{0} \cdot 0.6^{\frac{1}{1 + \log_{10}\left(\frac{4.5195402839999995 \times 10^{32} \cdot P \cdot \frac{300}{T}^{6.1}}{8.738478586320001 \times 10^{37} \cdot T}\right)^{2}}}}{8314000 \cdot T \cdot \left(1 + \frac{4.5195402839999995 \times 10^{32} \cdot P \cdot \frac{300}{T}^{6.1}}{8.738478586320001 \times 10^{37} \cdot T}\right)}$$ |
+| `R11` | `OH` + `CH2O` | → | `CO` + `H2O` + `HO2` | $$\mathrm{arrh_per_molecule}\left(A=3311.0000000000005, B=125\right)$$ |
+| `R12` | `HO2` + `CH3O2` | → | `CH3OOH` + `O2` | $$\mathrm{arrh_per_molecule}\left(A=246.82000000000002, B=750\right)$$ |
+| `R13` | `CH3OOH` + `OH` | → | `H2O` + `CH3O2` | $$\mathrm{arrh_per_molecule}\left(A=1601.32, B=200\right)$$ |
+| `R14` | `CH3OOH` + `OH` | → | `H2O` + `OH` + `CH2O` | $$\mathrm{arrh_per_molecule}\left(A=686.28, B=200\right)$$ |
+| `R15` | `NO` + `CH3O2` | → | `NO2` + `HO2` + `CH2O` | $$\mathrm{arrh_per_molecule}\left(A=1685.6000000000001, B=300\right)$$ |
+| `R16` | 2 `CH3O2` | → | 0.8 `HO2` + 2 `CH2O` | $$\mathrm{arrh_per_molecule}\left(A=57.19, B=390\right)$$ |
+| `R17` | `H2O` + `NO2` | → | 0.5 `HNO3` | $$\frac{2.408 \times 10^{-9} \cdot P}{8314000 \cdot T}$$ |
+| `R18` | `ISOP` + `OH` | → | 2 `CH3O2` | $$\mathrm{arrh_per_molecule}\left(A=16254, B=390\right)$$ |
+| `R19` | `ISOP` + `OH` | → | `ISOP` | $$\mathrm{arrh_per_molecule}\left(A=16254, B=390\right)$$ |
+| `R20` | `ISOP` + `OH` | → | `ISOP` + 0.5 `OH` | $$\mathrm{arrh_per_molecule}\left(A=16254, B=390\right)$$ |
+| `R21` | `O3` + `ISOP` | → | 0.05 `CO` + 0.06 `HO2` + 0.87 `CH2O` + 1.86 `CH3O2` | $$\mathrm{arrh_per_molecule}\left(A=3.3651799999999996, B=-1814\right)$$ |
+| `R22` | `O3` | → | 2 `OH` | $$jO32OH$$ |
+| `R23` | `H2O2` | → | 2 `OH` | $$jH2O2$$ |
+| `R24` | `NO2` | → | `NO` + `O3` | $$jNO2$$ |
+| `R25` | `CH2O` | → | `CO` + 2 `HO2` | $$jH2COa$$ |
+| `R26` | `CH2O` | → | `CO` | $$jH2COb$$ |
+| `R27` | `CH3OOH` | → | `HO2` + `OH` + `CH2O` | $$jCH3OOH$$ |
+
+## Analyses
+
+### jNO2_photolysis_sweep
+
+NO2-photolysis sensitivity. Sweeps the NO2 photolysis rate jNO2 from dark (0 s^-1) to bright-noon (~0.02 s^-1) at default T, P, and initial composition. Higher jNO2 drives faster NO/NO2/O3 photostationary cycling and feeds OH via the secondary O3+hv channel; the lower bound (jNO2=0) is the overnight limit where the photochemical OH source shuts down. Useful for inspecting the dark-to-noon transition without running a full diurnal cycle.
+
+**Time span:** 0 → 1
+
+**Swept over:** `jNO2`
+
+![Steady-state O3 vs NO2 photolysis rate jNO2.](/plots/gaschem/superfast/jNO2_photolysis_sweep-O3_vs_jNO2.png)
+
+### temperature_sweep
+
+Tropospheric-temperature sensitivity. Sweeps T from 240 K (cold upper troposphere) to 320 K (warm boundary layer) at default P=101325 Pa. The bimolecular Arrhenius rates (NO+O3, OH+CO, OH+CH4, ISOP+OH, ISOP+O3) and the termolecular falloff rates (NO2+OH+M, OH+CO+M) all carry strong T dependence — this sweep makes the net effect on tropospheric ozone visible in a single curve. Useful for sanity-checking the T-dependence of the inlined Arrhenius/falloff rate-law expressions.
+
+**Time span:** 0 → 1
+
+**Swept over:** `T`
+
+![Steady-state O3 vs temperature T.](/plots/gaschem/superfast/temperature_sweep-O3_vs_T.png)
+
+### pressure_altitude_sweep
+
+Vertical (pressure) sensitivity. Sweeps P from 30000 Pa (~9 km, upper troposphere) to 101325 Pa (surface) at fixed T=280 K. All inlined rate-law expressions divide by 8.314e6 * T (the per-molecule conversion factor) and scale with P^1 (bimolecular) or P^2 (third-body falloff for NO2+OH+M, OH+CO+M). This sweep illustrates the pressure dependence of the third-body channels relative to the bimolecular channels, and how chemical regime shifts with altitude.
+
+**Time span:** 0 → 1
+
+**Swept over:** `P`
+
+![Steady-state O3 vs ambient pressure P.](/plots/gaschem/superfast/pressure_altitude_sweep-O3_vs_P.png)
+
+### default_run_24h
+
+Illustrative 24-hour integration under default initial conditions and constant-day photolysis rates. Plots O3 vs. time. Initial conditions are the per-species reservoir defaults declared on the reaction system (O3=40 ppb, NO=NO2=0.4 ppt, etc.); photolysis-rate parameters (jNO2, jH2O2, ...) hold at their declared bright-noon values for the full integration window.
+
+**Time span:** 0 → 86400
+
+![Ozone concentration over 24 h.](/plots/gaschem/superfast/default_run_24h-O3_vs_time.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "tests": [
+    {
+      "time_span": {
+        "start": 0,
+        "end": 360
+      },
+      "id": "base_defaults_multi_species_multi_time",
+      "assertions": [
+        {
+          "expected": 39.39320259139222,
+          "time": 60,
+          "variable": "O3"
+        },
+        {
+          "expected": 38.21102425553218,
+          "time": 180,
+          "variable": "O3"
+        },
+        {
+          "expected": 36.515318706423145,
+          "time": 360,
+          "variable": "O3"
+        },
+        {
+          "expected": 0.014973954645431609,
+          "time": 60,
+          "variable": "OH"
+        },
+        {
+          "expected": 0.014220800015359584,
+          "time": 180,
+          "variable": "OH"
+        },
+        {
+          "expected": 0.01300187434251459,
+          "time": 360,
+          "variable": "OH",
+          "tolerance": {
+            "rel": 0.0005
+          }
+        },
+        {
+          "expected": 0.09898356849572909,
+          "time": 60,
+          "variable": "HO2"
+        },
+        {
+          "expected": 0.09301492196584987,
+          "time": 180,
+          "variable": "HO2"
+        },
+        {
+          "expected": 0.09035848137289122,
+          "time": 360,
+          "variable": "HO2"
+        },
+        {
+          "expected": 0.0005131039816090788,
+          "time": 60,
+          "variable": "NO2"
+        },
+        {
+          "expected": 0.00034910864362813033,
+          "time": 180,
+          "variable": "NO2"
+        },
+        {
+          "expected": 0.00018819921981223239,
+          "time": 360,
+          "variable": "NO2",
+          "tolerance": {
+            "rel": 0.0005
+          }
+        }
+      ],
+      "description": "Run from the upstream GasChem.jl defaults. Integrates 0..360 s and samples 4 active species at 4 times each. The expected values are this document's own (Python and Rust bindings agree to <=1e-8 relative); they no longer match upstream SuperFast, whose HO2 + HO2 water term squares H2O (see the reaction system notes).\n\nTolerance rationale (test-level rel=1e-4): default band — absorbs integrator differences between the bindings (the expected values are no longer compared against the upstream Rosenbrock23 run); set per mdl-1k5 after the Python runner exposed CSE-reorder noise on radical pathways. Per-assertion overrides: OH @360s and NO2 @360s use rel=5e-4 (5× looser) — stiff radicals near steady state at end-of-window, where step-size adaptation between integrators diverges and CSE-reorder noise amplifies relative-comparison drift on small-magnitude values.",
+      "tolerance": {
+        "rel": 0.0001
+      }
+    },
+    {
+      "time_span": {
+        "start": 0,
+        "end": 360
+      },
+      "id": "base_defaults_radical_pool",
+      "assertions": [
+        {
+          "expected": 0.19097455276829742,
+          "time": 360,
+          "variable": "CH3O2",
+          "tolerance": {
+            "rel": 0.0005
+          }
+        },
+        {
+          "expected": 0.5345601149850574,
+          "time": 360,
+          "variable": "CH3OOH",
+          "tolerance": {
+            "rel": 0.0005
+          }
+        },
+        {
+          "expected": 0.1751750058974256,
+          "time": 360,
+          "variable": "CH2O",
+          "tolerance": {
+            "rel": 0.001
+          }
+        },
+        {
+          "expected": 0.6004902099062742,
+          "time": 360,
+          "variable": "H2O2"
+        },
+        {
+          "expected": 0.000576442168892365,
+          "time": 360,
+          "variable": "HNO3"
+        },
+        {
+          "expected": 96.87255926148784,
+          "time": 360,
+          "variable": "CO"
+        },
+        {
+          "expected": 4.591947726881975e-18,
+          "time": 360,
+          "variable": "ISOP",
+          "tolerance": {
+            "rel": 0.005
+          }
+        }
+      ],
+      "description": "Radical pool values (CH3O2, CH3OOH, CH2O, H2O2, HNO3, CO, ISOP) at t=360 s under default initial conditions. Guards against structural drift in the CH3O2 and HxOy pathways.\n\nTolerance rationale (test-level rel=1e-4): default band per mdl-1k5 (Rosenbrock23 ↔ lambdify cse=True drift). Per-assertion overrides reflect species-specific stiffness: CH3O2 / CH3OOH @360s use rel=5e-4 (5× looser, near-steady-state radicals); CH2O uses rel=1e-3 (10× looser — fractional-stoichiometry products from CH3O2+CH3O2 R16 [stoich 2.0] and ISOP+O3 R21 [stoich 0.87] compound truncation, and the multi-channel CH2O budget magnifies CSE-reorder drift); ISOP uses rel=5e-3 (50× looser — ISOP @360s has decayed to ~4.6e-18 ppb, so relative comparison amplifies LSODA truncation noise on near-numerical-zero values).",
+      "tolerance": {
+        "rel": 0.0001
+      }
+    },
+    {
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "time_span": {
+        "start": 0,
+        "end": 3600
+      },
+      "id": "high_nox_photostationary_1h",
+      "assertions": [
+        {
+          "expected": 54.25591030539415,
+          "time": 600,
+          "variable": "O3"
+        },
+        {
+          "expected": 28.76735693348619,
+          "time": 3600,
+          "variable": "O3",
+          "tolerance": {
+            "rel": 0.0005
+          }
+        },
+        {
+          "expected": 2.050416934615542,
+          "time": 600,
+          "variable": "NO"
+        },
+        {
+          "expected": 3.697440554409655e-05,
+          "time": 3600,
+          "variable": "NO",
+          "tolerance": {
+            "rel": 0.002
+          }
+        },
+        {
+          "expected": 3.5207702158826177,
+          "time": 600,
+          "variable": "NO2"
+        },
+        {
+          "expected": 0.00017675559018342056,
+          "time": 3600,
+          "variable": "NO2",
+          "tolerance": {
+            "rel": 0.002
+          }
+        },
+        {
+          "expected": 14.424478363703374,
+          "time": 600,
+          "variable": "HNO3"
+        },
+        {
+          "expected": 19.994537057035767,
+          "time": 3600,
+          "variable": "HNO3"
+        }
+      ],
+      "description": "High-NOx photochemical-smog-ish regime: initial NO=10, NO2=10, O3=60, ISOP=0.5 ppb. Integrated 0..3600 s. Checks photostationary state of the NO/NO2/O3 triad and build-up of HNO3 via NO2+OH. Failure here indicates the NO2 photolysis / NO+O3 / HO2+NO / NO2+OH+M loop has drifted.\n\nTolerance rationale (test-level rel=1e-4): default band per mdl-1k5. Per-assertion overrides at t=3600 s reflect the photostationary turnover: O3 uses rel=5e-4 (5× looser, near-steady-state); NO and NO2 use rel=2e-3 (20× looser) — both species swing 2 orders of magnitude as O3+NO drains NO and NO2+OH+M produces HNO3, and Rosenbrock23 ↔ LSODA step-size adaptation diverges sharply across the photostationary turnover.",
+      "initial_conditions": {
+        "NO": 10,
+        "O3": 60,
+        "ISOP": 0.5,
+        "NO2": 10
+      }
+    },
+    {
+      "parameter_overrides": {
+        "jNO2": 0,
+        "jH2COb": 0,
+        "jH2COa": 0,
+        "jH2O2": 0,
+        "jCH3OOH": 0,
+        "jO32OH": 0
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1800
+      },
+      "id": "dark_all_photolysis_zero_30min",
+      "assertions": [
+        {
+          "expected": 39.99959974182895,
+          "time": 1800,
+          "variable": "O3"
+        },
+        {
+          "expected": 1.0314305852209193e-15,
+          "time": 1800,
+          "variable": "NO",
+          "tolerance": {
+            "rel": 0.001,
+            "abs": 1e-12
+          }
+        },
+        {
+          "expected": 0.0007972805261944212,
+          "time": 1800,
+          "variable": "NO2"
+        },
+        {
+          "expected": 7.148207937741515e-09,
+          "time": 1800,
+          "variable": "OH"
+        },
+        {
+          "expected": 3.5015467552483854e-06,
+          "time": 1800,
+          "variable": "HO2"
+        }
+      ],
+      "description": "Overnight / dark chemistry: all photolysis rates (jO32OH, jH2O2, jNO2, jH2COa, jH2COb, jCH3OOH) forced to 0. Integrated 0..1800 s. Without photolysis, OH/HO2 should relax toward zero while O3 and NO2 decay slowly. This exercises the parameter-override path and guards against runaway radical production without a radical source.\n\nTolerance rationale (test-level rel=1e-4 / abs=1e-14): default rel band; abs=1e-14 floors per-species comparisons for the active radicals that decay to near-numerical-zero in the absence of photolytic radical sources. NO @1800s is the one per-assertion override, rel=1e-3 / abs=1e-12: NO ≈ 1e-15 ppb, so abs is the operative floor there, and without it a rel comparison alone diverges as NO → 0. OH (≈ 7.1e-9 ppb) and HO2 (≈ 3.5e-6 ppb) sit orders of magnitude above abs and take the default rel=1e-4; they carried looser overrides (OH rel=1e-3, HO2 rel=1e-2) from when the squared R4 water term held them near the abs floor, and since the R4 fix this test is a check on it.",
+      "tolerance": {
+        "rel": 0.0001,
+        "abs": 1e-14
+      }
+    },
+    {
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "id": "initial_conditions_t0",
+      "assertions": [
+        {
+          "expected": 40,
+          "time": 0,
+          "variable": "O3"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "OH"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "HO2"
+        },
+        {
+          "expected": 0.0004,
+          "time": 0,
+          "variable": "NO"
+        },
+        {
+          "expected": 0.0004,
+          "time": 0,
+          "variable": "NO2"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "CH3O2"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "CH2O"
+        },
+        {
+          "expected": 100,
+          "time": 0,
+          "variable": "CO"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "CH3OOH"
+        },
+        {
+          "expected": 1e-11,
+          "time": 0,
+          "variable": "ISOP"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "H2O2"
+        },
+        {
+          "expected": 4e-06,
+          "time": 0,
+          "variable": "HNO3"
+        }
+      ],
+      "description": "At t=0, the solver must return the declared defaults for every active species.\n\nTolerance rationale (test-level rel=1e-10 / abs=1e-14): initial-condition assertion at t=0 — solver must return declared species defaults exact-to-roundoff; rel=1e-10 / abs=1e-14 covers only parser → MTK/lambdify float conversion and the first solver step's identity-evaluation of initial state. Tighter than every other test in this file because no integration drift has accumulated.",
+      "tolerance": {
+        "rel": 1e-10,
+        "abs": 1e-14
+      }
+    },
+    {
+      "tolerance": {
+        "rel": 0.0001
+      },
+      "time_span": {
+        "start": 0,
+        "end": 1800
+      },
+      "id": "isoprene_chemistry_elevated",
+      "assertions": [
+        {
+          "expected": 32.53151311885282,
+          "time": 1800,
+          "variable": "O3"
+        },
+        {
+          "expected": 3.052111630339415e-11,
+          "time": 1800,
+          "variable": "ISOP",
+          "tolerance": {
+            "rel": 0.005
+          }
+        },
+        {
+          "expected": 0.21274207744793766,
+          "time": 1800,
+          "variable": "CH3O2",
+          "tolerance": {
+            "rel": 0.002
+          }
+        },
+        {
+          "expected": 1.6187708662241425,
+          "time": 1800,
+          "variable": "CH2O",
+          "tolerance": {
+            "rel": 0.002
+          }
+        },
+        {
+          "expected": 101.51034047146955,
+          "time": 1800,
+          "variable": "CO"
+        }
+      ],
+      "description": "Elevated isoprene (ISOP=5 ppb, O3=50 ppb) for 1800 s. Exercises the fractional-stoichiometry products of ISOP+O3 (0.87 CH2O + 1.86 CH3O2 + 0.06 HO2 + 0.05 CO) and of the ISOP+OH channels (two of which carry fractional product stoich).\n\nTolerance rationale (test-level rel=1e-4): default band per mdl-1k5. Per-assertion overrides reflect species behaviour: ISOP @1800s uses rel=5e-3 (50× looser — ISOP has decayed to ~3.1e-11 ppb, near numerical zero); CH3O2 and CH2O @1800s use rel=2e-3 (20× looser — both are downstream products of fractional-stoichiometry channels that compound truncation, and CH3O2 in particular has Rosenbrock23↔LSODA step-size-adaptation drift in the active-radical regime).",
+      "initial_conditions": {
+        "O3": 50,
+        "ISOP": 5
+      }
+    }
+  ],
+  "parameters": {
+    "jNO2": {
+      "units": "1/s",
+      "default": 0.0149,
+      "description": "Photolysis NO2"
+    },
+    "T": {
+      "units": "K",
+      "default": 280,
+      "description": "Temperature"
+    },
+    "P": {
+      "units": "Pa",
+      "default": 101325,
+      "description": "Pressure"
+    },
+    "jH2COb": {
+      "units": "1/s",
+      "default": 0.00014,
+      "description": "Photolysis CH2O (molecular channel)"
+    },
+    "jH2COa": {
+      "units": "1/s",
+      "default": 0.00014,
+      "description": "Photolysis CH2O (radical channel)"
+    },
+    "jH2O2": {
+      "units": "1/s",
+      "default": 1.0097e-05,
+      "description": "Photolysis H2O2"
+    },
+    "jCH3OOH": {
+      "units": "1/s",
+      "default": 8.9573e-06,
+      "description": "Photolysis CH3OOH"
+    },
+    "jO32OH": {
+      "units": "1/s",
+      "default": 0.000227,
+      "description": "Photolysis O3 + hv -> 2 OH (simplified, incl O1D+H2O)"
+    }
+  },
+  "reference": {
+    "doi": "10.5194/gmd-11-4155-2018",
+    "citation": "Brown-Steiner, B., Selin, N. E., Prinn, R. G., Tilmes, S., Emmons, L., Lamarque, J.-F., and Cameron-Smith, P.: Evaluating simplified chemical mechanisms within present-day simulations of the Community Earth System Model version 1.2 with CAM4 (CESM1.2 CAM-chem): MOZART-4 vs. Reduced Hydrocarbon vs. Super-Fast chemistry, Geoscientific Model Development, 11, 4155-4174, 2018.",
+    "notes": "Source: GasChem.jl src/SuperFast.jl @ 8c12c048482b515fb8eb2110bf8ab4b4f4e71309. Regenerated via mtk2esm (ESS gt-dod2) during mdl-xa2; previously hand-written in mdl-dkw. Fractional stoichiometries (CH3O2+CH3O2 -> 2.0 CH2O + 0.8 HO2; ISOP+O3 -> 0.87 CH2O + 1.86 CH3O2 + 0.06 HO2 + 0.05 CO; H2O+NO2 -> 0.5 HNO3; ISOP+OH -> ISOP + 0.5 OH) are preserved directly (gt-1e96). O2, CH4, H2O travel as isconstantspecies parameters in the upstream MTK model and are serialized as ESM species with constant=true (gt-ertm). Rate-law wrappers (arrh, arr_3rd, rate_2HO2, rate_OH_CO, rate_toppb) are inlined as closed-form expressions in T, P, and the H2O reservoir species, rather than preserved as composed sub-systems — the composed form yielded unresolved `<subsys>.k(t)` references in the reaction rates.\n\nHO2 + HO2 (R4) water-vapour enhancement: upstream SuperFast.jl writes the factor as 1 + 1.4e-21*H2O*H2O_ppb_molec_cm3*exp(2200/T), multiplying by the water mixing ratio twice, and the inlined rate here carried the same H2O^2. The JPL form is 1 + 1.4e-21*[H2O]*exp(2200/T) with [H2O] the water number density (molec/cm^3), which is what R4 now uses (the 8.428e-7*P/(8314000*T) prefactor converts H2O from ppb to molec/cm^3 once). At the defaults the factor drops from ~3.2e7 to 2.74; with the squared term HO2 + HO2 was the dominant HO2 sink by seven orders of magnitude and held HO2/OH near 0.003, against ~7 now. The test expected values were regenerated after the fix: the Python and Rust bindings agree on every assertion to <=1e-8 relative, except the near-zero ISOP values (<=6e-4, inside their 5e-3 tolerance). See also superfast_ratelaws.esm, rate_2HO2.",
+    "url": "https://gmd.copernicus.org/articles/11/4155/2018/"
+  },
+  "reactions": [
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R1",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1023.4,
+          "B": -940
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        }
+      ],
+      "id": "R2",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 6.02,
+          "B": -490
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        },
+        {
+          "stoichiometry": 2,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R3",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 28896,
+          "B": 250
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 2,
+          "species": "HO2"
+        }
+      ],
+      "id": "R4",
+      "rate": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      180.6,
+                      "P",
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              460,
+                              "T"
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "exp"
+                      }
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      8314000,
+                      "T"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      761048.4,
+                      {
+                        "args": [
+                          "P",
+                          2
+                        ],
+                        "op": "^"
+                      },
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              920,
+                              "T"
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "exp"
+                      }
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      69122596000000,
+                      {
+                        "args": [
+                          "T",
+                          2
+                        ],
+                        "op": "^"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "+"
+          },
+          {
+            "args": [
+              1,
+              {
+                "args": [
+                  {
+                    "args": [
+                      8.428e-07,
+                      "P",
+                      "H2O",
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              2200,
+                              "T"
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "exp"
+                      }
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      8314000,
+                      "T"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "*"
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R5",
+      "rate": {
+        "args": [
+          {
+            "args": [
+              1083.6,
+              {
+                "args": [
+                  0
+                ],
+                "op": "exp"
+              },
+              "P"
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              8314000,
+              "T"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "/"
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "NO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        }
+      ],
+      "id": "R6",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1806,
+          "B": -1500
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "NO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        }
+      ],
+      "id": "R7",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1986.6000000000001,
+          "B": 270
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R8",
+      "rate": {
+        "args": [
+          {
+            "args": [
+              652327200,
+              {
+                "args": [
+                  0
+                ],
+                "op": "exp"
+              },
+              {
+                "args": [
+                  "P",
+                  2
+                ],
+                "op": "^"
+              },
+              {
+                "args": [
+                  0.6,
+                  {
+                    "args": [
+                      1,
+                      {
+                        "args": [
+                          1,
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          5423448340800000,
+                                          "P",
+                                          {
+                                            "args": [
+                                              {
+                                                "args": [
+                                                  300,
+                                                  "T"
+                                                ],
+                                                "op": "/"
+                                              },
+                                              3
+                                            ],
+                                            "op": "^"
+                                          }
+                                        ],
+                                        "op": "*"
+                                      },
+                                      {
+                                        "args": [
+                                          1165130478176000000,
+                                          "T"
+                                        ],
+                                        "op": "*"
+                                      }
+                                    ],
+                                    "op": "/"
+                                  }
+                                ],
+                                "op": "log10"
+                              },
+                              2
+                            ],
+                            "op": "^"
+                          }
+                        ],
+                        "op": "+"
+                      }
+                    ],
+                    "op": "/"
+                  }
+                ],
+                "op": "^"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      300,
+                      "T"
+                    ],
+                    "op": "/"
+                  },
+                  3
+                ],
+                "op": "^"
+              }
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              69122596000000,
+              {
+                "args": [
+                  "T",
+                  2
+                ],
+                "op": "^"
+              },
+              {
+                "args": [
+                  1,
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          5423448340800000,
+                          "P",
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  300,
+                                  "T"
+                                ],
+                                "op": "/"
+                              },
+                              3
+                            ],
+                            "op": "^"
+                          }
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          1165130478176000000,
+                          "T"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "/"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "/"
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "HNO3"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH4"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R9",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1474.8999999999999,
+          "B": -1775
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH3O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R10",
+      "rate": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  641455080,
+                  {
+                    "args": [
+                      "P",
+                      2
+                    ],
+                    "op": "^"
+                  },
+                  {
+                    "args": [
+                      0.6,
+                      {
+                        "args": [
+                          1,
+                          {
+                            "args": [
+                              1,
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              5333057535120000,
+                                              "P",
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      300,
+                                                      "T"
+                                                    ],
+                                                    "op": "/"
+                                                  },
+                                                  1.3
+                                                ],
+                                                "op": "^"
+                                              }
+                                            ],
+                                            "op": "*"
+                                          },
+                                          {
+                                            "args": [
+                                              45772983071199992,
+                                              {
+                                                "args": [
+                                                  "T",
+                                                  2
+                                                ],
+                                                "op": "^"
+                                              }
+                                            ],
+                                            "op": "*"
+                                          }
+                                        ],
+                                        "op": "/"
+                                      }
+                                    ],
+                                    "op": "log10"
+                                  },
+                                  2
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "+"
+                          }
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "^"
+                  },
+                  {
+                    "args": [
+                      0
+                    ],
+                    "op": "exp"
+                  }
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  69122596000000,
+                  {
+                    "args": [
+                      "T",
+                      3
+                    ],
+                    "op": "^"
+                  },
+                  {
+                    "args": [
+                      1,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              5333057535120000,
+                              "P",
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      300,
+                                      "T"
+                                    ],
+                                    "op": "/"
+                                  },
+                                  1.3
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "*"
+                          },
+                          {
+                            "args": [
+                              45772983071199992,
+                              {
+                                "args": [
+                                  "T",
+                                  2
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "+"
+                  }
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "/"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  90.3,
+                  "P",
+                  {
+                    "args": [
+                      0
+                    ],
+                    "op": "exp"
+                  },
+                  {
+                    "args": [
+                      0.6,
+                      {
+                        "args": [
+                          1,
+                          {
+                            "args": [
+                              1,
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      {
+                                        "args": [
+                                          {
+                                            "args": [
+                                              4.5195402839999995e+32,
+                                              "P",
+                                              {
+                                                "args": [
+                                                  {
+                                                    "args": [
+                                                      300,
+                                                      "T"
+                                                    ],
+                                                    "op": "/"
+                                                  },
+                                                  6.1
+                                                ],
+                                                "op": "^"
+                                              }
+                                            ],
+                                            "op": "*"
+                                          },
+                                          {
+                                            "args": [
+                                              8.738478586320001e+37,
+                                              "T"
+                                            ],
+                                            "op": "*"
+                                          }
+                                        ],
+                                        "op": "/"
+                                      }
+                                    ],
+                                    "op": "log10"
+                                  },
+                                  2
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "+"
+                          }
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "^"
+                  }
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  8314000,
+                  "T",
+                  {
+                    "args": [
+                      1,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              4.5195402839999995e+32,
+                              "P",
+                              {
+                                "args": [
+                                  {
+                                    "args": [
+                                      300,
+                                      "T"
+                                    ],
+                                    "op": "/"
+                                  },
+                                  6.1
+                                ],
+                                "op": "^"
+                              }
+                            ],
+                            "op": "*"
+                          },
+                          {
+                            "args": [
+                              8.738478586320001e+37,
+                              "T"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "+"
+                  }
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "/"
+          }
+        ],
+        "op": "+"
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ],
+      "id": "R11",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 3311.0000000000005,
+          "B": 125
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "CO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH3O2"
+        }
+      ],
+      "id": "R12",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 246.82000000000002,
+          "B": 750
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "CH3OOH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH3OOH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R13",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1601.32,
+          "B": 200
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH3O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH3OOH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R14",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 686.28,
+          "B": 200
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "NO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH3O2"
+        }
+      ],
+      "id": "R15",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 1685.6000000000001,
+          "B": 300
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 2,
+          "species": "CH3O2"
+        }
+      ],
+      "id": "R16",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 57.19,
+          "B": 390
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 0.8,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 2,
+          "species": "CH2O"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        }
+      ],
+      "id": "R17",
+      "rate": {
+        "args": [
+          {
+            "args": [
+              2.408e-09,
+              "P"
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              8314000,
+              "T"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "/"
+      },
+      "products": [
+        {
+          "stoichiometry": 0.5,
+          "species": "HNO3"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R18",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 16254,
+          "B": 390
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 2,
+          "species": "CH3O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R19",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 16254,
+          "B": 390
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        }
+      ],
+      "id": "R20",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 16254,
+          "B": 390
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        },
+        {
+          "stoichiometry": 0.5,
+          "species": "OH"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "ISOP"
+        }
+      ],
+      "id": "R21",
+      "rate": {
+        "op": "apply_expression_template",
+        "name": "arrh_per_molecule",
+        "bindings": {
+          "A": 3.3651799999999996,
+          "B": -1814
+        },
+        "args": []
+      },
+      "products": [
+        {
+          "stoichiometry": 0.05,
+          "species": "CO"
+        },
+        {
+          "stoichiometry": 0.06,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 0.87,
+          "species": "CH2O"
+        },
+        {
+          "stoichiometry": 1.86,
+          "species": "CH3O2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        }
+      ],
+      "id": "R22",
+      "rate": "jO32OH",
+      "products": [
+        {
+          "stoichiometry": 2,
+          "species": "OH"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "H2O2"
+        }
+      ],
+      "id": "R23",
+      "rate": "jH2O2",
+      "products": [
+        {
+          "stoichiometry": 2,
+          "species": "OH"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "NO2"
+        }
+      ],
+      "id": "R24",
+      "rate": "jNO2",
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "NO"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "O3"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ],
+      "id": "R25",
+      "rate": "jH2COa",
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "CO"
+        },
+        {
+          "stoichiometry": 2,
+          "species": "HO2"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ],
+      "id": "R26",
+      "rate": "jH2COb",
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "CO"
+        }
+      ]
+    },
+    {
+      "substrates": [
+        {
+          "stoichiometry": 1,
+          "species": "CH3OOH"
+        }
+      ],
+      "id": "R27",
+      "rate": "jCH3OOH",
+      "products": [
+        {
+          "stoichiometry": 1,
+          "species": "HO2"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "OH"
+        },
+        {
+          "stoichiometry": 1,
+          "species": "CH2O"
+        }
+      ]
+    }
+  ],
+  "species": {
+    "O2": {
+      "constant": true,
+      "units": "ppb",
+      "default": 209500000,
+      "description": "Molecular oxygen (constant reservoir)"
+    },
+    "NO": {
+      "units": "ppb",
+      "default": 0.0004,
+      "description": "Nitric oxide"
+    },
+    "CO": {
+      "units": "ppb",
+      "default": 100,
+      "description": "Carbon monoxide"
+    },
+    "ISOP": {
+      "units": "ppb",
+      "default": 1e-11,
+      "description": "Isoprene"
+    },
+    "HNO3": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Nitric acid"
+    },
+    "NO2": {
+      "units": "ppb",
+      "default": 0.0004,
+      "description": "Nitrogen dioxide"
+    },
+    "HO2": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Hydroperoxyl radical"
+    },
+    "CH3OOH": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Methyl hydroperoxide"
+    },
+    "OH": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Hydroxyl radical"
+    },
+    "O3": {
+      "units": "ppb",
+      "default": 40,
+      "description": "Ozone"
+    },
+    "CH4": {
+      "constant": true,
+      "units": "ppb",
+      "default": 1700,
+      "description": "Methane (constant reservoir)"
+    },
+    "H2O": {
+      "constant": true,
+      "units": "ppb",
+      "default": 18390000,
+      "description": "Water vapor (constant reservoir)"
+    },
+    "H2O2": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Hydrogen peroxide"
+    },
+    "CH3O2": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Methyl peroxy radical"
+    },
+    "CH2O": {
+      "units": "ppb",
+      "default": 4e-06,
+      "description": "Formaldehyde"
+    }
+  },
+  "expression_templates": {
+    "arrh_per_molecule": {
+      "params": [
+        "A",
+        "B"
+      ],
+      "body": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "A",
+              "P",
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "B",
+                      "T"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              8314000,
+              "T"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "analyses": [
+    {
+      "id": "jNO2_photolysis_sweep",
+      "description": "NO2-photolysis sensitivity. Sweeps the NO2 photolysis rate jNO2 from dark (0 s^-1) to bright-noon (~0.02 s^-1) at default T, P, and initial composition. Higher jNO2 drives faster NO/NO2/O3 photostationary cycling and feeds OH via the secondary O3+hv channel; the lower bound (jNO2=0) is the overnight limit where the photochemical OH source shuts down. Useful for inspecting the dark-to-noon transition without running a full diurnal cycle.",
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "jNO2",
+            "values": [
+              0.0,
+              0.001,
+              0.0025,
+              0.005,
+              0.0075,
+              0.01,
+              0.0149,
+              0.02
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "O3_vs_jNO2",
+          "type": "line",
+          "description": "Steady-state O3 vs NO2 photolysis rate jNO2.",
+          "x": {
+            "variable": "jNO2",
+            "label": "jNO2 (1/s)"
+          },
+          "y": {
+            "variable": "O3",
+            "label": "O3 (ppb)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "temperature_sweep",
+      "description": "Tropospheric-temperature sensitivity. Sweeps T from 240 K (cold upper troposphere) to 320 K (warm boundary layer) at default P=101325 Pa. The bimolecular Arrhenius rates (NO+O3, OH+CO, OH+CH4, ISOP+OH, ISOP+O3) and the termolecular falloff rates (NO2+OH+M, OH+CO+M) all carry strong T dependence — this sweep makes the net effect on tropospheric ozone visible in a single curve. Useful for sanity-checking the T-dependence of the inlined Arrhenius/falloff rate-law expressions.",
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "values": [
+              240,
+              250,
+              260,
+              270,
+              280,
+              290,
+              300,
+              310,
+              320
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "O3_vs_T",
+          "type": "line",
+          "description": "Steady-state O3 vs temperature T.",
+          "x": {
+            "variable": "T",
+            "label": "Temperature (K)"
+          },
+          "y": {
+            "variable": "O3",
+            "label": "O3 (ppb)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pressure_altitude_sweep",
+      "description": "Vertical (pressure) sensitivity. Sweeps P from 30000 Pa (~9 km, upper troposphere) to 101325 Pa (surface) at fixed T=280 K. All inlined rate-law expressions divide by 8.314e6 * T (the per-molecule conversion factor) and scale with P^1 (bimolecular) or P^2 (third-body falloff for NO2+OH+M, OH+CO+M). This sweep illustrates the pressure dependence of the third-body channels relative to the bimolecular channels, and how chemical regime shifts with altitude.",
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "P",
+            "values": [
+              30000,
+              40000,
+              50000,
+              60000,
+              70000,
+              80000,
+              90000,
+              101325
+            ]
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "O3_vs_P",
+          "type": "line",
+          "description": "Steady-state O3 vs ambient pressure P.",
+          "x": {
+            "variable": "P",
+            "label": "Pressure (Pa)"
+          },
+          "y": {
+            "variable": "O3",
+            "label": "O3 (ppb)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "default_run_24h",
+      "description": "Illustrative 24-hour integration under default initial conditions and constant-day photolysis rates. Plots O3 vs. time. Initial conditions are the per-species reservoir defaults declared on the reaction system (O3=40 ppb, NO=NO2=0.4 ppt, etc.); photolysis-rate parameters (jNO2, jH2O2, ...) hold at their declared bright-noon values for the full integration window.",
+      "time_span": {
+        "start": 0,
+        "end": 86400
+      },
+      "plots": [
+        {
+          "id": "O3_vs_time",
+          "type": "line",
+          "description": "Ozone concentration over 24 h.",
+          "x": {
+            "variable": "t",
+            "label": "time (s)"
+          },
+          "y": {
+            "variable": "O3",
+            "label": "O3 (ppb)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

@@ -1,0 +1,508 @@
+---
+title: "OneHourFuelMoisture"
+slug: "onehourfuelmoisture"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/moisture_1h.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station. Page 3 (1-hour timelag fuel moisture)."
+description: "1-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 3. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:149 (`OneHourFuelMoisture` @component). Observed-only: EMCPRM, MC10, use_fuel_sticks, is_raining are inputs (parameters); MC1 is the algebraic output."
+tags: ["wildland_fire", "nfdrs", "model", "fuel_moisture", "observed-only"]
+---
+
+## Description
+
+1-hour timelag dead fuel moisture content per the NFDRS (Cohen & Deeming 1985), page 3. Migrated from WildlandFire.jl@126976f2 src/nfdrs.jl:149 (`OneHourFuelMoisture` @component). Observed-only: EMCPRM, MC10, use_fuel_sticks, is_raining are inputs (parameters); MC1 is the algebraic output.
+
+## Reference
+
+_source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:149
+Upstream `OneHourFuelMoisture` is an MTK `@component` whose inputs (EMCPRM, MC10, use_fuel_sticks, is_raining) are `@parameters` and whose single output (MC1) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` that selects between three branches per Cohen & Deeming 1985 page 3:
+  - is_raining > 0.5  ⇒ MC1 = 0.35 (35% saturation)
+  - else use_fuel_sticks > 0.5  ⇒ MC1 = (4*EMCPRM + MC10)/5 (with-sticks branch)
+  - else  ⇒ MC1 = 1.03*EMCPRM (without-sticks branch)
+
+The rain branch dominates over fuel-sticks dispatch (outer ifelse). The dispatch threshold (0.5) is encoded as a strict `>` comparison so any value > 0.5 selects the corresponding branch. Defaults are 0.0 for both flags so the standalone component selects the without-sticks branch by default and is well-posed without overrides.
+
+Tolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a nested `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `EMCPRM` | `1` | `0.1` | Equilibrium moisture content at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture, mid-range NFDRS value. |
+| `MC10` | `1` | `0.1` | 10-hour fuel moisture content (dimensionless fraction). Coupled input from `TenHourFuelMoisture` when fuel sticks are used. Default 0.10 = 10%. |
+| `use_fuel_sticks` | `1` | `0.0` | Flag: 1 if 1-hour fuel sticks are used, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. With sticks, MC1 is a weighted blend of EMCPRM and MC10. |
+| `is_raining` | `1` | `0.0` | Flag: 1 if raining at observation time, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. Rain branch dominates: MC1 pinned to 0.35 regardless of sticks/EMCPRM. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `MC1` | `1` |  | 1-hour fuel moisture content (dimensionless fraction). |
+
+## Observed expressions
+
+$$
+MC1 = \mathrm{ifelse}\left(\mathrm{>}\left(is_{raining}, 0.5\right), 0.35, \mathrm{ifelse}\left(\mathrm{>}\left(use_{fuel\,sticks}, 0.5\right), \frac{4.0 \cdot EMCPRM + MC10}{5.0}, 1.03 \cdot EMCPRM\right)\right)
+$$
+_1-hour fuel moisture content (dimensionless fraction)._
+
+## Analyses
+
+### no_sticks_typical_day
+
+Typical NFDRS station without 1-hour fuel sticks: EMCPRM = 0.10 (10% interface EMC), no rain. Output MC1 = 1.03 * 0.10 = 0.103, the standard scaling that boosts atmospheric EMC by 3% to account for the shorter timelag of 1-hour fuels (Cohen & Deeming 1985 p.3).
+
+**Time span:** 0.0 → 1.0
+
+### with_sticks_typical_day
+
+NFDRS station equipped with 1-hour fuel sticks: EMCPRM = 0.10, MC10 = 0.10 (typical 10-hour state). With sticks the 1-hour fuel moisture is a 4:1 weighted blend toward EMCPRM, MC1 = (4*0.10 + 0.10)/5 = 0.10. Compare to the no-sticks branch (MC1 = 0.103) — with sticks the output is slightly damped by the MC10 contribution.
+
+**Time span:** 0.0 → 1.0
+
+### rainy_observation
+
+Wet observation: precipitation at the observation time pins MC1 to the saturation default of 35% (Cohen & Deeming 1985 p.4). All other inputs are ignored. This is the operational fallback when accurate fuel-moisture measurement is impossible due to wet conditions.
+
+**Time span:** 0.0 → 1.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/nfdrs.jl:149\nUpstream `OneHourFuelMoisture` is an MTK `@component` whose inputs (EMCPRM, MC10, use_fuel_sticks, is_raining) are `@parameters` and whose single output (MC1) is a time-indexed `@variable` with one algebraic equation — a nested `ifelse` that selects between three branches per Cohen & Deeming 1985 page 3:\n  - is_raining > 0.5  ⇒ MC1 = 0.35 (35% saturation)\n  - else use_fuel_sticks > 0.5  ⇒ MC1 = (4*EMCPRM + MC10)/5 (with-sticks branch)\n  - else  ⇒ MC1 = 1.03*EMCPRM (without-sticks branch)\n\nThe rain branch dominates over fuel-sticks dispatch (outer ifelse). The dispatch threshold (0.5) is encoded as a strict `>` comparison so any value > 0.5 selects the corresponding branch. Defaults are 0.0 for both flags so the standalone component selects the without-sticks branch by default and is well-posed without overrides.\n\nTolerance rationale (model-level rel=1e-12): observed-only algebraic system (no ODE integration); the equation is a nested `ifelse` over polynomial expressions in float64 — float64 roundoff is at the ULP level (~1e-15). 1e-12 is comfortably above that and below any plausible physical-discrimination scale on dimensionless moisture-fraction outputs."
+  },
+  "tolerance": {
+    "rel": 1e-12
+  },
+  "variables": {
+    "EMCPRM": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "Equilibrium moisture content at the fuel-atmosphere interface (dimensionless fraction). Default 0.10 = 10% moisture, mid-range NFDRS value."
+    },
+    "MC10": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.1,
+      "description": "10-hour fuel moisture content (dimensionless fraction). Coupled input from `TenHourFuelMoisture` when fuel sticks are used. Default 0.10 = 10%."
+    },
+    "use_fuel_sticks": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if 1-hour fuel sticks are used, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. With sticks, MC1 is a weighted blend of EMCPRM and MC10."
+    },
+    "is_raining": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Flag: 1 if raining at observation time, 0 otherwise (dimensionless). Threshold against 0.5 selects branch. Rain branch dominates: MC1 pinned to 0.35 regardless of sticks/EMCPRM."
+    },
+    "MC1": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1-hour fuel moisture content (dimensionless fraction)."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "MC1",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "is_raining",
+              0.5
+            ]
+          },
+          0.35,
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "use_fuel_sticks",
+                  0.5
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "*",
+                        "args": [
+                          4.0,
+                          "EMCPRM"
+                        ]
+                      },
+                      "MC10"
+                    ]
+                  },
+                  5.0
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  1.03,
+                  "EMCPRM"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "no_rain_no_sticks_emcprm10",
+      "description": "No rain, no fuel sticks, EMCPRM = 0.10 (10% interface EMC). Selects the without-sticks branch: MC1 = 1.03 * EMCPRM = 0.103.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.103
+        }
+      ]
+    },
+    {
+      "id": "no_rain_no_sticks_emcprm05",
+      "description": "No rain, no sticks; EMCPRM = 0.05 (dry interface). MC1 = 1.03 * 0.05 = 0.0515.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.0515
+        }
+      ]
+    },
+    {
+      "id": "no_rain_no_sticks_emcprm30",
+      "description": "No rain, no sticks; EMCPRM = 0.30 (humid interface). MC1 = 1.03 * 0.30 = 0.309.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.3
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.309
+        }
+      ]
+    },
+    {
+      "id": "no_rain_with_sticks_typical",
+      "description": "No rain, with fuel sticks, EMCPRM = 0.10, MC10 = 0.10. With-sticks branch: MC1 = (4*0.10 + 0.10)/5 = 0.50/5 = 0.10.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.1,
+        "MC10": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.1
+        }
+      ]
+    },
+    {
+      "id": "no_rain_with_sticks_dry_emcprm",
+      "description": "No rain, with sticks, EMCPRM = 0.05, MC10 = 0.05. MC1 = (4*0.05 + 0.05)/5 = 0.25/5 = 0.05.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.05,
+        "MC10": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.05
+        }
+      ]
+    },
+    {
+      "id": "no_rain_with_sticks_humid",
+      "description": "No rain, with sticks, EMCPRM = 0.20, MC10 = 0.15. MC1 = (4*0.20 + 0.15)/5 = 0.95/5 = 0.19. Exercises the EMCPRM-dominant weighting (4:1 ratio).",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.2,
+        "MC10": 0.15
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.19
+        }
+      ]
+    },
+    {
+      "id": "no_rain_with_sticks_diverging",
+      "description": "No rain, with sticks, EMCPRM = 0.30, MC10 = 0.10 (diverging inputs). MC1 = (4*0.30 + 0.10)/5 = 1.30/5 = 0.26. Confirms the 4:1 EMCPRM-dominant blend.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.3,
+        "MC10": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.26
+        }
+      ]
+    },
+    {
+      "id": "raining_no_sticks",
+      "description": "Rain branch (is_raining = 1.0): MC1 pinned to 0.35 regardless of EMCPRM. Without-sticks dispatch ignored.",
+      "parameter_overrides": {
+        "is_raining": 1.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.35
+        }
+      ]
+    },
+    {
+      "id": "raining_dominates_sticks",
+      "description": "Rain branch dominates over fuel-sticks branch (outer ifelse). is_raining = 1, use_fuel_sticks = 1, EMCPRM = 0.05, MC10 = 0.05 — without rain MC1 would be 0.05; with rain it pins to 0.35.",
+      "parameter_overrides": {
+        "is_raining": 1.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.05,
+        "MC10": 0.05
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.35
+        }
+      ]
+    },
+    {
+      "id": "raining_dominates_extreme_emcprm",
+      "description": "Rain branch dominates even at extreme EMCPRM = 0.50 (humid). MC1 = 0.35, NOT 1.03 * 0.50 = 0.515.",
+      "parameter_overrides": {
+        "is_raining": 1.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.35
+        }
+      ]
+    },
+    {
+      "id": "dispatch_is_raining_below_threshold",
+      "description": "is_raining = 0.4 (below 0.5 threshold) selects the no-rain branch. EMCPRM = 0.10, no sticks ⇒ MC1 = 1.03 * 0.10 = 0.103.",
+      "parameter_overrides": {
+        "is_raining": 0.4,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.103
+        }
+      ]
+    },
+    {
+      "id": "dispatch_is_raining_above_threshold",
+      "description": "is_raining = 0.6 (above 0.5 threshold) selects the rain branch. EMCPRM override should be ignored. MC1 = 0.35.",
+      "parameter_overrides": {
+        "is_raining": 0.6,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.99
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.35
+        }
+      ]
+    },
+    {
+      "id": "dispatch_use_fuel_sticks_below_threshold",
+      "description": "use_fuel_sticks = 0.4 (below 0.5 threshold) selects the without-sticks branch. EMCPRM = 0.15, MC10 override should not affect output. MC1 = 1.03 * 0.15 = 0.1545.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.4,
+        "EMCPRM": 0.15,
+        "MC10": 0.99
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.1545
+        }
+      ]
+    },
+    {
+      "id": "dispatch_use_fuel_sticks_above_threshold",
+      "description": "use_fuel_sticks = 0.6 (above 0.5 threshold) selects the with-sticks branch. EMCPRM = 0.10, MC10 = 0.20 ⇒ MC1 = (4*0.10 + 0.20)/5 = 0.60/5 = 0.12.",
+      "parameter_overrides": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.6,
+        "EMCPRM": 0.1,
+        "MC10": 0.2
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "MC1",
+          "time": 0.0,
+          "expected": 0.12
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "no_sticks_typical_day",
+      "description": "Typical NFDRS station without 1-hour fuel sticks: EMCPRM = 0.10 (10% interface EMC), no rain. Output MC1 = 1.03 * 0.10 = 0.103, the standard scaling that boosts atmospheric EMC by 3% to account for the shorter timelag of 1-hour fuels (Cohen & Deeming 1985 p.3).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      }
+    },
+    {
+      "id": "with_sticks_typical_day",
+      "description": "NFDRS station equipped with 1-hour fuel sticks: EMCPRM = 0.10, MC10 = 0.10 (typical 10-hour state). With sticks the 1-hour fuel moisture is a 4:1 weighted blend toward EMCPRM, MC1 = (4*0.10 + 0.10)/5 = 0.10. Compare to the no-sticks branch (MC1 = 0.103) — with sticks the output is slightly damped by the MC10 contribution.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "is_raining": 0.0,
+        "use_fuel_sticks": 1.0,
+        "EMCPRM": 0.1,
+        "MC10": 0.1
+      }
+    },
+    {
+      "id": "rainy_observation",
+      "description": "Wet observation: precipitation at the observation time pins MC1 to the saturation default of 35% (Cohen & Deeming 1985 p.4). All other inputs are ignored. This is the operational fallback when accurate fuel-moisture measurement is impossible due to wet conditions.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameters": {
+        "is_raining": 1.0,
+        "use_fuel_sticks": 0.0,
+        "EMCPRM": 0.1
+      }
+    }
+  ]
+}
+```
+
+</details>

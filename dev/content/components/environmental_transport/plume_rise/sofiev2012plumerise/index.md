@@ -1,0 +1,555 @@
+---
+title: "Sofiev2012PlumeRise"
+slug: "sofiev2012plumerise"
+domains: ["environmental_transport"]
+component_types: ["model"]
+subdomains: ["plume_rise"]
+domain: "environmental_transport"
+subdomain: "plume_rise"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/environmental_transport/plume_rise/sofiev_2012.esm"
+reference: "Sofiev, M., Ermakova, T., and Vankevich, R.: Evaluation of the smoke-injection height from wild-land fires using remote-sensing data, Atmos. Chem. Phys., 12, 1995–2006, https://doi.org/10.5194/acp-12-1995-2012, 2012."
+description: "Wildfire plume-rise model based on Sofiev et al. (2012). Computes plume top height H_p (m) as a function of atmospheric boundary-layer height H_abl (m), free-troposphere Brunt-Väisälä frequency N_ft (s⁻¹), and fire radiative power P_fr (W) via one empirical algebraic equation: H_p = α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²). The five empirical constants (α=0.24, β=170 m, γ=0.35, δ=0.6, N_0=√(2.5×10⁻⁴) s⁻¹) are from Sofiev et al. (2012). In a coupled model H_abl and N_ft are supplied by GEOSFP reanalysis; the additional variable lev_p (plume-top pressure level index) is computed from H_p by the GEOSFP coupler via a Newton-iteration height-to-level mapping. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0 src/plume_rise/sofiev_2012.jl:14."
+tags: ["environmental_transport", "plume_rise", "model", "plume-rise", "wildfire", "sofiev", "algebraic"]
+---
+
+## Description
+
+Wildfire plume-rise model based on Sofiev et al. (2012). Computes plume top height H_p (m) as a function of atmospheric boundary-layer height H_abl (m), free-troposphere Brunt-Väisälä frequency N_ft (s⁻¹), and fire radiative power P_fr (W) via one empirical algebraic equation: H_p = α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²). The five empirical constants (α=0.24, β=170 m, γ=0.35, δ=0.6, N_0=√(2.5×10⁻⁴) s⁻¹) are from Sofiev et al. (2012). In a coupled model H_abl and N_ft are supplied by GEOSFP reanalysis; the additional variable lev_p (plume-top pressure level index) is computed from H_p by the GEOSFP coupler via a Newton-iteration height-to-level mapping. Migrated from EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0 src/plume_rise/sofiev_2012.jl:14.
+
+## Reference
+
+_source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/plume_rise/sofiev_2012.jl:14
+
+Upstream `Sofiev2012PlumeRise` is an MTK `@component` (function returning a `System`) that computes wildfire plume-top height using the Sofiev et al. (2012) empirical formula. The component declares 11 `@parameters` and 4 time-indexed `@variables`, with a single algebraic equation: H_p ~ α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²).
+
+Variable and parameter treatment. The upstream source declares H_abl and N_ft as `@variables` (time-dependent), supplied at runtime via GEOSFP coupling (EarthSciDataExt.jl: `s12.H_abl ~ _parent_scope(gfp.A1₊PBLH_itp)(...)`, `s12.N_ft ~ sqrt(0.5*(N2+abs(N2)))` where N2 is from a virtual-potential-temperature gradient). In the standalone ESM these are declared as `parameter` (constant in tests), following the precedent of GaussianKC where coupling inputs are parameters in the isolated component.
+
+The variable lev_p (plume-top pressure-level index) has NO equation in the standalone component. When coupled to GEOSFP (EarthSciDataExt.jl), lev_p is driven by `s12.lev_p ~ lev_from_height(s12.H_p)`, a Newton-iteration height-to-level mapping built from GEOSFP hybrid Ap/Bp coefficients and the hypsometric equation. This non-trivial mapping cannot be expressed as a standalone ESM equation without the GEOSFP function tables, so lev_p is declared as a `state` variable with a default initial value of 5.0 (the solver guess from the upstream test) and is not asserted in inline tests.
+
+The parameter h_to_lev=100 m is used in the GEOSFP coupler as an initial linear guess for the height-to-level Newton iteration (`ℓ0 = clamp(H_p / h_to_lev, LMIN, LMAX)`). It does not appear in the standalone equation. Similarly Rd, g, and Punit are constants exported to the GEOSFP coupler for the hypsometric equation but are not used in the standalone H_p formula.
+
+Note on migration tracker blocking gap. The tracker lists this bead as `gt-ebuq (init_eq/system_kind)`. Investigation of the upstream source (sofiev_2012.jl:14) confirms the `initialization_equations` and `guesses` appear ONLY in the upstream test (sofiev_2012_test.jl): `ODEProblem(..., initialization_eqs=[sys.Puff₊lev ~ sys.Sofiev2012PlumeRise₊lev_p], guesses=[sys.Puff₊lev => 5.0])`. These belong to the COUPLED system (Puff + Sofiev2012PlumeRise + GEOSFP), not to the Sofiev2012PlumeRise component itself. The `System(eqs, t, ...)` call in the upstream source has no `initialization_equations` or `guesses` arguments. The gt-ebuq label is therefore inapplicable to this standalone component, analogous to the MogiModel/McTigueModel precedent.
+
+System kind: the single upstream equation is an explicit algebraic assignment with no D(.) operator. H_p is purely a function of parameters and coupling inputs H_abl / N_ft. system_kind is left unset (default 'ode', zero differential states), matching all other explicit-algebraic components.
+
+Parameter defaults. P_f0=1 MW and N_0=√(2.5×10⁻⁴) s⁻¹ are reference constants from Sofiev et al. (2012). P_fr=5 MW is the default fire radiative power. H_abl=1000 m and N_ft=N_0 are representative mid-latitude daytime values used for standalone testing.
+
+Tolerance rationale. Closed-form algebraic evaluation via a single exp/power chain — no ODE integration, no implicit solve. Relative tolerance 1e-10 covers float64 round-off.
+
+Coupler identity: this model was serialized with the model-level field `coupletype: "Sofiev2012PlumeRiseCoupler"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 ("informational label identifying this system's role in coupling"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `P_f0` | `W` | `1000000.0` | Reference fire radiative power (W). Appears as the denominator in the dimensionless power ratio (P_fr/P_f0)^γ. Sofiev et al. (2012) calibrated the formula using P_f0 = 1 MW as the normalisation constant. Upstream MTK `@parameter`. |
+| `N_0` | `1/s` | `0.015811388300841896` | Reference Brunt-Väisälä frequency (s⁻¹), N_0 = √(2.5×10⁻⁴) s⁻¹ ≈ 0.0158 s⁻¹. Appears squared in the stability exponent exp(−δ·N_ft²/N_0²). When N_ft = N_0 the exponent is exp(−δ) ≈ 0.549 (δ=0.6). Upstream MTK `@parameter`; default from Sofiev et al. (2012). |
+| `α` | `1` | `0.24` | Empirical scaling coefficient for the boundary-layer contribution to plume height (dimensionless). H_p = α·H_abl + β·(...): α controls how much of the boundary-layer height is incorporated into the plume top. Sofiev et al. (2012) fit α = 0.24 from a global satellite-detected injection-height dataset. Upstream MTK `@parameter`. |
+| `β` | `m` | `170.0` | Empirical amplitude coefficient for the fire-power contribution to plume height (m). β·(P_fr/P_f0)^γ is the power-dependent term before the stability correction. β = 170 m from Sofiev et al. (2012). Upstream MTK `@parameter`. |
+| `γ` | `1` | `0.35` | Empirical exponent for the fire-power scaling (dimensionless). Appears as the exponent of the normalised fire power (P_fr/P_f0)^γ. γ = 0.35 from Sofiev et al. (2012): sub-linear scaling means doubling fire power increases plume height by a factor of 2^0.35 ≈ 1.27. Upstream MTK `@parameter`. |
+| `δ` | `1` | `0.6` | Empirical stability-suppression exponent (dimensionless). Appears in the atmospheric-stability correction exp(−δ·N_ft²/N_0²): larger δ increases the suppression of plume rise by free-tropospheric stability. δ = 0.6 from Sofiev et al. (2012). Upstream MTK `@parameter`. |
+| `Rd` | `J/(kg*K)` | `287.05` | Specific gas constant for dry air (J kg⁻¹ K⁻¹). Not used in the standalone H_p equation; exported as a coupling constant for the GEOSFP coupler, which uses it in the hypsometric height computation for the lev_p Newton iteration. Upstream MTK `@parameter`. |
+| `g` | `m/s^2` | `9.80665` | Gravitational acceleration (m s⁻²). Not used in the standalone H_p equation; exported for the GEOSFP coupler (hypsometric height). Upstream MTK `@parameter`. |
+| `Punit` | `Pa` | `1.0` | Unit pressure constant (Pa). Not used in the standalone H_p equation; exported for the GEOSFP coupler to satisfy DynamicQuantities dimensional consistency in the hybrid-pressure level formula. Upstream MTK `@parameter`. |
+| `P_fr` | `W` | `5000000.0` | Fire radiative power (W). Primary fire-intensity input to the plume-rise formula. P_fr drives the power-dependent term β·(P_fr/P_f0)^γ. Default 5 MW is the typical radiative power for a moderate wildfire. Upstream MTK `@parameter`. |
+| `h_to_lev` | `m` | `100.0` | Height-to-level scale factor (m per level index unit). Not used in the standalone H_p equation; used by the GEOSFP coupler as the linear initial guess for the Newton iteration that maps H_p (m) to lev_p (level index): ℓ_0 = clamp(H_p / h_to_lev, l_min, l_max). A value of 100 m per level is a first-order approximation of the GEOS-FP 72-level hybrid grid. Upstream MTK `@parameter`. |
+| `H_abl` | `m` | `1000.0` | Atmospheric boundary-layer height (m). Appears linearly in H_p = α·H_abl + β·(...). In a coupled model this is supplied by GEOSFP (A1 diagnostic PBLH interpolated to the current lon/lat/time). In standalone tests it is held constant at the default. Upstream declared as MTK `@variable` (time-dependent via coupling); mapped to `parameter` here following the GaussianKC precedent for coupling inputs. |
+| `N_ft` | `1/s` | `0.015811388300841896` | Free-troposphere Brunt-Väisälä frequency (s⁻¹). Appears squared in the stability correction exp(−δ·N_ft²/N_0²). In a coupled model N_ft is computed from the GEOSFP virtual-potential-temperature vertical gradient near 2×H_abl: N_ft = sqrt(max((g/θv)·∂θv/∂z, 0)). Larger N_ft (stronger stability) suppresses the plume rise. In standalone tests it is held constant at N_0 (= √(2.5×10⁻⁴) s⁻¹) as the reference frequency. Upstream declared as MTK `@variable`; mapped to `parameter` here following the GaussianKC precedent. |
+| `lev_p` | `1` | `5.0` | Vertical pressure-level index of the plume top height (dimensionless). In a coupled model this is driven by the Newton-iteration height-to-level mapping in EarthSciDataExt.jl: lev_p ~ lev_from_height(H_p), where lev_from_height uses GEOSFP hybrid Ap/Bp coefficients and the hypsometric equation. The linear h_to_lev=100 m scale factor is the initial guess in that Newton iteration. This mapping requires GEOSFP function tables and cannot be expressed as a standalone ESM equation. In standalone context lev_p is held at its default (5.0, matching the upstream solver guess) and is not asserted in inline tests. lev_p is the output referenced via Puff coupling (initialization_eqs: Puff₊lev ~ Sofiev2012PlumeRise₊lev_p) to initialise the Puff particle's vertical coordinate. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `H_p` | `m` |  | Plume top height (m). Primary output of the Sofiev et al. (2012) formula: H_p = α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²). Combines the boundary-layer contribution α·H_abl with the fire-power and stability-corrected term. Plume injection height for fire-emission modelling. Upstream MTK `@variable` with a single algebraic equation (no D(.)). |
+
+## Observed expressions
+
+$$
+H_{p} = α \cdot H_{abl} + β \cdot \frac{P_{fr}}{P_{f0}}^{γ} \cdot e^{\left(-δ\right) \cdot \frac{N_{ft}^{2}}{N_{0}^{2}}}
+$$
+_Plume top height (m). Primary output of the Sofiev et al. (2012) formula: H_p = α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²). Combines the boundary-layer contribution α·H_abl with the fire-power and stability-corrected term. Plume injection height for fire-emission modelling. Upstream MTK `@variable` with a single algebraic equation (no D(.))._
+
+## Analyses
+
+### plume_height_vs_fire_power
+
+Plume top height H_p as a function of fire radiative power P_fr, for representative daytime conditions (H_abl=1000 m, N_ft=N_0). Illustrates Figure 3a from Sofiev et al. (2012): H_p increases sub-linearly with fire power due to the γ=0.35 exponent. Range: 0.1 MW (smoldering low-intensity fire) to 50 MW (large crown fire). The boundary-layer contribution α·H_abl=240 m sets the floor.
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `P_fr`
+
+![Plume top height H_p (m) vs fire radiative power P_fr (W). Sub-linear increase following P_fr^0.35; floor at α·H_abl=240 m from the boundary-layer term.](/plots/environmental_transport/plume_rise/sofiev2012plumerise/plume_height_vs_fire_power-H_p_vs_P_fr.png)
+
+### plume_height_vs_stability
+
+Plume top height H_p as a function of free-troposphere Brunt-Väisälä frequency N_ft, for P_fr=5 MW and H_abl=1000 m. Shows how atmospheric stability suppresses plume rise via the exp(−δ·N_ft²/N_0²) factor. As N_ft increases from near-neutral (N_ft≈0) to strongly stable (N_ft=3×N_0), H_p decreases from ~539 m (full fire-power contribution) toward the floor ~240 m (only boundary-layer contribution). Illustrates the atmospheric stability correction in Figure 3b of Sofiev et al. (2012).
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `N_ft`
+
+![Plume top height H_p (m) vs free-troposphere Brunt-Väisälä frequency N_ft (s⁻¹). H_p decreases rapidly with increasing stability; the exp(−δ·N_ft²/N_0²) factor becomes negligible around N_ft ≥ 3×N_0.](/plots/environmental_transport/plume_rise/sofiev2012plumerise/plume_height_vs_stability-H_p_vs_N_ft.png)
+
+### plume_height_vs_boundary_layer
+
+Plume top height H_p as a function of atmospheric boundary-layer height H_abl, for P_fr=5 MW and N_ft=N_0. The linear α·H_abl term shifts H_p upward proportionally as the boundary layer deepens during the day. Shows that deeper boundary layers (e.g., H_abl=2000 m in hot, dry climates) can significantly increase plume injection heights even for moderate fires.
+
+**Time span:** 0.0 → 0.0
+
+**Swept over:** `H_abl`
+
+![Plume top height H_p (m) vs boundary-layer height H_abl (m). Linear increase with slope α=0.24; the fire-power term is a constant offset at fixed P_fr and N_ft.](/plots/environmental_transport/plume_rise/sofiev2012plumerise/plume_height_vs_boundary_layer-H_p_vs_H_abl.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: EnvironmentalTransport.jl@a48559c4114eb9f06668ecf9f06235aad20f63f0:src/plume_rise/sofiev_2012.jl:14\n\nUpstream `Sofiev2012PlumeRise` is an MTK `@component` (function returning a `System`) that computes wildfire plume-top height using the Sofiev et al. (2012) empirical formula. The component declares 11 `@parameters` and 4 time-indexed `@variables`, with a single algebraic equation: H_p ~ α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²).\n\nVariable and parameter treatment. The upstream source declares H_abl and N_ft as `@variables` (time-dependent), supplied at runtime via GEOSFP coupling (EarthSciDataExt.jl: `s12.H_abl ~ _parent_scope(gfp.A1₊PBLH_itp)(...)`, `s12.N_ft ~ sqrt(0.5*(N2+abs(N2)))` where N2 is from a virtual-potential-temperature gradient). In the standalone ESM these are declared as `parameter` (constant in tests), following the precedent of GaussianKC where coupling inputs are parameters in the isolated component.\n\nThe variable lev_p (plume-top pressure-level index) has NO equation in the standalone component. When coupled to GEOSFP (EarthSciDataExt.jl), lev_p is driven by `s12.lev_p ~ lev_from_height(s12.H_p)`, a Newton-iteration height-to-level mapping built from GEOSFP hybrid Ap/Bp coefficients and the hypsometric equation. This non-trivial mapping cannot be expressed as a standalone ESM equation without the GEOSFP function tables, so lev_p is declared as a `state` variable with a default initial value of 5.0 (the solver guess from the upstream test) and is not asserted in inline tests.\n\nThe parameter h_to_lev=100 m is used in the GEOSFP coupler as an initial linear guess for the height-to-level Newton iteration (`ℓ0 = clamp(H_p / h_to_lev, LMIN, LMAX)`). It does not appear in the standalone equation. Similarly Rd, g, and Punit are constants exported to the GEOSFP coupler for the hypsometric equation but are not used in the standalone H_p formula.\n\nNote on migration tracker blocking gap. The tracker lists this bead as `gt-ebuq (init_eq/system_kind)`. Investigation of the upstream source (sofiev_2012.jl:14) confirms the `initialization_equations` and `guesses` appear ONLY in the upstream test (sofiev_2012_test.jl): `ODEProblem(..., initialization_eqs=[sys.Puff₊lev ~ sys.Sofiev2012PlumeRise₊lev_p], guesses=[sys.Puff₊lev => 5.0])`. These belong to the COUPLED system (Puff + Sofiev2012PlumeRise + GEOSFP), not to the Sofiev2012PlumeRise component itself. The `System(eqs, t, ...)` call in the upstream source has no `initialization_equations` or `guesses` arguments. The gt-ebuq label is therefore inapplicable to this standalone component, analogous to the MogiModel/McTigueModel precedent.\n\nSystem kind: the single upstream equation is an explicit algebraic assignment with no D(.) operator. H_p is purely a function of parameters and coupling inputs H_abl / N_ft. system_kind is left unset (default 'ode', zero differential states), matching all other explicit-algebraic components.\n\nParameter defaults. P_f0=1 MW and N_0=√(2.5×10⁻⁴) s⁻¹ are reference constants from Sofiev et al. (2012). P_fr=5 MW is the default fire radiative power. H_abl=1000 m and N_ft=N_0 are representative mid-latitude daytime values used for standalone testing.\n\nTolerance rationale. Closed-form algebraic evaluation via a single exp/power chain — no ODE integration, no implicit solve. Relative tolerance 1e-10 covers float64 round-off.\n\nCoupler identity: this model was serialized with the model-level field `coupletype: \"Sofiev2012PlumeRiseCoupler\"`, the EarthSciMLBase `CoupleType` metadata tag naming the Julia coupler struct that `EarthSciMLBase.couple2` dispatches on to find this component's pairwise coupling rules. The esm schema defined `coupletype` only before 0.8.0 (\"informational label identifying this system's role in coupling\"); 0.8.0 removed it in favour of explicit coupling — `coupling` entries naming components directly, or `coupling_roles` + `coupling_import` in a coupling-library file (esm-spec §10.9–§10.11). esm 1.0.0 has no model-level coupler-identity field, so the tag is recorded here to keep it recoverable."
+  },
+  "tolerance": {
+    "rel": 1e-10
+  },
+  "variables": {
+    "P_f0": {
+      "type": "parameter",
+      "units": "W",
+      "default": 1000000.0,
+      "description": "Reference fire radiative power (W). Appears as the denominator in the dimensionless power ratio (P_fr/P_f0)^γ. Sofiev et al. (2012) calibrated the formula using P_f0 = 1 MW as the normalisation constant. Upstream MTK `@parameter`."
+    },
+    "N_0": {
+      "type": "parameter",
+      "units": "1/s",
+      "default": 0.015811388300841896,
+      "description": "Reference Brunt-Väisälä frequency (s⁻¹), N_0 = √(2.5×10⁻⁴) s⁻¹ ≈ 0.0158 s⁻¹. Appears squared in the stability exponent exp(−δ·N_ft²/N_0²). When N_ft = N_0 the exponent is exp(−δ) ≈ 0.549 (δ=0.6). Upstream MTK `@parameter`; default from Sofiev et al. (2012)."
+    },
+    "α": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.24,
+      "description": "Empirical scaling coefficient for the boundary-layer contribution to plume height (dimensionless). H_p = α·H_abl + β·(...): α controls how much of the boundary-layer height is incorporated into the plume top. Sofiev et al. (2012) fit α = 0.24 from a global satellite-detected injection-height dataset. Upstream MTK `@parameter`."
+    },
+    "β": {
+      "type": "parameter",
+      "units": "m",
+      "default": 170.0,
+      "description": "Empirical amplitude coefficient for the fire-power contribution to plume height (m). β·(P_fr/P_f0)^γ is the power-dependent term before the stability correction. β = 170 m from Sofiev et al. (2012). Upstream MTK `@parameter`."
+    },
+    "γ": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.35,
+      "description": "Empirical exponent for the fire-power scaling (dimensionless). Appears as the exponent of the normalised fire power (P_fr/P_f0)^γ. γ = 0.35 from Sofiev et al. (2012): sub-linear scaling means doubling fire power increases plume height by a factor of 2^0.35 ≈ 1.27. Upstream MTK `@parameter`."
+    },
+    "δ": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.6,
+      "description": "Empirical stability-suppression exponent (dimensionless). Appears in the atmospheric-stability correction exp(−δ·N_ft²/N_0²): larger δ increases the suppression of plume rise by free-tropospheric stability. δ = 0.6 from Sofiev et al. (2012). Upstream MTK `@parameter`."
+    },
+    "Rd": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 287.05,
+      "description": "Specific gas constant for dry air (J kg⁻¹ K⁻¹). Not used in the standalone H_p equation; exported as a coupling constant for the GEOSFP coupler, which uses it in the hypsometric height computation for the lev_p Newton iteration. Upstream MTK `@parameter`."
+    },
+    "g": {
+      "type": "parameter",
+      "units": "m/s^2",
+      "default": 9.80665,
+      "description": "Gravitational acceleration (m s⁻²). Not used in the standalone H_p equation; exported for the GEOSFP coupler (hypsometric height). Upstream MTK `@parameter`."
+    },
+    "Punit": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.0,
+      "description": "Unit pressure constant (Pa). Not used in the standalone H_p equation; exported for the GEOSFP coupler to satisfy DynamicQuantities dimensional consistency in the hybrid-pressure level formula. Upstream MTK `@parameter`."
+    },
+    "P_fr": {
+      "type": "parameter",
+      "units": "W",
+      "default": 5000000.0,
+      "description": "Fire radiative power (W). Primary fire-intensity input to the plume-rise formula. P_fr drives the power-dependent term β·(P_fr/P_f0)^γ. Default 5 MW is the typical radiative power for a moderate wildfire. Upstream MTK `@parameter`."
+    },
+    "h_to_lev": {
+      "type": "parameter",
+      "units": "m",
+      "default": 100.0,
+      "description": "Height-to-level scale factor (m per level index unit). Not used in the standalone H_p equation; used by the GEOSFP coupler as the linear initial guess for the Newton iteration that maps H_p (m) to lev_p (level index): ℓ_0 = clamp(H_p / h_to_lev, l_min, l_max). A value of 100 m per level is a first-order approximation of the GEOS-FP 72-level hybrid grid. Upstream MTK `@parameter`."
+    },
+    "H_abl": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1000.0,
+      "description": "Atmospheric boundary-layer height (m). Appears linearly in H_p = α·H_abl + β·(...). In a coupled model this is supplied by GEOSFP (A1 diagnostic PBLH interpolated to the current lon/lat/time). In standalone tests it is held constant at the default. Upstream declared as MTK `@variable` (time-dependent via coupling); mapped to `parameter` here following the GaussianKC precedent for coupling inputs."
+    },
+    "N_ft": {
+      "type": "parameter",
+      "units": "1/s",
+      "default": 0.015811388300841896,
+      "description": "Free-troposphere Brunt-Väisälä frequency (s⁻¹). Appears squared in the stability correction exp(−δ·N_ft²/N_0²). In a coupled model N_ft is computed from the GEOSFP virtual-potential-temperature vertical gradient near 2×H_abl: N_ft = sqrt(max((g/θv)·∂θv/∂z, 0)). Larger N_ft (stronger stability) suppresses the plume rise. In standalone tests it is held constant at N_0 (= √(2.5×10⁻⁴) s⁻¹) as the reference frequency. Upstream declared as MTK `@variable`; mapped to `parameter` here following the GaussianKC precedent."
+    },
+    "H_p": {
+      "type": "unknown",
+      "units": "m",
+      "description": "Plume top height (m). Primary output of the Sofiev et al. (2012) formula: H_p = α·H_abl + β·(P_fr/P_f0)^γ · exp(−δ·N_ft²/N_0²). Combines the boundary-layer contribution α·H_abl with the fire-power and stability-corrected term. Plume injection height for fire-emission modelling. Upstream MTK `@variable` with a single algebraic equation (no D(.))."
+    },
+    "lev_p": {
+      "type": "parameter",
+      "units": "1",
+      "default": 5.0,
+      "description": "Vertical pressure-level index of the plume top height (dimensionless). In a coupled model this is driven by the Newton-iteration height-to-level mapping in EarthSciDataExt.jl: lev_p ~ lev_from_height(H_p), where lev_from_height uses GEOSFP hybrid Ap/Bp coefficients and the hypsometric equation. The linear h_to_lev=100 m scale factor is the initial guess in that Newton iteration. This mapping requires GEOSFP function tables and cannot be expressed as a standalone ESM equation. In standalone context lev_p is held at its default (5.0, matching the upstream solver guess) and is not asserted in inline tests. lev_p is the output referenced via Puff coupling (initialization_eqs: Puff₊lev ~ Sofiev2012PlumeRise₊lev_p) to initialise the Puff particle's vertical coordinate."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "H_p",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "α",
+              "H_abl"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "β",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "P_fr",
+                      "P_f0"
+                    ]
+                  },
+                  "γ"
+                ]
+              },
+              {
+                "op": "exp",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "-",
+                        "args": [
+                          "δ"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "^",
+                            "args": [
+                              "N_ft",
+                              2
+                            ]
+                          },
+                          {
+                            "op": "^",
+                            "args": [
+                              "N_0",
+                              2
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_conditions",
+      "description": "Primary correctness test at representative mid-latitude daytime conditions: H_abl=1000 m (typical mixed-layer depth), N_ft=N_0=√(2.5×10⁻⁴) s⁻¹ (reference free-troposphere stability), P_fr=5 MW (moderate wildfire). Expected: H_p = 0.24×1000 + 170×5^0.35×exp(−0.6) = 240 + 170×1.75647×0.54881 ≈ 403.875 m. Verifies the algebraic formula end-to-end.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 1000.0,
+        "N_ft": 0.015811388300841896,
+        "P_fr": 5000000.0,
+        "P_f0": 1000000.0,
+        "α": 0.24,
+        "β": 170.0,
+        "γ": 0.35,
+        "δ": 0.6,
+        "N_0": 0.015811388300841896
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 403.87463362807637,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "shallow_boundary_layer",
+      "description": "Lower boundary layer H_abl=500 m (stable nighttime / shallow morning ML), same fire power and stability. H_p = 0.24×500 + 170×5^0.35×exp(−0.6) = 120 + 163.875 = 283.875 m. Verifies linearity in H_abl: reducing H_abl by 500 m reduces H_p by α×500 = 120 m.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 500.0,
+        "N_ft": 0.015811388300841896,
+        "P_fr": 5000000.0
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 283.87463362807637,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "zero_stability_max_plume",
+      "description": "N_ft=0 (neutral free troposphere, maximum plume rise): exp(−δ×0/N_0²)=exp(0)=1. H_p = 0.24×1000 + 170×5^0.35×1 = 240 + 298.600 = 538.600 m. Verifies the upper bound of the stability correction — when N_ft=0 the fire-power term reaches its maximum. This is the theoretical maximum H_p for the given H_abl and P_fr.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 1000.0,
+        "N_ft": 0.0,
+        "P_fr": 5000000.0
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 538.5990508408247,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "linearity_in_H_abl",
+      "description": "Doubling H_abl from 1000 m to 2000 m increases H_p by exactly α×1000 = 240 m (the formula is linear in H_abl). Expected H_p = 643.875 m = 403.875 + 240. Verifies correct coefficient α in the boundary-layer term.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 2000.0,
+        "N_ft": 0.015811388300841896,
+        "P_fr": 5000000.0
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 643.8746336280764,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "high_fire_power",
+      "description": "Doubled fire radiative power P_fr=10 MW (large crown fire). H_p = 0.24×1000 + 170×(10)^0.35×exp(−0.6) = 240 + 170×2.23872×0.54881 = 240 + 208.868 = 448.868 m. Verifies the sub-linear power-law scaling: doubling P_fr from 5 MW to 10 MW multiplies the fire term by 2^0.35 ≈ 1.274, not by 2.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 1000.0,
+        "N_ft": 0.015811388300841896,
+        "P_fr": 10000000.0
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 448.8681558387152,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    },
+    {
+      "id": "strong_stability",
+      "description": "N_ft=3×N_0 (strongly stable free troposphere): exp(−δ×9) = exp(−5.4) ≈ 0.00452. This nearly kills the fire-power term. H_p = 0.24×1000 + 170×5^0.35×0.00452 = 240 + 1.349 = 241.349 m. Verifies the exponential stability-suppression: even a large fire barely raises the plume above the boundary layer under strong inversions.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameter_overrides": {
+        "H_abl": 1000.0,
+        "N_ft": 0.04743416490252569,
+        "P_fr": 5000000.0
+      },
+      "assertions": [
+        {
+          "variable": "H_p",
+          "time": 0.0,
+          "expected": 241.3486467825099,
+          "tolerance": {
+            "rel": 1e-10
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "plume_height_vs_fire_power",
+      "description": "Plume top height H_p as a function of fire radiative power P_fr, for representative daytime conditions (H_abl=1000 m, N_ft=N_0). Illustrates Figure 3a from Sofiev et al. (2012): H_p increases sub-linearly with fire power due to the γ=0.35 exponent. Range: 0.1 MW (smoldering low-intensity fire) to 50 MW (large crown fire). The boundary-layer contribution α·H_abl=240 m sets the floor.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameters": {
+        "H_abl": 1000.0,
+        "N_ft": 0.015811388300841896
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "P_fr",
+            "range": {
+              "start": 100000.0,
+              "stop": 50000000.0,
+              "count": 60,
+              "scale": "log"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "H_p_vs_P_fr",
+          "type": "line",
+          "description": "Plume top height H_p (m) vs fire radiative power P_fr (W). Sub-linear increase following P_fr^0.35; floor at α·H_abl=240 m from the boundary-layer term.",
+          "x": {
+            "variable": "P_fr",
+            "label": "Fire radiative power P_fr (W)"
+          },
+          "y": {
+            "variable": "H_p",
+            "label": "Plume top height H_p (m)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "plume_height_vs_stability",
+      "description": "Plume top height H_p as a function of free-troposphere Brunt-Väisälä frequency N_ft, for P_fr=5 MW and H_abl=1000 m. Shows how atmospheric stability suppresses plume rise via the exp(−δ·N_ft²/N_0²) factor. As N_ft increases from near-neutral (N_ft≈0) to strongly stable (N_ft=3×N_0), H_p decreases from ~539 m (full fire-power contribution) toward the floor ~240 m (only boundary-layer contribution). Illustrates the atmospheric stability correction in Figure 3b of Sofiev et al. (2012).",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameters": {
+        "H_abl": 1000.0,
+        "P_fr": 5000000.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "N_ft",
+            "range": {
+              "start": 0.001,
+              "stop": 0.05,
+              "count": 50,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "H_p_vs_N_ft",
+          "type": "line",
+          "description": "Plume top height H_p (m) vs free-troposphere Brunt-Väisälä frequency N_ft (s⁻¹). H_p decreases rapidly with increasing stability; the exp(−δ·N_ft²/N_0²) factor becomes negligible around N_ft ≥ 3×N_0.",
+          "x": {
+            "variable": "N_ft",
+            "label": "Brunt-Väisälä frequency N_ft (s⁻¹)"
+          },
+          "y": {
+            "variable": "H_p",
+            "label": "Plume top height H_p (m)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "plume_height_vs_boundary_layer",
+      "description": "Plume top height H_p as a function of atmospheric boundary-layer height H_abl, for P_fr=5 MW and N_ft=N_0. The linear α·H_abl term shifts H_p upward proportionally as the boundary layer deepens during the day. Shows that deeper boundary layers (e.g., H_abl=2000 m in hot, dry climates) can significantly increase plume injection heights even for moderate fires.",
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "parameters": {
+        "P_fr": 5000000.0,
+        "N_ft": 0.015811388300841896
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "H_abl",
+            "range": {
+              "start": 100.0,
+              "stop": 3000.0,
+              "count": 50,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "H_p_vs_H_abl",
+          "type": "line",
+          "description": "Plume top height H_p (m) vs boundary-layer height H_abl (m). Linear increase with slope α=0.24; the fire-power term is a constant offset at fixed P_fr and N_ft.",
+          "x": {
+            "variable": "H_abl",
+            "label": "Boundary-layer height H_abl (m)"
+          },
+          "y": {
+            "variable": "H_p",
+            "label": "Plume top height H_p (m)"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

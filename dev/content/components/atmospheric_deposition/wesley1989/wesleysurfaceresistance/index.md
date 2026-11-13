@@ -1,0 +1,2829 @@
+---
+title: "WesleySurfaceResistance"
+slug: "wesleysurfaceresistance"
+domains: ["atmospheric_deposition"]
+component_types: ["model"]
+subdomains: ["wesley1989"]
+domain: "atmospheric_deposition"
+subdomain: "wesley1989"
+component_type: "model"
+esm_version: "1.2.0"
+esm_path: "components/atmospheric_deposition/wesley1989/surface_resistance.esm"
+reference: "10.1016/0004-6981(89)90153-4"
+description: "Wesely (1989) bulk surface (canopy) resistance to gaseous dry deposition. Computes the total surface resistance r_c [s/m] along Wesely's three parallel mass-transfer pathways — the upper-canopy leaf cuticles, the lower-canopy structures, and the ground — from the gas species' Henry's-law solubility and reactivity, solar irradiation, surface air temperature, terrain slope, season, land-use category, and surface wetness (rain/dew). Migrated from AtmosphericDeposition.jl@e4468c79 src/wesley1989.jl:360 (the `WesleySurfaceResistance` builder function); implements Wesely (1989) Eq. 2 with the stomatal, mesophyll, cuticle, lower-canopy and ground sub-resistances of Eqs. 3-14 and the Walmsley & Wesely (1996) corrections."
+tags: ["atmospheric_deposition", "wesley1989", "model", "dry-deposition", "wesley-1989", "surface-resistance", "resistance-model"]
+---
+
+## Description
+
+Wesely (1989) bulk surface (canopy) resistance to gaseous dry deposition. Computes the total surface resistance r_c [s/m] along Wesely's three parallel mass-transfer pathways — the upper-canopy leaf cuticles, the lower-canopy structures, and the ground — from the gas species' Henry's-law solubility and reactivity, solar irradiation, surface air temperature, terrain slope, season, land-use category, and surface wetness (rain/dew). Migrated from AtmosphericDeposition.jl@e4468c79 src/wesley1989.jl:360 (the `WesleySurfaceResistance` builder function); implements Wesely (1989) Eq. 2 with the stomatal, mesophyll, cuticle, lower-canopy and ground sub-resistances of Eqs. 3-14 and the Walmsley & Wesely (1996) corrections.
+
+## Reference
+
+Wesely, M. L. (1989). Parameterization of surface resistances to gaseous dry deposition in regional-scale numerical models. Atmospheric Environment 23(6), 1293-1304.
+
+_source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/wesley1989.jl:360
+
+Upstream `WesleySurfaceResistance` is a plain Julia builder function (not an MTK @component): the low-level surface-resistance kernel called by DryDepGas in src/dry_deposition.jl. It is migrated here as a standalone, fully-explicit algebraic model. The three GasData struct fields (Dh2oPerDx, Hstar, Fo) and the nine scalar arguments (G, Ts, theta, iSeason, iLandUse, rain, dew, isSO2, isO3) become `parameter`s; every intermediate resistance and the total r_c become algebraic `state` outputs fixed by explicit equations. There are no differential states, so `system_kind` is left unset (the triangular-algebraic convention of the sibling observed-only migrations, e.g. sp_ch1/barometric.esm).
+
+Lookup tables. The seven season x land-use tables (r_i, r_lu, r_ac, r_gsS, r_gsO, r_clS, r_clO) are migrated as `interp.linear` over the 55-entry column-major flattening of each 5x11 grid, on the integer axis [1..55], evaluated at table_index = (iLandUse-1)*5 + iSeason. This mirrors upstream `obtain_value`, which builds a 1-D DataInterpolations.LinearInterpolation over `vec(matrix)` (Julia's column-major flatten) on the index range 1:55 and evaluates it at that same coordinate. iSeason in 1..5 and iLandUse in 1..11 are categorical integers, so every lookup lands exactly on an integer axis knot — interp.linear returns the exact table entry with a zero blend weight, bit-identical to the upstream interpolation. (A 2-D interp.bilinear form over the 5x11 grid was rejected: at a query on the upper season edge its w=1 endpoint blend t_i + 1*(t_{i+1} - t_i) catastrophically cancels when the lower cell corner is the 1e25 sentinel — e.g. 1e25 + (4000 - 1e25) = 0 — whereas the 1-D flatten is always queried at an integer knot, w=0, and never cancels.)
+
+Float32 tables. The upstream tables are `SA_F32` (Float32) static arrays, so each entry is stored as its exact Float64-promoted Float32 value to reproduce upstream arithmetic. In practice only the sentinel `inf = 1e25` is inexact in Float32 — Float64(Float32(1e25)) = 9.999999562023526e24; every other table entry is an integer <= 9000 and is exact in Float32.
+
+Faithful-behavior note. Upstream `r_s` assigns `rs = ifelse(Ts >= 39.9, inf, ...)` and then immediately overwrites `rs = ifelse(Ts <= 0.1, inf, ...)`; the first assignment is dead code. The migrated `rs` equation reproduces the actual upstream behavior — only the Ts <= 0.1 guard — and intentionally does not migrate the unreachable Ts >= 39.9 case. The `1.0e25` literal inside the `rs` ifelse is the upstream Float64 `inf` constant and is distinct from the Float32 table sentinel. The boolean arguments rain, dew, isSO2 and isO3 are 0/1 parameters; conditions test them as `> 0.5`.
+
+Domain note. For water (iLandUse=7, every season) and non-winter wetland (iLandUse=9, iSeason != 4) the r_gsS ground-resistance table entry is 0, so the general-gas ground term Hstar/(1e5*r_gsS_val) of Wesely Eq. 9 is infinite. Upstream Julia evaluates that as Inf — giving r_gsx_gen = 0 (an infinitely fast ground sink) and r_c clamped to its 10 s/m floor — whereas the ESS Python runner's strict float division raises on it. The migrated equation keeps the faithful Eq. 9 form, so 51 of the 55 (season, land-use) cells are directly evaluable by the Python runner; the four water/wetland cells need a binding whose division yields Inf rather than raising. Inline tests use vegetated and urban land uses (iLandUse in {1, 3, 4, 5, 6}), matching the upstream wesely1989_test.jl TestWesely suite, which fixes iLandUse=4 throughout.
+
+Tolerance rationale (model-level rel=1e-6): an explicit algebraic system with no ODE integration; 1e-6 covers Float64 round-off across the resistance expression chain (reciprocal sums, the exp() cold correction, and the interp.linear table lookups), well above the bit-level agreement expected between bindings._
+- **DOI**: 10.1016/0004-6981(89)90153-4
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `Dh2oPerDx` | `1` | `1.9` | Ratio of the molecular diffusivity of water vapor to that of the gas of interest (Wesely 1989 Table 2, D_H2O/D_x). Default: SO2. |
+| `Hstar` | `1` | `100000.0` | Effective Henry's-law solubility coefficient of the gas [M atm^-1] (Wesely 1989 Table 2, H*). Default: SO2. |
+| `Fo` | `1` | `0.0` | Chemical reactivity factor of the gas [-] (Wesely 1989 Table 2, f0; 0, 0.1 or 1). Default: SO2. |
+| `G` | `W/m^2` | `300.0` | Solar (global) irradiation reaching the surface. |
+| `Ts` | `degC` | `25.0` | Surface air temperature. |
+| `theta` | `rad` | `0.0` | Slope of the local terrain (Wesely 1989 Eq. 5; the source argument theta). |
+| `iSeason` | `1` | `1` | Season index 1-5: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional spring. Default: midsummer. |
+| `iLandUse` | `1` | `4` | Land-use index 1-11: 1 urban, 2 agricultural, 3 range, 4 deciduous forest, 5 coniferous forest, 6 mixed forest, 7 water, 8 barren, 9 wetland, 10 mixed agricultural/range, 11 rocky shrubland. Default: deciduous forest. |
+| `rain` | `1` | `0` | Surface-wetness flag: 1 if rain is present, 0 otherwise. |
+| `dew` | `1` | `0` | Surface-wetness flag: 1 if dew is present, 0 otherwise. |
+| `isSO2` | `1` | `1` | Species flag: 1 if the gas of interest is SO2, 0 otherwise. Default: SO2. |
+| `isO3` | `1` | `0` | Species flag: 1 if the gas of interest is O3, 0 otherwise. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `table_index` | `1` |  | Flattened (column-major) lookup coordinate into the 55-entry Wesely season x land-use tables: (iLandUse-1)*5 + iSeason. |
+| `r_i_val` | `s/m` |  | Minimum bulk-canopy stomatal resistance for water vapor (Wesely table r_i) at this season/land-use. |
+| `r_lu_val` | `s/m` |  | Outer-upper-canopy / leaf-cuticle reference resistance (Wesely table r_lu) at this season/land-use. |
+| `r_ac_val` | `s/m` |  | In-canopy aerodynamic resistance (Wesely table r_ac) at this season/land-use. |
+| `r_gsS_val` | `s/m` |  | Ground (soil/litter/snow/water) SO2 uptake resistance (Wesely table r_gsS) at this season/land-use. |
+| `r_gsO_val` | `s/m` |  | Ground (soil/litter/snow/water) O3 uptake resistance (Wesely table r_gsO) at this season/land-use. |
+| `r_clS_val` | `s/m` |  | Lower-canopy SO2 uptake resistance (Wesely table r_clS) at this season/land-use. |
+| `r_clO_val` | `s/m` |  | Lower-canopy O3 uptake resistance (Wesely table r_clO) at this season/land-use. |
+| `rs` | `s/m` |  | Bulk-canopy stomatal resistance (Wesely Eq. 3), tripled when rain or dew is present. The dry-surface value is the wesely_stomatal_resistance template of resistance_templates.esm. |
+| `rmx` | `s/m` |  | Mesophyll resistance (Wesely Eq. 6). |
+| `rsmx` | `s/m` |  | Combined minimum stomatal + mesophyll resistance (Wesely Eq. 4). |
+| `rdc` | `s/m` |  | Resistance to buoyant-convection / hillside mixing (Wesely Eq. 5). |
+| `rluO_dew` | `s/m` |  | O3 outer-surface (cuticle) resistance under dew (Wesely Eq. 11). |
+| `rluO_rain` | `s/m` |  | O3 outer-surface (cuticle) resistance under rain (Wesely Eq. 13). |
+| `rlux_dew` | `s/m` |  | Upper-canopy leaf-cuticle resistance assuming dew is active (Wesely Eqs. 10, 11, 14). |
+| `rlux_rain` | `s/m` |  | Upper-canopy leaf-cuticle resistance assuming rain is active (Wesely Eqs. 12, 13, 14). |
+| `rlux_dry` | `s/m` |  | Upper-canopy leaf-cuticle resistance for dry surfaces (Wesely Eq. 7). |
+| `rlux` | `s/m` |  | Selected upper-canopy leaf-cuticle resistance (dew, then rain, else dry; dew/rain ignored in winter). |
+| `r_clx_gen` | `s/m` |  | Lower-canopy resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 8). |
+| `r_gsx_gen` | `s/m` |  | Ground-uptake resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 9). |
+| `rclx` | `s/m` |  | Selected lower-canopy resistance (r_clS for SO2, r_clO for O3, else r_clx_gen), before the cold-temperature correction. |
+| `rgsx` | `s/m` |  | Selected ground-uptake resistance (r_gsS for SO2, r_gsO for O3, else r_gsx_gen), before the cold-temperature correction. |
+| `correction` | `s/m` |  | Cold-temperature additive correction applied to rlux, rclx and rgsx (Wesely p.4): 1000 s/m * exp(-Ts/(1 degC) - 4) when Ts < 0 degC, else 0. Defined by the wesely_cold_correction template of resistance_templates.esm. |
+| `r_c` | `s/m` |  | Total bulk surface (canopy) resistance to dry deposition (Wesely Eq. 2), clamped to [10, 9999] s/m. |
+
+## Observed expressions
+
+$$
+table_{index} = \left(iLandUse - 1\right) \cdot 5 + iSeason
+$$
+_Flattened (column-major) lookup coordinate into the 55-entry Wesely season x land-use tables: (iLandUse-1)*5 + iSeason._
+
+$$
+r_{i\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Minimum bulk-canopy stomatal resistance for water vapor (Wesely table r_i) at this season/land-use._
+
+$$
+r_{lu\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Outer-upper-canopy / leaf-cuticle reference resistance (Wesely table r_lu) at this season/land-use._
+
+$$
+r_{ac\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_In-canopy aerodynamic resistance (Wesely table r_ac) at this season/land-use._
+
+$$
+r_{gsS\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Ground (soil/litter/snow/water) SO2 uptake resistance (Wesely table r_gsS) at this season/land-use._
+
+$$
+r_{gsO\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Ground (soil/litter/snow/water) O3 uptake resistance (Wesely table r_gsO) at this season/land-use._
+
+$$
+r_{clS\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Lower-canopy SO2 uptake resistance (Wesely table r_clS) at this season/land-use._
+
+$$
+r_{clO\,val} = \mathrm{fn}\left(\mathrm{const}\left(\right), \mathrm{const}\left(\right), table_{index}\right)
+$$
+_Lower-canopy O3 uptake resistance (Wesely table r_clO) at this season/land-use._
+
+$$
+rs = \mathrm{wesely_stomatal_resistance}\left(r_{i}=r_{i\,val}, G=G, T_{c}=Ts\right) \cdot \mathrm{ifelse}\left(\mathrm{or}\left(\mathrm{>}\left(rain, 0.5\right), \mathrm{>}\left(dew, 0.5\right)\right), 3.0, 1.0\right)
+$$
+_Bulk-canopy stomatal resistance (Wesely Eq. 3), tripled when rain or dew is present. The dry-surface value is the wesely_stomatal_resistance template of resistance_templates.esm._
+
+$$
+rmx = \frac{1.0}{\frac{Hstar}{3000.0} + 100.0 \cdot Fo}
+$$
+_Mesophyll resistance (Wesely Eq. 6)._
+
+$$
+rsmx = rs \cdot Dh2oPerDx + rmx
+$$
+_Combined minimum stomatal + mesophyll resistance (Wesely Eq. 4)._
+
+$$
+rdc = \frac{100.0 \cdot \left(1.0 + \frac{1000.0}{G + 10.0}\right)}{1.0 + 1000.0 \cdot theta}
+$$
+_Resistance to buoyant-convection / hillside mixing (Wesely Eq. 5)._
+
+$$
+rluO_{dew} = \frac{1.0}{\frac{1.0}{3000.0} + \frac{1.0}{3 \cdot r_{lu\,val}}}
+$$
+_O3 outer-surface (cuticle) resistance under dew (Wesely Eq. 11)._
+
+$$
+rluO_{rain} = \frac{1.0}{\frac{1.0}{1000.0} + \frac{1.0}{3 \cdot r_{lu\,val}}}
+$$
+_O3 outer-surface (cuticle) resistance under rain (Wesely Eq. 13)._
+
+$$
+rlux_{dew} = \mathrm{ifelse}\left(\mathrm{>}\left(isSO2, 0.5\right), \mathrm{ifelse}\left(iLandUse = 1, 50.0, 100.0\right), \mathrm{ifelse}\left(\mathrm{>}\left(isO3, 0.5\right), rluO_{dew}, \frac{1.0}{\frac{1.0}{\frac{3 \cdot r_{lu\,val}}{1 \times 10^{-5} \cdot Hstar + Fo}} + 1 \times 10^{-7} \cdot Hstar + \frac{Fo}{rluO_{dew}}}\right)\right)
+$$
+_Upper-canopy leaf-cuticle resistance assuming dew is active (Wesely Eqs. 10, 11, 14)._
+
+$$
+rlux_{rain} = \mathrm{ifelse}\left(\mathrm{>}\left(isSO2, 0.5\right), \mathrm{ifelse}\left(iLandUse = 1, 50.0, \frac{1.0}{\frac{1.0}{5000.0} + \frac{1.0}{3 \cdot r_{lu\,val}}}\right), \mathrm{ifelse}\left(\mathrm{>}\left(isO3, 0.5\right), rluO_{rain}, \frac{1.0}{\frac{1.0}{\frac{3 \cdot r_{lu\,val}}{1 \times 10^{-5} \cdot Hstar + Fo}} + 1 \times 10^{-7} \cdot Hstar + \frac{Fo}{rluO_{rain}}}\right)\right)
+$$
+_Upper-canopy leaf-cuticle resistance assuming rain is active (Wesely Eqs. 12, 13, 14)._
+
+$$
+rlux_{dry} = \frac{r_{lu\,val}}{1 \times 10^{-5} \cdot Hstar + Fo}
+$$
+_Upper-canopy leaf-cuticle resistance for dry surfaces (Wesely Eq. 7)._
+
+$$
+rlux = \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(dew, 0.5\right), \mathrm{!=}\left(iSeason, 4\right)\right), rlux_{dew}, \mathrm{ifelse}\left(\mathrm{and}\left(\mathrm{>}\left(rain, 0.5\right), \mathrm{!=}\left(iSeason, 4\right)\right), rlux_{rain}, rlux_{dry}\right)\right)
+$$
+_Selected upper-canopy leaf-cuticle resistance (dew, then rain, else dry; dew/rain ignored in winter)._
+
+$$
+r_{clx\,gen} = \frac{1.0}{\frac{Hstar}{100000.0 \cdot r_{clS\,val}} + \frac{Fo}{r_{clO\,val}}}
+$$
+_Lower-canopy resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 8)._
+
+$$
+r_{gsx\,gen} = \frac{1.0}{\frac{Hstar}{100000.0 \cdot r_{gsS\,val}} + \frac{Fo}{r_{gsO\,val}}}
+$$
+_Ground-uptake resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 9)._
+
+$$
+rclx = \mathrm{ifelse}\left(\mathrm{>}\left(isSO2, 0.5\right), r_{clS\,val}, \mathrm{ifelse}\left(\mathrm{>}\left(isO3, 0.5\right), r_{clO\,val}, r_{clx\,gen}\right)\right)
+$$
+_Selected lower-canopy resistance (r_clS for SO2, r_clO for O3, else r_clx_gen), before the cold-temperature correction._
+
+$$
+rgsx = \mathrm{ifelse}\left(\mathrm{>}\left(isSO2, 0.5\right), r_{gsS\,val}, \mathrm{ifelse}\left(\mathrm{>}\left(isO3, 0.5\right), r_{gsO\,val}, r_{gsx\,gen}\right)\right)
+$$
+_Selected ground-uptake resistance (r_gsS for SO2, r_gsO for O3, else r_gsx_gen), before the cold-temperature correction._
+
+$$
+correction = \mathrm{wesely_cold_correction}\left(T_{c}=Ts\right)
+$$
+_Cold-temperature additive correction applied to rlux, rclx and rgsx (Wesely p.4): 1000 s/m * exp(-Ts/(1 degC) - 4) when Ts < 0 degC, else 0. Defined by the wesely_cold_correction template of resistance_templates.esm._
+
+$$
+r_{c} = \mathrm{min}\left(\mathrm{max}\left(\frac{1.0}{\frac{1.0}{rsmx} + \frac{1.0}{rlux + correction} + \frac{1.0}{rdc + rclx + correction} + \frac{1.0}{r_{ac\,val} + rgsx + correction}}, 10.0\right), 9999.0\right)
+$$
+_Total bulk surface (canopy) resistance to dry deposition (Wesely Eq. 2), clamped to [10, 9999] s/m._
+
+## Analyses
+
+### resistance_vs_solar_irradiation
+
+Surface resistance r_c as a function of solar irradiation G for SO2 over a midsummer deciduous forest (Ts=25 degC, dry, flat terrain). Brighter light opens stomata and lowers the stomatal pathway resistance, so r_c falls as G increases.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `G`
+
+### resistance_over_season_and_light
+
+Surface resistance r_c for SO2 over a deciduous forest as a joint function of solar irradiation G and the Wesely season index (1 midsummer through 5 transitional spring). Surfaces how the season-dependent lookup tables and the light-driven stomatal pathway together set r_c.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `G`, `iSeason`
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "./resistance_templates.esm"
+    }
+  ],
+  "reference": {
+    "doi": "10.1016/0004-6981(89)90153-4",
+    "citation": "Wesely, M. L. (1989). Parameterization of surface resistances to gaseous dry deposition in regional-scale numerical models. Atmospheric Environment 23(6), 1293-1304.",
+    "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/wesley1989.jl:360\n\nUpstream `WesleySurfaceResistance` is a plain Julia builder function (not an MTK @component): the low-level surface-resistance kernel called by DryDepGas in src/dry_deposition.jl. It is migrated here as a standalone, fully-explicit algebraic model. The three GasData struct fields (Dh2oPerDx, Hstar, Fo) and the nine scalar arguments (G, Ts, theta, iSeason, iLandUse, rain, dew, isSO2, isO3) become `parameter`s; every intermediate resistance and the total r_c become algebraic `state` outputs fixed by explicit equations. There are no differential states, so `system_kind` is left unset (the triangular-algebraic convention of the sibling observed-only migrations, e.g. sp_ch1/barometric.esm).\n\nLookup tables. The seven season x land-use tables (r_i, r_lu, r_ac, r_gsS, r_gsO, r_clS, r_clO) are migrated as `interp.linear` over the 55-entry column-major flattening of each 5x11 grid, on the integer axis [1..55], evaluated at table_index = (iLandUse-1)*5 + iSeason. This mirrors upstream `obtain_value`, which builds a 1-D DataInterpolations.LinearInterpolation over `vec(matrix)` (Julia's column-major flatten) on the index range 1:55 and evaluates it at that same coordinate. iSeason in 1..5 and iLandUse in 1..11 are categorical integers, so every lookup lands exactly on an integer axis knot — interp.linear returns the exact table entry with a zero blend weight, bit-identical to the upstream interpolation. (A 2-D interp.bilinear form over the 5x11 grid was rejected: at a query on the upper season edge its w=1 endpoint blend t_i + 1*(t_{i+1} - t_i) catastrophically cancels when the lower cell corner is the 1e25 sentinel — e.g. 1e25 + (4000 - 1e25) = 0 — whereas the 1-D flatten is always queried at an integer knot, w=0, and never cancels.)\n\nFloat32 tables. The upstream tables are `SA_F32` (Float32) static arrays, so each entry is stored as its exact Float64-promoted Float32 value to reproduce upstream arithmetic. In practice only the sentinel `inf = 1e25` is inexact in Float32 — Float64(Float32(1e25)) = 9.999999562023526e24; every other table entry is an integer <= 9000 and is exact in Float32.\n\nFaithful-behavior note. Upstream `r_s` assigns `rs = ifelse(Ts >= 39.9, inf, ...)` and then immediately overwrites `rs = ifelse(Ts <= 0.1, inf, ...)`; the first assignment is dead code. The migrated `rs` equation reproduces the actual upstream behavior — only the Ts <= 0.1 guard — and intentionally does not migrate the unreachable Ts >= 39.9 case. The `1.0e25` literal inside the `rs` ifelse is the upstream Float64 `inf` constant and is distinct from the Float32 table sentinel. The boolean arguments rain, dew, isSO2 and isO3 are 0/1 parameters; conditions test them as `> 0.5`.\n\nDomain note. For water (iLandUse=7, every season) and non-winter wetland (iLandUse=9, iSeason != 4) the r_gsS ground-resistance table entry is 0, so the general-gas ground term Hstar/(1e5*r_gsS_val) of Wesely Eq. 9 is infinite. Upstream Julia evaluates that as Inf — giving r_gsx_gen = 0 (an infinitely fast ground sink) and r_c clamped to its 10 s/m floor — whereas the ESS Python runner's strict float division raises on it. The migrated equation keeps the faithful Eq. 9 form, so 51 of the 55 (season, land-use) cells are directly evaluable by the Python runner; the four water/wetland cells need a binding whose division yields Inf rather than raising. Inline tests use vegetated and urban land uses (iLandUse in {1, 3, 4, 5, 6}), matching the upstream wesely1989_test.jl TestWesely suite, which fixes iLandUse=4 throughout.\n\nTolerance rationale (model-level rel=1e-6): an explicit algebraic system with no ODE integration; 1e-6 covers Float64 round-off across the resistance expression chain (reciprocal sums, the exp() cold correction, and the interp.linear table lookups), well above the bit-level agreement expected between bindings."
+  },
+  "tolerance": {
+    "rel": 1e-06
+  },
+  "variables": {
+    "Dh2oPerDx": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.9,
+      "description": "Ratio of the molecular diffusivity of water vapor to that of the gas of interest (Wesely 1989 Table 2, D_H2O/D_x). Default: SO2."
+    },
+    "Hstar": {
+      "type": "parameter",
+      "units": "1",
+      "default": 100000.0,
+      "description": "Effective Henry's-law solubility coefficient of the gas [M atm^-1] (Wesely 1989 Table 2, H*). Default: SO2."
+    },
+    "Fo": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Chemical reactivity factor of the gas [-] (Wesely 1989 Table 2, f0; 0, 0.1 or 1). Default: SO2."
+    },
+    "G": {
+      "type": "parameter",
+      "units": "W/m^2",
+      "default": 300.0,
+      "description": "Solar (global) irradiation reaching the surface."
+    },
+    "Ts": {
+      "type": "parameter",
+      "units": "degC",
+      "default": 25.0,
+      "description": "Surface air temperature."
+    },
+    "theta": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.0,
+      "description": "Slope of the local terrain (Wesely 1989 Eq. 5; the source argument theta)."
+    },
+    "iSeason": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1,
+      "description": "Season index 1-5: 1 midsummer, 2 autumn, 3 late autumn, 4 winter, 5 transitional spring. Default: midsummer."
+    },
+    "iLandUse": {
+      "type": "parameter",
+      "units": "1",
+      "default": 4,
+      "description": "Land-use index 1-11: 1 urban, 2 agricultural, 3 range, 4 deciduous forest, 5 coniferous forest, 6 mixed forest, 7 water, 8 barren, 9 wetland, 10 mixed agricultural/range, 11 rocky shrubland. Default: deciduous forest."
+    },
+    "rain": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0,
+      "description": "Surface-wetness flag: 1 if rain is present, 0 otherwise."
+    },
+    "dew": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0,
+      "description": "Surface-wetness flag: 1 if dew is present, 0 otherwise."
+    },
+    "isSO2": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1,
+      "description": "Species flag: 1 if the gas of interest is SO2, 0 otherwise. Default: SO2."
+    },
+    "isO3": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0,
+      "description": "Species flag: 1 if the gas of interest is O3, 0 otherwise."
+    },
+    "table_index": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Flattened (column-major) lookup coordinate into the 55-entry Wesely season x land-use tables: (iLandUse-1)*5 + iSeason."
+    },
+    "r_i_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Minimum bulk-canopy stomatal resistance for water vapor (Wesely table r_i) at this season/land-use."
+    },
+    "r_lu_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Outer-upper-canopy / leaf-cuticle reference resistance (Wesely table r_lu) at this season/land-use."
+    },
+    "r_ac_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "In-canopy aerodynamic resistance (Wesely table r_ac) at this season/land-use."
+    },
+    "r_gsS_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground (soil/litter/snow/water) SO2 uptake resistance (Wesely table r_gsS) at this season/land-use."
+    },
+    "r_gsO_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground (soil/litter/snow/water) O3 uptake resistance (Wesely table r_gsO) at this season/land-use."
+    },
+    "r_clS_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy SO2 uptake resistance (Wesely table r_clS) at this season/land-use."
+    },
+    "r_clO_val": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy O3 uptake resistance (Wesely table r_clO) at this season/land-use."
+    },
+    "rs": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Bulk-canopy stomatal resistance (Wesely Eq. 3), tripled when rain or dew is present. The dry-surface value is the wesely_stomatal_resistance template of resistance_templates.esm."
+    },
+    "rmx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Mesophyll resistance (Wesely Eq. 6)."
+    },
+    "rsmx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Combined minimum stomatal + mesophyll resistance (Wesely Eq. 4)."
+    },
+    "rdc": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Resistance to buoyant-convection / hillside mixing (Wesely Eq. 5)."
+    },
+    "rluO_dew": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "O3 outer-surface (cuticle) resistance under dew (Wesely Eq. 11)."
+    },
+    "rluO_rain": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "O3 outer-surface (cuticle) resistance under rain (Wesely Eq. 13)."
+    },
+    "rlux_dew": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Upper-canopy leaf-cuticle resistance assuming dew is active (Wesely Eqs. 10, 11, 14)."
+    },
+    "rlux_rain": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Upper-canopy leaf-cuticle resistance assuming rain is active (Wesely Eqs. 12, 13, 14)."
+    },
+    "rlux_dry": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Upper-canopy leaf-cuticle resistance for dry surfaces (Wesely Eq. 7)."
+    },
+    "rlux": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Selected upper-canopy leaf-cuticle resistance (dew, then rain, else dry; dew/rain ignored in winter)."
+    },
+    "r_clx_gen": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Lower-canopy resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 8)."
+    },
+    "r_gsx_gen": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Ground-uptake resistance for a general gas, i.e. neither SO2 nor O3 (Wesely Eq. 9)."
+    },
+    "rclx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Selected lower-canopy resistance (r_clS for SO2, r_clO for O3, else r_clx_gen), before the cold-temperature correction."
+    },
+    "rgsx": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Selected ground-uptake resistance (r_gsS for SO2, r_gsO for O3, else r_gsx_gen), before the cold-temperature correction."
+    },
+    "correction": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Cold-temperature additive correction applied to rlux, rclx and rgsx (Wesely p.4): 1000 s/m * exp(-Ts/(1 degC) - 4) when Ts < 0 degC, else 0. Defined by the wesely_cold_correction template of resistance_templates.esm."
+    },
+    "r_c": {
+      "type": "unknown",
+      "units": "s/m",
+      "description": "Total bulk surface (canopy) resistance to dry deposition (Wesely Eq. 2), clamped to [10, 9999] s/m."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "table_index",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "-",
+                "args": [
+                  "iLandUse",
+                  1
+                ]
+              },
+              5
+            ]
+          },
+          "iSeason"
+        ]
+      }
+    },
+    {
+      "lhs": "r_i_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              60.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              120.0,
+              120.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              240.0,
+              70.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              140.0,
+              130.0,
+              250.0,
+              250.0,
+              400.0,
+              250.0,
+              100.0,
+              500.0,
+              500.0,
+              800.0,
+              190.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              80.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              160.0,
+              100.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              200.0,
+              150.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              300.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_lu_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              2000.0,
+              9000.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9.999999562023526e+24,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9.999999562023526e+24,
+              4000.0,
+              2000.0,
+              4000.0,
+              4000.0,
+              6000.0,
+              2000.0,
+              2000.0,
+              8000.0,
+              8000.0,
+              9000.0,
+              3000.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              2500.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              4000.0,
+              4000.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              8000.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_ac_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              100.0,
+              200.0,
+              150.0,
+              10.0,
+              10.0,
+              50.0,
+              100.0,
+              100.0,
+              100.0,
+              10.0,
+              80.0,
+              2000.0,
+              1500.0,
+              1000.0,
+              1000.0,
+              1200.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              1700.0,
+              1500.0,
+              1500.0,
+              1500.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              300.0,
+              200.0,
+              100.0,
+              50.0,
+              200.0,
+              150.0,
+              120.0,
+              50.0,
+              10.0,
+              60.0,
+              200.0,
+              140.0,
+              120.0,
+              50.0,
+              120.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_gsS_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              400.0,
+              400.0,
+              400.0,
+              100.0,
+              500.0,
+              150.0,
+              200.0,
+              150.0,
+              100.0,
+              150.0,
+              350.0,
+              350.0,
+              350.0,
+              100.0,
+              350.0,
+              500.0,
+              500.0,
+              500.0,
+              100.0,
+              500.0,
+              500.0,
+              500.0,
+              500.0,
+              100.0,
+              500.0,
+              100.0,
+              100.0,
+              200.0,
+              100.0,
+              200.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              0.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              0.0,
+              0.0,
+              0.0,
+              100.0,
+              0.0,
+              220.0,
+              300.0,
+              200.0,
+              100.0,
+              250.0,
+              40.0,
+              400.0,
+              400.0,
+              50.0,
+              40.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_gsO_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              300.0,
+              300.0,
+              300.0,
+              600.0,
+              300.0,
+              150.0,
+              150.0,
+              150.0,
+              3500.0,
+              150.0,
+              200.0,
+              200.0,
+              200.0,
+              3500.0,
+              200.0,
+              200.0,
+              200.0,
+              200.0,
+              3500.0,
+              200.0,
+              200.0,
+              200.0,
+              200.0,
+              3500.0,
+              200.0,
+              300.0,
+              300.0,
+              300.0,
+              3500.0,
+              300.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              2000.0,
+              400.0,
+              400.0,
+              400.0,
+              400.0,
+              400.0,
+              1000.0,
+              800.0,
+              1000.0,
+              3500.0,
+              1000.0,
+              180.0,
+              180.0,
+              180.0,
+              3500.0,
+              180.0,
+              200.0,
+              200.0,
+              20.0,
+              3500.0,
+              200.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_clS_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              2000.0,
+              9000.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9.999999562023526e+24,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              4000.0,
+              2000.0,
+              2000.0,
+              3000.0,
+              200.0,
+              2000.0,
+              2000.0,
+              4000.0,
+              6000.0,
+              400.0,
+              3000.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              2500.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              4000.0,
+              2000.0,
+              9000.0,
+              9000.0,
+              9.999999562023526e+24,
+              4000.0,
+              4000.0,
+              9000.0,
+              9000.0,
+              9000.0,
+              8000.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "r_clO_val",
+      "rhs": {
+        "op": "fn",
+        "name": "interp.linear",
+        "args": [
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              1000.0,
+              400.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              400.0,
+              400.0,
+              1000.0,
+              500.0,
+              1000.0,
+              400.0,
+              400.0,
+              400.0,
+              500.0,
+              1000.0,
+              1000.0,
+              1000.0,
+              1500.0,
+              1500.0,
+              1000.0,
+              600.0,
+              600.0,
+              600.0,
+              700.0,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              9.999999562023526e+24,
+              1000.0,
+              400.0,
+              800.0,
+              800.0,
+              600.0,
+              1000.0,
+              400.0,
+              600.0,
+              1000.0,
+              800.0,
+              1000.0,
+              400.0,
+              600.0,
+              800.0,
+              800.0
+            ]
+          },
+          {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25,
+              26,
+              27,
+              28,
+              29,
+              30,
+              31,
+              32,
+              33,
+              34,
+              35,
+              36,
+              37,
+              38,
+              39,
+              40,
+              41,
+              42,
+              43,
+              44,
+              45,
+              46,
+              47,
+              48,
+              49,
+              50,
+              51,
+              52,
+              53,
+              54,
+              55
+            ]
+          },
+          "table_index"
+        ]
+      }
+    },
+    {
+      "lhs": "rs",
+      "rhs": {
+        "op": "*",
+        "args": [
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "wesely_stomatal_resistance",
+            "bindings": {
+              "r_i": "r_i_val",
+              "G": "G",
+              "T_c": "Ts"
+            }
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "or",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "rain",
+                      0.5
+                    ]
+                  },
+                  {
+                    "op": ">",
+                    "args": [
+                      "dew",
+                      0.5
+                    ]
+                  }
+                ]
+              },
+              3.0,
+              1.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rmx",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.0,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "Hstar",
+                  3000.0
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  100.0,
+                  "Fo"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rsmx",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              "rs",
+              "Dh2oPerDx"
+            ]
+          },
+          "rmx"
+        ]
+      }
+    },
+    {
+      "lhs": "rdc",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "*",
+            "args": [
+              100.0,
+              {
+                "op": "+",
+                "args": [
+                  1.0,
+                  {
+                    "op": "/",
+                    "args": [
+                      1000.0,
+                      {
+                        "op": "+",
+                        "args": [
+                          "G",
+                          10.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "+",
+            "args": [
+              1.0,
+              {
+                "op": "*",
+                "args": [
+                  1000.0,
+                  "theta"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rluO_dew",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.0,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  3000.0
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "r_lu_val"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rluO_rain",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.0,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  1000.0
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "*",
+                    "args": [
+                      3,
+                      "r_lu_val"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_dew",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "isSO2",
+              0.5
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iLandUse",
+                  1
+                ]
+              },
+              50.0,
+              100.0
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "isO3",
+                  0.5
+                ]
+              },
+              "rluO_dew",
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  3,
+                                  "r_lu_val"
+                                ]
+                              },
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      1e-05,
+                                      "Hstar"
+                                    ]
+                                  },
+                                  "Fo"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          1e-07,
+                          "Hstar"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          "Fo",
+                          "rluO_dew"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_rain",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "isSO2",
+              0.5
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "==",
+                "args": [
+                  "iLandUse",
+                  1
+                ]
+              },
+              50.0,
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          5000.0
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "*",
+                            "args": [
+                              3,
+                              "r_lu_val"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "isO3",
+                  0.5
+                ]
+              },
+              "rluO_rain",
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "/",
+                            "args": [
+                              {
+                                "op": "*",
+                                "args": [
+                                  3,
+                                  "r_lu_val"
+                                ]
+                              },
+                              {
+                                "op": "+",
+                                "args": [
+                                  {
+                                    "op": "*",
+                                    "args": [
+                                      1e-05,
+                                      "Hstar"
+                                    ]
+                                  },
+                                  "Fo"
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "*",
+                        "args": [
+                          1e-07,
+                          "Hstar"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          "Fo",
+                          "rluO_rain"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux_dry",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "r_lu_val",
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  1e-05,
+                  "Hstar"
+                ]
+              },
+              "Fo"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rlux",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "and",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "dew",
+                  0.5
+                ]
+              },
+              {
+                "op": "!=",
+                "args": [
+                  "iSeason",
+                  4
+                ]
+              }
+            ]
+          },
+          "rlux_dew",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": "and",
+                "args": [
+                  {
+                    "op": ">",
+                    "args": [
+                      "rain",
+                      0.5
+                    ]
+                  },
+                  {
+                    "op": "!=",
+                    "args": [
+                      "iSeason",
+                      4
+                    ]
+                  }
+                ]
+              },
+              "rlux_rain",
+              "rlux_dry"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "r_clx_gen",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.0,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "Hstar",
+                  {
+                    "op": "*",
+                    "args": [
+                      100000.0,
+                      "r_clS_val"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "Fo",
+                  "r_clO_val"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "r_gsx_gen",
+      "rhs": {
+        "op": "/",
+        "args": [
+          1.0,
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "Hstar",
+                  {
+                    "op": "*",
+                    "args": [
+                      100000.0,
+                      "r_gsS_val"
+                    ]
+                  }
+                ]
+              },
+              {
+                "op": "/",
+                "args": [
+                  "Fo",
+                  "r_gsO_val"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rclx",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "isSO2",
+              0.5
+            ]
+          },
+          "r_clS_val",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "isO3",
+                  0.5
+                ]
+              },
+              "r_clO_val",
+              "r_clx_gen"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "rgsx",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": ">",
+            "args": [
+              "isSO2",
+              0.5
+            ]
+          },
+          "r_gsS_val",
+          {
+            "op": "ifelse",
+            "args": [
+              {
+                "op": ">",
+                "args": [
+                  "isO3",
+                  0.5
+                ]
+              },
+              "r_gsO_val",
+              "r_gsx_gen"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "correction",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "wesely_cold_correction",
+        "bindings": {
+          "T_c": "Ts"
+        }
+      }
+    },
+    {
+      "lhs": "r_c",
+      "rhs": {
+        "op": "min",
+        "args": [
+          {
+            "op": "max",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  1.0,
+                  {
+                    "op": "+",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "rsmx"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "+",
+                            "args": [
+                              "rlux",
+                              "correction"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "+",
+                            "args": [
+                              "rdc",
+                              "rclx",
+                              "correction"
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          {
+                            "op": "+",
+                            "args": [
+                              "r_ac_val",
+                              "rgsx",
+                              "correction"
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              10.0
+            ]
+          },
+          9999.0
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_midsummer_so2",
+      "description": "Default case: SO2 over a midsummer deciduous forest, G=300 W/m^2, Ts=25 degC, dry, flat terrain. This is the (iSeason=1, iLandUse=4, G=300) cell of the upstream TestWesely SO2 sweep; Wesely (1989) Table 3 / Walmsley (1996) Table 1 list ~160 s/m there, and the exact algorithm value asserted here is within that table's stated tolerance. Pins every sub-resistance along all three deposition pathways.",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.9,
+        "Hstar": 100000.0,
+        "Fo": 0.0,
+        "G": 300.0,
+        "Ts": 25.0,
+        "theta": 0.0,
+        "iSeason": 1,
+        "iLandUse": 4,
+        "rain": 0,
+        "dew": 0,
+        "isSO2": 1,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "table_index",
+          "time": 0.0,
+          "expected": 16.0
+        },
+        {
+          "variable": "r_i_val",
+          "time": 0.0,
+          "expected": 70.0
+        },
+        {
+          "variable": "r_lu_val",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "r_ac_val",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "r_gsS_val",
+          "time": 0.0,
+          "expected": 500.0
+        },
+        {
+          "variable": "r_clS_val",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rs",
+          "time": 0.0,
+          "expected": 107.63171856086944
+        },
+        {
+          "variable": "rmx",
+          "time": 0.0,
+          "expected": 0.03
+        },
+        {
+          "variable": "rsmx",
+          "time": 0.0,
+          "expected": 204.53026526565193
+        },
+        {
+          "variable": "rdc",
+          "time": 0.0,
+          "expected": 422.5806451612903
+        },
+        {
+          "variable": "rlux_dry",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 500.0
+        },
+        {
+          "variable": "correction",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 161.2374025290373
+        }
+      ]
+    },
+    {
+      "id": "upstream_reference_point",
+      "description": "The exact-value assertion from AtmosphericDeposition.jl's wesely1989_test.jl: WesleySurfaceResistance(So2Data, 1, 1, 1, 1, 1, rain=true, dew=true, isSO2=true, isO3=false) = 45.45454545454546 s/m. Dew is active and the land use is urban (iLandUse=1), so the leaf-cuticle resistance collapses to 50 s/m; rs is the upstream r_s(1,1,1,1,true) = 3.0772306344553016e30 reference value.",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.9,
+        "Hstar": 100000.0,
+        "Fo": 0.0,
+        "G": 1.0,
+        "Ts": 1.0,
+        "theta": 1.0,
+        "iSeason": 1,
+        "iLandUse": 1,
+        "rain": 1,
+        "dew": 1,
+        "isSO2": 1,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rs",
+          "time": 0.0,
+          "expected": 3.0772306344553016e+30
+        },
+        {
+          "variable": "rmx",
+          "time": 0.0,
+          "expected": 0.03
+        },
+        {
+          "variable": "rsmx",
+          "time": 0.0,
+          "expected": 5.846738205465072e+30
+        },
+        {
+          "variable": "rdc",
+          "time": 0.0,
+          "expected": 9.181727363545544
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 50.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 45.45454545454546
+        }
+      ]
+    },
+    {
+      "id": "ozone_coniferous_summer",
+      "description": "Ozone over a coniferous forest in midsummer, dry, G=500 W/m^2, Ts=20 degC. Exercises the isO3 branch: the lower-canopy and ground resistances select the O3 tables (r_clO, r_gsO) and the leaf cuticle uses the dry-surface form (Eq. 7).",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.6,
+        "Hstar": 0.01,
+        "Fo": 1.0,
+        "G": 500.0,
+        "Ts": 20.0,
+        "theta": 0.0,
+        "iSeason": 1,
+        "iLandUse": 5,
+        "rain": 0,
+        "dew": 0,
+        "isSO2": 0,
+        "isO3": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "r_clO_val",
+          "time": 0.0,
+          "expected": 1000.0
+        },
+        {
+          "variable": "r_gsO_val",
+          "time": 0.0,
+          "expected": 200.0
+        },
+        {
+          "variable": "rlux_dry",
+          "time": 0.0,
+          "expected": 1999.9998000000198
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 1999.9998000000198
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 1000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 200.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 170.27724825587075
+        }
+      ]
+    },
+    {
+      "id": "ammonia_general_rain",
+      "description": "Ammonia (a general gas: neither SO2 nor O3) over rain-wetted range land in autumn, G=200 W/m^2, Ts=15 degC. Exercises the general-gas resistances (Eqs. 8 & 9) and the rain branch of the leaf-cuticle resistance (Eqs. 12-14).",
+      "parameter_overrides": {
+        "Dh2oPerDx": 0.97,
+        "Hstar": 20000.0,
+        "Fo": 0.0,
+        "G": 200.0,
+        "Ts": 15.0,
+        "theta": 0.0,
+        "iSeason": 2,
+        "iLandUse": 3,
+        "rain": 1,
+        "dew": 0,
+        "isSO2": 0,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "r_clx_gen",
+          "time": 0.0,
+          "expected": 45000.0
+        },
+        {
+          "variable": "r_gsx_gen",
+          "time": 0.0,
+          "expected": 1749.9999999999998
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 45000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 1749.9999999999998
+        },
+        {
+          "variable": "rluO_rain",
+          "time": 0.0,
+          "expected": 964.2857142857142
+        },
+        {
+          "variable": "rlux_rain",
+          "time": 0.0,
+          "expected": 498.1549815498155
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 498.1549815498155
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 389.12183013729054
+        }
+      ]
+    },
+    {
+      "id": "no2_general_dew",
+      "description": "Nitrogen dioxide (a general gas) over a dew-wetted mixed forest in late autumn, G=400 W/m^2, Ts=17 degC. Exercises the dew branch of the leaf-cuticle resistance for a non-SO2/non-O3 gas (Eq. 14 with the dew-form O3 reference resistance).",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.6,
+        "Hstar": 0.01,
+        "Fo": 0.1,
+        "G": 400.0,
+        "Ts": 17.0,
+        "theta": 0.0,
+        "iSeason": 3,
+        "iLandUse": 6,
+        "rain": 0,
+        "dew": 1,
+        "isSO2": 0,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rluO_dew",
+          "time": 0.0,
+          "expected": 2666.6666666666665
+        },
+        {
+          "variable": "rlux_dew",
+          "time": 0.0,
+          "expected": 23999.421613939103
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 23999.421613939103
+        },
+        {
+          "variable": "r_clx_gen",
+          "time": 0.0,
+          "expected": 5999.99940000006
+        },
+        {
+          "variable": "r_gsx_gen",
+          "time": 0.0,
+          "expected": 2999.9955000067494
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 5999.99940000006
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 2999.9955000067494
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 1337.4894564257415
+        }
+      ]
+    },
+    {
+      "id": "winter_cold_correction",
+      "description": "SO2 over a coniferous forest in winter (iSeason=4) with sub-freezing Ts=-5 degC and dew flagged. Two winter behaviors are pinned: dew and rain have no effect in winter (rlux falls through to the dry branch despite dew=1), and Ts<0 activates the cold-temperature correction added to rlux, rclx and rgsx.",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.9,
+        "Hstar": 100000.0,
+        "Fo": 0.0,
+        "G": 100.0,
+        "Ts": -5.0,
+        "theta": 0.0,
+        "iSeason": 4,
+        "iLandUse": 5,
+        "rain": 0,
+        "dew": 1,
+        "isSO2": 1,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "correction",
+          "time": 0.0,
+          "expected": 2718.2818284590453
+        },
+        {
+          "variable": "rs",
+          "time": 0.0,
+          "expected": 3.0000000000000005e+25
+        },
+        {
+          "variable": "rlux_dry",
+          "time": 0.0,
+          "expected": 6000.0
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 6000.0
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 200.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 100.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 1733.500306109259
+        }
+      ]
+    },
+    {
+      "id": "dew_so2_deciduous",
+      "description": "SO2 over a dew-wetted deciduous forest (iLandUse=4, not urban) in transitional spring. With dew active, isSO2 true and a non-urban land use, the leaf-cuticle resistance takes the constant 100 s/m value (Wesely Eq. 10).",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.9,
+        "Hstar": 100000.0,
+        "Fo": 0.0,
+        "G": 600.0,
+        "Ts": 22.0,
+        "theta": 0.0,
+        "iSeason": 5,
+        "iLandUse": 4,
+        "rain": 0,
+        "dew": 1,
+        "isSO2": 1,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rlux_dew",
+          "time": 0.0,
+          "expected": 100.0
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 100.0
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 4000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 500.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 83.75464865511395
+        }
+      ]
+    },
+    {
+      "id": "rain_o3_deciduous",
+      "description": "Ozone over a rain-wetted deciduous forest in autumn, G=350 W/m^2, Ts=12 degC. Exercises the rain branch of the leaf-cuticle resistance for O3 (Wesely Eq. 13): rlux selects the rain-form O3 cuticle resistance rluO_rain.",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.6,
+        "Hstar": 0.01,
+        "Fo": 1.0,
+        "G": 350.0,
+        "Ts": 12.0,
+        "theta": 0.0,
+        "iSeason": 2,
+        "iLandUse": 4,
+        "rain": 1,
+        "dew": 0,
+        "isSO2": 0,
+        "isO3": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rluO_rain",
+          "time": 0.0,
+          "expected": 964.2857142857142
+        },
+        {
+          "variable": "rlux_rain",
+          "time": 0.0,
+          "expected": 964.2857142857142
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 964.2857142857142
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 400.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 200.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 343.52614134502295
+        }
+      ]
+    },
+    {
+      "id": "rain_so2_range",
+      "description": "SO2 over rain-wetted range land (iLandUse=3, not urban) in midsummer. Exercises the rain + SO2 + non-urban leaf-cuticle branch (Wesely Eq. 12).",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.9,
+        "Hstar": 100000.0,
+        "Fo": 0.0,
+        "G": 450.0,
+        "Ts": 24.0,
+        "theta": 0.0,
+        "iSeason": 1,
+        "iLandUse": 3,
+        "rain": 1,
+        "dew": 0,
+        "isSO2": 1,
+        "isO3": 0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rlux_rain",
+          "time": 0.0,
+          "expected": 2727.272727272727
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 2727.272727272727
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 350.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 238.47984573096045
+        }
+      ]
+    },
+    {
+      "id": "dew_o3_mixed_forest",
+      "description": "Ozone over a dew-wetted mixed forest in midsummer, G=700 W/m^2, Ts=26 degC. Exercises the dew branch of the leaf-cuticle resistance for O3 (Wesely Eq. 11): rlux selects the dew-form O3 cuticle resistance rluO_dew.",
+      "parameter_overrides": {
+        "Dh2oPerDx": 1.6,
+        "Hstar": 0.01,
+        "Fo": 1.0,
+        "G": 700.0,
+        "Ts": 26.0,
+        "theta": 0.0,
+        "iSeason": 1,
+        "iLandUse": 6,
+        "rain": 0,
+        "dew": 1,
+        "isSO2": 0,
+        "isO3": 1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "rluO_dew",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rlux_dew",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rlux",
+          "time": 0.0,
+          "expected": 2000.0
+        },
+        {
+          "variable": "rclx",
+          "time": 0.0,
+          "expected": 1000.0
+        },
+        {
+          "variable": "rgsx",
+          "time": 0.0,
+          "expected": 300.0
+        },
+        {
+          "variable": "r_c",
+          "time": 0.0,
+          "expected": 286.22269447980483
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "resistance_vs_solar_irradiation",
+      "description": "Surface resistance r_c as a function of solar irradiation G for SO2 over a midsummer deciduous forest (Ts=25 degC, dry, flat terrain). Brighter light opens stomata and lowers the stomatal pathway resistance, so r_c falls as G increases.",
+      "initial_state": {},
+      "parameters": {
+        "Ts": 25.0,
+        "iSeason": 1,
+        "iLandUse": 4,
+        "isSO2": 1,
+        "isO3": 0,
+        "rain": 0,
+        "dew": 0,
+        "theta": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "G",
+            "range": {
+              "start": 0.0,
+              "stop": 1000.0,
+              "count": 21,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "rc_vs_G",
+          "type": "line",
+          "description": "Total surface resistance r_c versus solar irradiation G.",
+          "x": {
+            "variable": "G",
+            "label": "Solar irradiation (W/m^2)"
+          },
+          "y": {
+            "variable": "r_c",
+            "label": "Surface resistance r_c (s/m)"
+          }
+        }
+      ]
+    },
+    {
+      "id": "resistance_over_season_and_light",
+      "description": "Surface resistance r_c for SO2 over a deciduous forest as a joint function of solar irradiation G and the Wesely season index (1 midsummer through 5 transitional spring). Surfaces how the season-dependent lookup tables and the light-driven stomatal pathway together set r_c.",
+      "initial_state": {},
+      "parameters": {
+        "Ts": 20.0,
+        "iLandUse": 4,
+        "isSO2": 1,
+        "isO3": 0,
+        "rain": 0,
+        "dew": 0,
+        "theta": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "G",
+            "range": {
+              "start": 0.0,
+              "stop": 1000.0,
+              "count": 11,
+              "scale": "linear"
+            }
+          },
+          {
+            "parameter": "iSeason",
+            "range": {
+              "start": 1,
+              "stop": 5,
+              "count": 5,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "rc_heatmap",
+          "type": "heatmap",
+          "description": "Total surface resistance r_c over solar irradiation G and season index.",
+          "x": {
+            "variable": "G",
+            "label": "Solar irradiation (W/m^2)"
+          },
+          "y": {
+            "variable": "iSeason",
+            "label": "Season index"
+          },
+          "value": {
+            "variable": "r_c",
+            "reduce": "final"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

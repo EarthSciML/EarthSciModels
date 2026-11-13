@@ -1,0 +1,1025 @@
+---
+title: "CloudWaterProperties"
+slug: "cloudwaterproperties"
+domains: ["aerosol"]
+component_types: ["model"]
+subdomains: ["cloud_physics"]
+domain: "aerosol"
+subdomain: "cloud_physics"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/aerosol/cloud_physics/cloud_water_properties.esm"
+reference: "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Eq. 17.2 (specific heat of liquid water), Eq. 17.3 (latent heat of vaporization), Eq. 17.4 (latent heat of melting), Eq. 17.5 (surface tension of water), Table 17.2 (saturation vapor pressure over water and ice). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:15 (esm-8xa)."
+description: "Thermodynamic properties of water and aqueous solutions for cloud-physics calculations: temperature offset, specific heat of liquid water, latent heats of vaporization and melting, surface tension, and saturation vapor pressure over water and ice. Based on Seinfeld & Pandis (2006), Chapter 17, Equations 17.1–17.6 and Table 17.2. Migrated from Aerosol.jl src/cloud_physics.jl:15."
+tags: ["aerosol", "cloud_physics", "model", "water_properties", "thermodynamics", "saturation_vapor_pressure", "latent_heat", "surface_tension"]
+---
+
+## Description
+
+Thermodynamic properties of water and aqueous solutions for cloud-physics calculations: temperature offset, specific heat of liquid water, latent heats of vaporization and melting, surface tension, and saturation vapor pressure over water and ice. Based on Seinfeld & Pandis (2006), Chapter 17, Equations 17.1–17.6 and Table 17.2. Migrated from Aerosol.jl src/cloud_physics.jl:15.
+
+## Reference
+
+Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Eq. 17.2 (specific heat of liquid water), Eq. 17.3 (latent heat of vaporization), Eq. 17.4 (latent heat of melting), Eq. 17.5 (surface tension of water), Table 17.2 (saturation vapor pressure over water and ice). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:15 (esm-8xa).
+
+_source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:15
+
+Upstream `CloudWaterProperties` is an MTK `@component` with one `@parameters` entry (`T`, temperature in K, default 293.15 K) and 7 `@variables` — `T_C`, `c_pw`, `ΔH_v`, `ΔH_m`, `σ_w0`, `p_sat_water`, `p_sat_ice` — all algebraic (no `D()` time-derivative). Numerical constants from the upstream `@constants` block are carried as fixed-default parameters here (the .esm schema has no constant type). The upstream `T_unit = 1.0 K` normalization factor appears only as a divisor in polynomial arguments to make them dimensionless; since T_unit = 1.0, dividing by T_unit is numerically a no-op and is dropped in the ESM expressions — `T_C / T_unit` simplifies to `T_C`.
+
+Equations (S&P 2006, Ch. 17):
+  T_C         = T − T_ref                                                      [Eq. 17.1-style offset from 273.15 K]
+  c_pw        = cpw_base + cpw_c2*(T−T_cpw_ref)² + cpw_c4*(T−T_cpw_ref)⁴       [Eq. 17.2, valid 273 < T ≤ 308 K]
+  ΔH_v        = Hv_ref*(T_ref/T)^(Hv_exp_const + Hv_exp_coeff*T)               [Eq. 17.3, J/kg]
+  ΔH_m        = Hm_base + Hm_c1*T_C + Hm_c2*T_C²                               [Eq. 17.4, J/kg]
+  σ_w0        = sigma_base − sigma_coeff*T_C                                    [Eq. 17.5, N/m]
+  p_sat_water = Σ_{k=0}^{6} a_k_w * T_C^k                                      [Table 17.2, polynomial in T_C, Pa]
+  p_sat_ice   = Σ_{k=0}^{6} a_k_i * T_C^k                                      [Table 17.2, polynomial in T_C, Pa]
+
+Observed classification: all 7 variables are purely algebraic outputs of T; none has a `D()` time-derivative. After MTK `structural_simplify` the compiled system has zero ODE states and all become observed quantities. Serialized as `type: observed` with an `expression`, and the `equations` array is empty.
+
+Key physical interpretations:
+  c_pw reaches its minimum (~4174 J/kg/K) near 308 K (S&P Eq. 17.2 reference point). Standard value at 25°C is ~4182 J/kg/K.
+  ΔH_v decreases with temperature (warmer air requires less energy to vaporize water). At 0°C: exactly Hv_ref = 2.5e6 J/kg; at 20°C: ~2.452e6 J/kg.
+  ΔH_m linear in T_C at 0°C: 333.5 kJ/kg (standard latent heat of ice melting).
+  σ_w0 decreases linearly with T_C; at 20°C: 0.0730 N/m (S&P Table 17.1 gives 0.0728 N/m — the polynomial-fit value).
+  p_sat_water = 610.78 Pa at 0°C (≈6.11 mbar, the triple-point pressure), rising exponentially to ~2337 Pa at 20°C and ~4243 Pa at 30°C.
+  p_sat_ice < p_sat_water below 273.15 K (Bergeron-Findeisen effect: ice has lower saturation pressure than supercooled water). Both polynomials agree at T_C = 0 to within ~0.14 Pa.
+
+Evaluation order (acyclic): T → T_C; T → c_pw, ΔH_v; T_C → ΔH_m, σ_w0, p_sat_water, p_sat_ice.
+
+Tolerance rationale (model-level rel=1e-9): purely algebraic system with polynomial and power-law expressions. The most complex computation is the rational exponent in ΔH_v — a floating-point pow() call. Round-off is at ~1e-15 relative; rel=1e-9 leaves six orders of headroom, matching the sibling coagulation-rate and Köhler ESMs with comparable arithmetic depth._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T_ref` | `K` | `273.15` | Reference temperature 0°C = 273.15 K. Used to define T_C = T − T_ref and as the base-point temperature for ΔH_v (Hv_ref is the latent heat of vaporization at T_ref). Migrated from upstream @constants block. |
+| `T_cpw_ref` | `K` | `308.0` | Reference temperature for the c_pw correlation (Eq. 17.2): the polynomial (T − T_cpw_ref)² and (T − T_cpw_ref)⁴ is zero-centered at 308 K, where c_pw attains its minimum value cpw_base. Migrated from upstream @constants block. |
+| `a0_w` | `Pa` | `610.7799961` | Saturation vapor pressure over water polynomial constant term (Table 17.2). p_sat_water(T_C=0) = a0_w ≈ 610.78 Pa, matching the known triple-point pressure of water. |
+| `a1_w` | `Pa` | `44.36518521` | Saturation vapor pressure over water polynomial coefficient k=1 (Table 17.2). |
+| `a2_w` | `Pa` | `1.428945805` | Saturation vapor pressure over water polynomial coefficient k=2 (Table 17.2). |
+| `a3_w` | `Pa` | `0.02650648471` | Saturation vapor pressure over water polynomial coefficient k=3 (Table 17.2). |
+| `a4_w` | `Pa` | `0.0003031240396` | Saturation vapor pressure over water polynomial coefficient k=4 (Table 17.2). |
+| `a5_w` | `Pa` | `2.034080948e-06` | Saturation vapor pressure over water polynomial coefficient k=5 (Table 17.2). |
+| `a6_w` | `Pa` | `6.136820929e-09` | Saturation vapor pressure over water polynomial coefficient k=6 (Table 17.2). |
+| `a0_i` | `Pa` | `610.9177956` | Saturation vapor pressure over ice polynomial constant term (Table 17.2). p_sat_ice(T_C=0) = a0_i ≈ 610.92 Pa ≈ a0_w at the triple point. |
+| `a1_i` | `Pa` | `50.3469897` | Saturation vapor pressure over ice polynomial coefficient k=1 (Table 17.2). Larger than a1_w — ice saturation pressure has a steeper local slope at 0°C. |
+| `a2_i` | `Pa` | `1.886013408` | Saturation vapor pressure over ice polynomial coefficient k=2 (Table 17.2). |
+| `a3_i` | `Pa` | `0.04176223716` | Saturation vapor pressure over ice polynomial coefficient k=3 (Table 17.2). |
+| `a4_i` | `Pa` | `0.000582472028` | Saturation vapor pressure over ice polynomial coefficient k=4 (Table 17.2). |
+| `a5_i` | `Pa` | `4.838803174e-06` | Saturation vapor pressure over ice polynomial coefficient k=5 (Table 17.2). |
+| `a6_i` | `Pa` | `1.838826904e-08` | Saturation vapor pressure over ice polynomial coefficient k=6 (Table 17.2). |
+| `cpw_base` | `J/(kg*K)` | `4175.0` | Base specific heat of liquid water at T_cpw_ref = 308 K (Eq. 17.2). The minimum of the c_pw(T) parabolic fit, corresponding to 4.175 J/(g·K) in S&P. |
+| `cpw_c2` | `J/(kg*K)` | `0.013` | Quadratic coefficient for c_pw (Eq. 17.2). Original S&P value is 1.3×10⁻⁵ J/(g·K) = 0.013 J/(kg·K) after unit conversion. |
+| `cpw_c4` | `J/(kg*K)` | `1.6e-05` | Quartic coefficient for c_pw (Eq. 17.2). Original S&P value is 1.6×10⁻⁸ J/(g·K) = 1.6×10⁻⁵ J/(kg·K) after unit conversion. |
+| `Hv_ref` | `J/kg` | `2500000.0` | Latent heat of vaporization at the reference temperature T_ref = 273.15 K (Eq. 17.3). 2.5 kJ/g = 2.5×10⁶ J/kg. |
+| `Hv_exp_const` | `1` | `0.167` | Constant term in the exponent of the latent-heat-of-vaporization power law (Eq. 17.3, dimensionless). |
+| `Hv_exp_coeff` | `1/K` | `0.000367` | Linear coefficient in the exponent of the latent-heat-of-vaporization power law (Eq. 17.3). Hv_exp_coeff × T is dimensionless. |
+| `Hm_base` | `J/kg` | `333500.0` | Base latent heat of melting at 0°C (Eq. 17.4). 333.5 J/g = 3.335×10⁵ J/kg — the standard latent heat of ice fusion. |
+| `Hm_c1` | `J/kg` | `2030.0` | Linear temperature coefficient for latent heat of melting (Eq. 17.4). 2.03 J/(g·K) = 2030 J/(kg·K); ΔH_m increases with temperature. |
+| `Hm_c2` | `J/kg` | `-10.5` | Quadratic temperature coefficient for latent heat of melting (Eq. 17.4). −0.0105 J/(g·K²) = −10.5 J/(kg·K²); the negative sign causes ΔH_m to reach a maximum and then decrease at high temperatures. |
+| `sigma_base` | `N/m` | `0.0761` | Surface tension of pure water at 0°C (Eq. 17.5). Literature value at 0°C is ~0.0756 N/m; the polynomial-fit intercept is 0.0761 N/m. |
+| `sigma_coeff` | `N/(m*K)` | `0.000155` | Temperature coefficient of surface tension for water (Eq. 17.5). Surface tension decreases linearly with temperature above 0°C. At 20°C: σ_w0 = 0.0761 − 1.55×10⁻⁴×20 = 0.0730 N/m (cf. S&P Table 17.1: 0.0728 N/m). |
+| `T` | `K` | `293.15` | Air/droplet temperature. All thermodynamic water properties are evaluated at this temperature. Default 293.15 K (20°C), a typical cloud-base temperature. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `T_C` | `K` |  | Temperature offset from 273.15 K (0°C). T_C = T − T_ref. Used in the polynomial expressions for ΔH_m, σ_w0, p_sat_water, and p_sat_ice. At the standard default T = 293.15 K: T_C = 20.0 K. |
+| `c_pw` | `J/(kg*K)` |  | Specific heat of liquid water (S&P Eq. 17.2). c_pw = cpw_base + cpw_c2*(T−T_cpw_ref)² + cpw_c4*(T−T_cpw_ref)⁴, parabola-in-temperature fit valid 273 < T ≤ 308 K with minimum at T_cpw_ref = 308 K. At 20°C: ~4178.6 J/(kg·K); at 0°C: ~4214.4 J/(kg·K) (water is more structured and has higher specific heat near freezing). |
+| `ΔH_v` | `J/kg` |  | Latent heat of vaporization of water (S&P Eq. 17.3). ΔH_v = Hv_ref*(T_ref/T)^(Hv_exp_const + Hv_exp_coeff*T). Decreases with temperature: at T = T_ref (0°C) = Hv_ref = 2.5×10⁶ J/kg exactly; at 20°C: ~2.452×10⁶ J/kg; at 30°C: ~2.429×10⁶ J/kg. |
+| `ΔH_m` | `J/kg` |  | Latent heat of melting (ice fusion) of water (S&P Eq. 17.4). ΔH_m = Hm_base + Hm_c1*T_C + Hm_c2*T_C². At 0°C: 333500 J/kg (the standard latent heat of ice melting). Increases with T at moderate temperatures (Hm_c1 > 0) then decreases (Hm_c2 < 0). Physically meaningful for T near 273 K. |
+| `σ_w0` | `N/m` |  | Surface tension of pure water (S&P Eq. 17.5). σ_w0 = sigma_base − sigma_coeff*T_C. Decreases linearly with temperature above 0°C. At 0°C: 0.0761 N/m; at 20°C: 0.0730 N/m; at 30°C: 0.07145 N/m. Used in the Kelvin curvature coefficient for CCN activation. |
+| `p_sat_water` | `Pa` |  | Saturation vapor pressure over liquid water (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. At 0°C: 610.78 Pa (triple point); at 20°C: ~2337 Pa; at 30°C: ~4243 Pa. Valid range: 233–313 K. |
+| `p_sat_ice` | `Pa` |  | Saturation vapor pressure over ice (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. Below 273.15 K, p_sat_ice < p_sat_water — this difference drives the Bergeron-Findeisen ice crystal growth mechanism in mixed-phase clouds. At 0°C: 610.92 Pa (≈ p_sat_water at 0°C); at −20°C: ~103.2 Pa vs p_sat_water ~125.4 Pa. Valid range: 193–273 K. |
+
+## Observed expressions
+
+$$
+T_{C} = T - T_{ref}
+$$
+_Temperature offset from 273.15 K (0°C). T_C = T − T_ref. Used in the polynomial expressions for ΔH_m, σ_w0, p_sat_water, and p_sat_ice. At the standard default T = 293.15 K: T_C = 20.0 K._
+
+$$
+c_{pw} = cpw_{base} + cpw_{c2} \cdot \left(T - T_{cpw\,ref}\right)^{2} + cpw_{c4} \cdot \left(T - T_{cpw\,ref}\right)^{4}
+$$
+_Specific heat of liquid water (S&P Eq. 17.2). c_pw = cpw_base + cpw_c2*(T−T_cpw_ref)² + cpw_c4*(T−T_cpw_ref)⁴, parabola-in-temperature fit valid 273 < T ≤ 308 K with minimum at T_cpw_ref = 308 K. At 20°C: ~4178.6 J/(kg·K); at 0°C: ~4214.4 J/(kg·K) (water is more structured and has higher specific heat near freezing)._
+
+$$
+ΔH_{v} = Hv_{ref} \cdot \frac{T_{ref}}{T}^{Hv_{exp\,const} + Hv_{exp\,coeff} \cdot T}
+$$
+_Latent heat of vaporization of water (S&P Eq. 17.3). ΔH_v = Hv_ref*(T_ref/T)^(Hv_exp_const + Hv_exp_coeff*T). Decreases with temperature: at T = T_ref (0°C) = Hv_ref = 2.5×10⁶ J/kg exactly; at 20°C: ~2.452×10⁶ J/kg; at 30°C: ~2.429×10⁶ J/kg._
+
+$$
+ΔH_{m} = Hm_{base} + Hm_{c1} \cdot T_{C} + Hm_{c2} \cdot T_{C}^{2}
+$$
+_Latent heat of melting (ice fusion) of water (S&P Eq. 17.4). ΔH_m = Hm_base + Hm_c1*T_C + Hm_c2*T_C². At 0°C: 333500 J/kg (the standard latent heat of ice melting). Increases with T at moderate temperatures (Hm_c1 > 0) then decreases (Hm_c2 < 0). Physically meaningful for T near 273 K._
+
+$$
+σ_{w0} = sigma_{base} - sigma_{coeff} \cdot T_{C}
+$$
+_Surface tension of pure water (S&P Eq. 17.5). σ_w0 = sigma_base − sigma_coeff*T_C. Decreases linearly with temperature above 0°C. At 0°C: 0.0761 N/m; at 20°C: 0.0730 N/m; at 30°C: 0.07145 N/m. Used in the Kelvin curvature coefficient for CCN activation._
+
+$$
+p_{sat\,water} = 610.7799961 + 44.36518521 \cdot T_{C} + 1.428945805 \cdot T_{C}^{2} + 0.02650648471 \cdot T_{C}^{3} + 0.0003031240396 \cdot T_{C}^{4} + 2.034080948 \times 10^{-6} \cdot T_{C}^{5} + 6.136820929 \times 10^{-9} \cdot T_{C}^{6}
+$$
+_Saturation vapor pressure over liquid water (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. At 0°C: 610.78 Pa (triple point); at 20°C: ~2337 Pa; at 30°C: ~4243 Pa. Valid range: 233–313 K._
+
+$$
+p_{sat\,ice} = 610.9177956 + 50.3469897 \cdot T_{C} + 1.886013408 \cdot T_{C}^{2} + 0.04176223716 \cdot T_{C}^{3} + 0.000582472028 \cdot T_{C}^{4} + 4.838803174 \times 10^{-6} \cdot T_{C}^{5} + 1.838826904 \times 10^{-8} \cdot T_{C}^{6}
+$$
+_Saturation vapor pressure over ice (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. Below 273.15 K, p_sat_ice < p_sat_water — this difference drives the Bergeron-Findeisen ice crystal growth mechanism in mixed-phase clouds. At 0°C: 610.92 Pa (≈ p_sat_water at 0°C); at −20°C: ~103.2 Pa vs p_sat_water ~125.4 Pa. Valid range: 193–273 K._
+
+## Analyses
+
+### saturation_vapor_pressures
+
+Saturation vapor pressures over water and ice as a function of temperature (233–313 K). Both rise strongly with temperature following the Table 17.2 polynomials. Below 273.15 K, p_sat_ice < p_sat_water — the Bergeron-Findeisen difference. At 0°C they are nearly equal (~611 Pa). Above 273.15 K the ice polynomial is extrapolated beyond its valid range and is shown only for comparison.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![Saturation vapor pressure over water (p_sat_water) and ice (p_sat_ice) vs temperature T. Both curves are from S&P Table 17.2 polynomial fits. The Bergeron-Findeisen gap (p_sat_water > p_sat_ice) is visible below 273.15 K.](/plots/aerosol/cloud_physics/cloudwaterproperties/saturation_vapor_pressures-p_sat_vs_T.png)
+
+### thermodynamic_properties_vs_temperature
+
+Key thermodynamic properties — specific heat c_pw, latent heat of vaporization ΔH_v, surface tension σ_w0, and latent heat of melting ΔH_m — as functions of temperature from 253 to 313 K. Illustrates how all properties vary with cloud temperature, relevant for droplet growth, CCN activation, and ice nucleation parameterizations.
+
+**Time span:** 0.0 → 1.0
+
+**Swept over:** `T`
+
+![Latent heat of vaporization ΔH_v and latent heat of melting ΔH_m vs temperature. ΔH_v decreases with T; ΔH_m increases with T above 273 K (from S&P Eqs. 17.3 and 17.4).](/plots/aerosol/cloud_physics/cloudwaterproperties/thermodynamic_properties_vs_temperature-latent_heats_vs_T.png)
+
+![Specific heat of liquid water c_pw and surface tension σ_w0 vs temperature. c_pw has a minimum near 308 K; σ_w0 decreases linearly (from S&P Eqs. 17.2 and 17.5).](/plots/aerosol/cloud_physics/cloudwaterproperties/thermodynamic_properties_vs_temperature-c_pw_sigma_vs_T.png)
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "citation": "Seinfeld, J. H., and Pandis, S. N. (2006). Atmospheric Chemistry and Physics: From Air Pollution to Climate Change, 2nd Edition, John Wiley & Sons. Eq. 17.2 (specific heat of liquid water), Eq. 17.3 (latent heat of vaporization), Eq. 17.4 (latent heat of melting), Eq. 17.5 (surface tension of water), Table 17.2 (saturation vapor pressure over water and ice). Migrated from Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:15 (esm-8xa).",
+    "notes": "source_ref: Aerosol.jl@c8c640bb636b22f2425460e9ed5cba50793bfee1:src/cloud_physics.jl:15\n\nUpstream `CloudWaterProperties` is an MTK `@component` with one `@parameters` entry (`T`, temperature in K, default 293.15 K) and 7 `@variables` — `T_C`, `c_pw`, `ΔH_v`, `ΔH_m`, `σ_w0`, `p_sat_water`, `p_sat_ice` — all algebraic (no `D()` time-derivative). Numerical constants from the upstream `@constants` block are carried as fixed-default parameters here (the .esm schema has no constant type). The upstream `T_unit = 1.0 K` normalization factor appears only as a divisor in polynomial arguments to make them dimensionless; since T_unit = 1.0, dividing by T_unit is numerically a no-op and is dropped in the ESM expressions — `T_C / T_unit` simplifies to `T_C`.\n\nEquations (S&P 2006, Ch. 17):\n  T_C         = T − T_ref                                                      [Eq. 17.1-style offset from 273.15 K]\n  c_pw        = cpw_base + cpw_c2*(T−T_cpw_ref)² + cpw_c4*(T−T_cpw_ref)⁴       [Eq. 17.2, valid 273 < T ≤ 308 K]\n  ΔH_v        = Hv_ref*(T_ref/T)^(Hv_exp_const + Hv_exp_coeff*T)               [Eq. 17.3, J/kg]\n  ΔH_m        = Hm_base + Hm_c1*T_C + Hm_c2*T_C²                               [Eq. 17.4, J/kg]\n  σ_w0        = sigma_base − sigma_coeff*T_C                                    [Eq. 17.5, N/m]\n  p_sat_water = Σ_{k=0}^{6} a_k_w * T_C^k                                      [Table 17.2, polynomial in T_C, Pa]\n  p_sat_ice   = Σ_{k=0}^{6} a_k_i * T_C^k                                      [Table 17.2, polynomial in T_C, Pa]\n\nObserved classification: all 7 variables are purely algebraic outputs of T; none has a `D()` time-derivative. After MTK `structural_simplify` the compiled system has zero ODE states and all become observed quantities. Serialized as `type: observed` with an `expression`, and the `equations` array is empty.\n\nKey physical interpretations:\n  c_pw reaches its minimum (~4174 J/kg/K) near 308 K (S&P Eq. 17.2 reference point). Standard value at 25°C is ~4182 J/kg/K.\n  ΔH_v decreases with temperature (warmer air requires less energy to vaporize water). At 0°C: exactly Hv_ref = 2.5e6 J/kg; at 20°C: ~2.452e6 J/kg.\n  ΔH_m linear in T_C at 0°C: 333.5 kJ/kg (standard latent heat of ice melting).\n  σ_w0 decreases linearly with T_C; at 20°C: 0.0730 N/m (S&P Table 17.1 gives 0.0728 N/m — the polynomial-fit value).\n  p_sat_water = 610.78 Pa at 0°C (≈6.11 mbar, the triple-point pressure), rising exponentially to ~2337 Pa at 20°C and ~4243 Pa at 30°C.\n  p_sat_ice < p_sat_water below 273.15 K (Bergeron-Findeisen effect: ice has lower saturation pressure than supercooled water). Both polynomials agree at T_C = 0 to within ~0.14 Pa.\n\nEvaluation order (acyclic): T → T_C; T → c_pw, ΔH_v; T_C → ΔH_m, σ_w0, p_sat_water, p_sat_ice.\n\nTolerance rationale (model-level rel=1e-9): purely algebraic system with polynomial and power-law expressions. The most complex computation is the rational exponent in ΔH_v — a floating-point pow() call. Round-off is at ~1e-15 relative; rel=1e-9 leaves six orders of headroom, matching the sibling coagulation-rate and Köhler ESMs with comparable arithmetic depth."
+  },
+  "tolerance": {
+    "rel": 1e-09
+  },
+  "variables": {
+    "T_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 273.15,
+      "description": "Reference temperature 0°C = 273.15 K. Used to define T_C = T − T_ref and as the base-point temperature for ΔH_v (Hv_ref is the latent heat of vaporization at T_ref). Migrated from upstream @constants block."
+    },
+    "T_cpw_ref": {
+      "type": "parameter",
+      "units": "K",
+      "default": 308.0,
+      "description": "Reference temperature for the c_pw correlation (Eq. 17.2): the polynomial (T − T_cpw_ref)² and (T − T_cpw_ref)⁴ is zero-centered at 308 K, where c_pw attains its minimum value cpw_base. Migrated from upstream @constants block."
+    },
+    "a0_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 610.7799961,
+      "description": "Saturation vapor pressure over water polynomial constant term (Table 17.2). p_sat_water(T_C=0) = a0_w ≈ 610.78 Pa, matching the known triple-point pressure of water."
+    },
+    "a1_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 44.36518521,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=1 (Table 17.2)."
+    },
+    "a2_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.428945805,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=2 (Table 17.2)."
+    },
+    "a3_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.02650648471,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=3 (Table 17.2)."
+    },
+    "a4_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.0003031240396,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=4 (Table 17.2)."
+    },
+    "a5_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 2.034080948e-06,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=5 (Table 17.2)."
+    },
+    "a6_w": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 6.136820929e-09,
+      "description": "Saturation vapor pressure over water polynomial coefficient k=6 (Table 17.2)."
+    },
+    "a0_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 610.9177956,
+      "description": "Saturation vapor pressure over ice polynomial constant term (Table 17.2). p_sat_ice(T_C=0) = a0_i ≈ 610.92 Pa ≈ a0_w at the triple point."
+    },
+    "a1_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 50.3469897,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=1 (Table 17.2). Larger than a1_w — ice saturation pressure has a steeper local slope at 0°C."
+    },
+    "a2_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.886013408,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=2 (Table 17.2)."
+    },
+    "a3_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.04176223716,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=3 (Table 17.2)."
+    },
+    "a4_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 0.000582472028,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=4 (Table 17.2)."
+    },
+    "a5_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 4.838803174e-06,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=5 (Table 17.2)."
+    },
+    "a6_i": {
+      "type": "parameter",
+      "units": "Pa",
+      "default": 1.838826904e-08,
+      "description": "Saturation vapor pressure over ice polynomial coefficient k=6 (Table 17.2)."
+    },
+    "cpw_base": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 4175.0,
+      "description": "Base specific heat of liquid water at T_cpw_ref = 308 K (Eq. 17.2). The minimum of the c_pw(T) parabolic fit, corresponding to 4.175 J/(g·K) in S&P."
+    },
+    "cpw_c2": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 0.013,
+      "description": "Quadratic coefficient for c_pw (Eq. 17.2). Original S&P value is 1.3×10⁻⁵ J/(g·K) = 0.013 J/(kg·K) after unit conversion."
+    },
+    "cpw_c4": {
+      "type": "parameter",
+      "units": "J/(kg*K)",
+      "default": 1.6e-05,
+      "description": "Quartic coefficient for c_pw (Eq. 17.2). Original S&P value is 1.6×10⁻⁸ J/(g·K) = 1.6×10⁻⁵ J/(kg·K) after unit conversion."
+    },
+    "Hv_ref": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 2500000.0,
+      "description": "Latent heat of vaporization at the reference temperature T_ref = 273.15 K (Eq. 17.3). 2.5 kJ/g = 2.5×10⁶ J/kg."
+    },
+    "Hv_exp_const": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.167,
+      "description": "Constant term in the exponent of the latent-heat-of-vaporization power law (Eq. 17.3, dimensionless)."
+    },
+    "Hv_exp_coeff": {
+      "type": "parameter",
+      "units": "1/K",
+      "default": 0.000367,
+      "description": "Linear coefficient in the exponent of the latent-heat-of-vaporization power law (Eq. 17.3). Hv_exp_coeff × T is dimensionless."
+    },
+    "Hm_base": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 333500.0,
+      "description": "Base latent heat of melting at 0°C (Eq. 17.4). 333.5 J/g = 3.335×10⁵ J/kg — the standard latent heat of ice fusion."
+    },
+    "Hm_c1": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": 2030.0,
+      "description": "Linear temperature coefficient for latent heat of melting (Eq. 17.4). 2.03 J/(g·K) = 2030 J/(kg·K); ΔH_m increases with temperature."
+    },
+    "Hm_c2": {
+      "type": "parameter",
+      "units": "J/kg",
+      "default": -10.5,
+      "description": "Quadratic temperature coefficient for latent heat of melting (Eq. 17.4). −0.0105 J/(g·K²) = −10.5 J/(kg·K²); the negative sign causes ΔH_m to reach a maximum and then decrease at high temperatures."
+    },
+    "sigma_base": {
+      "type": "parameter",
+      "units": "N/m",
+      "default": 0.0761,
+      "description": "Surface tension of pure water at 0°C (Eq. 17.5). Literature value at 0°C is ~0.0756 N/m; the polynomial-fit intercept is 0.0761 N/m."
+    },
+    "sigma_coeff": {
+      "type": "parameter",
+      "units": "N/(m*K)",
+      "default": 0.000155,
+      "description": "Temperature coefficient of surface tension for water (Eq. 17.5). Surface tension decreases linearly with temperature above 0°C. At 20°C: σ_w0 = 0.0761 − 1.55×10⁻⁴×20 = 0.0730 N/m (cf. S&P Table 17.1: 0.0728 N/m)."
+    },
+    "T": {
+      "type": "parameter",
+      "units": "K",
+      "default": 293.15,
+      "description": "Air/droplet temperature. All thermodynamic water properties are evaluated at this temperature. Default 293.15 K (20°C), a typical cloud-base temperature."
+    },
+    "T_C": {
+      "type": "unknown",
+      "units": "K",
+      "description": "Temperature offset from 273.15 K (0°C). T_C = T − T_ref. Used in the polynomial expressions for ΔH_m, σ_w0, p_sat_water, and p_sat_ice. At the standard default T = 293.15 K: T_C = 20.0 K."
+    },
+    "c_pw": {
+      "type": "unknown",
+      "units": "J/(kg*K)",
+      "description": "Specific heat of liquid water (S&P Eq. 17.2). c_pw = cpw_base + cpw_c2*(T−T_cpw_ref)² + cpw_c4*(T−T_cpw_ref)⁴, parabola-in-temperature fit valid 273 < T ≤ 308 K with minimum at T_cpw_ref = 308 K. At 20°C: ~4178.6 J/(kg·K); at 0°C: ~4214.4 J/(kg·K) (water is more structured and has higher specific heat near freezing)."
+    },
+    "ΔH_v": {
+      "type": "unknown",
+      "units": "J/kg",
+      "description": "Latent heat of vaporization of water (S&P Eq. 17.3). ΔH_v = Hv_ref*(T_ref/T)^(Hv_exp_const + Hv_exp_coeff*T). Decreases with temperature: at T = T_ref (0°C) = Hv_ref = 2.5×10⁶ J/kg exactly; at 20°C: ~2.452×10⁶ J/kg; at 30°C: ~2.429×10⁶ J/kg."
+    },
+    "ΔH_m": {
+      "type": "unknown",
+      "units": "J/kg",
+      "description": "Latent heat of melting (ice fusion) of water (S&P Eq. 17.4). ΔH_m = Hm_base + Hm_c1*T_C + Hm_c2*T_C². At 0°C: 333500 J/kg (the standard latent heat of ice melting). Increases with T at moderate temperatures (Hm_c1 > 0) then decreases (Hm_c2 < 0). Physically meaningful for T near 273 K."
+    },
+    "σ_w0": {
+      "type": "unknown",
+      "units": "N/m",
+      "description": "Surface tension of pure water (S&P Eq. 17.5). σ_w0 = sigma_base − sigma_coeff*T_C. Decreases linearly with temperature above 0°C. At 0°C: 0.0761 N/m; at 20°C: 0.0730 N/m; at 30°C: 0.07145 N/m. Used in the Kelvin curvature coefficient for CCN activation."
+    },
+    "p_sat_water": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Saturation vapor pressure over liquid water (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. At 0°C: 610.78 Pa (triple point); at 20°C: ~2337 Pa; at 30°C: ~4243 Pa. Valid range: 233–313 K."
+    },
+    "p_sat_ice": {
+      "type": "unknown",
+      "units": "Pa",
+      "description": "Saturation vapor pressure over ice (S&P Table 17.2). 6th-degree polynomial in T_C = T − 273.15. Below 273.15 K, p_sat_ice < p_sat_water — this difference drives the Bergeron-Findeisen ice crystal growth mechanism in mixed-phase clouds. At 0°C: 610.92 Pa (≈ p_sat_water at 0°C); at −20°C: ~103.2 Pa vs p_sat_water ~125.4 Pa. Valid range: 193–273 K."
+    }
+  },
+  "equations": [
+    {
+      "lhs": "T_C",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "T",
+          "T_ref"
+        ]
+      }
+    },
+    {
+      "lhs": "c_pw",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "cpw_base",
+          {
+            "op": "*",
+            "args": [
+              "cpw_c2",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "T",
+                      "T_cpw_ref"
+                    ]
+                  },
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "cpw_c4",
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "-",
+                    "args": [
+                      "T",
+                      "T_cpw_ref"
+                    ]
+                  },
+                  4
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "ΔH_v",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "Hv_ref",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  "T_ref",
+                  "T"
+                ]
+              },
+              {
+                "op": "+",
+                "args": [
+                  "Hv_exp_const",
+                  {
+                    "op": "*",
+                    "args": [
+                      "Hv_exp_coeff",
+                      "T"
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "ΔH_m",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "Hm_base",
+          {
+            "op": "*",
+            "args": [
+              "Hm_c1",
+              "T_C"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              "Hm_c2",
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "σ_w0",
+      "rhs": {
+        "op": "-",
+        "args": [
+          "sigma_base",
+          {
+            "op": "*",
+            "args": [
+              "sigma_coeff",
+              "T_C"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "p_sat_water",
+      "rhs": {
+        "op": "+",
+        "args": [
+          610.7799961,
+          {
+            "op": "*",
+            "args": [
+              44.36518521,
+              "T_C"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.428945805,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.02650648471,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  3
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.0003031240396,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  4
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              2.034080948e-06,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  5
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              6.136820929e-09,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  6
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "p_sat_ice",
+      "rhs": {
+        "op": "+",
+        "args": [
+          610.9177956,
+          {
+            "op": "*",
+            "args": [
+              50.3469897,
+              "T_C"
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.886013408,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  2
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.04176223716,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  3
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              0.000582472028,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  4
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              4.838803174e-06,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  5
+                ]
+              }
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              1.838826904e-08,
+              {
+                "op": "^",
+                "args": [
+                  "T_C",
+                  6
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "tests": [
+    {
+      "id": "default_parameters",
+      "description": "All seven observables at the upstream default parameterization (T=293.15 K, 20°C). T_C=20.0 K; c_pw≈4178.6 J/(kg·K) (minimum near 308 K); ΔH_v≈2.452×10⁶ J/kg; ΔH_m=369900 J/kg; σ_w0=0.0730 N/m; p_sat_water≈2337.1 Pa (~23.4 mbar, well-known 20°C value); p_sat_ice extrapolated above 273.15 K (unphysical regime). System is time-invariant; same values at t=0 and t=1.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "T_C",
+          "time": 0.0,
+          "expected": 20.0
+        },
+        {
+          "variable": "T_C",
+          "time": 1.0,
+          "expected": 20.0
+        },
+        {
+          "variable": "c_pw",
+          "time": 0.0,
+          "expected": 4178.6448752681
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.0,
+          "expected": 2451959.663776183
+        },
+        {
+          "variable": "ΔH_m",
+          "time": 0.0,
+          "expected": 369900.0
+        },
+        {
+          "variable": "σ_w0",
+          "time": 0.0,
+          "expected": 0.073
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 0.0,
+          "expected": 2337.1155618890557
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 1.0,
+          "expected": 2337.1155618890557
+        }
+      ]
+    },
+    {
+      "id": "freezing_point",
+      "description": "T=273.15 K (0°C, the melting point of ice). T_C=0 so all T_C-linear terms vanish: ΔH_m = Hm_base = 333500 J/kg exactly; σ_w0 = sigma_base = 0.0761 N/m exactly. ΔH_v = Hv_ref*(T_ref/T_ref)^(...) = Hv_ref = 2.5×10⁶ J/kg exactly. p_sat_water = a0_w = 610.7799961 Pa and p_sat_ice = a0_i = 610.9177956 Pa — both equal to the triple-point pressure within ~0.14 Pa. c_pw reaches a local maximum near freezing (~4214.4 J/(kg·K)).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 273.15
+      },
+      "assertions": [
+        {
+          "variable": "T_C",
+          "time": 0.0,
+          "expected": 0.0
+        },
+        {
+          "variable": "c_pw",
+          "time": 0.0,
+          "expected": 4214.3898309481
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.0,
+          "expected": 2500000.0
+        },
+        {
+          "variable": "ΔH_m",
+          "time": 0.0,
+          "expected": 333500.0
+        },
+        {
+          "variable": "σ_w0",
+          "time": 0.0,
+          "expected": 0.0761
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 0.0,
+          "expected": 610.7799961
+        },
+        {
+          "variable": "p_sat_ice",
+          "time": 0.0,
+          "expected": 610.9177956
+        }
+      ]
+    },
+    {
+      "id": "cold_cloud_bergeron_findeisen",
+      "description": "T=253.15 K (−20°C), a typical mixed-phase cloud temperature. Key feature: p_sat_ice < p_sat_water (103.2 Pa vs 125.4 Pa) — the Bergeron-Findeisen supersaturation difference that drives ice crystal growth at the expense of supercooled liquid droplets in mixed-phase clouds. ΔH_v rises as temperature falls (more energy needed to vaporize cold water). σ_w0 increases at colder T (higher surface tension). c_pw also rises significantly at sub-zero temperatures.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 253.15
+      },
+      "assertions": [
+        {
+          "variable": "T_C",
+          "time": 0.0,
+          "expected": -19.99999999999997
+        },
+        {
+          "variable": "c_pw",
+          "time": 0.0,
+          "expected": 4358.9301146281
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.0,
+          "expected": 2549898.8739017854
+        },
+        {
+          "variable": "ΔH_m",
+          "time": 0.0,
+          "expected": 288700.00000000006
+        },
+        {
+          "variable": "σ_w0",
+          "time": 0.0,
+          "expected": 0.07919999999999999
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 0.0,
+          "expected": 125.38628006185627
+        },
+        {
+          "variable": "p_sat_ice",
+          "time": 0.0,
+          "expected": 103.17367106176015
+        }
+      ]
+    },
+    {
+      "id": "warm_boundary_layer",
+      "description": "T=303.15 K (30°C), a warm boundary-layer cloud or maritime environment. p_sat_water≈4243 Pa (~42.4 mbar), nearly double the 20°C value, reflecting the exponential sensitivity of vapor pressure to temperature. ΔH_v≈2.429×10⁶ J/kg (lower than at 0°C — warmer clouds are less costly to form). σ_w0 = 0.07145 N/m (lowest of the tested temperatures — warmer water has lower surface tension). c_pw≈4175.3 J/(kg·K) near the minimum (closest to T_cpw_ref = 308 K).",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 303.15
+      },
+      "assertions": [
+        {
+          "variable": "T_C",
+          "time": 0.0,
+          "expected": 30.0
+        },
+        {
+          "variable": "c_pw",
+          "time": 0.0,
+          "expected": 4175.3146454281
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.0,
+          "expected": 2428550.5659932736
+        },
+        {
+          "variable": "ΔH_m",
+          "time": 0.0,
+          "expected": 384950.0
+        },
+        {
+          "variable": "σ_w0",
+          "time": 0.0,
+          "expected": 0.07145
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 0.0,
+          "expected": 4242.894245639641
+        }
+      ]
+    },
+    {
+      "id": "sub_freezing_bergeron_ratio",
+      "description": "T=260 K (−13.15°C). Verifies the Bergeron-Findeisen ratio: p_sat_water/p_sat_ice > 1 in the sub-zero regime (both are from the same Table 17.2 polynomial family, consistent with laboratory observations). All seven observables checked.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_overrides": {
+        "T": 260.0
+      },
+      "assertions": [
+        {
+          "variable": "T_C",
+          "time": 0.0,
+          "expected": -13.149999999999977
+        },
+        {
+          "variable": "c_pw",
+          "time": 0.0,
+          "expected": 4289.886656000001
+        },
+        {
+          "variable": "ΔH_v",
+          "time": 0.0,
+          "expected": 2532579.615025226
+        },
+        {
+          "variable": "ΔH_m",
+          "time": 0.0,
+          "expected": 304989.8137500001
+        },
+        {
+          "variable": "σ_w0",
+          "time": 0.0,
+          "expected": 0.07813824999999999
+        },
+        {
+          "variable": "p_sat_water",
+          "time": 0.0,
+          "expected": 222.49675382975357
+        },
+        {
+          "variable": "p_sat_ice",
+          "time": 0.0,
+          "expected": 195.63418105535638
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "saturation_vapor_pressures",
+      "description": "Saturation vapor pressures over water and ice as a function of temperature (233–313 K). Both rise strongly with temperature following the Table 17.2 polynomials. Below 273.15 K, p_sat_ice < p_sat_water — the Bergeron-Findeisen difference. At 0°C they are nearly equal (~611 Pa). Above 273.15 K the ice polynomial is extrapolated beyond its valid range and is shown only for comparison.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 233.15,
+              "stop": 313.15,
+              "count": 41,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "p_sat_vs_T",
+          "type": "line",
+          "description": "Saturation vapor pressure over water (p_sat_water) and ice (p_sat_ice) vs temperature T. Both curves are from S&P Table 17.2 polynomial fits. The Bergeron-Findeisen gap (p_sat_water > p_sat_ice) is visible below 273.15 K.",
+          "x": {
+            "variable": "T",
+            "label": "Temperature T (K)"
+          },
+          "y": [
+            {
+              "variable": "p_sat_water",
+              "label": "p_sat_water (Pa, over liquid)"
+            },
+            {
+              "variable": "p_sat_ice",
+              "label": "p_sat_ice (Pa, over ice)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "thermodynamic_properties_vs_temperature",
+      "description": "Key thermodynamic properties — specific heat c_pw, latent heat of vaporization ΔH_v, surface tension σ_w0, and latent heat of melting ΔH_m — as functions of temperature from 253 to 313 K. Illustrates how all properties vary with cloud temperature, relevant for droplet growth, CCN activation, and ice nucleation parameterizations.",
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "parameter_sweep": {
+        "type": "cartesian",
+        "dimensions": [
+          {
+            "parameter": "T",
+            "range": {
+              "start": 253.15,
+              "stop": 313.15,
+              "count": 31,
+              "scale": "linear"
+            }
+          }
+        ]
+      },
+      "plots": [
+        {
+          "id": "latent_heats_vs_T",
+          "type": "line",
+          "description": "Latent heat of vaporization ΔH_v and latent heat of melting ΔH_m vs temperature. ΔH_v decreases with T; ΔH_m increases with T above 273 K (from S&P Eqs. 17.3 and 17.4).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature T (K)"
+          },
+          "y": [
+            {
+              "variable": "ΔH_v",
+              "label": "ΔH_v (J/kg, vaporization)"
+            },
+            {
+              "variable": "ΔH_m",
+              "label": "ΔH_m (J/kg, melting)"
+            }
+          ]
+        },
+        {
+          "id": "c_pw_sigma_vs_T",
+          "type": "line",
+          "description": "Specific heat of liquid water c_pw and surface tension σ_w0 vs temperature. c_pw has a minimum near 308 K; σ_w0 decreases linearly (from S&P Eqs. 17.2 and 17.5).",
+          "x": {
+            "variable": "T",
+            "label": "Temperature T (K)"
+          },
+          "y": [
+            {
+              "variable": "c_pw",
+              "label": "c_pw (J/(kg·K))"
+            },
+            {
+              "variable": "σ_w0",
+              "label": "σ_w0 (N/m)"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

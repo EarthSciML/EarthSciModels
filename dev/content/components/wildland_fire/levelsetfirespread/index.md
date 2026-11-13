@@ -1,0 +1,787 @@
+---
+title: "LevelSetFireSpread"
+slug: "levelsetfirespread"
+domains: ["wildland_fire"]
+component_types: ["model"]
+domain: "wildland_fire"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/level_set_fire_spread.esm"
+reference: "Mandel, J., Beezley, J.D., and Kochanski, A.K. (2011). Coupled atmosphere-wildland fire modeling with WRF 3.3 and SFIRE 2011. Geosci. Model Dev., 4, 591–610. doi:10.5194/gmd-4-591-2011 — Eq. 9 (level-set PDE), Eq. 2 (direction-dependent spread rate), §3.4 (Neumann BCs)."
+description: "Level-set fire front propagation PDE: Hamilton-Jacobi equation ∂ψ/∂t + S(n̂)|∇ψ| = 0, where S(n̂) is the Rothermel/Mandel (2011) direction-dependent spread rate projected onto the fire-front normal. Migrated from WildlandFire.jl src/level_set_fire_spread.jl:73. v0.8.0: a DISCRETIZATION-AGNOSTIC library PDE leaf. (1) Spatial derivatives are bare `D` ops (op:D, wrt:x / wrt:y) instead of the `grad` sugar. (2) This leaf imports NO discretization of its own — the scheme is chosen by the ASSEMBLER that mounts this component, which carries the rule imports on its model-ref edge (esm-spec §9.7.10 form A: the edge's `expression_template_imports` register into this component's own template scope). The reference assembler (wildlandfire.esm/level_set_hj_2d.esm) mounts the first-order Godunov (Rouy-Tourin / Osher-Sethian) rule godunov_norm_D2_periodic, which fires by compound match on the gradient-magnitude term sqrt(D(psi,x)² + D(psi,y)²), plus the central rules central_D1x/D1y for the individual ∂ψ/∂x, ∂ψ/∂y in the wind/slope normal projections — but any grid + scheme satisfying the same D-op / grid-geometry contract composes here unchanged. (3) The direction-dependent right-hand side is authored as READABLE INTERMEDIATE array-shaped observed fields over the [x,y] index sets — psi_x, psi_y (central ∂ψ), grad_mag (Godunov |∇ψ|), grad_safe, U_n, tanphi_n (wind/slope normal projections), phi_W, phi_S, and S_n (the spread rate) — so the state equation is simply D(psi,t) = −S_n·grad_mag. Both toolkits evaluate these per cell: the Julia evaluator folds the elementwise ones into the state RHS (leaving the producer stencils psi_x/grad_mag for its index beta-reduction), and the Rust array runtime materializes each as a companion buffer in dependency order — identical numerics either way (front radii match to 4 places at NX=NY=32). The producer observeds (psi_x, psi_y, grad_mag) carry the bare D ops the mounted discretization lowers; grad_mag's exponent is the integer 2 on the bare D ops so the Godunov compound matches. Only the scalar grid observeds (dx, dy) remain scalar. (4) Grid geometry (index sets x,y; spacing dx=Lx/NX, dy=Ly/NY; extent x0,y0) is the consumer-supplied contract of grids/cartesian_uniform_2d/grid.esm (metaparameters NX,NY bound at load; extent Lx,Ly parameters), and BCs come from the mounted discretization. The initial perimeter is supplied by the ASSEMBLER (a §11.4.1 dedicated IC model), not baked here. The D ops assume Cartesian (x,y in meters) coordinates; geographic (lon/lat) usage needs metric-tensor scaling not yet expressible in ESM (other:P3-A-metric-tensor-coord-transforms gap)."
+tags: ["wildland_fire", "model", "level_set", "pde", "fire_spread", "mandel2011", "munoz-esparza2018", "grid:cartesian_uniform_2d", "op:D"]
+---
+
+## Description
+
+Level-set fire front propagation PDE: Hamilton-Jacobi equation ∂ψ/∂t + S(n̂)|∇ψ| = 0, where S(n̂) is the Rothermel/Mandel (2011) direction-dependent spread rate projected onto the fire-front normal. Migrated from WildlandFire.jl src/level_set_fire_spread.jl:73. v0.8.0: a DISCRETIZATION-AGNOSTIC library PDE leaf. (1) Spatial derivatives are bare `D` ops (op:D, wrt:x / wrt:y) instead of the `grad` sugar. (2) This leaf imports NO discretization of its own — the scheme is chosen by the ASSEMBLER that mounts this component, which carries the rule imports on its model-ref edge (esm-spec §9.7.10 form A: the edge's `expression_template_imports` register into this component's own template scope). The reference assembler (wildlandfire.esm/level_set_hj_2d.esm) mounts the first-order Godunov (Rouy-Tourin / Osher-Sethian) rule godunov_norm_D2_periodic, which fires by compound match on the gradient-magnitude term sqrt(D(psi,x)² + D(psi,y)²), plus the central rules central_D1x/D1y for the individual ∂ψ/∂x, ∂ψ/∂y in the wind/slope normal projections — but any grid + scheme satisfying the same D-op / grid-geometry contract composes here unchanged. (3) The direction-dependent right-hand side is authored as READABLE INTERMEDIATE array-shaped observed fields over the [x,y] index sets — psi_x, psi_y (central ∂ψ), grad_mag (Godunov |∇ψ|), grad_safe, U_n, tanphi_n (wind/slope normal projections), phi_W, phi_S, and S_n (the spread rate) — so the state equation is simply D(psi,t) = −S_n·grad_mag. Both toolkits evaluate these per cell: the Julia evaluator folds the elementwise ones into the state RHS (leaving the producer stencils psi_x/grad_mag for its index beta-reduction), and the Rust array runtime materializes each as a companion buffer in dependency order — identical numerics either way (front radii match to 4 places at NX=NY=32). The producer observeds (psi_x, psi_y, grad_mag) carry the bare D ops the mounted discretization lowers; grad_mag's exponent is the integer 2 on the bare D ops so the Godunov compound matches. Only the scalar grid observeds (dx, dy) remain scalar. (4) Grid geometry (index sets x,y; spacing dx=Lx/NX, dy=Ly/NY; extent x0,y0) is the consumer-supplied contract of grids/cartesian_uniform_2d/grid.esm (metaparameters NX,NY bound at load; extent Lx,Ly parameters), and BCs come from the mounted discretization. The initial perimeter is supplied by the ASSEMBLER (a §11.4.1 dedicated IC model), not baked here. The D ops assume Cartesian (x,y in meters) coordinates; geographic (lon/lat) usage needs metric-tensor scaling not yet expressible in ESM (other:P3-A-metric-tensor-coord-transforms gap).
+
+## Reference
+
+_source_ref: WildlandFire.jl:src/level_set_fire_spread.jl:73. The fire front is tracked implicitly as the zero contour of ψ(t,x,y): ψ ≤ 0 burning, ψ > 0 unburned fuel. PDE (Mandel 2011, Eq. 9): ∂ψ/∂t = −S(n̂)|∇ψ|, with n̂ = ∇ψ/|∇ψ| the inward normal and S(n̂) = R_0·(1 + φ_W + φ_S) the direction-dependent spread rate (Mandel 2011 Eq. 2 / Muñoz-Esparza 2018 Eq. 10): φ_W = C_wind·(max(0,U_n)/U_ref)^B_wind·max(β_ratio,ε)^(−E_wind), φ_S = φ_s_coeff·max(0,tanφ_n)², U_n = (u·∇ψ)/|∇ψ|_safe, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe, |∇ψ|_safe = |∇ψ| + 1e-10, U_ref = 0.00508 m/s (1 ft/min). S(n̂) and |∇ψ| are decomposed into named array-shaped observed fields over [x,y]: grad_mag = |∇ψ| as the Godunov-lowered compound sqrt(D(psi,x)² + D(psi,y)²) (exponent MUST be the integer 2 to match the rule); psi_x, psi_y = the central-lowered bare D(psi,x)/D(psi,y) used by U_n/tanφ_n; grad_safe = grad_mag + 1e-10; and U_n, tanφ_n, φ_W, φ_S, S_n as above. The state equation is then D(psi,t) = −S_n·grad_mag. Array-shaped observeds ARE now supported by both evaluators (Julia elementwise fold + producer index beta-reduction; Rust dependency-ordered companion buffers), so the physics reads as authored rather than inlined into one expression._
+
+## Variables
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `psi` | `m` |  | Level-set function over the 2-D [x,y] index sets. Fire front at ψ=0; ψ<0 burning, ψ>0 unburned. Initialized as signed distance to the initial fire perimeter. |
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `R_0` | `m/s` | `1.0` | No-wind no-slope rate of spread R_0 (m/s), the isotropic base spread rate. Derived from a Rothermel (1972) fuel model; default 1.0. |
+| `C_wind` | `1` | `1.0` | Wind coefficient C in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 1.0. |
+| `B_wind` | `1` | `0.5` | Wind exponent B in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5. |
+| `E_wind` | `1` | `0.5` | Relative-packing-ratio exponent E in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5. |
+| `beta_ratio` | `1` | `1.0` | Relative packing ratio β/β_op. Fuel-model dependent; default 1.0 (at optimum). |
+| `phi_s_coeff` | `1` | `0.0` | Slope factor coefficient φ_s_coeff = 5.275·β^(−0.3). Default 0 (flat terrain / slope effect disabled). |
+| `u_x` | `m/s` | `0.0` | Midflame wind x-component (eastward, m/s). Default 0 (calm). |
+| `u_y` | `m/s` | `0.0` | Midflame wind y-component (northward, m/s). Default 0 (calm). |
+| `dzdx` | `1` | `0.0` | Terrain gradient dz/dx (dimensionless). Default 0 (flat). |
+| `dzdy` | `1` | `0.0` | Terrain gradient dz/dy (dimensionless). Default 0 (flat). |
+| `x0` | `m` | `0` | Left x domain edge: the grid's x0 free name (consumer-supplied geometry contract, grids/cartesian_uniform_2d/grid.esm). Default 0; override for a shifted domain. |
+| `y0` | `m` | `0` | Bottom y domain edge: the grid's y0 free name. Default 0; override for a shifted domain. |
+| `Lx` | `m` | `1.0` | Domain width along x (bx - x0): USER-SUPPLIED grid extent. The x-spacing dx = Lx/NX derives from it, so a run on a different-size box needs only this parameter (and Ly), not an edit to this component. Default 1.0 (unit box). |
+| `Ly` | `m` | `1.0` | Domain height along y (by - y0): USER-SUPPLIED grid extent; dy = Ly/NY derives from it. Default 1.0 (unit box). |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `dx` | `m` |  | x-spacing dx = Lx/NX: the grid's dx free name, read by the mounted discretization rule's expanded body. Lx is the consumer-supplied x-extent; NX the document-scoped metaparameter (cell count), substituted as an integer literal at load (esm-spec §9.7.6). A loader-API rebinding of NX (a convergence sweep) keeps the spacing consistent automatically. |
+| `dy` | `m` |  | y-spacing dy = Ly/NY: the grid's dy free name; Ly the consumer-supplied y-extent, NY substituted at load. |
+| `psi_x` | `1` |  | ∂ψ/∂x by the mounted central first-derivative rule (central_D1x). A bare D op the assembler's discretization lowers to a per-cell makearray stencil; used in the wind/slope normal projections. |
+| `psi_y` | `1` |  | ∂ψ/∂y by the mounted central first-derivative rule (central_D1y). |
+| `grad_mag` | `1` |  | \|∇ψ\| by the mounted first-order Godunov (Rouy-Tourin / Osher-Sethian) upwind rule, which fires by compound match on sqrt(D(psi,x)²+D(psi,y)²) (exponent MUST be the integer 2). A producer-defined array observed; the exponent is written on the bare D ops so the compound matches the rule, NOT on the central-lowered psi_x/psi_y. |
+| `grad_safe` | `1` |  | \|∇ψ\|_safe = √(ψ_x²+ψ_y²) + 1e-10: the CENTRAL gradient magnitude, consistent with the central ∇ψ (psi_x, psi_y) used in the normal-projection numerators. This makes n̂ = ∇ψ/\|∇ψ\|_safe a true unit normal, so n̂·∇z and n̂·u are the exact directional slope/wind, bounded by \|∇z\|, \|u\| (Cauchy–Schwarz) with NO singularity as \|∇ψ\|→0 (numerator vanishes with the denominator). The former Godunov \|∇ψ\| in the denominator was inconsistent with the central numerator and blew up where the two disagreed. The 1e-10 is only a NaN guard now. |
+| `U_n` | `m/s` |  | Wind projected onto the fire-front normal, U_n = (u·∇ψ)/\|∇ψ\|_safe (Muñoz-Esparza 2018 Eq. 10). Central-difference ∇ψ (psi_x, psi_y) in the numerator; the Godunov magnitude in the denominator, matching the original inlined form. |
+| `tanphi_n` | `1` |  | Terrain slope projected onto the front normal, tanφ_n = (∇z·∇ψ)/\|∇ψ\|_safe. |
+| `phi_W` | `1` |  | Wind factor φ_W = C·(max(0,U_n)/U_ref)^B·max(β_ratio,ε)^(−E) (Mandel 2011 Eq. 2), U_ref = 0.00508 m/s (1 ft/min). U_n = u·n̂ is bounded by \|u\| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored. |
+| `phi_S` | `1` |  | Slope factor φ_S = φ_s_coeff·max(0,tanφ_n)² (Mandel 2011 Eq. 2). tanφ_n = ∇z·n̂ is bounded by \|∇z\| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored. Default 0 (flat terrain). |
+| `S_n` | `m/s` |  | Direction-dependent spread rate S(n̂) = R_0·(1 + φ_W + φ_S) (Mandel 2011 Eq. 2). With the default calm/flat parameters (u=0, dz=0, φ_s_coeff=0) this reduces to R_0. |
+
+## Observed expressions
+
+$$
+dx = \frac{Lx}{NX}
+$$
+_x-spacing dx = Lx/NX: the grid's dx free name, read by the mounted discretization rule's expanded body. Lx is the consumer-supplied x-extent; NX the document-scoped metaparameter (cell count), substituted as an integer literal at load (esm-spec §9.7.6). A loader-API rebinding of NX (a convergence sweep) keeps the spacing consistent automatically._
+
+$$
+dy = \frac{Ly}{NY}
+$$
+_y-spacing dy = Ly/NY: the grid's dy free name; Ly the consumer-supplied y-extent, NY substituted at load._
+
+$$
+psi_{x} = \mathrm{D}\left(psi\right)
+$$
+_∂ψ/∂x by the mounted central first-derivative rule (central_D1x). A bare D op the assembler's discretization lowers to a per-cell makearray stencil; used in the wind/slope normal projections._
+
+$$
+psi_{y} = \mathrm{D}\left(psi\right)
+$$
+_∂ψ/∂y by the mounted central first-derivative rule (central_D1y)._
+
+$$
+grad_{mag} = \sqrt{\mathrm{D}\left(psi\right)^{2} + \mathrm{D}\left(psi\right)^{2}}
+$$
+_|∇ψ| by the mounted first-order Godunov (Rouy-Tourin / Osher-Sethian) upwind rule, which fires by compound match on sqrt(D(psi,x)²+D(psi,y)²) (exponent MUST be the integer 2). A producer-defined array observed; the exponent is written on the bare D ops so the compound matches the rule, NOT on the central-lowered psi_x/psi_y._
+
+$$
+grad_{safe} = \sqrt{psi_{x} \cdot psi_{x} + psi_{y} \cdot psi_{y}} + 1 \times 10^{-10}
+$$
+_|∇ψ|_safe = √(ψ_x²+ψ_y²) + 1e-10: the CENTRAL gradient magnitude, consistent with the central ∇ψ (psi_x, psi_y) used in the normal-projection numerators. This makes n̂ = ∇ψ/|∇ψ|_safe a true unit normal, so n̂·∇z and n̂·u are the exact directional slope/wind, bounded by |∇z|, |u| (Cauchy–Schwarz) with NO singularity as |∇ψ|→0 (numerator vanishes with the denominator). The former Godunov |∇ψ| in the denominator was inconsistent with the central numerator and blew up where the two disagreed. The 1e-10 is only a NaN guard now._
+
+$$
+U_{n} = \frac{u_{x} \cdot psi_{x} + u_{y} \cdot psi_{y}}{grad_{safe}}
+$$
+_Wind projected onto the fire-front normal, U_n = (u·∇ψ)/|∇ψ|_safe (Muñoz-Esparza 2018 Eq. 10). Central-difference ∇ψ (psi_x, psi_y) in the numerator; the Godunov magnitude in the denominator, matching the original inlined form._
+
+$$
+tanphi_{n} = \frac{dzdx \cdot psi_{x} + dzdy \cdot psi_{y}}{grad_{safe}}
+$$
+_Terrain slope projected onto the front normal, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe._
+
+$$
+phi_{W} = C_{wind} \cdot \frac{\mathrm{max}\left(0.0, U_{n}\right)}{0.00508}^{B_{wind}} \cdot \mathrm{max}\left(beta_{ratio}, 1 \times 10^{-10}\right)^{-E_{wind}}
+$$
+_Wind factor φ_W = C·(max(0,U_n)/U_ref)^B·max(β_ratio,ε)^(−E) (Mandel 2011 Eq. 2), U_ref = 0.00508 m/s (1 ft/min). U_n = u·n̂ is bounded by |u| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored._
+
+$$
+phi_{S} = phi_{s\,coeff} \cdot \mathrm{max}\left(0.0, tanphi_{n}\right)^{2.0}
+$$
+_Slope factor φ_S = φ_s_coeff·max(0,tanφ_n)² (Mandel 2011 Eq. 2). tanφ_n = ∇z·n̂ is bounded by |∇z| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored. Default 0 (flat terrain)._
+
+$$
+S_{n} = R_{0} \cdot \left(1.0 + phi_{W} + phi_{S}\right)
+$$
+_Direction-dependent spread rate S(n̂) = R_0·(1 + φ_W + φ_S) (Mandel 2011 Eq. 2). With the default calm/flat parameters (u=0, dz=0, φ_s_coeff=0) this reduces to R_0._
+
+## Equations
+
+$$
+\mathrm{D}\left(psi\right) = \left(-1.0\right) \cdot S_{n} \cdot grad_{mag}
+$$
+
+## Analyses
+
+### calm_flat_circle
+
+Isotropic fire-front spread on a flat, calm 36 km x 40 km domain (Godunov |grad psi| + central stencils on cartesian_uniform_2d, 64x64, periodic). A circular ignition (radius 2*dx, centered) expands at the no-wind rate R_0 = 1 m/s. Discretization-agnostic leaf made runnable via mounted discretization + expression IC.
+
+**Time span:** 0.0 → 3600.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl:src/level_set_fire_spread.jl:73. The fire front is tracked implicitly as the zero contour of ψ(t,x,y): ψ ≤ 0 burning, ψ > 0 unburned fuel. PDE (Mandel 2011, Eq. 9): ∂ψ/∂t = −S(n̂)|∇ψ|, with n̂ = ∇ψ/|∇ψ| the inward normal and S(n̂) = R_0·(1 + φ_W + φ_S) the direction-dependent spread rate (Mandel 2011 Eq. 2 / Muñoz-Esparza 2018 Eq. 10): φ_W = C_wind·(max(0,U_n)/U_ref)^B_wind·max(β_ratio,ε)^(−E_wind), φ_S = φ_s_coeff·max(0,tanφ_n)², U_n = (u·∇ψ)/|∇ψ|_safe, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe, |∇ψ|_safe = |∇ψ| + 1e-10, U_ref = 0.00508 m/s (1 ft/min). S(n̂) and |∇ψ| are decomposed into named array-shaped observed fields over [x,y]: grad_mag = |∇ψ| as the Godunov-lowered compound sqrt(D(psi,x)² + D(psi,y)²) (exponent MUST be the integer 2 to match the rule); psi_x, psi_y = the central-lowered bare D(psi,x)/D(psi,y) used by U_n/tanφ_n; grad_safe = grad_mag + 1e-10; and U_n, tanφ_n, φ_W, φ_S, S_n as above. The state equation is then D(psi,t) = −S_n·grad_mag. Array-shaped observeds ARE now supported by both evaluators (Julia elementwise fold + producer index beta-reduction; Rust dependency-ordered companion buffers), so the physics reads as authored rather than inlined into one expression."
+  },
+  "variables": {
+    "psi": {
+      "type": "unknown",
+      "units": "m",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Level-set function over the 2-D [x,y] index sets. Fire front at ψ=0; ψ<0 burning, ψ>0 unburned. Initialized as signed distance to the initial fire perimeter."
+    },
+    "R_0": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 1.0,
+      "description": "No-wind no-slope rate of spread R_0 (m/s), the isotropic base spread rate. Derived from a Rothermel (1972) fuel model; default 1.0."
+    },
+    "C_wind": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Wind coefficient C in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 1.0."
+    },
+    "B_wind": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.5,
+      "description": "Wind exponent B in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5."
+    },
+    "E_wind": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.5,
+      "description": "Relative-packing-ratio exponent E in φ_W (Mandel 2011, Eq. 2). Fuel-model dependent; default 0.5."
+    },
+    "beta_ratio": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Relative packing ratio β/β_op. Fuel-model dependent; default 1.0 (at optimum)."
+    },
+    "phi_s_coeff": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Slope factor coefficient φ_s_coeff = 5.275·β^(−0.3). Default 0 (flat terrain / slope effect disabled)."
+    },
+    "u_x": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Midflame wind x-component (eastward, m/s). Default 0 (calm)."
+    },
+    "u_y": {
+      "type": "parameter",
+      "units": "m/s",
+      "default": 0.0,
+      "description": "Midflame wind y-component (northward, m/s). Default 0 (calm)."
+    },
+    "dzdx": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Terrain gradient dz/dx (dimensionless). Default 0 (flat)."
+    },
+    "dzdy": {
+      "type": "parameter",
+      "units": "1",
+      "default": 0.0,
+      "description": "Terrain gradient dz/dy (dimensionless). Default 0 (flat)."
+    },
+    "x0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0,
+      "description": "Left x domain edge: the grid's x0 free name (consumer-supplied geometry contract, grids/cartesian_uniform_2d/grid.esm). Default 0; override for a shifted domain."
+    },
+    "y0": {
+      "type": "parameter",
+      "units": "m",
+      "default": 0,
+      "description": "Bottom y domain edge: the grid's y0 free name. Default 0; override for a shifted domain."
+    },
+    "Lx": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1.0,
+      "description": "Domain width along x (bx - x0): USER-SUPPLIED grid extent. The x-spacing dx = Lx/NX derives from it, so a run on a different-size box needs only this parameter (and Ly), not an edit to this component. Default 1.0 (unit box)."
+    },
+    "Ly": {
+      "type": "parameter",
+      "units": "m",
+      "default": 1.0,
+      "description": "Domain height along y (by - y0): USER-SUPPLIED grid extent; dy = Ly/NY derives from it. Default 1.0 (unit box)."
+    },
+    "dx": {
+      "type": "unknown",
+      "units": "m",
+      "description": "x-spacing dx = Lx/NX: the grid's dx free name, read by the mounted discretization rule's expanded body. Lx is the consumer-supplied x-extent; NX the document-scoped metaparameter (cell count), substituted as an integer literal at load (esm-spec §9.7.6). A loader-API rebinding of NX (a convergence sweep) keeps the spacing consistent automatically."
+    },
+    "dy": {
+      "type": "unknown",
+      "units": "m",
+      "description": "y-spacing dy = Ly/NY: the grid's dy free name; Ly the consumer-supplied y-extent, NY substituted at load."
+    },
+    "psi_x": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "∂ψ/∂x by the mounted central first-derivative rule (central_D1x). A bare D op the assembler's discretization lowers to a per-cell makearray stencil; used in the wind/slope normal projections."
+    },
+    "psi_y": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "∂ψ/∂y by the mounted central first-derivative rule (central_D1y)."
+    },
+    "grad_mag": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "|∇ψ| by the mounted first-order Godunov (Rouy-Tourin / Osher-Sethian) upwind rule, which fires by compound match on sqrt(D(psi,x)²+D(psi,y)²) (exponent MUST be the integer 2). A producer-defined array observed; the exponent is written on the bare D ops so the compound matches the rule, NOT on the central-lowered psi_x/psi_y."
+    },
+    "grad_safe": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "|∇ψ|_safe = √(ψ_x²+ψ_y²) + 1e-10: the CENTRAL gradient magnitude, consistent with the central ∇ψ (psi_x, psi_y) used in the normal-projection numerators. This makes n̂ = ∇ψ/|∇ψ|_safe a true unit normal, so n̂·∇z and n̂·u are the exact directional slope/wind, bounded by |∇z|, |u| (Cauchy–Schwarz) with NO singularity as |∇ψ|→0 (numerator vanishes with the denominator). The former Godunov |∇ψ| in the denominator was inconsistent with the central numerator and blew up where the two disagreed. The 1e-10 is only a NaN guard now."
+    },
+    "U_n": {
+      "type": "unknown",
+      "units": "m/s",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Wind projected onto the fire-front normal, U_n = (u·∇ψ)/|∇ψ|_safe (Muñoz-Esparza 2018 Eq. 10). Central-difference ∇ψ (psi_x, psi_y) in the numerator; the Godunov magnitude in the denominator, matching the original inlined form."
+    },
+    "tanphi_n": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Terrain slope projected onto the front normal, tanφ_n = (∇z·∇ψ)/|∇ψ|_safe."
+    },
+    "phi_W": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Wind factor φ_W = C·(max(0,U_n)/U_ref)^B·max(β_ratio,ε)^(−E) (Mandel 2011 Eq. 2), U_ref = 0.00508 m/s (1 ft/min). U_n = u·n̂ is bounded by |u| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored."
+    },
+    "phi_S": {
+      "type": "unknown",
+      "units": "1",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Slope factor φ_S = φ_s_coeff·max(0,tanφ_n)² (Mandel 2011 Eq. 2). tanφ_n = ∇z·n̂ is bounded by |∇z| (consistent central normal), so no artificial cap is needed — exact Rothermel physics restored. Default 0 (flat terrain)."
+    },
+    "S_n": {
+      "type": "unknown",
+      "units": "m/s",
+      "shape": [
+        "x",
+        "y"
+      ],
+      "description": "Direction-dependent spread rate S(n̂) = R_0·(1 + φ_W + φ_S) (Mandel 2011 Eq. 2). With the default calm/flat parameters (u=0, dz=0, φ_s_coeff=0) this reduces to R_0."
+    }
+  },
+  "equations": [
+    {
+      "lhs": {
+        "op": "D",
+        "args": [
+          "psi"
+        ],
+        "wrt": "t"
+      },
+      "rhs": {
+        "op": "*",
+        "args": [
+          -1.0,
+          "S_n",
+          "grad_mag"
+        ]
+      }
+    },
+    {
+      "lhs": "dx",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "Lx",
+          "NX"
+        ]
+      }
+    },
+    {
+      "lhs": "dy",
+      "rhs": {
+        "op": "/",
+        "args": [
+          "Ly",
+          "NY"
+        ]
+      }
+    },
+    {
+      "lhs": "psi_x",
+      "rhs": {
+        "op": "D",
+        "args": [
+          "psi"
+        ],
+        "wrt": "x"
+      }
+    },
+    {
+      "lhs": "psi_y",
+      "rhs": {
+        "op": "D",
+        "args": [
+          "psi"
+        ],
+        "wrt": "y"
+      }
+    },
+    {
+      "lhs": "grad_mag",
+      "rhs": {
+        "op": "sqrt",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      "psi"
+                    ],
+                    "wrt": "x"
+                  },
+                  2
+                ]
+              },
+              {
+                "op": "^",
+                "args": [
+                  {
+                    "op": "D",
+                    "args": [
+                      "psi"
+                    ],
+                    "wrt": "y"
+                  },
+                  2
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "grad_safe",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "sqrt",
+            "args": [
+              {
+                "op": "+",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      "psi_x",
+                      "psi_x"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "psi_y",
+                      "psi_y"
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          1e-10
+        ]
+      }
+    },
+    {
+      "lhs": "U_n",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "u_x",
+                  "psi_x"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "u_y",
+                  "psi_y"
+                ]
+              }
+            ]
+          },
+          "grad_safe"
+        ]
+      }
+    },
+    {
+      "lhs": "tanphi_n",
+      "rhs": {
+        "op": "/",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  "dzdx",
+                  "psi_x"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "dzdy",
+                  "psi_y"
+                ]
+              }
+            ]
+          },
+          "grad_safe"
+        ]
+      }
+    },
+    {
+      "lhs": "phi_W",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "C_wind",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0.0,
+                      "U_n"
+                    ]
+                  },
+                  0.00508
+                ]
+              },
+              "B_wind"
+            ]
+          },
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  "beta_ratio",
+                  1e-10
+                ]
+              },
+              {
+                "op": "-",
+                "args": [
+                  "E_wind"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "phi_S",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "phi_s_coeff",
+          {
+            "op": "^",
+            "args": [
+              {
+                "op": "max",
+                "args": [
+                  0.0,
+                  "tanphi_n"
+                ]
+              },
+              2.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "S_n",
+      "rhs": {
+        "op": "*",
+        "args": [
+          "R_0",
+          {
+            "op": "+",
+            "args": [
+              1.0,
+              "phi_W",
+              "phi_S"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "analyses": [
+    {
+      "id": "calm_flat_circle",
+      "description": "Isotropic fire-front spread on a flat, calm 36 km x 40 km domain (Godunov |grad psi| + central stencils on cartesian_uniform_2d, 64x64, periodic). A circular ignition (radius 2*dx, centered) expands at the no-wind rate R_0 = 1 m/s. Discretization-agnostic leaf made runnable via mounted discretization + expression IC.",
+      "time_span": {
+        "start": 0.0,
+        "end": 3600.0
+      },
+      "expression_template_imports": [
+        {
+          "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/godunov_norm_D2_periodic.esm",
+          "bindings": {
+            "NX": 64,
+            "NY": 64
+          }
+        },
+        {
+          "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/central_D1x_periodic.esm",
+          "bindings": {
+            "NX": 64,
+            "NY": 64
+          }
+        },
+        {
+          "ref": "${ESD_ROOT}/grids/cartesian_uniform_2d/rules/central_D1y_periodic.esm",
+          "bindings": {
+            "NX": 64,
+            "NY": 64
+          }
+        }
+      ],
+      "parameters": {
+        "R_0": 1.0,
+        "C_wind": 1.0,
+        "B_wind": 0.5,
+        "E_wind": 0.5,
+        "beta_ratio": 1.0,
+        "phi_s_coeff": 0.0,
+        "u_x": 0.0,
+        "u_y": 0.0,
+        "dzdx": 0.0,
+        "dzdy": 0.0,
+        "x0": 0.0,
+        "y0": 0.0,
+        "Lx": 36000.0,
+        "Ly": 40000.0
+      },
+      "initial_state": {
+        "type": "expression",
+        "values": {
+          "psi": {
+            "op": "aggregate",
+            "args": [],
+            "expr": {
+              "op": "-",
+              "args": [
+                {
+                  "op": "sqrt",
+                  "args": [
+                    {
+                      "op": "+",
+                      "args": [
+                        {
+                          "op": "^",
+                          "args": [
+                            {
+                              "op": "-",
+                              "args": [
+                                {
+                                  "op": "*",
+                                  "args": [
+                                    {
+                                      "op": "-",
+                                      "args": [
+                                        "i",
+                                        0.5
+                                      ]
+                                    },
+                                    {
+                                      "op": "/",
+                                      "args": [
+                                        36000,
+                                        64
+                                      ]
+                                    }
+                                  ]
+                                },
+                                18000
+                              ]
+                            },
+                            2
+                          ]
+                        },
+                        {
+                          "op": "^",
+                          "args": [
+                            {
+                              "op": "-",
+                              "args": [
+                                {
+                                  "op": "*",
+                                  "args": [
+                                    {
+                                      "op": "-",
+                                      "args": [
+                                        "j",
+                                        0.5
+                                      ]
+                                    },
+                                    {
+                                      "op": "/",
+                                      "args": [
+                                        40000,
+                                        64
+                                      ]
+                                    }
+                                  ]
+                                },
+                                20000
+                              ]
+                            },
+                            2
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "op": "*",
+                  "args": [
+                    2,
+                    {
+                      "op": "/",
+                      "args": [
+                        36000,
+                        64
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "output_idx": [
+              "i",
+              "j"
+            ],
+            "ranges": {
+              "i": {
+                "from": "x"
+              },
+              "j": {
+                "from": "y"
+              }
+            }
+          }
+        }
+      },
+      "plots": [
+        {
+          "id": "psi_snapshot",
+          "type": "field_snapshot",
+          "description": "Level-set field psi(x,y) at t=3600 s; the psi=0 contour is the fire front (psi<0 burnt, psi>0 unburned).",
+          "at_time": 3600.0,
+          "contours": [
+            0.0
+          ],
+          "x": {
+            "variable": "x",
+            "label": "x (m)"
+          },
+          "y": {
+            "variable": "y",
+            "label": "y (m)"
+          },
+          "value": {
+            "variable": "psi"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+</details>

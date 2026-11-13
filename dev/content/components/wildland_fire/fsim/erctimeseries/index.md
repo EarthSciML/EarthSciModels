@@ -1,0 +1,378 @@
+---
+title: "ERCTimeSeries"
+slug: "erctimeseries"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["fsim"]
+domain: "wildland_fire"
+subdomain: "fsim"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/fsim/erc_time_series.esm"
+reference: "Andrews, Patricia L. 2018. The Rothermel surface fire spread model and associated developments: A comprehensive explanation. Gen. Tech. Rep. RMRS-GTR-371. Fort Collins, CO: U.S. Department of Agriculture, Forest Service, Rocky Mountain Research Station."
+description: "Energy Release Component (ERC) time series model — first-order autoregressive (AR(1)) simulation with seasonal trend and white noise. Generates synthetic daily ERC values using an AR(1) process with separate autocorrelation, innovation variance, and seasonal trend parameters. Migrated from WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fsim.jl:333."
+tags: ["wildland_fire", "fsim", "model", "erc", "time-series", "autoregressive"]
+---
+
+## Description
+
+Energy Release Component (ERC) time series model — first-order autoregressive (AR(1)) simulation with seasonal trend and white noise. Generates synthetic daily ERC values using an AR(1) process with separate autocorrelation, innovation variance, and seasonal trend parameters. Migrated from WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fsim.jl:333.
+
+## Reference
+
+_Energy Release Component (ERC) time series model — first-order autoregressive (AR(1)) simulation with seasonal trend and white noise.
+
+Equations:
+  ERC_hat   = φ₁·a_prev + a_current + f_t          (AR(1) with drift)
+  var_a     = s² · (1 − ρ₁·φ₁)                      (innovation variance)
+  σ²_daily  = var_a / (1 − ρ₁·φ₁)                   (stationary variance = s²)
+
+Derived notation:
+  ERC_hat   — simulated daily ERC value
+  a_prev    — white noise value at previous time step
+  a_current — white noise value at current time step
+  f_t       — seasonal trend at current time step
+  φ₁        — first-order autoregressive coefficient
+  ρ₁        — first-order autocorrelation
+  s²        — observed daily variance of ERC
+  var_a     — variance of white noise process
+  σ²_daily  — daily variance of ERC around seasonal trend
+
+source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fsim.jl:333
+
+When ρ₁ = φ₁ (standard AR(1)), the equations simplify:
+  var_a     = s² · (1 − φ₁²)
+  σ²_daily  = s²_
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `a_prev` |  |  | White noise value at previous time step (dimensionless) |
+| `ρ₁` |  |  | First-order autocorrelation (dimensionless) |
+| `φ₁` |  |  | First-order autoregressive coefficient (dimensionless) |
+| `a_current` |  |  | White noise value at current time step (dimensionless) |
+| `f_t` |  |  | Seasonal trend value at current time step (dimensionless) |
+| `one` |  | `1` | Dimensionless unity (dimensionless) |
+| `s²` |  |  | Observed daily variance of ERC (dimensionless) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `var_a` |  |  | Variance of white noise process (dimensionless) |
+| `ERC_hat` |  |  | Simulated daily ERC value (dimensionless) |
+| `σ²_daily` |  |  | Daily variance of ERC around seasonal trend (dimensionless) |
+
+## Observed expressions
+
+$$
+var_{a} = s² \cdot \left(\left(-1\right) \cdot ρ₁ \cdot φ₁ + one\right)
+$$
+_Variance of white noise process (dimensionless)_
+
+$$
+ERC_{hat} = φ₁ \cdot a_{prev} + a_{current} + f_{t}
+$$
+_Simulated daily ERC value (dimensionless)_
+
+$$
+σ²_{daily} = \frac{var_{a}}{\left(-1\right) \cdot ρ₁ \cdot φ₁ + one}
+$$
+_Daily variance of ERC around seasonal trend (dimensionless)_
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "a_prev": {
+      "type": "parameter",
+      "description": "White noise value at previous time step (dimensionless)"
+    },
+    "var_a": {
+      "type": "unknown",
+      "description": "Variance of white noise process (dimensionless)"
+    },
+    "ERC_hat": {
+      "type": "unknown",
+      "description": "Simulated daily ERC value (dimensionless)"
+    },
+    "σ²_daily": {
+      "type": "unknown",
+      "description": "Daily variance of ERC around seasonal trend (dimensionless)"
+    },
+    "ρ₁": {
+      "type": "parameter",
+      "description": "First-order autocorrelation (dimensionless)"
+    },
+    "φ₁": {
+      "type": "parameter",
+      "description": "First-order autoregressive coefficient (dimensionless)"
+    },
+    "a_current": {
+      "type": "parameter",
+      "description": "White noise value at current time step (dimensionless)"
+    },
+    "f_t": {
+      "type": "parameter",
+      "description": "Seasonal trend value at current time step (dimensionless)"
+    },
+    "one": {
+      "default": 1,
+      "type": "parameter",
+      "description": "Dimensionless unity (dimensionless)"
+    },
+    "s²": {
+      "type": "parameter",
+      "description": "Observed daily variance of ERC (dimensionless)"
+    }
+  },
+  "reference": {
+    "notes": "Energy Release Component (ERC) time series model — first-order autoregressive (AR(1)) simulation with seasonal trend and white noise.\n\nEquations:\n  ERC_hat   = φ₁·a_prev + a_current + f_t          (AR(1) with drift)\n  var_a     = s² · (1 − ρ₁·φ₁)                      (innovation variance)\n  σ²_daily  = var_a / (1 − ρ₁·φ₁)                   (stationary variance = s²)\n\nDerived notation:\n  ERC_hat   — simulated daily ERC value\n  a_prev    — white noise value at previous time step\n  a_current — white noise value at current time step\n  f_t       — seasonal trend at current time step\n  φ₁        — first-order autoregressive coefficient\n  ρ₁        — first-order autocorrelation\n  s²        — observed daily variance of ERC\n  var_a     — variance of white noise process\n  σ²_daily  — daily variance of ERC around seasonal trend\n\nsource_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/fsim.jl:333\n\nWhen ρ₁ = φ₁ (standard AR(1)), the equations simplify:\n  var_a     = s² · (1 − φ₁²)\n  σ²_daily  = s²"
+  },
+  "tolerance": {
+    "rel": 1e-14
+  },
+  "equations": [
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "φ₁",
+              "a_prev"
+            ],
+            "op": "*"
+          },
+          "a_current",
+          "f_t"
+        ],
+        "op": "+"
+      },
+      "lhs": "ERC_hat"
+    },
+    {
+      "rhs": {
+        "args": [
+          "s²",
+          {
+            "args": [
+              {
+                "args": [
+                  -1,
+                  "ρ₁",
+                  "φ₁"
+                ],
+                "op": "*"
+              },
+              "one"
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "*"
+      },
+      "lhs": "var_a"
+    },
+    {
+      "rhs": {
+        "args": [
+          "var_a",
+          {
+            "args": [
+              {
+                "args": [
+                  -1,
+                  "ρ₁",
+                  "φ₁"
+                ],
+                "op": "*"
+              },
+              "one"
+            ],
+            "op": "+"
+          }
+        ],
+        "op": "/"
+      },
+      "lhs": "σ²_daily"
+    }
+  ],
+  "tests": [
+    {
+      "id": "no_autocorrelation",
+      "description": "φ₁=0, ρ₁=0: white noise only, no autoregressive component. ERC_hat = a_current + f_t = 0, var_a = s² = 1, σ²_daily = s² = 1.",
+      "parameter_overrides": {
+        "a_prev": 0.5,
+        "φ₁": 0.0,
+        "a_current": 0.0,
+        "f_t": 0.0,
+        "ρ₁": 0.0,
+        "s²": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "ERC_hat",
+          "time": 0.0,
+          "expected": 0.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "var_a",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "σ²_daily",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "moderate_autocorrelation",
+      "description": "φ₁=0.5, ρ₁=0.5: moderate AR(1) with positive noise and seasonal trend. ERC_hat = 0.5·1 + 0.5 + 0.2 = 1.2, var_a = 2·(1−0.25) = 1.5, σ²_daily = 1.5/0.75 = 2.",
+      "parameter_overrides": {
+        "a_prev": 1.0,
+        "φ₁": 0.5,
+        "a_current": 0.5,
+        "f_t": 0.2,
+        "ρ₁": 0.5,
+        "s²": 2.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "ERC_hat",
+          "time": 0.0,
+          "expected": 1.2,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "var_a",
+          "time": 0.0,
+          "expected": 1.5,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "σ²_daily",
+          "time": 0.0,
+          "expected": 2.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "strong_autocorrelation",
+      "description": "φ₁=0.9, ρ₁=0.9: strong AR(1) with dominant seasonal trend. ERC_hat = 0.9·0 + 0.3 + 5 = 5.3, var_a = 0.5·(1−0.81) = 0.095, σ²_daily = 0.5.",
+      "parameter_overrides": {
+        "a_prev": 0.0,
+        "φ₁": 0.9,
+        "a_current": 0.3,
+        "f_t": 5.0,
+        "ρ₁": 0.9,
+        "s²": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "ERC_hat",
+          "time": 0.0,
+          "expected": 5.3,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "var_a",
+          "time": 0.0,
+          "expected": 0.095,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "σ²_daily",
+          "time": 0.0,
+          "expected": 0.5,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    },
+    {
+      "id": "negative_autocorrelation",
+      "description": "φ₁=-0.3, ρ₁=-0.3: negative AR(1) coefficient. ERC_hat = −0.3·1 + 0 + 0 = −0.3, var_a = 1·(1−0.09) = 0.91, σ²_daily = 0.91/0.91 = 1.",
+      "parameter_overrides": {
+        "a_prev": 1.0,
+        "φ₁": -0.3,
+        "a_current": 0.0,
+        "f_t": 0.0,
+        "ρ₁": -0.3,
+        "s²": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "ERC_hat",
+          "time": 0.0,
+          "expected": -0.3,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "var_a",
+          "time": 0.0,
+          "expected": 0.91,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        },
+        {
+          "variable": "σ²_daily",
+          "time": 0.0,
+          "expected": 1.0,
+          "tolerance": {
+            "abs": 1e-15
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": []
+}
+```
+
+</details>

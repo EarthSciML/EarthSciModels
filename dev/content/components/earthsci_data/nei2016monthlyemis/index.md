@@ -1,0 +1,10988 @@
+---
+title: "NEI2016MonthlyEmis"
+slug: "nei2016monthlyemis"
+domains: ["earthsci_data"]
+component_types: ["model"]
+domain: "earthsci_data"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/earthsci_data/nei2016_monthly.esm"
+reference: "US EPA (2020). 2016 National Emissions Inventory v1. https://gaftp.epa.gov/Air/emismod/2016/"
+description: "US EPA 2016 NEI CMAQ-formatted monthly DataLoader. Converts monthly gridded anthropogenic+biogenic emissions from the 12US1 12-km Lambert Conformal domain to mixing ratio source rates (1/s) for 69 species. Species-specific temporal scaling: CO (day-of-week×diurnal), FORM (diurnal), ISOP (isoprene diurnal), NO/NO2 (NOx day-of-week×NOx diurnal), others (none). The gt-p3ep(lookup) gap is resolved via datetime.hour+floor+interp.linear for diurnal/day-of-week and interp.bilinear for the 94x49 delp_dry_surface field. Migrated from EarthSciData.jl src/nei2016monthly.jl:358 (esm-ftdf)."
+tags: ["earthsci_data", "model", "emissions", "nei2016", "cmaq", "12us1", "anthropogenic", "biogenic", "dataloader", "monthly", "diurnal", "dayofweek", "surface_emissions", "regridding_model"]
+---
+
+## Description
+
+US EPA 2016 NEI CMAQ-formatted monthly DataLoader. Converts monthly gridded anthropogenic+biogenic emissions from the 12US1 12-km Lambert Conformal domain to mixing ratio source rates (1/s) for 69 species. Species-specific temporal scaling: CO (day-of-week×diurnal), FORM (diurnal), ISOP (isoprene diurnal), NO/NO2 (NOx day-of-week×NOx diurnal), others (none). The gt-p3ep(lookup) gap is resolved via datetime.hour+floor+interp.linear for diurnal/day-of-week and interp.bilinear for the 94x49 delp_dry_surface field. Migrated from EarthSciData.jl src/nei2016monthly.jl:358 (esm-ftdf).
+
+[esm-3nc.3] Split at 0.7.0 into a pure-I/O loader (nei2016_monthly_loader.esm) + this regridding model per RFC pure-io-data-loaders §6/§7; at esm 1.0.0 that file is merged BACK into this one, which now holds both the model and the `NEI2016` data source it consumes. The loader is referenced as the subsystem NEI2016; each of the 69 species emission observeds references its regridded loader field as NEI2016.<SP> and is regridded conservatively (cell-centered emissions). The native Lambert Conformal Conic grid (params 33/45/40/-97, R=6370997) is reprojected by ESD reprojection/lambert_conformal.esm (esd-47z.2). The pre-migration 69 flux_<SP> parameters and top-level param_to_var coupling block are removed.
+
+## Reference
+
+_source_ref: EarthSciData.jl:src/nei2016monthly.jl:358
+
+All 69 species are observed (algebraic) variables — upstream test: "NEI has no state variables."
+
+gt-p3ep(lookup) resolution:
+  diurnal_itp(t, lon): local_hour = datetime.hour(t+t_ref+floor(lon_deg/15)*3600)+1
+    → interp.linear(DIURNAL_FACTORS, [1..24], local_hour)
+  diurnal_itp_NOx / diurnal_itp_ISOP: same with NOx/ISOP factor arrays
+  dayofweek_itp_CO/NOx(t, lon): iso_weekday = (floor(t_local/86400)+3) mod 7+1
+    → interp.linear(DayofWeekFactors, [1..7], iso_weekday)
+  delp_dry_surface_itp(lon, lat): interp.bilinear 94×49 bilinear from JLD2 file
+
+Species from 'mrggrid_withbeis_withrwc' sector (verified by reading NCF header):
+  69 species including NO, NO2, CO, FORM, ISOP, ACET, SO2, NH3, and PM components.
+
+Unit conversion (runtime): native IOAPI units → kg/m²/s
+  data *= to_unit(attrib['units'])  # e.g. tons/day → kg/s per cell
+  data /= (XCELL * YCELL)  # 12000 × 12000 = 1.44e8 m²
+  → conservative regridding to target domain
+
+--- esm-3nc.3 pure-IO split ---
+This is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration nei2016_monthly.esm carried this coupler model, a co-located data_loaders.NEI2016 block (with the now-removed `spatial` and `regridding` sub-blocks), AND a top-level `coupling` block that fed the model's 69 flux_<SP> parameters from the loader via param_to_var (from NEI2016.<SP> to NEI2016MonthlyEmis.flux_<SP>). In the 0.7.0 pure-IO form the loader was the separate file components/earthsci_data/nei2016_monthly_loader.esm, referenced as the subsystem `NEI2016`; at esm 1.0.0 it is the `NEI2016` entry in THIS file's `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Each emission observed references its field directly as NEI2016.<SP>, so the 69 flux_<SP> parameters and the top-level coupling block are removed (no external consumer referenced flux_<SP> — couplings/earthscidata_spatial_params.esm only routes lat/lon/lev).
+Reprojection (RFC §6 step 2): NEI2016's native grid.crs.projection is 'lambert_conformal', so the reprojection rule selected by convention is ESD reprojection/lambert_conformal.esm (esd-47z.2), parameterized by the loader crs parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97} on a sphere of radius R=6370997 m — the same rule as wrf with a different parameter set.
+Regridding (RFC §6 step 3 / §5.2): every NEI2016 species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block. function_tables.delp_dry_surface_table stays top-level in this model file (RFC §8 gotcha).
+
+Inline tests emptied (matching the era5/wrf reference migrations): the pre-migration model carried 7 inline tests, but (a) tests 6–7 set parameter_overrides on the now-removed flux_<SP> parameters, and (b) all 7 exercise observeds built on the `interp.bilinear` op (delp_dry_surface, the diurnal/day-of-week factor tables), which the canonical ESS Python runner does not yet support ('Unsupported operation: interp.bilinear') — the same reason era5's interp.bilinear-based `P` ships with empty inline tests and a load-only gate. The 7 scenarios are preserved here as informational live tests (require real NEI2016 12US1 NetCDF and interp.bilinear runner support; not run in CI):
+  1. diurnal_factor_6am_utc: t=21600 s, lon=0 → local_hour=7, diurnal_factor=DIURNAL_FACTORS[7]=1.45 (datetime.hour extraction, 1-based indexing).
+  2. diurnal_factor_6pm_utc: t=64800 s, lon=0 → local_hour=19, diurnal_factor=DIURNAL_FACTORS[19]=0.65.
+  3. day_of_week_sunday: t=0, lon=0, t_ref=2016-05-01 (Sunday, ISO 7) → day_of_week=7, dayofweek_co=0.683, dayofweek_nox=0.784.
+  4. delp_dry_surface_neg94_44: lon=-94.375°, lat=44.5° → delp_dry_surface≈14.721285536474896 (rel 1e-4).
+  5. delp_dry_surface_neg88_42: lon=-88.125°, lat=42.0° → delp_dry_surface≈14.8498301901334 (rel 1e-4).
+  6. zero_emission_above_surface: lev=2 (above surface) → every species observed is 0 via the ifelse(lev<2, …, 0) gate.
+  7. co_emission_surface_scaling: lev=1, lon=0, lat=40°N, t=21600, NEI2016.CO=1e-8 kg/m²/s → CO = NEI2016.CO/Δz*scale*dayofweek_co(0.683)*diurnal_factor(1.45)/(g0_100*delp_dry_surface) ≈ 6.89e-11 1/s (was flux_CO before the pure-IO split; the loader field NEI2016.CO now supplies the regridded flux)._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `t_ref` | `s` | `1462060800.0` | Reference time (Unix s). Default=2016-05-01T00:00:00Z (1462060800). MTK time t is elapsed seconds since t_ref. |
+| `g0_100` | `kg/m^2` | `10.197162129779283` | g0_100 = 100/g0 ≈ 10.197 kg/m². Converts dry pressure thickness (hPa, unitless) to column mass density (kg/m²) for flux→mixing-ratio conversion. |
+| `Δz` | `1` | `1.0` | Vertical layer thickness scaling (dimensionless 1.0). Unit-compatibility placeholder from upstream Julia implementation. |
+| `scale` | `1` | `1.0` | Uniform scaling factor applied to all species emissions (1=no scaling). |
+| `lon` | `rad` | `-1.7017327985067427` | Longitude (radians). Default=-97.5°. Receives spatial coordinate via coupling. |
+| `lat` | `rad` | `0.6981317007977318` | Latitude (radians). Default=40.0°. Receives spatial coordinate via coupling. |
+| `lev` | `1` | `1.0` | Vertical level index (1=surface). Emissions applied only at lev<2. |
+| `flux_ACET` | `kg/m^2/s` | `1.8e-10` | NEI2016 ACET emissions flux density (kg/m²/s). Default 1.8e-10: acetone; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-12 kg/m^2/s; ~2.45 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ACROLEIN` | `kg/m^2/s` | `8e-13` | NEI2016 ACROLEIN emissions flux density (kg/m²/s). Default 8e-13: acrolein; mean stored value over the 12US1 cells that emit it (46% of cells), averaged over the twelve 2016 monthly files (true flux ~2.6e-14 kg/m^2/s; ~0.00756 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ALD2` | `kg/m^2/s` | `8.5e-11` | NEI2016 ALD2 emissions flux density (kg/m²/s). Default 8.5e-11: acetaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.8e-12 kg/m^2/s; ~1.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ALD2_PRIMARY` | `kg/m^2/s` | `8.5e-11` | NEI2016 ALD2_PRIMARY emissions flux density (kg/m²/s). Default 8.5e-11: primary (directly emitted) acetaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.8e-12 kg/m^2/s; ~1.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ALDX` | `kg/m^2/s` | `3.6e-11` | NEI2016 ALDX emissions flux density (kg/m²/s). Default 3.6e-11: propionaldehyde and higher aldehydes; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-12 kg/m^2/s; ~0.505 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_APIN` | `kg/m^2/s` | `3.7e-10` | NEI2016 APIN emissions flux density (kg/m²/s). Default 3.7e-10: alpha-pinene; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-11 kg/m^2/s; ~5.12 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_BENZ` | `kg/m^2/s` | `1.3e-11` | NEI2016 BENZ emissions flux density (kg/m²/s). Default 1.3e-11: benzene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-13 kg/m^2/s; ~0.186 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_BPIN` | `kg/m^2/s` | `1.7e-10` | NEI2016 BPIN emissions flux density (kg/m²/s). Default 1.7e-10: beta-pinene; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~5.6e-12 kg/m^2/s; ~2.38 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_BUTADIENE13` | `kg/m^2/s` | `1.5e-12` | NEI2016 BUTADIENE13 emissions flux density (kg/m²/s). Default 1.5e-12: 1,3-butadiene; mean stored value over the 12US1 cells that emit it (46% of cells), averaged over the twelve 2016 monthly files (true flux ~4.9e-14 kg/m^2/s; ~0.0145 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_CH4` | `kg/m^2/s` | `2e-09` | NEI2016 CH4 emissions flux density (kg/m²/s). Default 2e-09: methane; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~6.6e-11 kg/m^2/s; ~27.7 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_CH4_INV` | `kg/m^2/s` | `8.7e-12` | NEI2016 CH4_INV emissions flux density (kg/m²/s). Default 8.7e-12: inventory (anthropogenic) methane; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~2.9e-13 kg/m^2/s; ~0.0704 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_CL2` | `kg/m^2/s` | `8.9e-12` | NEI2016 CL2 emissions flux density (kg/m²/s). Default 8.9e-12: molecular chlorine; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~2.9e-13 kg/m^2/s; ~0.0725 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_CO` | `kg/m^2/s` | `5e-09` | NEI2016 CO emissions flux density (kg/m²/s). Default 5e-09: ~40 Tg/yr of CO (NEI2016 anthropogenic, non-wildfire) -> 1.6e-10 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s). |
+| `flux_CO2_INV` | `kg/m^2/s` | `2e-07` | NEI2016 CO2_INV emissions flux density (kg/m²/s). Default 2e-07: inventory carbon dioxide; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~6.6e-09 kg/m^2/s; ~1.64e+03 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ETH` | `kg/m^2/s` | `1.4e-10` | NEI2016 ETH emissions flux density (kg/m²/s). Default 1.4e-10: ethene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.6e-12 kg/m^2/s; ~1.9 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ETHA` | `kg/m^2/s` | `1.1e-10` | NEI2016 ETHA emissions flux density (kg/m²/s). Default 1.1e-10: ethane; mean stored value over the 12US1 cells that emit it (69% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-12 kg/m^2/s; ~1.6 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ETHY` | `kg/m^2/s` | `1.1e-11` | NEI2016 ETHY emissions flux density (kg/m²/s). Default 1.1e-11: ethyne; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-13 kg/m^2/s; ~0.147 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ETOH` | `kg/m^2/s` | `2.3e-10` | NEI2016 ETOH emissions flux density (kg/m²/s). Default 2.3e-10: ethanol; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-12 kg/m^2/s; ~3.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_FORM` | `kg/m^2/s` | `1.2e-10` | NEI2016 FORM emissions flux density (kg/m²/s). Default 1.2e-10: ~1 Tg/yr of primary formaldehyde (BEIS biogenic plus anthropogenic) -> 3.9e-12 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s). |
+| `flux_FORM_PRIMARY` | `kg/m^2/s` | `1.2e-10` | NEI2016 FORM_PRIMARY emissions flux density (kg/m²/s). Default 1.2e-10: primary (directly emitted) formaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.9e-12 kg/m^2/s; ~1.63 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_HCL` | `kg/m^2/s` | `8.1e-13` | NEI2016 HCL emissions flux density (kg/m²/s). Default 8.1e-13: hydrogen chloride; mean stored value over the 12US1 cells that emit it (22% of cells), averaged over the twelve 2016 monthly files (true flux ~2.7e-14 kg/m^2/s; ~0.00369 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_HONO` | `kg/m^2/s` | `3.5e-12` | NEI2016 HONO emissions flux density (kg/m²/s). Default 3.5e-12: nitrous acid; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-13 kg/m^2/s; ~0.0487 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_IOLE` | `kg/m^2/s` | `2.5e-10` | NEI2016 IOLE emissions flux density (kg/m²/s). Default 2.5e-10: internal olefin carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~8.2e-12 kg/m^2/s; ~3.46 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_ISOP` | `kg/m^2/s` | `2e-09` | NEI2016 ISOP emissions flux density (kg/m²/s). Default 2e-09: ~18 Tg/yr of isoprene, dominated by the BEIS biogenic emissions merged into this sector (annual mean; summer midday is several times larger) -> 7e-11 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s). |
+| `flux_KET` | `kg/m^2/s` | `3e-12` | NEI2016 KET emissions flux density (kg/m²/s). Default 3e-12: ketone carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~9.9e-14 kg/m^2/s; ~0.0418 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_MEOH` | `kg/m^2/s` | `3.8e-10` | NEI2016 MEOH emissions flux density (kg/m²/s). Default 3.8e-10: methanol; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-11 kg/m^2/s; ~5.28 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_N2O_INV` | `kg/m^2/s` | `5.1e-12` | NEI2016 N2O_INV emissions flux density (kg/m²/s). Default 5.1e-12: inventory nitrous oxide; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-13 kg/m^2/s; ~0.0412 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NAPH` | `kg/m^2/s` | `1.3e-12` | NEI2016 NAPH emissions flux density (kg/m²/s). Default 1.3e-12: naphthalene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-14 kg/m^2/s; ~0.0182 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NH3` | `kg/m^2/s` | `2.5e-10` | NEI2016 NH3 emissions flux density (kg/m²/s). Default 2.5e-10: ammonia; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~8.2e-12 kg/m^2/s; ~3.49 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NH3_FERT` | `kg/m^2/s` | `1.3e-10` | NEI2016 NH3_FERT emissions flux density (kg/m²/s). Default 1.3e-10: fertilizer ammonia; mean stored value over the 12US1 cells that emit it (35% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-12 kg/m^2/s; ~0.943 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NO` | `kg/m^2/s` | `7e-10` | NEI2016 NO emissions flux density (kg/m²/s). Default 7e-10: ~5.9 Tg/yr of NO: NEI2016 NOx ~10 Tg/yr as NO2 (anthropogenic plus BEIS soil), 90% of it emitted as NO by moles -> 2.3e-11 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s). |
+| `flux_NO2` | `kg/m^2/s` | `1.2e-10` | NEI2016 NO2 emissions flux density (kg/m²/s). Default 1.2e-10: ~1.0 Tg/yr of NO2: the 10% of NEI2016 NOx (~10 Tg/yr as NO2) emitted as NO2 -> 3.9e-12 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s). |
+| `flux_NOX` | `kg/m^2/s` | `6.6e-10` | NEI2016 NOX emissions flux density (kg/m²/s). Default 6.6e-10: total NOx (NO + NO2 + HONO); mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.2e-11 kg/m^2/s; ~9.29 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NR` | `kg/m^2/s` | `1.1e-10` | NEI2016 NR emissions flux density (kg/m²/s). Default 1.1e-10: non-reactive carbon; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-12 kg/m^2/s; ~1.5 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_NVOL` | `kg/m^2/s` | `4.2e-12` | NEI2016 NVOL emissions flux density (kg/m²/s). Default 4.2e-12: non-volatile organics; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-13 kg/m^2/s; ~0.0563 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_OLE` | `kg/m^2/s` | `1.9e-10` | NEI2016 OLE emissions flux density (kg/m²/s). Default 1.9e-10: terminal olefin carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~6.3e-12 kg/m^2/s; ~2.72 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PAL` | `kg/m^2/s` | `5.1e-12` | NEI2016 PAL emissions flux density (kg/m²/s). Default 5.1e-12: particulate aluminum; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-13 kg/m^2/s; ~0.0683 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PAR` | `kg/m^2/s` | `8.1e-10` | NEI2016 PAR emissions flux density (kg/m²/s). Default 8.1e-10: paraffin carbon bonds; mean stored value over the 12US1 cells that emit it (69% of cells), averaged over the twelve 2016 monthly files (true flux ~2.7e-11 kg/m^2/s; ~11.4 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PCA` | `kg/m^2/s` | `4.4e-12` | NEI2016 PCA emissions flux density (kg/m²/s). Default 4.4e-12: particulate calcium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-13 kg/m^2/s; ~0.0607 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PCL` | `kg/m^2/s` | `1.8e-12` | NEI2016 PCL emissions flux density (kg/m²/s). Default 1.8e-12: particulate chloride; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-14 kg/m^2/s; ~0.0245 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PEC` | `kg/m^2/s` | `1.5e-11` | NEI2016 PEC emissions flux density (kg/m²/s). Default 1.5e-11: particulate elemental carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.9e-13 kg/m^2/s; ~0.205 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PFE` | `kg/m^2/s` | `3.9e-12` | NEI2016 PFE emissions flux density (kg/m²/s). Default 3.9e-12: particulate iron; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-13 kg/m^2/s; ~0.0545 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PH2O` | `kg/m^2/s` | `4e-13` | NEI2016 PH2O emissions flux density (kg/m²/s). Default 4e-13: particulate water; mean stored value over the 12US1 cells that emit it (62% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-14 kg/m^2/s; ~0.00501 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PK` | `kg/m^2/s` | `3.7e-12` | NEI2016 PK emissions flux density (kg/m²/s). Default 3.7e-12: particulate potassium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-13 kg/m^2/s; ~0.0516 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PM2_5` | `kg/m^2/s` | `1.7e-10` | NEI2016 PM2_5 emissions flux density (kg/m²/s). Default 1.7e-10: total PM2.5; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.6e-12 kg/m^2/s; ~2.43 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PMC` | `kg/m^2/s` | `5e-10` | NEI2016 PMC emissions flux density (kg/m²/s). Default 5e-10: coarse PM (PM10 minus PM2.5); mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-11 kg/m^2/s; ~6.9 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PMG` | `kg/m^2/s` | `4.8e-13` | NEI2016 PMG emissions flux density (kg/m²/s). Default 4.8e-13: particulate magnesium; mean stored value over the 12US1 cells that emit it (65% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-14 kg/m^2/s; ~0.00647 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PMN` | `kg/m^2/s` | `1e-13` | NEI2016 PMN emissions flux density (kg/m²/s). Default 1e-13: particulate manganese; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~3.3e-15 kg/m^2/s; ~0.00139 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PMOTHR` | `kg/m^2/s` | `5.2e-11` | NEI2016 PMOTHR emissions flux density (kg/m²/s). Default 5.2e-11: other unspeciated PM2.5; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-12 kg/m^2/s; ~0.721 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PNA` | `kg/m^2/s` | `3.7e-13` | NEI2016 PNA emissions flux density (kg/m²/s). Default 3.7e-13: particulate sodium; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-14 kg/m^2/s; ~0.00505 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PNCOM` | `kg/m^2/s` | `2.3e-11` | NEI2016 PNCOM emissions flux density (kg/m²/s). Default 2.3e-11: particulate non-carbon organic matter; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-13 kg/m^2/s; ~0.325 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PNH4` | `kg/m^2/s` | `7.4e-13` | NEI2016 PNH4 emissions flux density (kg/m²/s). Default 7.4e-13: particulate ammonium; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~2.4e-14 kg/m^2/s; ~0.01 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PNO3` | `kg/m^2/s` | `9.4e-13` | NEI2016 PNO3 emissions flux density (kg/m²/s). Default 9.4e-13: particulate nitrate; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.1e-14 kg/m^2/s; ~0.013 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_POC` | `kg/m^2/s` | `4.4e-11` | NEI2016 POC emissions flux density (kg/m²/s). Default 4.4e-11: particulate organic carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-12 kg/m^2/s; ~0.612 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PRPA` | `kg/m^2/s` | `7e-11` | NEI2016 PRPA emissions flux density (kg/m²/s). Default 7e-11: propane; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.3e-12 kg/m^2/s; ~0.979 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PSI` | `kg/m^2/s` | `1.6e-11` | NEI2016 PSI emissions flux density (kg/m²/s). Default 1.6e-11: particulate silicon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.3e-13 kg/m^2/s; ~0.219 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PSO4` | `kg/m^2/s` | `3.3e-12` | NEI2016 PSO4 emissions flux density (kg/m²/s). Default 3.3e-12: particulate sulfate; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.1e-13 kg/m^2/s; ~0.0458 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_PTI` | `kg/m^2/s` | `3.8e-13` | NEI2016 PTI emissions flux density (kg/m²/s). Default 3.8e-13: particulate titanium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-14 kg/m^2/s; ~0.0053 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_SESQ` | `kg/m^2/s` | `7.2e-11` | NEI2016 SESQ emissions flux density (kg/m²/s). Default 7.2e-11: sesquiterpenes; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~2.4e-12 kg/m^2/s; ~0.988 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_SO2` | `kg/m^2/s` | `1.8e-11` | NEI2016 SO2 emissions flux density (kg/m²/s). Default 1.8e-11: sulfur dioxide; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-13 kg/m^2/s; ~0.254 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_SOAALK` | `kg/m^2/s` | `2.3e-10` | NEI2016 SOAALK emissions flux density (kg/m²/s). Default 2.3e-10: SOA-forming alkanes; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-12 kg/m^2/s; ~3.24 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_SULF` | `kg/m^2/s` | `2.3e-13` | NEI2016 SULF emissions flux density (kg/m²/s). Default 2.3e-13: sulfuric acid; mean stored value over the 12US1 cells that emit it (35% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-15 kg/m^2/s; ~0.00163 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_TERP` | `kg/m^2/s` | `1.1e-09` | NEI2016 TERP emissions flux density (kg/m²/s). Default 1.1e-09: monoterpenes; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-11 kg/m^2/s; ~15.7 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_TOL` | `kg/m^2/s` | `5.5e-11` | NEI2016 TOL emissions flux density (kg/m²/s). Default 5.5e-11: toluene and other monoalkyl aromatics; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.8e-12 kg/m^2/s; ~0.773 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_UNK` | `kg/m^2/s` | `1e-12` | NEI2016 UNK emissions flux density (kg/m²/s). Default 1e-12: unknown; every cell of all twelve 2016 monthly files is zero, so this is only a small nonzero scale for the planner, the order of the smallest emitted species here (needs science review). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_UNR` | `kg/m^2/s` | `4.8e-11` | NEI2016 UNR emissions flux density (kg/m²/s). Default 4.8e-11: unreactive carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-12 kg/m^2/s; ~0.665 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_VOC_BEIS` | `kg/m^2/s` | `4.5e-09` | NEI2016 VOC_BEIS emissions flux density (kg/m²/s). Default 4.5e-09: total biogenic VOC (BEIS); mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~1.5e-10 kg/m^2/s; ~61.4 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_VOC_INV` | `kg/m^2/s` | `8e-10` | NEI2016 VOC_INV emissions flux density (kg/m²/s). Default 8e-10: total inventory VOC; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.6e-11 kg/m^2/s; ~11.2 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+| `flux_XYLMN` | `kg/m^2/s` | `5.4e-11` | NEI2016 XYLMN emissions flux density (kg/m²/s). Default 5.4e-11: xylene and other polyalkyl aromatics; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.8e-12 kg/m^2/s; ~0.753 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale. |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `lon_deg` | `deg` |  | Longitude in degrees: lon × (180/π). Used for timezone offset and delp_dry_surface lookup. |
+| `lat_deg` | `deg` |  | Latitude in degrees: lat × (180/π). Used for delp_dry_surface lookup. |
+| `tz_offset_h` | `1` |  | Timezone offset in hours: floor(lon_deg/15). 1 hour per 15° longitude. |
+| `t_local_utc` | `s` |  | Local solar time (Unix s): t + t_ref + tz_offset_h×3600. |
+| `local_hour` | `1` |  | Local hour of day 1..24: datetime.hour(t_local_utc)+1 (1-based to match DIURNAL_FACTORS). |
+| `day_of_week` | `1` |  | Local ISO weekday 1..7 (Mon..Sun). Derived from t_local_utc: days=floor(t/86400); dow=(days+3) mod 7+1. Offset +3 because Unix epoch (day 0) is Thursday (ISO 4). |
+| `diurnal_factor` | `1` |  | General diurnal factor at local_hour. DIURNAL_FACTORS=[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45] (24 values, UTC-0). Applied to CO, FORM, and default species. |
+| `diurnal_factor_nox` | `1` |  | NOx diurnal factor at local_hour. DIURNAL_FACTORS_NOx=[0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]. Applied to NO and NO2. |
+| `diurnal_factor_isop` | `1` |  | Isoprene diurnal factor (zero at night, peaks ~2.66 at midday). Applied to ISOP. |
+| `dayofweek_co` | `1` |  | CO day-of-week factor (ISO 1..7). DayofWeekFactors_CO=[1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]. Weekday>weekend. |
+| `dayofweek_nox` | `1` |  | NOx day-of-week factor (ISO 1..7). DayofWeekFactors_NOx=[1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]. Reduced weekends. |
+| `delp_dry_surface` | `1` |  | Dry pressure thickness (hPa, unitless) bilinearly interpolated from the 94x49 mean-domain table (lon -125..-66.875 deg, lat 25..49 deg), flat-clamped outside the domain. Used in the flux-to-mixing-ratio conversion: mixing_ratio_rate = flux/(g0_100 x delp). Typical 10-16 hPa. |
+| `t_utc` | `s` |  | Absolute UTC time (Unix s) = t + t_ref. Distinct from t_local_utc, which carries the cell's timezone offset: the days-in-month normalisation is a property of the DATA FILE's month, not of local time. |
+| `month_utc` | `1` |  | Calendar month (1-12) of the current UTC time, selecting the monthly EPA file whose totals are being normalised. |
+| `is_leap_year_utc` | `1` |  | 1 if the current UTC year is a leap year, else 0 (datetime.is_leap_year), giving February 29 days. |
+| `days_in_month` | `1` |  | Days in the current calendar month, leap-aware -- the equivalent of Julia's Dates.daysinmonth(t). EarthSciAST has no datetime.daysinmonth, so this is a 12-entry table over datetime.month plus a February correction gated on datetime.is_leap_year. Every species emission is divided by this: the EPA gridded-merge monthly files store a whole month's emissions on one 24-hour TSTEP despite their 'tons/day' units attribute, so treating the stored value as a daily rate over-emits by this factor (~30.5x measured domain-wide). Mirrors EarthSciData.jl `data ./= Dates.daysinmonth(t)` in loadslice!; see EarthSciData.jl issue #209 / PR #210. |
+| `ACET` | `1/s` |  | NEI2016 ACET mixing ratio source rate (1/s) at surface (lev<2). = flux_ACET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ACROLEIN` | `1/s` |  | NEI2016 ACROLEIN mixing ratio source rate (1/s) at surface (lev<2). = flux_ACROLEIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ALD2` | `1/s` |  | NEI2016 ALD2 mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ALD2_PRIMARY` | `1/s` |  | NEI2016 ALD2_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ALDX` | `1/s` |  | NEI2016 ALDX mixing ratio source rate (1/s) at surface (lev<2). = flux_ALDX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `APIN` | `1/s` |  | NEI2016 APIN mixing ratio source rate (1/s) at surface (lev<2). = flux_APIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `BENZ` | `1/s` |  | NEI2016 BENZ mixing ratio source rate (1/s) at surface (lev<2). = flux_BENZ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `BPIN` | `1/s` |  | NEI2016 BPIN mixing ratio source rate (1/s) at surface (lev<2). = flux_BPIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `BUTADIENE13` | `1/s` |  | NEI2016 BUTADIENE13 mixing ratio source rate (1/s) at surface (lev<2). = flux_BUTADIENE13/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `CH4` | `1/s` |  | NEI2016 CH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `CH4_INV` | `1/s` |  | NEI2016 CH4_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `CL2` | `1/s` |  | NEI2016 CL2 mixing ratio source rate (1/s) at surface (lev<2). = flux_CL2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `CO` | `1/s` |  | NEI2016 CO mixing ratio source rate (1/s) at surface (lev<2). = flux_CO/Δz×scale×(dayofweek_co×diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `CO2_INV` | `1/s` |  | NEI2016 CO2_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CO2_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ETH` | `1/s` |  | NEI2016 ETH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ETHA` | `1/s` |  | NEI2016 ETHA mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ETHY` | `1/s` |  | NEI2016 ETHY mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ETOH` | `1/s` |  | NEI2016 ETOH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `FORM` | `1/s` |  | NEI2016 FORM mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM/Δz×scale×(diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `FORM_PRIMARY` | `1/s` |  | NEI2016 FORM_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `HCL` | `1/s` |  | NEI2016 HCL mixing ratio source rate (1/s) at surface (lev<2). = flux_HCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `HONO` | `1/s` |  | NEI2016 HONO mixing ratio source rate (1/s) at surface (lev<2). = flux_HONO/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `IOLE` | `1/s` |  | NEI2016 IOLE mixing ratio source rate (1/s) at surface (lev<2). = flux_IOLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `ISOP` | `1/s` |  | NEI2016 ISOP mixing ratio source rate (1/s) at surface (lev<2). = flux_ISOP/Δz×scale×(diurnal_factor_isop)/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `KET` | `1/s` |  | NEI2016 KET mixing ratio source rate (1/s) at surface (lev<2). = flux_KET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `MEOH` | `1/s` |  | NEI2016 MEOH mixing ratio source rate (1/s) at surface (lev<2). = flux_MEOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `N2O_INV` | `1/s` |  | NEI2016 N2O_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_N2O_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NAPH` | `1/s` |  | NEI2016 NAPH mixing ratio source rate (1/s) at surface (lev<2). = flux_NAPH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NH3` | `1/s` |  | NEI2016 NH3 mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NH3_FERT` | `1/s` |  | NEI2016 NH3_FERT mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3_FERT/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NO` | `1/s` |  | NEI2016 NO mixing ratio source rate (1/s) at surface (lev<2). = flux_NO/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NO2` | `1/s` |  | NEI2016 NO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_NO2/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NOX` | `1/s` |  | NEI2016 NOX mixing ratio source rate (1/s) at surface (lev<2). = flux_NOX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NR` | `1/s` |  | NEI2016 NR mixing ratio source rate (1/s) at surface (lev<2). = flux_NR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `NVOL` | `1/s` |  | NEI2016 NVOL mixing ratio source rate (1/s) at surface (lev<2). = flux_NVOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `OLE` | `1/s` |  | NEI2016 OLE mixing ratio source rate (1/s) at surface (lev<2). = flux_OLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PAL` | `1/s` |  | NEI2016 PAL mixing ratio source rate (1/s) at surface (lev<2). = flux_PAL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PAR` | `1/s` |  | NEI2016 PAR mixing ratio source rate (1/s) at surface (lev<2). = flux_PAR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PCA` | `1/s` |  | NEI2016 PCA mixing ratio source rate (1/s) at surface (lev<2). = flux_PCA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PCL` | `1/s` |  | NEI2016 PCL mixing ratio source rate (1/s) at surface (lev<2). = flux_PCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PEC` | `1/s` |  | NEI2016 PEC mixing ratio source rate (1/s) at surface (lev<2). = flux_PEC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PFE` | `1/s` |  | NEI2016 PFE mixing ratio source rate (1/s) at surface (lev<2). = flux_PFE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PH2O` | `1/s` |  | NEI2016 PH2O mixing ratio source rate (1/s) at surface (lev<2). = flux_PH2O/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PK` | `1/s` |  | NEI2016 PK mixing ratio source rate (1/s) at surface (lev<2). = flux_PK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PM2_5` | `1/s` |  | NEI2016 PM2_5 mixing ratio source rate (1/s) at surface (lev<2). = flux_PM2_5/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PMC` | `1/s` |  | NEI2016 PMC mixing ratio source rate (1/s) at surface (lev<2). = flux_PMC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PMG` | `1/s` |  | NEI2016 PMG mixing ratio source rate (1/s) at surface (lev<2). = flux_PMG/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PMN` | `1/s` |  | NEI2016 PMN mixing ratio source rate (1/s) at surface (lev<2). = flux_PMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PMOTHR` | `1/s` |  | NEI2016 PMOTHR mixing ratio source rate (1/s) at surface (lev<2). = flux_PMOTHR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PNA` | `1/s` |  | NEI2016 PNA mixing ratio source rate (1/s) at surface (lev<2). = flux_PNA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PNCOM` | `1/s` |  | NEI2016 PNCOM mixing ratio source rate (1/s) at surface (lev<2). = flux_PNCOM/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PNH4` | `1/s` |  | NEI2016 PNH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PNO3` | `1/s` |  | NEI2016 PNO3 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNO3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `POC` | `1/s` |  | NEI2016 POC mixing ratio source rate (1/s) at surface (lev<2). = flux_POC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PRPA` | `1/s` |  | NEI2016 PRPA mixing ratio source rate (1/s) at surface (lev<2). = flux_PRPA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PSI` | `1/s` |  | NEI2016 PSI mixing ratio source rate (1/s) at surface (lev<2). = flux_PSI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PSO4` | `1/s` |  | NEI2016 PSO4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PSO4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `PTI` | `1/s` |  | NEI2016 PTI mixing ratio source rate (1/s) at surface (lev<2). = flux_PTI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `SESQ` | `1/s` |  | NEI2016 SESQ mixing ratio source rate (1/s) at surface (lev<2). = flux_SESQ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `SO2` | `1/s` |  | NEI2016 SO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_SO2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `SOAALK` | `1/s` |  | NEI2016 SOAALK mixing ratio source rate (1/s) at surface (lev<2). = flux_SOAALK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `SULF` | `1/s` |  | NEI2016 SULF mixing ratio source rate (1/s) at surface (lev<2). = flux_SULF/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `TERP` | `1/s` |  | NEI2016 TERP mixing ratio source rate (1/s) at surface (lev<2). = flux_TERP/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `TOL` | `1/s` |  | NEI2016 TOL mixing ratio source rate (1/s) at surface (lev<2). = flux_TOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `UNK` | `1/s` |  | NEI2016 UNK mixing ratio source rate (1/s) at surface (lev<2). = flux_UNK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `UNR` | `1/s` |  | NEI2016 UNR mixing ratio source rate (1/s) at surface (lev<2). = flux_UNR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `VOC_BEIS` | `1/s` |  | NEI2016 VOC_BEIS mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_BEIS/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `VOC_INV` | `1/s` |  | NEI2016 VOC_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+| `XYLMN` | `1/s` |  | NEI2016 XYLMN mixing ratio source rate (1/s) at surface (lev<2). = flux_XYLMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2. |
+
+## Observed expressions
+
+$$
+lon_{deg} = 57.29577951308232 \cdot lon
+$$
+_Longitude in degrees: lon × (180/π). Used for timezone offset and delp_dry_surface lookup._
+
+$$
+lat_{deg} = 57.29577951308232 \cdot lat
+$$
+_Latitude in degrees: lat × (180/π). Used for delp_dry_surface lookup._
+
+$$
+tz_{offset\,h} = \mathrm{floor}\left(\frac{lon_{deg}}{15.0}\right)
+$$
+_Timezone offset in hours: floor(lon_deg/15). 1 hour per 15° longitude._
+
+$$
+t_{local\,utc} = t + t_{ref} + tz_{offset\,h} \cdot 3600.0
+$$
+_Local solar time (Unix s): t + t_ref + tz_offset_h×3600._
+
+$$
+local_{hour} = \mathrm{fn}\left(t_{local\,utc}\right) + 1.0
+$$
+_Local hour of day 1..24: datetime.hour(t_local_utc)+1 (1-based to match DIURNAL_FACTORS)._
+
+$$
+day_{of\,week} = \mathrm{floor}\left(\frac{t_{local\,utc}}{86400.0}\right) + 3.0 + \left(-7.0\right) \cdot \mathrm{floor}\left(\frac{\mathrm{floor}\left(\frac{t_{local\,utc}}{86400.0}\right) + 3.0}{7.0}\right) + 1.0
+$$
+_Local ISO weekday 1..7 (Mon..Sun). Derived from t_local_utc: days=floor(t/86400); dow=(days+3) mod 7+1. Offset +3 because Unix epoch (day 0) is Thursday (ISO 4)._
+
+$$
+diurnal_{factor} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=local_{hour}, n=24\right)
+$$
+_General diurnal factor at local_hour. DIURNAL_FACTORS=[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45] (24 values, UTC-0). Applied to CO, FORM, and default species._
+
+$$
+diurnal_{factor\,nox} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=local_{hour}, n=24\right)
+$$
+_NOx diurnal factor at local_hour. DIURNAL_FACTORS_NOx=[0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]. Applied to NO and NO2._
+
+$$
+diurnal_{factor\,isop} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=local_{hour}, n=24\right)
+$$
+_Isoprene diurnal factor (zero at night, peaks ~2.66 at midday). Applied to ISOP._
+
+$$
+dayofweek_{co} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=day_{of\,week}, n=7\right)
+$$
+_CO day-of-week factor (ISO 1..7). DayofWeekFactors_CO=[1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]. Weekday>weekend._
+
+$$
+dayofweek_{nox} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=day_{of\,week}, n=7\right)
+$$
+_NOx day-of-week factor (ISO 1..7). DayofWeekFactors_NOx=[1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]. Reduced weekends._
+
+$$
+delp_{dry\,surface} = \mathrm{bilinear}\left(table=\mathrm{const}\left(\right), axis_{x}=\mathrm{const}\left(\right), axis_{y}=\mathrm{const}\left(\right), x=lon_{deg}, y=lat_{deg}, nx=94, ny=49\right)
+$$
+_Dry pressure thickness (hPa, unitless) bilinearly interpolated from the 94x49 mean-domain table (lon -125..-66.875 deg, lat 25..49 deg), flat-clamped outside the domain. Used in the flux-to-mixing-ratio conversion: mixing_ratio_rate = flux/(g0_100 x delp). Typical 10-16 hPa._
+
+$$
+t_{utc} = t + t_{ref}
+$$
+_Absolute UTC time (Unix s) = t + t_ref. Distinct from t_local_utc, which carries the cell's timezone offset: the days-in-month normalisation is a property of the DATA FILE's month, not of local time._
+
+$$
+month_{utc} = \mathrm{fn}\left(t_{utc}\right)
+$$
+_Calendar month (1-12) of the current UTC time, selecting the monthly EPA file whose totals are being normalised._
+
+$$
+is_{leap\,year\,utc} = \mathrm{fn}\left(t_{utc}\right)
+$$
+_1 if the current UTC year is a leap year, else 0 (datetime.is_leap_year), giving February 29 days._
+
+$$
+days_{in\,month} = \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=month_{utc}, n=12\right) + is_{leap\,year\,utc} \cdot \mathrm{linear}\left(table=\mathrm{const}\left(\right), axis=\mathrm{const}\left(\right), x=month_{utc}, n=12\right)
+$$
+_Days in the current calendar month, leap-aware -- the equivalent of Julia's Dates.daysinmonth(t). EarthSciAST has no datetime.daysinmonth, so this is a 12-entry table over datetime.month plus a February correction gated on datetime.is_leap_year. Every species emission is divided by this: the EPA gridded-merge monthly files store a whole month's emissions on one 24-hour TSTEP despite their 'tons/day' units attribute, so treating the stored value as a daily rate over-emits by this factor (~30.5x measured domain-wide). Mirrors EarthSciData.jl `data ./= Dates.daysinmonth(t)` in loadslice!; see EarthSciData.jl issue #209 / PR #210._
+
+$$
+ACET = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ACET}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ACET mixing ratio source rate (1/s) at surface (lev<2). = flux_ACET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ACROLEIN = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ACROLEIN}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ACROLEIN mixing ratio source rate (1/s) at surface (lev<2). = flux_ACROLEIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ALD2 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ALD2}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ALD2 mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ALD2_{PRIMARY} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ALD2\,PRIMARY}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ALD2_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ALDX = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ALDX}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ALDX mixing ratio source rate (1/s) at surface (lev<2). = flux_ALDX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+APIN = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{APIN}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 APIN mixing ratio source rate (1/s) at surface (lev<2). = flux_APIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+BENZ = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{BENZ}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 BENZ mixing ratio source rate (1/s) at surface (lev<2). = flux_BENZ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+BPIN = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{BPIN}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 BPIN mixing ratio source rate (1/s) at surface (lev<2). = flux_BPIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+BUTADIENE13 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{BUTADIENE13}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 BUTADIENE13 mixing ratio source rate (1/s) at surface (lev<2). = flux_BUTADIENE13/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+CH4 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{CH4}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 CH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+CH4_{INV} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{CH4\,INV}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 CH4_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+CL2 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{CL2}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 CL2 mixing ratio source rate (1/s) at surface (lev<2). = flux_CL2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+CO = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{CO}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}} \cdot dayofweek_{co} \cdot diurnal_{factor}, 0.0\right)
+$$
+_NEI2016 CO mixing ratio source rate (1/s) at surface (lev<2). = flux_CO/Δz×scale×(dayofweek_co×diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+CO2_{INV} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{CO2\,INV}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 CO2_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CO2_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ETH = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ETH}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ETH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ETHA = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ETHA}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ETHA mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ETHY = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ETHY}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ETHY mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ETOH = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ETOH}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 ETOH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+FORM = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{FORM}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}} \cdot diurnal_{factor}, 0.0\right)
+$$
+_NEI2016 FORM mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM/Δz×scale×(diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+FORM_{PRIMARY} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{FORM\,PRIMARY}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 FORM_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+HCL = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{HCL}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 HCL mixing ratio source rate (1/s) at surface (lev<2). = flux_HCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+HONO = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{HONO}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 HONO mixing ratio source rate (1/s) at surface (lev<2). = flux_HONO/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+IOLE = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{IOLE}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 IOLE mixing ratio source rate (1/s) at surface (lev<2). = flux_IOLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+ISOP = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{ISOP}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}} \cdot diurnal_{factor\,isop}, 0.0\right)
+$$
+_NEI2016 ISOP mixing ratio source rate (1/s) at surface (lev<2). = flux_ISOP/Δz×scale×(diurnal_factor_isop)/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+KET = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{KET}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 KET mixing ratio source rate (1/s) at surface (lev<2). = flux_KET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+MEOH = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{MEOH}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 MEOH mixing ratio source rate (1/s) at surface (lev<2). = flux_MEOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+N2O_{INV} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{N2O\,INV}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 N2O_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_N2O_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NAPH = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NAPH}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NAPH mixing ratio source rate (1/s) at surface (lev<2). = flux_NAPH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NH3 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NH3}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NH3 mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NH3_{FERT} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NH3\,FERT}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NH3_FERT mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3_FERT/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NO = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NO}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}} \cdot dayofweek_{nox} \cdot diurnal_{factor\,nox}, 0.0\right)
+$$
+_NEI2016 NO mixing ratio source rate (1/s) at surface (lev<2). = flux_NO/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NO2 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NO2}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}} \cdot dayofweek_{nox} \cdot diurnal_{factor\,nox}, 0.0\right)
+$$
+_NEI2016 NO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_NO2/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NOX = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NOX}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NOX mixing ratio source rate (1/s) at surface (lev<2). = flux_NOX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NR = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NR}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NR mixing ratio source rate (1/s) at surface (lev<2). = flux_NR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+NVOL = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{NVOL}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 NVOL mixing ratio source rate (1/s) at surface (lev<2). = flux_NVOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+OLE = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{OLE}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 OLE mixing ratio source rate (1/s) at surface (lev<2). = flux_OLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PAL = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PAL}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PAL mixing ratio source rate (1/s) at surface (lev<2). = flux_PAL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PAR = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PAR}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PAR mixing ratio source rate (1/s) at surface (lev<2). = flux_PAR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PCA = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PCA}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PCA mixing ratio source rate (1/s) at surface (lev<2). = flux_PCA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PCL = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PCL}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PCL mixing ratio source rate (1/s) at surface (lev<2). = flux_PCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PEC = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PEC}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PEC mixing ratio source rate (1/s) at surface (lev<2). = flux_PEC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PFE = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PFE}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PFE mixing ratio source rate (1/s) at surface (lev<2). = flux_PFE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PH2O = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PH2O}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PH2O mixing ratio source rate (1/s) at surface (lev<2). = flux_PH2O/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PK = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PK}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PK mixing ratio source rate (1/s) at surface (lev<2). = flux_PK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PM2_{5} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PM2\,5}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PM2_5 mixing ratio source rate (1/s) at surface (lev<2). = flux_PM2_5/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PMC = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PMC}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PMC mixing ratio source rate (1/s) at surface (lev<2). = flux_PMC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PMG = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PMG}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PMG mixing ratio source rate (1/s) at surface (lev<2). = flux_PMG/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PMN = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PMN}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PMN mixing ratio source rate (1/s) at surface (lev<2). = flux_PMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PMOTHR = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PMOTHR}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PMOTHR mixing ratio source rate (1/s) at surface (lev<2). = flux_PMOTHR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PNA = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PNA}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PNA mixing ratio source rate (1/s) at surface (lev<2). = flux_PNA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PNCOM = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PNCOM}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PNCOM mixing ratio source rate (1/s) at surface (lev<2). = flux_PNCOM/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PNH4 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PNH4}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PNH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PNO3 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PNO3}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PNO3 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNO3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+POC = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{POC}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 POC mixing ratio source rate (1/s) at surface (lev<2). = flux_POC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PRPA = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PRPA}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PRPA mixing ratio source rate (1/s) at surface (lev<2). = flux_PRPA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PSI = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PSI}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PSI mixing ratio source rate (1/s) at surface (lev<2). = flux_PSI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PSO4 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PSO4}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PSO4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PSO4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+PTI = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{PTI}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 PTI mixing ratio source rate (1/s) at surface (lev<2). = flux_PTI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+SESQ = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{SESQ}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 SESQ mixing ratio source rate (1/s) at surface (lev<2). = flux_SESQ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+SO2 = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{SO2}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 SO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_SO2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+SOAALK = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{SOAALK}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 SOAALK mixing ratio source rate (1/s) at surface (lev<2). = flux_SOAALK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+SULF = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{SULF}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 SULF mixing ratio source rate (1/s) at surface (lev<2). = flux_SULF/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+TERP = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{TERP}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 TERP mixing ratio source rate (1/s) at surface (lev<2). = flux_TERP/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+TOL = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{TOL}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 TOL mixing ratio source rate (1/s) at surface (lev<2). = flux_TOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+UNK = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{UNK}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 UNK mixing ratio source rate (1/s) at surface (lev<2). = flux_UNK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+UNR = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{UNR}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 UNR mixing ratio source rate (1/s) at surface (lev<2). = flux_UNR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+VOC_{BEIS} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{VOC\,BEIS}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 VOC_BEIS mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_BEIS/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+VOC_{INV} = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{VOC\,INV}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 VOC_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+$$
+XYLMN = \mathrm{ifelse}\left(\mathrm{<}\left(lev, 2.0\right), \frac{\frac{flux_{XYLMN}}{days_{in\,month}} \cdot \frac{1.0}{Δz} \cdot scale}{g0_{100} \cdot delp_{dry\,surface}}, 0.0\right)
+$$
+_NEI2016 XYLMN mixing ratio source rate (1/s) at surface (lev<2). = flux_XYLMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2._
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "expression_template_imports": [
+    {
+      "ref": "esm:std/interp.esm",
+      "only": [
+        "bilinear",
+        "linear"
+      ]
+    }
+  ],
+  "reference": {
+    "notes": "source_ref: EarthSciData.jl:src/nei2016monthly.jl:358\n\nAll 69 species are observed (algebraic) variables — upstream test: \"NEI has no state variables.\"\n\ngt-p3ep(lookup) resolution:\n  diurnal_itp(t, lon): local_hour = datetime.hour(t+t_ref+floor(lon_deg/15)*3600)+1\n    → interp.linear(DIURNAL_FACTORS, [1..24], local_hour)\n  diurnal_itp_NOx / diurnal_itp_ISOP: same with NOx/ISOP factor arrays\n  dayofweek_itp_CO/NOx(t, lon): iso_weekday = (floor(t_local/86400)+3) mod 7+1\n    → interp.linear(DayofWeekFactors, [1..7], iso_weekday)\n  delp_dry_surface_itp(lon, lat): interp.bilinear 94×49 bilinear from JLD2 file\n\nSpecies from 'mrggrid_withbeis_withrwc' sector (verified by reading NCF header):\n  69 species including NO, NO2, CO, FORM, ISOP, ACET, SO2, NH3, and PM components.\n\nUnit conversion (runtime): native IOAPI units → kg/m²/s\n  data *= to_unit(attrib['units'])  # e.g. tons/day → kg/s per cell\n  data /= (XCELL * YCELL)  # 12000 × 12000 = 1.44e8 m²\n  → conservative regridding to target domain\n\n--- esm-3nc.3 pure-IO split ---\nThis is the regridding-model half of the pure-IO loader migration (RFC pure-io-data-loaders §6/§7, bead esm-3nc.3). The pre-migration nei2016_monthly.esm carried this coupler model, a co-located data_loaders.NEI2016 block (with the now-removed `spatial` and `regridding` sub-blocks), AND a top-level `coupling` block that fed the model's 69 flux_<SP> parameters from the loader via param_to_var (from NEI2016.<SP> to NEI2016MonthlyEmis.flux_<SP>). In the 0.7.0 pure-IO form the loader was the separate file components/earthsci_data/nei2016_monthly_loader.esm, referenced as the subsystem `NEI2016`; at esm 1.0.0 it is the `NEI2016` entry in THIS file's `data_sources` and the standalone file is gone (a data source is not a component, so it neither needs nor may be a subsystem). Each emission observed references its field directly as NEI2016.<SP>, so the 69 flux_<SP> parameters and the top-level coupling block are removed (no external consumer referenced flux_<SP> — couplings/earthscidata_spatial_params.esm only routes lat/lon/lev).\nReprojection (RFC §6 step 2): NEI2016's native grid.crs.projection is 'lambert_conformal', so the reprojection rule selected by convention is ESD reprojection/lambert_conformal.esm (esd-47z.2), parameterized by the loader crs parameters {lat_1:33, lat_2:45, lat_0:40, lon_0:-97} on a sphere of radius R=6370997 m — the same rule as wrf with a different parameter set.\nRegridding (RFC §6 step 3 / §5.2): every NEI2016 species flux is a cell-centered scalar → conservative area-weighted overlap join (ESD regridding/conservative_regrid_overlap_join.esm), declared in the model `regrid` block. function_tables.delp_dry_surface_table stays top-level in this model file (RFC §8 gotcha).\n\nInline tests emptied (matching the era5/wrf reference migrations): the pre-migration model carried 7 inline tests, but (a) tests 6–7 set parameter_overrides on the now-removed flux_<SP> parameters, and (b) all 7 exercise observeds built on the `interp.bilinear` op (delp_dry_surface, the diurnal/day-of-week factor tables), which the canonical ESS Python runner does not yet support ('Unsupported operation: interp.bilinear') — the same reason era5's interp.bilinear-based `P` ships with empty inline tests and a load-only gate. The 7 scenarios are preserved here as informational live tests (require real NEI2016 12US1 NetCDF and interp.bilinear runner support; not run in CI):\n  1. diurnal_factor_6am_utc: t=21600 s, lon=0 → local_hour=7, diurnal_factor=DIURNAL_FACTORS[7]=1.45 (datetime.hour extraction, 1-based indexing).\n  2. diurnal_factor_6pm_utc: t=64800 s, lon=0 → local_hour=19, diurnal_factor=DIURNAL_FACTORS[19]=0.65.\n  3. day_of_week_sunday: t=0, lon=0, t_ref=2016-05-01 (Sunday, ISO 7) → day_of_week=7, dayofweek_co=0.683, dayofweek_nox=0.784.\n  4. delp_dry_surface_neg94_44: lon=-94.375°, lat=44.5° → delp_dry_surface≈14.721285536474896 (rel 1e-4).\n  5. delp_dry_surface_neg88_42: lon=-88.125°, lat=42.0° → delp_dry_surface≈14.8498301901334 (rel 1e-4).\n  6. zero_emission_above_surface: lev=2 (above surface) → every species observed is 0 via the ifelse(lev<2, …, 0) gate.\n  7. co_emission_surface_scaling: lev=1, lon=0, lat=40°N, t=21600, NEI2016.CO=1e-8 kg/m²/s → CO = NEI2016.CO/Δz*scale*dayofweek_co(0.683)*diurnal_factor(1.45)/(g0_100*delp_dry_surface) ≈ 6.89e-11 1/s (was flux_CO before the pure-IO split; the loader field NEI2016.CO now supplies the regridded flux)."
+  },
+  "tolerance": {
+    "rel": 1e-06,
+    "abs": 1e-14
+  },
+  "variables": {
+    "t_ref": {
+      "type": "parameter",
+      "units": "s",
+      "default": 1462060800.0,
+      "description": "Reference time (Unix s). Default=2016-05-01T00:00:00Z (1462060800). MTK time t is elapsed seconds since t_ref."
+    },
+    "g0_100": {
+      "type": "parameter",
+      "units": "kg/m^2",
+      "default": 10.197162129779283,
+      "description": "g0_100 = 100/g0 ≈ 10.197 kg/m². Converts dry pressure thickness (hPa, unitless) to column mass density (kg/m²) for flux→mixing-ratio conversion."
+    },
+    "Δz": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Vertical layer thickness scaling (dimensionless 1.0). Unit-compatibility placeholder from upstream Julia implementation."
+    },
+    "scale": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Uniform scaling factor applied to all species emissions (1=no scaling)."
+    },
+    "lon": {
+      "type": "parameter",
+      "units": "rad",
+      "default": -1.7017327985067427,
+      "description": "Longitude (radians). Default=-97.5°. Receives spatial coordinate via coupling."
+    },
+    "lat": {
+      "type": "parameter",
+      "units": "rad",
+      "default": 0.6981317007977318,
+      "description": "Latitude (radians). Default=40.0°. Receives spatial coordinate via coupling."
+    },
+    "lev": {
+      "type": "parameter",
+      "units": "1",
+      "default": 1.0,
+      "description": "Vertical level index (1=surface). Emissions applied only at lev<2."
+    },
+    "lon_deg": {
+      "type": "unknown",
+      "units": "deg",
+      "description": "Longitude in degrees: lon × (180/π). Used for timezone offset and delp_dry_surface lookup."
+    },
+    "lat_deg": {
+      "type": "unknown",
+      "units": "deg",
+      "description": "Latitude in degrees: lat × (180/π). Used for delp_dry_surface lookup."
+    },
+    "tz_offset_h": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Timezone offset in hours: floor(lon_deg/15). 1 hour per 15° longitude."
+    },
+    "t_local_utc": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Local solar time (Unix s): t + t_ref + tz_offset_h×3600."
+    },
+    "local_hour": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Local hour of day 1..24: datetime.hour(t_local_utc)+1 (1-based to match DIURNAL_FACTORS)."
+    },
+    "day_of_week": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Local ISO weekday 1..7 (Mon..Sun). Derived from t_local_utc: days=floor(t/86400); dow=(days+3) mod 7+1. Offset +3 because Unix epoch (day 0) is Thursday (ISO 4)."
+    },
+    "diurnal_factor": {
+      "type": "unknown",
+      "units": "1",
+      "description": "General diurnal factor at local_hour. DIURNAL_FACTORS=[0.45, 0.45, 0.6, 0.6, 0.6, 0.6, 1.45, 1.45, 1.45, 1.45, 1.4, 1.4, 1.4, 1.4, 1.45, 1.45, 1.45, 1.45, 0.65, 0.65, 0.65, 0.65, 0.45, 0.45] (24 values, UTC-0). Applied to CO, FORM, and default species."
+    },
+    "diurnal_factor_nox": {
+      "type": "unknown",
+      "units": "1",
+      "description": "NOx diurnal factor at local_hour. DIURNAL_FACTORS_NOx=[0.39598674, 0.31852847, 0.30128068, 0.29590213, 0.33177775, 0.43871498, 0.9094625, 1.5850095, 1.6223788, 1.3429453, 1.2265036, 1.1937649, 1.254314, 1.3282939, 1.331211, 1.4135737, 1.6848333, 1.710925, 1.3491899, 1.0586671, 0.84439224, 0.761263, 0.72693235, 0.5741503]. Applied to NO and NO2."
+    },
+    "diurnal_factor_isop": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Isoprene diurnal factor (zero at night, peaks ~2.66 at midday). Applied to ISOP."
+    },
+    "dayofweek_co": {
+      "type": "unknown",
+      "units": "1",
+      "description": "CO day-of-week factor (ISO 1..7). DayofWeekFactors_CO=[1.076, 1.1076, 1.0706, 1.0706, 1.0706, 0.779, 0.683]. Weekday>weekend."
+    },
+    "dayofweek_nox": {
+      "type": "unknown",
+      "units": "1",
+      "description": "NOx day-of-week factor (ISO 1..7). DayofWeekFactors_NOx=[1.0706, 1.0706, 1.0706, 1.0706, 1.0706, 0.863, 0.784]. Reduced weekends."
+    },
+    "delp_dry_surface": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Dry pressure thickness (hPa, unitless) bilinearly interpolated from the 94x49 mean-domain table (lon -125..-66.875 deg, lat 25..49 deg), flat-clamped outside the domain. Used in the flux-to-mixing-ratio conversion: mixing_ratio_rate = flux/(g0_100 x delp). Typical 10-16 hPa."
+    },
+    "t_utc": {
+      "type": "unknown",
+      "units": "s",
+      "description": "Absolute UTC time (Unix s) = t + t_ref. Distinct from t_local_utc, which carries the cell's timezone offset: the days-in-month normalisation is a property of the DATA FILE's month, not of local time."
+    },
+    "month_utc": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Calendar month (1-12) of the current UTC time, selecting the monthly EPA file whose totals are being normalised."
+    },
+    "is_leap_year_utc": {
+      "type": "unknown",
+      "units": "1",
+      "description": "1 if the current UTC year is a leap year, else 0 (datetime.is_leap_year), giving February 29 days."
+    },
+    "days_in_month": {
+      "type": "unknown",
+      "units": "1",
+      "description": "Days in the current calendar month, leap-aware -- the equivalent of Julia's Dates.daysinmonth(t). EarthSciAST has no datetime.daysinmonth, so this is a 12-entry table over datetime.month plus a February correction gated on datetime.is_leap_year. Every species emission is divided by this: the EPA gridded-merge monthly files store a whole month's emissions on one 24-hour TSTEP despite their 'tons/day' units attribute, so treating the stored value as a daily rate over-emits by this factor (~30.5x measured domain-wide). Mirrors EarthSciData.jl `data ./= Dates.daysinmonth(t)` in loadslice!; see EarthSciData.jl issue #209 / PR #210."
+    },
+    "ACET": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ACET mixing ratio source rate (1/s) at surface (lev<2). = flux_ACET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ACROLEIN": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ACROLEIN mixing ratio source rate (1/s) at surface (lev<2). = flux_ACROLEIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ALD2": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ALD2 mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ALD2_PRIMARY": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ALD2_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_ALD2_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ALDX": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ALDX mixing ratio source rate (1/s) at surface (lev<2). = flux_ALDX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "APIN": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 APIN mixing ratio source rate (1/s) at surface (lev<2). = flux_APIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "BENZ": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 BENZ mixing ratio source rate (1/s) at surface (lev<2). = flux_BENZ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "BPIN": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 BPIN mixing ratio source rate (1/s) at surface (lev<2). = flux_BPIN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "BUTADIENE13": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 BUTADIENE13 mixing ratio source rate (1/s) at surface (lev<2). = flux_BUTADIENE13/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "CH4": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 CH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "CH4_INV": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 CH4_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CH4_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "CL2": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 CL2 mixing ratio source rate (1/s) at surface (lev<2). = flux_CL2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "CO": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 CO mixing ratio source rate (1/s) at surface (lev<2). = flux_CO/Δz×scale×(dayofweek_co×diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "CO2_INV": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 CO2_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_CO2_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ETH": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ETH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ETHA": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ETHA mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ETHY": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ETHY mixing ratio source rate (1/s) at surface (lev<2). = flux_ETHY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ETOH": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ETOH mixing ratio source rate (1/s) at surface (lev<2). = flux_ETOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "FORM": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 FORM mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM/Δz×scale×(diurnal_factor)/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "FORM_PRIMARY": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 FORM_PRIMARY mixing ratio source rate (1/s) at surface (lev<2). = flux_FORM_PRIMARY/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "HCL": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 HCL mixing ratio source rate (1/s) at surface (lev<2). = flux_HCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "HONO": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 HONO mixing ratio source rate (1/s) at surface (lev<2). = flux_HONO/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "IOLE": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 IOLE mixing ratio source rate (1/s) at surface (lev<2). = flux_IOLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "ISOP": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 ISOP mixing ratio source rate (1/s) at surface (lev<2). = flux_ISOP/Δz×scale×(diurnal_factor_isop)/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "KET": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 KET mixing ratio source rate (1/s) at surface (lev<2). = flux_KET/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "MEOH": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 MEOH mixing ratio source rate (1/s) at surface (lev<2). = flux_MEOH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "N2O_INV": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 N2O_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_N2O_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NAPH": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NAPH mixing ratio source rate (1/s) at surface (lev<2). = flux_NAPH/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NH3": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NH3 mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NH3_FERT": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NH3_FERT mixing ratio source rate (1/s) at surface (lev<2). = flux_NH3_FERT/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NO": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NO mixing ratio source rate (1/s) at surface (lev<2). = flux_NO/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NO2": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_NO2/Δz×scale×(dayofweek_nox×diurnal_factor_nox)/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NOX": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NOX mixing ratio source rate (1/s) at surface (lev<2). = flux_NOX/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NR": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NR mixing ratio source rate (1/s) at surface (lev<2). = flux_NR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "NVOL": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 NVOL mixing ratio source rate (1/s) at surface (lev<2). = flux_NVOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "OLE": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 OLE mixing ratio source rate (1/s) at surface (lev<2). = flux_OLE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PAL": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PAL mixing ratio source rate (1/s) at surface (lev<2). = flux_PAL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PAR": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PAR mixing ratio source rate (1/s) at surface (lev<2). = flux_PAR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PCA": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PCA mixing ratio source rate (1/s) at surface (lev<2). = flux_PCA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PCL": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PCL mixing ratio source rate (1/s) at surface (lev<2). = flux_PCL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PEC": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PEC mixing ratio source rate (1/s) at surface (lev<2). = flux_PEC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PFE": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PFE mixing ratio source rate (1/s) at surface (lev<2). = flux_PFE/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PH2O": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PH2O mixing ratio source rate (1/s) at surface (lev<2). = flux_PH2O/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PK": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PK mixing ratio source rate (1/s) at surface (lev<2). = flux_PK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PM2_5": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PM2_5 mixing ratio source rate (1/s) at surface (lev<2). = flux_PM2_5/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PMC": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PMC mixing ratio source rate (1/s) at surface (lev<2). = flux_PMC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PMG": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PMG mixing ratio source rate (1/s) at surface (lev<2). = flux_PMG/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PMN": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PMN mixing ratio source rate (1/s) at surface (lev<2). = flux_PMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PMOTHR": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PMOTHR mixing ratio source rate (1/s) at surface (lev<2). = flux_PMOTHR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PNA": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PNA mixing ratio source rate (1/s) at surface (lev<2). = flux_PNA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PNCOM": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PNCOM mixing ratio source rate (1/s) at surface (lev<2). = flux_PNCOM/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PNH4": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PNH4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNH4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PNO3": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PNO3 mixing ratio source rate (1/s) at surface (lev<2). = flux_PNO3/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "POC": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 POC mixing ratio source rate (1/s) at surface (lev<2). = flux_POC/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PRPA": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PRPA mixing ratio source rate (1/s) at surface (lev<2). = flux_PRPA/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PSI": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PSI mixing ratio source rate (1/s) at surface (lev<2). = flux_PSI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PSO4": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PSO4 mixing ratio source rate (1/s) at surface (lev<2). = flux_PSO4/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "PTI": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 PTI mixing ratio source rate (1/s) at surface (lev<2). = flux_PTI/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "SESQ": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 SESQ mixing ratio source rate (1/s) at surface (lev<2). = flux_SESQ/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "SO2": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 SO2 mixing ratio source rate (1/s) at surface (lev<2). = flux_SO2/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "SOAALK": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 SOAALK mixing ratio source rate (1/s) at surface (lev<2). = flux_SOAALK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "SULF": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 SULF mixing ratio source rate (1/s) at surface (lev<2). = flux_SULF/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "TERP": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 TERP mixing ratio source rate (1/s) at surface (lev<2). = flux_TERP/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "TOL": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 TOL mixing ratio source rate (1/s) at surface (lev<2). = flux_TOL/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "UNK": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 UNK mixing ratio source rate (1/s) at surface (lev<2). = flux_UNK/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "UNR": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 UNR mixing ratio source rate (1/s) at surface (lev<2). = flux_UNR/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "VOC_BEIS": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 VOC_BEIS mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_BEIS/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "VOC_INV": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 VOC_INV mixing ratio source rate (1/s) at surface (lev<2). = flux_VOC_INV/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "XYLMN": {
+      "type": "unknown",
+      "units": "1/s",
+      "description": "NEI2016 XYLMN mixing ratio source rate (1/s) at surface (lev<2). = flux_XYLMN/Δz×scale×(1 (no temporal scaling))/(g0_100×delp_dry_surface). Zero for lev≥2."
+    },
+    "flux_ACET": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.8e-10,
+      "description": "NEI2016 ACET emissions flux density (kg/m²/s). Default 1.8e-10: acetone; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-12 kg/m^2/s; ~2.45 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ACET",
+          "description": "NEI2016 ACET emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ACROLEIN": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8e-13,
+      "description": "NEI2016 ACROLEIN emissions flux density (kg/m²/s). Default 8e-13: acrolein; mean stored value over the 12US1 cells that emit it (46% of cells), averaged over the twelve 2016 monthly files (true flux ~2.6e-14 kg/m^2/s; ~0.00756 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ACROLEIN",
+          "description": "NEI2016 ACROLEIN emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ALD2": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.5e-11,
+      "description": "NEI2016 ALD2 emissions flux density (kg/m²/s). Default 8.5e-11: acetaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.8e-12 kg/m^2/s; ~1.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ALD2",
+          "description": "NEI2016 ALD2 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ALD2_PRIMARY": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.5e-11,
+      "description": "NEI2016 ALD2_PRIMARY emissions flux density (kg/m²/s). Default 8.5e-11: primary (directly emitted) acetaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.8e-12 kg/m^2/s; ~1.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ALD2_PRIMARY",
+          "description": "NEI2016 ALD2_PRIMARY emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ALDX": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.6e-11,
+      "description": "NEI2016 ALDX emissions flux density (kg/m²/s). Default 3.6e-11: propionaldehyde and higher aldehydes; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-12 kg/m^2/s; ~0.505 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ALDX",
+          "description": "NEI2016 ALDX emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_APIN": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.7e-10,
+      "description": "NEI2016 APIN emissions flux density (kg/m²/s). Default 3.7e-10: alpha-pinene; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-11 kg/m^2/s; ~5.12 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "APIN",
+          "description": "NEI2016 APIN emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_BENZ": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.3e-11,
+      "description": "NEI2016 BENZ emissions flux density (kg/m²/s). Default 1.3e-11: benzene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-13 kg/m^2/s; ~0.186 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "BENZ",
+          "description": "NEI2016 BENZ emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_BPIN": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.7e-10,
+      "description": "NEI2016 BPIN emissions flux density (kg/m²/s). Default 1.7e-10: beta-pinene; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~5.6e-12 kg/m^2/s; ~2.38 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "BPIN",
+          "description": "NEI2016 BPIN emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_BUTADIENE13": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.5e-12,
+      "description": "NEI2016 BUTADIENE13 emissions flux density (kg/m²/s). Default 1.5e-12: 1,3-butadiene; mean stored value over the 12US1 cells that emit it (46% of cells), averaged over the twelve 2016 monthly files (true flux ~4.9e-14 kg/m^2/s; ~0.0145 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "BUTADIENE13",
+          "description": "NEI2016 BUTADIENE13 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_CH4": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2e-09,
+      "description": "NEI2016 CH4 emissions flux density (kg/m²/s). Default 2e-09: methane; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~6.6e-11 kg/m^2/s; ~27.7 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "CH4",
+          "description": "NEI2016 CH4 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_CH4_INV": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.7e-12,
+      "description": "NEI2016 CH4_INV emissions flux density (kg/m²/s). Default 8.7e-12: inventory (anthropogenic) methane; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~2.9e-13 kg/m^2/s; ~0.0704 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "CH4_INV",
+          "description": "NEI2016 CH4_INV emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_CL2": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.9e-12,
+      "description": "NEI2016 CL2 emissions flux density (kg/m²/s). Default 8.9e-12: molecular chlorine; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~2.9e-13 kg/m^2/s; ~0.0725 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "CL2",
+          "description": "NEI2016 CL2 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_CO": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5e-09,
+      "description": "NEI2016 CO emissions flux density (kg/m²/s). Default 5e-09: ~40 Tg/yr of CO (NEI2016 anthropogenic, non-wildfire) -> 1.6e-10 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s).",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "CO",
+          "description": "NEI2016 CO emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_CO2_INV": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2e-07,
+      "description": "NEI2016 CO2_INV emissions flux density (kg/m²/s). Default 2e-07: inventory carbon dioxide; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~6.6e-09 kg/m^2/s; ~1.64e+03 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "CO2_INV",
+          "description": "NEI2016 CO2_INV emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ETH": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.4e-10,
+      "description": "NEI2016 ETH emissions flux density (kg/m²/s). Default 1.4e-10: ethene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.6e-12 kg/m^2/s; ~1.9 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ETH",
+          "description": "NEI2016 ETH emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ETHA": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.1e-10,
+      "description": "NEI2016 ETHA emissions flux density (kg/m²/s). Default 1.1e-10: ethane; mean stored value over the 12US1 cells that emit it (69% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-12 kg/m^2/s; ~1.6 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ETHA",
+          "description": "NEI2016 ETHA emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ETHY": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.1e-11,
+      "description": "NEI2016 ETHY emissions flux density (kg/m²/s). Default 1.1e-11: ethyne; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-13 kg/m^2/s; ~0.147 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ETHY",
+          "description": "NEI2016 ETHY emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ETOH": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.3e-10,
+      "description": "NEI2016 ETOH emissions flux density (kg/m²/s). Default 2.3e-10: ethanol; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-12 kg/m^2/s; ~3.19 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ETOH",
+          "description": "NEI2016 ETOH emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_FORM": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.2e-10,
+      "description": "NEI2016 FORM emissions flux density (kg/m²/s). Default 1.2e-10: ~1 Tg/yr of primary formaldehyde (BEIS biogenic plus anthropogenic) -> 3.9e-12 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s).",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "FORM",
+          "description": "NEI2016 FORM emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_FORM_PRIMARY": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.2e-10,
+      "description": "NEI2016 FORM_PRIMARY emissions flux density (kg/m²/s). Default 1.2e-10: primary (directly emitted) formaldehyde; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.9e-12 kg/m^2/s; ~1.63 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "FORM_PRIMARY",
+          "description": "NEI2016 FORM_PRIMARY emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_HCL": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.1e-13,
+      "description": "NEI2016 HCL emissions flux density (kg/m²/s). Default 8.1e-13: hydrogen chloride; mean stored value over the 12US1 cells that emit it (22% of cells), averaged over the twelve 2016 monthly files (true flux ~2.7e-14 kg/m^2/s; ~0.00369 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "HCL",
+          "description": "NEI2016 HCL emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_HONO": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.5e-12,
+      "description": "NEI2016 HONO emissions flux density (kg/m²/s). Default 3.5e-12: nitrous acid; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-13 kg/m^2/s; ~0.0487 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "HONO",
+          "description": "NEI2016 HONO emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_IOLE": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.5e-10,
+      "description": "NEI2016 IOLE emissions flux density (kg/m²/s). Default 2.5e-10: internal olefin carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~8.2e-12 kg/m^2/s; ~3.46 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "IOLE",
+          "description": "NEI2016 IOLE emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_ISOP": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2e-09,
+      "description": "NEI2016 ISOP emissions flux density (kg/m²/s). Default 2e-09: ~18 Tg/yr of isoprene, dominated by the BEIS biogenic emissions merged into this sector (annual mean; summer midday is several times larger) -> 7e-11 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s).",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "ISOP",
+          "description": "NEI2016 ISOP emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_KET": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3e-12,
+      "description": "NEI2016 KET emissions flux density (kg/m²/s). Default 3e-12: ketone carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~9.9e-14 kg/m^2/s; ~0.0418 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "KET",
+          "description": "NEI2016 KET emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_MEOH": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.8e-10,
+      "description": "NEI2016 MEOH emissions flux density (kg/m²/s). Default 3.8e-10: methanol; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-11 kg/m^2/s; ~5.28 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "MEOH",
+          "description": "NEI2016 MEOH emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_N2O_INV": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5.1e-12,
+      "description": "NEI2016 N2O_INV emissions flux density (kg/m²/s). Default 5.1e-12: inventory nitrous oxide; mean stored value over the 12US1 cells that emit it (40% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-13 kg/m^2/s; ~0.0412 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "N2O_INV",
+          "description": "NEI2016 N2O_INV emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NAPH": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.3e-12,
+      "description": "NEI2016 NAPH emissions flux density (kg/m²/s). Default 1.3e-12: naphthalene; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-14 kg/m^2/s; ~0.0182 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NAPH",
+          "description": "NEI2016 NAPH emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NH3": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.5e-10,
+      "description": "NEI2016 NH3 emissions flux density (kg/m²/s). Default 2.5e-10: ammonia; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~8.2e-12 kg/m^2/s; ~3.49 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NH3",
+          "description": "NEI2016 NH3 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NH3_FERT": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.3e-10,
+      "description": "NEI2016 NH3_FERT emissions flux density (kg/m²/s). Default 1.3e-10: fertilizer ammonia; mean stored value over the 12US1 cells that emit it (35% of cells), averaged over the twelve 2016 monthly files (true flux ~4.3e-12 kg/m^2/s; ~0.943 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NH3_FERT",
+          "description": "NEI2016 NH3_FERT emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NO": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 7e-10,
+      "description": "NEI2016 NO emissions flux density (kg/m²/s). Default 7e-10: ~5.9 Tg/yr of NO: NEI2016 NOx ~10 Tg/yr as NO2 (anthropogenic plus BEIS soil), 90% of it emitted as NO by moles -> 2.3e-11 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s).",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NO",
+          "description": "NEI2016 NO emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NO2": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.2e-10,
+      "description": "NEI2016 NO2 emissions flux density (kg/m²/s). Default 1.2e-10: ~1.0 Tg/yr of NO2: the 10% of NEI2016 NOx (~10 Tg/yr as NO2) emitted as NO2 -> 3.9e-12 kg/m^2/s true. The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is that stored-value scale (true CONUS-land-average flux x 30.4, from annual total / 8.1e12 m^2 / 3.156e7 s).",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NO2",
+          "description": "NEI2016 NO2 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NOX": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 6.6e-10,
+      "description": "NEI2016 NOX emissions flux density (kg/m²/s). Default 6.6e-10: total NOx (NO + NO2 + HONO); mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.2e-11 kg/m^2/s; ~9.29 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NOX",
+          "description": "NEI2016 NOX emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NR": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.1e-10,
+      "description": "NEI2016 NR emissions flux density (kg/m²/s). Default 1.1e-10: non-reactive carbon; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-12 kg/m^2/s; ~1.5 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NR",
+          "description": "NEI2016 NR emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_NVOL": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.2e-12,
+      "description": "NEI2016 NVOL emissions flux density (kg/m²/s). Default 4.2e-12: non-volatile organics; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-13 kg/m^2/s; ~0.0563 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "NVOL",
+          "description": "NEI2016 NVOL emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_OLE": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.9e-10,
+      "description": "NEI2016 OLE emissions flux density (kg/m²/s). Default 1.9e-10: terminal olefin carbon bonds; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~6.3e-12 kg/m^2/s; ~2.72 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "OLE",
+          "description": "NEI2016 OLE emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PAL": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5.1e-12,
+      "description": "NEI2016 PAL emissions flux density (kg/m²/s). Default 5.1e-12: particulate aluminum; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-13 kg/m^2/s; ~0.0683 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PAL",
+          "description": "NEI2016 PAL emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PAR": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8.1e-10,
+      "description": "NEI2016 PAR emissions flux density (kg/m²/s). Default 8.1e-10: paraffin carbon bonds; mean stored value over the 12US1 cells that emit it (69% of cells), averaged over the twelve 2016 monthly files (true flux ~2.7e-11 kg/m^2/s; ~11.4 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PAR",
+          "description": "NEI2016 PAR emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PCA": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.4e-12,
+      "description": "NEI2016 PCA emissions flux density (kg/m²/s). Default 4.4e-12: particulate calcium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-13 kg/m^2/s; ~0.0607 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PCA",
+          "description": "NEI2016 PCA emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PCL": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.8e-12,
+      "description": "NEI2016 PCL emissions flux density (kg/m²/s). Default 1.8e-12: particulate chloride; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-14 kg/m^2/s; ~0.0245 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PCL",
+          "description": "NEI2016 PCL emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PEC": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.5e-11,
+      "description": "NEI2016 PEC emissions flux density (kg/m²/s). Default 1.5e-11: particulate elemental carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~4.9e-13 kg/m^2/s; ~0.205 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PEC",
+          "description": "NEI2016 PEC emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PFE": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.9e-12,
+      "description": "NEI2016 PFE emissions flux density (kg/m²/s). Default 3.9e-12: particulate iron; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-13 kg/m^2/s; ~0.0545 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PFE",
+          "description": "NEI2016 PFE emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PH2O": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4e-13,
+      "description": "NEI2016 PH2O emissions flux density (kg/m²/s). Default 4e-13: particulate water; mean stored value over the 12US1 cells that emit it (62% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-14 kg/m^2/s; ~0.00501 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PH2O",
+          "description": "NEI2016 PH2O emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PK": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.7e-12,
+      "description": "NEI2016 PK emissions flux density (kg/m²/s). Default 3.7e-12: particulate potassium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-13 kg/m^2/s; ~0.0516 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PK",
+          "description": "NEI2016 PK emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PM2_5": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.7e-10,
+      "description": "NEI2016 PM2_5 emissions flux density (kg/m²/s). Default 1.7e-10: total PM2.5; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.6e-12 kg/m^2/s; ~2.43 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PM2_5",
+          "description": "NEI2016 PM2_5 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PMC": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5e-10,
+      "description": "NEI2016 PMC emissions flux density (kg/m²/s). Default 5e-10: coarse PM (PM10 minus PM2.5); mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-11 kg/m^2/s; ~6.9 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PMC",
+          "description": "NEI2016 PMC emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PMG": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.8e-13,
+      "description": "NEI2016 PMG emissions flux density (kg/m²/s). Default 4.8e-13: particulate magnesium; mean stored value over the 12US1 cells that emit it (65% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-14 kg/m^2/s; ~0.00647 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PMG",
+          "description": "NEI2016 PMG emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PMN": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1e-13,
+      "description": "NEI2016 PMN emissions flux density (kg/m²/s). Default 1e-13: particulate manganese; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~3.3e-15 kg/m^2/s; ~0.00139 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PMN",
+          "description": "NEI2016 PMN emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PMOTHR": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5.2e-11,
+      "description": "NEI2016 PMOTHR emissions flux density (kg/m²/s). Default 5.2e-11: other unspeciated PM2.5; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.7e-12 kg/m^2/s; ~0.721 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PMOTHR",
+          "description": "NEI2016 PMOTHR emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PNA": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.7e-13,
+      "description": "NEI2016 PNA emissions flux density (kg/m²/s). Default 3.7e-13: particulate sodium; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~1.2e-14 kg/m^2/s; ~0.00505 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PNA",
+          "description": "NEI2016 PNA emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PNCOM": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.3e-11,
+      "description": "NEI2016 PNCOM emissions flux density (kg/m²/s). Default 2.3e-11: particulate non-carbon organic matter; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-13 kg/m^2/s; ~0.325 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PNCOM",
+          "description": "NEI2016 PNCOM emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PNH4": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 7.4e-13,
+      "description": "NEI2016 PNH4 emissions flux density (kg/m²/s). Default 7.4e-13: particulate ammonium; mean stored value over the 12US1 cells that emit it (66% of cells), averaged over the twelve 2016 monthly files (true flux ~2.4e-14 kg/m^2/s; ~0.01 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PNH4",
+          "description": "NEI2016 PNH4 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PNO3": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 9.4e-13,
+      "description": "NEI2016 PNO3 emissions flux density (kg/m²/s). Default 9.4e-13: particulate nitrate; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~3.1e-14 kg/m^2/s; ~0.013 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PNO3",
+          "description": "NEI2016 PNO3 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_POC": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.4e-11,
+      "description": "NEI2016 POC emissions flux density (kg/m²/s). Default 4.4e-11: particulate organic carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.4e-12 kg/m^2/s; ~0.612 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "POC",
+          "description": "NEI2016 POC emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PRPA": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 7e-11,
+      "description": "NEI2016 PRPA emissions flux density (kg/m²/s). Default 7e-11: propane; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.3e-12 kg/m^2/s; ~0.979 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PRPA",
+          "description": "NEI2016 PRPA emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PSI": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.6e-11,
+      "description": "NEI2016 PSI emissions flux density (kg/m²/s). Default 1.6e-11: particulate silicon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.3e-13 kg/m^2/s; ~0.219 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PSI",
+          "description": "NEI2016 PSI emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PSO4": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.3e-12,
+      "description": "NEI2016 PSO4 emissions flux density (kg/m²/s). Default 3.3e-12: particulate sulfate; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.1e-13 kg/m^2/s; ~0.0458 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PSO4",
+          "description": "NEI2016 PSO4 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_PTI": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 3.8e-13,
+      "description": "NEI2016 PTI emissions flux density (kg/m²/s). Default 3.8e-13: particulate titanium; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.3e-14 kg/m^2/s; ~0.0053 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "PTI",
+          "description": "NEI2016 PTI emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_SESQ": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 7.2e-11,
+      "description": "NEI2016 SESQ emissions flux density (kg/m²/s). Default 7.2e-11: sesquiterpenes; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~2.4e-12 kg/m^2/s; ~0.988 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "SESQ",
+          "description": "NEI2016 SESQ emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_SO2": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.8e-11,
+      "description": "NEI2016 SO2 emissions flux density (kg/m²/s). Default 1.8e-11: sulfur dioxide; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~5.9e-13 kg/m^2/s; ~0.254 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "SO2",
+          "description": "NEI2016 SO2 emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_SOAALK": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.3e-10,
+      "description": "NEI2016 SOAALK emissions flux density (kg/m²/s). Default 2.3e-10: SOA-forming alkanes; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-12 kg/m^2/s; ~3.24 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "SOAALK",
+          "description": "NEI2016 SOAALK emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_SULF": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 2.3e-13,
+      "description": "NEI2016 SULF emissions flux density (kg/m²/s). Default 2.3e-13: sulfuric acid; mean stored value over the 12US1 cells that emit it (35% of cells), averaged over the twelve 2016 monthly files (true flux ~7.6e-15 kg/m^2/s; ~0.00163 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "SULF",
+          "description": "NEI2016 SULF emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_TERP": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1.1e-09,
+      "description": "NEI2016 TERP emissions flux density (kg/m²/s). Default 1.1e-09: monoterpenes; mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~3.6e-11 kg/m^2/s; ~15.7 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "TERP",
+          "description": "NEI2016 TERP emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_TOL": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5.5e-11,
+      "description": "NEI2016 TOL emissions flux density (kg/m²/s). Default 5.5e-11: toluene and other monoalkyl aromatics; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.8e-12 kg/m^2/s; ~0.773 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "TOL",
+          "description": "NEI2016 TOL emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_UNK": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 1e-12,
+      "description": "NEI2016 UNK emissions flux density (kg/m²/s). Default 1e-12: unknown; every cell of all twelve 2016 monthly files is zero, so this is only a small nonzero scale for the planner, the order of the smallest emitted species here (needs science review). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "UNK",
+          "description": "NEI2016 UNK emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_UNR": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.8e-11,
+      "description": "NEI2016 UNR emissions flux density (kg/m²/s). Default 4.8e-11: unreactive carbon; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.6e-12 kg/m^2/s; ~0.665 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "UNR",
+          "description": "NEI2016 UNR emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_VOC_BEIS": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 4.5e-09,
+      "description": "NEI2016 VOC_BEIS emissions flux density (kg/m²/s). Default 4.5e-09: total biogenic VOC (BEIS); mean stored value over the 12US1 cells that emit it (67% of cells), averaged over the twelve 2016 monthly files (true flux ~1.5e-10 kg/m^2/s; ~61.4 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "VOC_BEIS",
+          "description": "NEI2016 VOC_BEIS emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_VOC_INV": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 8e-10,
+      "description": "NEI2016 VOC_INV emissions flux density (kg/m²/s). Default 8e-10: total inventory VOC; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~2.6e-11 kg/m^2/s; ~11.2 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "VOC_INV",
+          "description": "NEI2016 VOC_INV emissions flux density (kg/m²/s)."
+        }
+      }
+    },
+    "flux_XYLMN": {
+      "type": "parameter",
+      "units": "kg/m^2/s",
+      "default": 5.4e-11,
+      "description": "NEI2016 XYLMN emissions flux density (kg/m²/s). Default 5.4e-11: xylene and other polyalkyl aromatics; mean stored value over the 12US1 cells that emit it (68% of cells), averaged over the twelve 2016 monthly files (true flux ~1.8e-12 kg/m^2/s; ~0.753 Tg/yr over the domain). The stored value is a whole month's emissions on one record (see days_in_month), so it is ~30.4x the true per-second flux; this default is at that stored-value scale.",
+      "update": {
+        "kind": "data",
+        "source": "NEI2016",
+        "from": {
+          "file_variable": "XYLMN",
+          "description": "NEI2016 XYLMN emissions flux density (kg/m²/s)."
+        }
+      }
+    }
+  },
+  "equations": [
+    {
+      "lhs": "lon_deg",
+      "rhs": {
+        "op": "*",
+        "args": [
+          57.29577951308232,
+          "lon"
+        ]
+      }
+    },
+    {
+      "lhs": "lat_deg",
+      "rhs": {
+        "op": "*",
+        "args": [
+          57.29577951308232,
+          "lat"
+        ]
+      }
+    },
+    {
+      "lhs": "tz_offset_h",
+      "rhs": {
+        "op": "floor",
+        "args": [
+          {
+            "op": "/",
+            "args": [
+              "lon_deg",
+              15.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "t_local_utc",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "t",
+          "t_ref",
+          {
+            "op": "*",
+            "args": [
+              "tz_offset_h",
+              3600.0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "local_hour",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "fn",
+            "name": "datetime.hour",
+            "args": [
+              "t_local_utc"
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "day_of_week",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "+",
+            "args": [
+              {
+                "op": "floor",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "t_local_utc",
+                      86400.0
+                    ]
+                  }
+                ]
+              },
+              3.0,
+              {
+                "op": "*",
+                "args": [
+                  -7.0,
+                  {
+                    "op": "floor",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          {
+                            "op": "+",
+                            "args": [
+                              {
+                                "op": "floor",
+                                "args": [
+                                  {
+                                    "op": "/",
+                                    "args": [
+                                      "t_local_utc",
+                                      86400.0
+                                    ]
+                                  }
+                                ]
+                              },
+                              3.0
+                            ]
+                          },
+                          7.0
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          1.0
+        ]
+      }
+    },
+    {
+      "lhs": "diurnal_factor",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "linear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              0.45,
+              0.45,
+              0.6,
+              0.6,
+              0.6,
+              0.6,
+              1.45,
+              1.45,
+              1.45,
+              1.45,
+              1.4,
+              1.4,
+              1.4,
+              1.4,
+              1.45,
+              1.45,
+              1.45,
+              1.45,
+              0.65,
+              0.65,
+              0.65,
+              0.65,
+              0.45,
+              0.45
+            ]
+          },
+          "axis": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24
+            ]
+          },
+          "x": "local_hour",
+          "n": 24
+        }
+      }
+    },
+    {
+      "lhs": "diurnal_factor_nox",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "linear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              0.39598674,
+              0.31852847,
+              0.30128068,
+              0.29590213,
+              0.33177775,
+              0.43871498,
+              0.9094625,
+              1.5850095,
+              1.6223788,
+              1.3429453,
+              1.2265036,
+              1.1937649,
+              1.254314,
+              1.3282939,
+              1.331211,
+              1.4135737,
+              1.6848333,
+              1.710925,
+              1.3491899,
+              1.0586671,
+              0.84439224,
+              0.761263,
+              0.72693235,
+              0.5741503
+            ]
+          },
+          "axis": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24
+            ]
+          },
+          "x": "local_hour",
+          "n": 24
+        }
+      }
+    },
+    {
+      "lhs": "diurnal_factor_isop",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "linear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0.2376,
+              0.7224,
+              1.2048,
+              1.656,
+              2.0496,
+              2.3616,
+              2.5728,
+              2.6616,
+              2.6184,
+              2.4408,
+              2.1288,
+              1.6896,
+              1.1448,
+              0.5136,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "axis": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24
+            ]
+          },
+          "x": "local_hour",
+          "n": 24
+        }
+      }
+    },
+    {
+      "lhs": "dayofweek_co",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "linear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1.076,
+              1.1076,
+              1.0706,
+              1.0706,
+              1.0706,
+              0.779,
+              0.683
+            ]
+          },
+          "axis": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          "x": "day_of_week",
+          "n": 7
+        }
+      }
+    },
+    {
+      "lhs": "dayofweek_nox",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "linear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1.0706,
+              1.0706,
+              1.0706,
+              1.0706,
+              1.0706,
+              0.863,
+              0.784
+            ]
+          },
+          "axis": {
+            "op": "const",
+            "args": [],
+            "value": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ]
+          },
+          "x": "day_of_week",
+          "n": 7
+        }
+      }
+    },
+    {
+      "lhs": "delp_dry_surface",
+      "rhs": {
+        "op": "apply_expression_template",
+        "args": [],
+        "name": "bilinear",
+        "bindings": {
+          "table": {
+            "op": "const",
+            "args": [],
+            "value": [
+              [
+                15.3025,
+                15.3043,
+                15.3056,
+                15.3071,
+                15.3082,
+                15.3093,
+                15.3104,
+                15.3114,
+                15.3124,
+                15.3131,
+                15.3139,
+                15.3144,
+                15.3155,
+                15.3158,
+                15.3148,
+                15.3133,
+                15.3108,
+                15.3087,
+                15.3067,
+                15.3046,
+                15.3028,
+                15.3004,
+                15.2991,
+                15.298,
+                15.2979,
+                15.2991,
+                15.301,
+                15.3045,
+                15.3094,
+                15.3165,
+                15.3252,
+                15.3338,
+                15.3427,
+                15.3538,
+                15.3675,
+                15.3777,
+                15.3907,
+                15.3983,
+                15.4026,
+                15.4057,
+                15.408,
+                15.408,
+                15.4075,
+                15.4052,
+                15.402,
+                15.397,
+                15.3763,
+                15.3151,
+                14.7824
+              ],
+              [
+                15.2978,
+                15.2997,
+                15.3011,
+                15.3019,
+                15.3035,
+                15.3037,
+                15.3042,
+                15.3048,
+                15.3049,
+                15.3056,
+                15.3067,
+                15.3074,
+                15.3066,
+                15.3055,
+                15.3042,
+                15.3021,
+                15.299,
+                15.2955,
+                15.2925,
+                15.2895,
+                15.2868,
+                15.2838,
+                15.2808,
+                15.2779,
+                15.2766,
+                15.2762,
+                15.2772,
+                15.2794,
+                15.2843,
+                15.2903,
+                15.1985,
+                15.1199,
+                15.2697,
+                15.2921,
+                15.1296,
+                14.8677,
+                15.1038,
+                15.3155,
+                15.3469,
+                15.3659,
+                15.3839,
+                15.3934,
+                15.3885,
+                15.3898,
+                15.3795,
+                15.263,
+                15.0392,
+                14.9321,
+                14.379
+              ],
+              [
+                15.2937,
+                15.2954,
+                15.2962,
+                15.2969,
+                15.2974,
+                15.2983,
+                15.2981,
+                15.2976,
+                15.2983,
+                15.2987,
+                15.2987,
+                15.2985,
+                15.2973,
+                15.2953,
+                15.293,
+                15.2903,
+                15.286,
+                15.2818,
+                15.278,
+                15.2736,
+                15.2702,
+                15.2658,
+                15.2616,
+                15.2576,
+                15.2547,
+                15.2519,
+                15.2508,
+                15.2235,
+                15.0597,
+                14.9047,
+                14.501,
+                14.0853,
+                14.1374,
+                14.0211,
+                13.9056,
+                14.1072,
+                14.4578,
+                14.8381,
+                14.9485,
+                14.9202,
+                14.9273,
+                14.9188,
+                15.0243,
+                15.1297,
+                15.2013,
+                14.3979,
+                14.2746,
+                14.9307,
+                15.0273
+              ],
+              [
+                15.289,
+                15.2902,
+                15.291,
+                15.2914,
+                15.292,
+                15.2915,
+                15.2913,
+                15.2912,
+                15.2904,
+                15.2904,
+                15.2905,
+                15.2897,
+                15.2875,
+                15.2844,
+                15.2813,
+                15.2775,
+                15.2724,
+                15.2673,
+                15.2626,
+                15.2577,
+                15.2531,
+                15.2478,
+                15.2437,
+                15.2391,
+                15.2339,
+                15.2293,
+                15.1962,
+                14.9486,
+                14.3691,
+                13.7663,
+                13.3062,
+                13.4263,
+                13.1236,
+                13.1488,
+                13.47,
+                14.1975,
+                14.2583,
+                14.5037,
+                14.8604,
+                15.0537,
+                15.1116,
+                14.9719,
+                14.9225,
+                14.9705,
+                15.1227,
+                14.549,
+                14.5783,
+                15.3093,
+                15.3237
+              ],
+              [
+                15.2835,
+                15.2849,
+                15.2858,
+                15.2855,
+                15.2853,
+                15.2851,
+                15.2843,
+                15.2833,
+                15.2828,
+                15.2821,
+                15.2811,
+                15.2786,
+                15.2765,
+                15.2738,
+                15.2692,
+                15.2645,
+                15.2584,
+                15.2529,
+                15.2471,
+                15.2411,
+                15.236,
+                15.2318,
+                15.2283,
+                15.2223,
+                15.158,
+                15.1191,
+                15.0623,
+                14.7297,
+                14.3799,
+                14.3064,
+                14.4022,
+                14.4134,
+                13.3611,
+                13.0677,
+                13.298,
+                13.3958,
+                13.1882,
+                13.4628,
+                14.0446,
+                14.2154,
+                14.4369,
+                15.013,
+                14.6063,
+                14.5583,
+                14.9851,
+                15.234,
+                15.2585,
+                15.1964,
+                15.1203
+              ],
+              [
+                15.2782,
+                15.2793,
+                15.2795,
+                15.2796,
+                15.2786,
+                15.2781,
+                15.2773,
+                15.2756,
+                15.2745,
+                15.2738,
+                15.2721,
+                15.2685,
+                15.2659,
+                15.2618,
+                15.2567,
+                15.2511,
+                15.2449,
+                15.2385,
+                15.2321,
+                15.2259,
+                15.2199,
+                15.2156,
+                15.0166,
+                14.8924,
+                14.8449,
+                14.6472,
+                15.0495,
+                15.0476,
+                15.0817,
+                15.0602,
+                14.3201,
+                13.6816,
+                13.4805,
+                12.6428,
+                13.0075,
+                12.8417,
+                12.6957,
+                12.7373,
+                12.8793,
+                13.251,
+                13.4792,
+                14.0224,
+                13.8377,
+                13.5591,
+                13.7526,
+                14.6147,
+                14.6113,
+                14.1985,
+                14.0358
+              ],
+              [
+                15.2728,
+                15.2729,
+                15.2735,
+                15.2731,
+                15.2727,
+                15.2723,
+                15.2699,
+                15.2683,
+                15.2668,
+                15.2645,
+                15.2622,
+                15.2588,
+                15.2548,
+                15.2499,
+                15.244,
+                15.2377,
+                15.2307,
+                15.2244,
+                15.2181,
+                15.2123,
+                15.2048,
+                15.0667,
+                14.4885,
+                14.3907,
+                14.56,
+                14.7602,
+                15.1224,
+                15.0557,
+                14.764,
+                13.9257,
+                12.8406,
+                12.3114,
+                12.9602,
+                12.8966,
+                12.8856,
+                12.7059,
+                12.6259,
+                12.7578,
+                13.0615,
+                13.7478,
+                13.8655,
+                14.2341,
+                13.8973,
+                13.03,
+                13.2417,
+                13.3364,
+                13.3031,
+                13.2858,
+                13.1465
+              ],
+              [
+                15.2668,
+                15.2677,
+                15.2676,
+                15.2672,
+                15.266,
+                15.2645,
+                15.2633,
+                15.2604,
+                15.2585,
+                15.2555,
+                15.2523,
+                15.2485,
+                15.2437,
+                15.238,
+                15.2315,
+                15.2237,
+                15.2167,
+                15.2098,
+                15.1961,
+                15.114,
+                14.9589,
+                14.5507,
+                14.327,
+                14.368,
+                14.9915,
+                14.9856,
+                14.4777,
+                13.7267,
+                13.0651,
+                12.4247,
+                12.5125,
+                12.5338,
+                12.4079,
+                12.688,
+                12.5842,
+                12.459,
+                12.8109,
+                12.8891,
+                13.0453,
+                13.2657,
+                13.8839,
+                14.4222,
+                14.0284,
+                14.2545,
+                13.7556,
+                13.5371,
+                13.0015,
+                12.7348,
+                12.621
+              ],
+              [
+                15.2622,
+                15.2628,
+                15.2626,
+                15.2613,
+                15.26,
+                15.258,
+                15.2555,
+                15.253,
+                15.2499,
+                15.2465,
+                15.2424,
+                15.2381,
+                15.2332,
+                15.2266,
+                15.2189,
+                15.2108,
+                15.203,
+                15.1949,
+                15.1493,
+                14.6117,
+                13.996,
+                14.3859,
+                14.8059,
+                15.0004,
+                14.8997,
+                13.9687,
+                12.6066,
+                11.718,
+                11.9196,
+                12.1894,
+                12.646,
+                12.743,
+                12.3583,
+                12.3871,
+                12.4289,
+                12.5966,
+                12.81,
+                12.8805,
+                12.9246,
+                13.1634,
+                13.5541,
+                14.4821,
+                14.6144,
+                14.5278,
+                14.3525,
+                14.0972,
+                13.8804,
+                13.2769,
+                12.713
+              ],
+              [
+                15.257,
+                15.2572,
+                15.257,
+                15.2556,
+                15.2537,
+                15.2512,
+                15.2481,
+                15.2449,
+                15.2416,
+                15.2374,
+                15.2331,
+                15.2288,
+                15.2229,
+                15.2163,
+                15.2088,
+                15.2006,
+                15.19,
+                15.1802,
+                15.1236,
+                13.8507,
+                13.8865,
+                14.9057,
+                14.9903,
+                14.7933,
+                13.5903,
+                11.7515,
+                11.0369,
+                11.5885,
+                12.4712,
+                12.6622,
+                12.7747,
+                12.8444,
+                12.635,
+                12.2787,
+                12.322,
+                12.6281,
+                12.8173,
+                12.9118,
+                12.7212,
+                13.1484,
+                13.3602,
+                14.2197,
+                14.8282,
+                14.8321,
+                14.6821,
+                14.3378,
+                14.1501,
+                13.7516,
+                13.503
+              ],
+              [
+                15.2521,
+                15.2519,
+                15.2509,
+                15.2489,
+                15.2462,
+                15.244,
+                15.2408,
+                15.2377,
+                15.2046,
+                15.2276,
+                15.2236,
+                15.2193,
+                15.2131,
+                15.2073,
+                15.2004,
+                15.1919,
+                15.172,
+                15.1625,
+                14.9434,
+                13.8462,
+                13.5511,
+                13.7851,
+                13.298,
+                12.1762,
+                11.1729,
+                11.24,
+                11.5694,
+                12.0668,
+                12.7374,
+                13.0441,
+                12.954,
+                12.7258,
+                12.9229,
+                12.6572,
+                12.5821,
+                12.6099,
+                12.7697,
+                13.0184,
+                12.679,
+                12.7002,
+                12.8729,
+                13.8183,
+                14.6804,
+                14.7367,
+                14.4771,
+                14.2556,
+                13.9942,
+                13.3703,
+                13.3517
+              ],
+              [
+                15.2464,
+                15.2464,
+                15.245,
+                15.2421,
+                15.2393,
+                15.2361,
+                15.2336,
+                15.2296,
+                15.1857,
+                15.2191,
+                15.2157,
+                15.2115,
+                15.2058,
+                15.1999,
+                15.1937,
+                15.186,
+                15.1692,
+                15.148,
+                14.6832,
+                13.565,
+                13.5847,
+                13.0104,
+                12.0891,
+                11.7861,
+                11.9566,
+                11.8007,
+                12.1505,
+                12.2875,
+                12.5275,
+                12.642,
+                12.8889,
+                12.6129,
+                12.8713,
+                12.8633,
+                12.4209,
+                12.8549,
+                12.879,
+                12.9899,
+                12.9018,
+                12.7817,
+                12.8585,
+                13.296,
+                13.7473,
+                14.4345,
+                14.3834,
+                14.0993,
+                13.9666,
+                13.669,
+                13.4398
+              ],
+              [
+                15.2407,
+                15.24,
+                15.2383,
+                15.2355,
+                15.2324,
+                15.2295,
+                15.2258,
+                15.2225,
+                15.2186,
+                15.2132,
+                15.2081,
+                15.203,
+                15.199,
+                15.1946,
+                15.1895,
+                15.1746,
+                15.1274,
+                14.6941,
+                14.1597,
+                13.3435,
+                13.6994,
+                13.6292,
+                13.1547,
+                13.0666,
+                12.9261,
+                12.3422,
+                12.3849,
+                12.062,
+                11.76,
+                12.0394,
+                12.6115,
+                12.5076,
+                12.6972,
+                12.5151,
+                12.3907,
+                12.7881,
+                13.0851,
+                13.1949,
+                13.5763,
+                13.2237,
+                12.8559,
+                12.9137,
+                13.2547,
+                14.0424,
+                14.1491,
+                14.0356,
+                13.9794,
+                13.5601,
+                13.3614
+              ],
+              [
+                15.2353,
+                15.2341,
+                15.2326,
+                15.2293,
+                15.2261,
+                15.223,
+                15.2196,
+                15.2156,
+                15.2115,
+                15.2061,
+                15.2012,
+                15.197,
+                15.194,
+                15.1464,
+                14.9256,
+                14.5911,
+                14.1436,
+                13.7001,
+                13.1611,
+                13.1628,
+                13.715,
+                13.5849,
+                13.7735,
+                13.8187,
+                12.9165,
+                12.4438,
+                12.1805,
+                11.6808,
+                11.6236,
+                11.8799,
+                12.1817,
+                12.4942,
+                12.5483,
+                12.418,
+                12.4978,
+                12.5007,
+                12.6342,
+                13.5989,
+                13.8965,
+                13.3901,
+                12.8222,
+                12.966,
+                13.5169,
+                13.948,
+                13.7346,
+                13.8273,
+                13.8314,
+                13.4834,
+                12.897
+              ],
+              [
+                15.2294,
+                15.2279,
+                15.226,
+                15.2234,
+                15.22,
+                15.2169,
+                15.214,
+                15.2092,
+                15.2043,
+                15.1996,
+                15.1915,
+                15.1694,
+                14.9939,
+                14.2027,
+                13.5564,
+                13.533,
+                14.0936,
+                14.1402,
+                13.7072,
+                13.7209,
+                14.0962,
+                13.9571,
+                13.8238,
+                13.4311,
+                12.6612,
+                12.2289,
+                12.1219,
+                11.992,
+                11.617,
+                11.8933,
+                12.0564,
+                12.3669,
+                12.2138,
+                12.0975,
+                12.3794,
+                12.4891,
+                13.4125,
+                13.5706,
+                13.1476,
+                12.8448,
+                12.4608,
+                12.7634,
+                13.459,
+                13.7849,
+                13.3907,
+                13.4189,
+                13.3791,
+                13.3072,
+                13.1556
+              ],
+              [
+                15.2229,
+                15.2212,
+                15.2188,
+                15.2167,
+                15.2143,
+                15.2115,
+                15.1968,
+                15.1959,
+                15.1974,
+                15.1058,
+                14.7804,
+                14.1655,
+                13.3905,
+                13.5846,
+                14.066,
+                14.7199,
+                15.0772,
+                14.4996,
+                14.082,
+                14.211,
+                13.4873,
+                13.2654,
+                13.0224,
+                12.743,
+                12.8398,
+                12.4273,
+                12.2039,
+                12.266,
+                11.9092,
+                11.8827,
+                11.9374,
+                12.0148,
+                12.1803,
+                11.9132,
+                12.1041,
+                12.9655,
+                13.4886,
+                12.6597,
+                12.2953,
+                11.9358,
+                11.9102,
+                12.3692,
+                13.0034,
+                13.2259,
+                12.9898,
+                12.9879,
+                13.1329,
+                13.1465,
+                12.93
+              ],
+              [
+                15.2161,
+                15.2144,
+                15.2126,
+                15.2102,
+                15.2079,
+                15.1619,
+                15.1665,
+                15.1827,
+                15.174,
+                14.6856,
+                14.1255,
+                14.0356,
+                14.3277,
+                14.8157,
+                15.0528,
+                15.0407,
+                14.8097,
+                14.6022,
+                14.4711,
+                14.1215,
+                13.7301,
+                13.4538,
+                13.7539,
+                13.3337,
+                13.1549,
+                12.5466,
+                12.367,
+                12.0603,
+                11.7287,
+                11.6997,
+                11.8262,
+                11.9711,
+                12.0802,
+                12.021,
+                12.0948,
+                13.0646,
+                13.1722,
+                11.9802,
+                11.4633,
+                11.583,
+                11.8311,
+                12.1636,
+                12.5529,
+                12.6252,
+                12.6942,
+                13.1351,
+                13.0569,
+                13.0474,
+                12.9302
+              ],
+              [
+                15.2097,
+                15.2076,
+                15.2056,
+                15.2026,
+                15.1603,
+                14.9581,
+                15.1717,
+                15.1637,
+                14.7102,
+                14.2519,
+                14.9161,
+                15.0795,
+                15.1022,
+                15.0779,
+                14.9578,
+                14.8516,
+                14.6739,
+                14.5338,
+                14.6263,
+                14.3307,
+                13.9568,
+                13.5491,
+                13.8544,
+                13.9303,
+                13.3648,
+                12.4147,
+                12.0893,
+                11.8966,
+                11.7742,
+                11.8465,
+                11.9697,
+                12.2352,
+                12.2333,
+                12.2033,
+                12.1976,
+                12.9648,
+                13.0009,
+                11.9897,
+                11.2454,
+                11.6541,
+                11.7921,
+                12.0631,
+                12.2384,
+                12.4329,
+                12.912,
+                13.3171,
+                13.2493,
+                13.0671,
+                12.4797
+              ],
+              [
+                15.2023,
+                15.2003,
+                15.1977,
+                15.19,
+                15.0202,
+                15.0574,
+                14.952,
+                14.4046,
+                14.5217,
+                14.8585,
+                15.1235,
+                15.114,
+                15.1073,
+                15.035,
+                14.7345,
+                14.6979,
+                14.6056,
+                14.2411,
+                14.2022,
+                13.8575,
+                13.0355,
+                12.9346,
+                12.93,
+                12.8683,
+                13.1253,
+                12.3499,
+                12.0766,
+                12.0309,
+                12.2309,
+                12.3568,
+                12.5022,
+                12.9133,
+                12.8999,
+                12.5334,
+                12.1588,
+                12.8113,
+                12.8915,
+                12.0384,
+                11.4169,
+                11.6661,
+                11.9033,
+                11.9249,
+                11.9788,
+                12.4748,
+                12.6801,
+                12.6521,
+                12.7794,
+                12.5674,
+                12.5104
+              ],
+              [
+                15.1941,
+                15.1922,
+                15.1886,
+                15.1452,
+                14.9975,
+                14.6284,
+                14.5262,
+                14.6643,
+                15.034,
+                15.1095,
+                15.1264,
+                15.1061,
+                15.0595,
+                14.7752,
+                14.4723,
+                14.5464,
+                14.67,
+                14.3269,
+                13.8134,
+                13.2958,
+                12.4803,
+                12.3491,
+                12.4426,
+                12.4612,
+                12.6552,
+                11.8326,
+                12.2093,
+                12.378,
+                12.5871,
+                12.5441,
+                12.7728,
+                12.8255,
+                12.9225,
+                12.8764,
+                12.4734,
+                12.5804,
+                12.7634,
+                12.5119,
+                11.8454,
+                11.4217,
+                11.7868,
+                11.6557,
+                11.7774,
+                12.3716,
+                12.5498,
+                12.0681,
+                12.1805,
+                12.6344,
+                13.0296
+              ],
+              [
+                15.187,
+                15.1829,
+                15.1463,
+                14.5941,
+                14.1652,
+                14.6703,
+                15.1164,
+                15.138,
+                15.0463,
+                15.0148,
+                14.6537,
+                14.7001,
+                14.5417,
+                14.1678,
+                14.0701,
+                13.9867,
+                14.3928,
+                14.4064,
+                13.5666,
+                12.6179,
+                12.492,
+                12.2161,
+                12.2819,
+                12.2517,
+                12.2935,
+                11.4784,
+                11.4487,
+                11.6619,
+                12.4742,
+                12.6294,
+                12.2561,
+                12.4539,
+                12.9459,
+                12.8458,
+                12.5287,
+                12.3286,
+                12.6906,
+                12.6989,
+                12.5547,
+                11.6713,
+                11.8872,
+                12.2227,
+                12.0966,
+                12.3221,
+                12.4056,
+                12.6941,
+                12.8599,
+                13.2356,
+                13.2287
+              ],
+              [
+                15.1306,
+                15.0285,
+                14.6694,
+                14.5588,
+                15.0058,
+                15.1521,
+                15.1557,
+                15.1425,
+                15.0157,
+                14.6199,
+                13.9923,
+                14.3103,
+                14.0194,
+                13.6883,
+                13.8078,
+                14.1151,
+                14.3414,
+                14.2997,
+                13.461,
+                12.7856,
+                12.117,
+                11.8296,
+                12.2,
+                12.0449,
+                12.3851,
+                11.9131,
+                11.1884,
+                11.263,
+                11.7748,
+                12.0706,
+                12.2785,
+                12.2527,
+                12.3888,
+                12.2971,
+                12.2835,
+                12.1729,
+                12.1064,
+                12.454,
+                12.5049,
+                11.748,
+                11.6692,
+                12.0871,
+                12.567,
+                12.5879,
+                12.8356,
+                13.2865,
+                13.3662,
+                13.4711,
+                13.4616
+              ],
+              [
+                14.7816,
+                14.7665,
+                14.9036,
+                15.099,
+                15.1544,
+                15.1568,
+                15.0664,
+                14.9445,
+                14.8583,
+                14.3711,
+                13.8394,
+                13.8984,
+                13.4516,
+                13.1899,
+                13.5143,
+                13.8021,
+                13.8774,
+                13.5559,
+                12.8988,
+                11.9961,
+                12.0643,
+                12.4522,
+                12.5174,
+                12.241,
+                12.72,
+                12.3943,
+                11.7494,
+                11.8127,
+                11.6528,
+                11.3504,
+                11.457,
+                11.2957,
+                11.5576,
+                11.7195,
+                11.8243,
+                11.7361,
+                11.7877,
+                11.7968,
+                11.9608,
+                11.658,
+                11.3954,
+                12.0716,
+                12.5982,
+                12.4873,
+                12.613,
+                13.3843,
+                13.5525,
+                13.5332,
+                13.4821
+              ],
+              [
+                14.994,
+                15.147,
+                15.1598,
+                15.1594,
+                15.157,
+                15.139,
+                14.9582,
+                14.6554,
+                14.4866,
+                14.2251,
+                13.6095,
+                13.2073,
+                12.8414,
+                12.7139,
+                13.0978,
+                13.0976,
+                13.3071,
+                13.0654,
+                12.3761,
+                11.9757,
+                12.4991,
+                12.4272,
+                12.19,
+                11.9621,
+                12.3583,
+                12.7794,
+                12.4089,
+                12.4993,
+                12.292,
+                11.9549,
+                11.4927,
+                10.9496,
+                10.909,
+                11.7504,
+                11.555,
+                11.1323,
+                11.286,
+                11.3517,
+                11.3797,
+                11.2917,
+                11.3992,
+                11.8903,
+                12.2649,
+                12.2204,
+                12.2508,
+                13.2517,
+                13.7077,
+                13.6735,
+                13.6597
+              ],
+              [
+                15.1633,
+                15.1628,
+                15.1616,
+                15.16,
+                15.1461,
+                15.0147,
+                14.7395,
+                14.38,
+                14.0496,
+                13.7798,
+                13.4046,
+                13.0768,
+                12.7171,
+                12.75,
+                12.856,
+                12.7941,
+                12.9953,
+                12.3963,
+                11.9374,
+                12.1567,
+                12.397,
+                12.1044,
+                11.9579,
+                12.046,
+                12.4887,
+                12.1976,
+                12.2111,
+                12.6261,
+                12.5078,
+                11.7909,
+                12.264,
+                11.558,
+                11.1673,
+                11.9455,
+                11.8679,
+                11.6811,
+                11.2167,
+                10.879,
+                10.8003,
+                11.069,
+                11.0211,
+                11.8773,
+                12.586,
+                12.6358,
+                12.8755,
+                13.4944,
+                13.6206,
+                13.7632,
+                13.7826
+              ],
+              [
+                15.163,
+                15.1587,
+                15.1438,
+                15.1042,
+                14.9524,
+                14.6586,
+                14.0948,
+                13.8748,
+                13.8042,
+                13.779,
+                13.3509,
+                12.9998,
+                12.9913,
+                12.7716,
+                12.6938,
+                13.0583,
+                12.8038,
+                11.8923,
+                11.2164,
+                12.0428,
+                12.1191,
+                11.8326,
+                11.7625,
+                12.0379,
+                12.4812,
+                12.2561,
+                11.8819,
+                12.0928,
+                12.3934,
+                11.7978,
+                12.4152,
+                12.0109,
+                11.5993,
+                11.86,
+                11.8067,
+                11.4024,
+                10.7814,
+                11.1732,
+                10.8724,
+                11.6561,
+                11.7304,
+                12.8026,
+                13.0285,
+                12.931,
+                12.8953,
+                13.494,
+                13.4362,
+                13.6948,
+                13.794
+              ],
+              [
+                15.1616,
+                15.1424,
+                14.9988,
+                14.8588,
+                14.1624,
+                13.703,
+                13.1478,
+                12.6692,
+                12.9913,
+                12.8779,
+                12.3677,
+                12.4668,
+                12.6092,
+                12.5568,
+                12.794,
+                12.7481,
+                12.327,
+                11.6637,
+                11.4228,
+                11.7671,
+                11.7351,
+                11.7178,
+                11.8282,
+                12.187,
+                12.3034,
+                11.8486,
+                11.7858,
+                11.6582,
+                12.0261,
+                11.8715,
+                11.9383,
+                11.8955,
+                11.683,
+                11.7089,
+                11.7318,
+                11.5035,
+                12.1602,
+                12.0533,
+                12.1229,
+                12.6672,
+                12.8459,
+                13.0694,
+                13.3032,
+                13.3051,
+                13.3351,
+                13.7049,
+                13.6186,
+                13.8442,
+                13.6987
+              ],
+              [
+                15.1221,
+                14.9903,
+                14.4523,
+                13.8014,
+                13.3574,
+                12.4072,
+                11.9701,
+                11.8183,
+                11.9279,
+                11.6802,
+                11.875,
+                12.4101,
+                12.8144,
+                12.8816,
+                12.8023,
+                12.4916,
+                11.8208,
+                11.5138,
+                11.4743,
+                11.5211,
+                11.501,
+                11.5893,
+                12.0099,
+                12.1519,
+                11.9616,
+                10.8565,
+                10.8495,
+                11.695,
+                11.7048,
+                11.6777,
+                11.6826,
+                11.9445,
+                11.878,
+                11.7811,
+                11.8215,
+                11.8626,
+                12.4327,
+                12.5154,
+                12.9046,
+                12.9268,
+                12.4847,
+                13.2075,
+                13.4964,
+                13.5396,
+                13.7285,
+                13.8783,
+                13.8536,
+                13.9154,
+                13.807
+              ],
+              [
+                14.8221,
+                14.0397,
+                13.2435,
+                12.53,
+                12.2109,
+                11.715,
+                11.4234,
+                11.6969,
+                11.7878,
+                11.8045,
+                12.4547,
+                12.7415,
+                12.8758,
+                13.0472,
+                12.9652,
+                12.7002,
+                12.303,
+                11.9323,
+                11.6591,
+                11.7991,
+                11.8516,
+                11.6551,
+                11.7955,
+                11.8267,
+                11.7704,
+                10.5157,
+                10.1555,
+                11.1489,
+                11.013,
+                11.2682,
+                10.9567,
+                11.646,
+                11.6206,
+                11.6321,
+                11.7883,
+                11.8656,
+                12.0971,
+                12.1339,
+                12.421,
+                11.6304,
+                12.446,
+                13.4429,
+                13.6164,
+                13.685,
+                13.6882,
+                13.8291,
+                13.9662,
+                14.0242,
+                13.8726
+              ],
+              [
+                13.7382,
+                12.5012,
+                11.7118,
+                11.6104,
+                11.6228,
+                11.8505,
+                11.8765,
+                11.8022,
+                11.7795,
+                11.9776,
+                12.5927,
+                12.9807,
+                13.0906,
+                13.0832,
+                12.996,
+                12.834,
+                12.6484,
+                12.5891,
+                12.3699,
+                12.3896,
+                12.3307,
+                12.0356,
+                11.3599,
+                11.4971,
+                11.1673,
+                10.4289,
+                10.1933,
+                10.7281,
+                10.2363,
+                10.851,
+                10.8735,
+                11.1096,
+                11.0144,
+                11.537,
+                11.801,
+                12.0186,
+                12.263,
+                12.2295,
+                12.0295,
+                12.1533,
+                13.1531,
+                13.2741,
+                13.587,
+                13.781,
+                13.7136,
+                13.9002,
+                14.0463,
+                13.9861,
+                13.8535
+              ],
+              [
+                12.0508,
+                11.5335,
+                11.1236,
+                11.3825,
+                12.1282,
+                12.4457,
+                12.4912,
+                12.2777,
+                12.3882,
+                12.5686,
+                12.6602,
+                12.8598,
+                12.8868,
+                13.0603,
+                12.9484,
+                12.9333,
+                12.8955,
+                12.5571,
+                12.1788,
+                11.9828,
+                11.9439,
+                12.0192,
+                11.5713,
+                11.2579,
+                10.8147,
+                10.9716,
+                10.9131,
+                10.5498,
+                10.2002,
+                10.1553,
+                10.8381,
+                10.8051,
+                10.9863,
+                11.2042,
+                11.7465,
+                11.7775,
+                12.3791,
+                12.6137,
+                12.9078,
+                13.0812,
+                13.2343,
+                13.4132,
+                13.7126,
+                13.8105,
+                13.8158,
+                13.9705,
+                14.0816,
+                13.8719,
+                13.775
+              ],
+              [
+                11.5395,
+                11.7075,
+                11.921,
+                11.9825,
+                12.3165,
+                12.7495,
+                12.8851,
+                12.9644,
+                12.9947,
+                12.8593,
+                12.8569,
+                12.8538,
+                12.9028,
+                12.891,
+                12.7526,
+                12.3434,
+                11.6874,
+                11.8402,
+                12.0229,
+                11.9953,
+                11.9278,
+                11.5296,
+                11.047,
+                11.1741,
+                11.1063,
+                11.2033,
+                10.965,
+                11.0422,
+                10.7463,
+                10.484,
+                10.6759,
+                10.7197,
+                11.2859,
+                11.621,
+                11.726,
+                11.8985,
+                12.511,
+                12.6404,
+                12.775,
+                13.0434,
+                13.2984,
+                13.4791,
+                13.7335,
+                13.881,
+                13.806,
+                13.9408,
+                14.0985,
+                13.9683,
+                13.9381
+              ],
+              [
+                11.8588,
+                12.2417,
+                12.1763,
+                12.4374,
+                12.7069,
+                12.8563,
+                12.9189,
+                12.8743,
+                13.1145,
+                13.06,
+                12.9398,
+                13.0975,
+                12.9295,
+                12.8903,
+                12.8591,
+                12.6184,
+                12.609,
+                12.6109,
+                12.5645,
+                12.3808,
+                12.3881,
+                12.032,
+                11.587,
+                11.3071,
+                10.9964,
+                11.2236,
+                11.6331,
+                11.8283,
+                11.2362,
+                11.8921,
+                12.408,
+                12.4553,
+                12.0229,
+                11.9917,
+                12.5224,
+                12.6205,
+                12.7529,
+                12.9059,
+                12.9,
+                13.0622,
+                13.3026,
+                13.5433,
+                13.7093,
+                13.8443,
+                13.9451,
+                13.932,
+                14.1368,
+                14.0899,
+                14.0445
+              ],
+              [
+                12.3334,
+                12.3519,
+                12.5415,
+                12.9283,
+                12.8016,
+                12.6912,
+                12.7376,
+                12.7543,
+                12.8845,
+                13.4005,
+                12.9347,
+                12.6874,
+                12.8572,
+                13.0925,
+                13.1425,
+                13.231,
+                13.2424,
+                13.1562,
+                13.0088,
+                12.8308,
+                12.6895,
+                12.6064,
+                12.1932,
+                11.9452,
+                11.7496,
+                12.2226,
+                12.5785,
+                12.4936,
+                11.9284,
+                12.2042,
+                12.6417,
+                12.7209,
+                12.4418,
+                12.5209,
+                12.9016,
+                12.7306,
+                12.8927,
+                13.1354,
+                12.7493,
+                12.8928,
+                13.4053,
+                13.4844,
+                13.5969,
+                13.7577,
+                13.9301,
+                14.0859,
+                14.1576,
+                14.1843,
+                14.1155
+              ],
+              [
+                12.5251,
+                12.7698,
+                13.0927,
+                13.1959,
+                13.0961,
+                12.8705,
+                12.8944,
+                12.7821,
+                13.2278,
+                13.2691,
+                12.9056,
+                12.74,
+                13.247,
+                13.6001,
+                13.4894,
+                13.2949,
+                13.0518,
+                12.9579,
+                12.9171,
+                12.8412,
+                12.8584,
+                12.9161,
+                12.5328,
+                12.1017,
+                12.1384,
+                12.5709,
+                12.8911,
+                12.6999,
+                12.3722,
+                12.4554,
+                12.7979,
+                12.845,
+                12.6685,
+                12.7929,
+                12.9582,
+                12.8581,
+                13.2033,
+                12.9873,
+                12.323,
+                13.1456,
+                13.6104,
+                13.5988,
+                13.6864,
+                13.7928,
+                13.9254,
+                14.088,
+                14.2048,
+                14.1806,
+                14.2177
+              ],
+              [
+                12.6331,
+                13.1358,
+                13.2135,
+                13.0121,
+                13.1108,
+                13.1075,
+                13.0736,
+                13.2375,
+                13.5794,
+                13.4875,
+                13.216,
+                13.0473,
+                13.605,
+                13.7253,
+                13.5152,
+                13.3138,
+                13.1793,
+                13.0762,
+                13.0403,
+                12.9462,
+                12.9723,
+                13.0745,
+                12.8296,
+                12.6621,
+                12.6053,
+                12.6751,
+                13.0346,
+                12.8903,
+                12.673,
+                12.6651,
+                12.8352,
+                12.9904,
+                12.9687,
+                13.039,
+                13.0603,
+                13.0727,
+                13.4283,
+                13.4944,
+                13.4525,
+                13.7365,
+                13.7557,
+                13.7337,
+                13.7861,
+                13.8378,
+                13.9416,
+                14.0579,
+                14.1837,
+                14.1371,
+                14.2851
+              ],
+              [
+                12.6144,
+                13.0058,
+                13.0936,
+                13.1306,
+                12.9081,
+                12.8057,
+                12.8608,
+                12.9139,
+                12.9325,
+                13.5526,
+                13.6619,
+                13.4056,
+                13.7195,
+                13.723,
+                13.5425,
+                13.4791,
+                13.3801,
+                13.2818,
+                13.2209,
+                13.1258,
+                13.0842,
+                13.24,
+                13.1143,
+                13.0416,
+                13.0161,
+                12.9825,
+                13.1594,
+                13.055,
+                12.9051,
+                12.995,
+                13.0988,
+                13.1327,
+                13.1815,
+                13.2003,
+                13.1498,
+                13.2018,
+                13.3945,
+                13.6977,
+                13.8055,
+                13.888,
+                13.8725,
+                13.8813,
+                13.9156,
+                13.9448,
+                14.083,
+                14.1768,
+                14.2068,
+                14.1347,
+                14.3112
+              ],
+              [
+                12.2821,
+                12.7096,
+                12.8657,
+                13.0431,
+                13.4912,
+                13.3564,
+                13.4433,
+                13.4418,
+                13.208,
+                13.9149,
+                14.0777,
+                13.8238,
+                13.7465,
+                13.6986,
+                13.6971,
+                13.6545,
+                13.5433,
+                13.4486,
+                13.3664,
+                13.2918,
+                13.2784,
+                13.369,
+                13.3175,
+                13.3274,
+                13.3216,
+                13.3376,
+                13.3332,
+                13.2112,
+                13.1929,
+                13.2229,
+                13.351,
+                13.3526,
+                13.3577,
+                13.2735,
+                13.1962,
+                13.2879,
+                13.4469,
+                13.742,
+                13.9203,
+                14.0217,
+                14.0109,
+                14.0226,
+                14.0295,
+                14.083,
+                14.1595,
+                14.2533,
+                14.2249,
+                14.2835,
+                14.4088
+              ],
+              [
+                11.9625,
+                12.58,
+                13.2183,
+                13.3551,
+                13.9493,
+                14.2909,
+                14.2771,
+                14.1317,
+                14.2199,
+                14.3554,
+                14.1446,
+                13.9104,
+                13.7569,
+                13.7815,
+                13.7992,
+                13.8601,
+                13.8023,
+                13.6905,
+                13.5278,
+                13.6087,
+                13.523,
+                13.4601,
+                13.5433,
+                13.5634,
+                13.5574,
+                13.544,
+                13.5091,
+                13.4597,
+                13.4499,
+                13.4233,
+                13.5242,
+                13.5245,
+                13.4966,
+                13.4137,
+                13.3779,
+                13.4789,
+                13.6004,
+                13.8513,
+                14.076,
+                14.1263,
+                14.1309,
+                14.1326,
+                14.1689,
+                14.2129,
+                14.2344,
+                14.2919,
+                14.3142,
+                14.4882,
+                14.5241
+              ],
+              [
+                11.8563,
+                12.3326,
+                13.6534,
+                13.9099,
+                14.2369,
+                14.5482,
+                14.4234,
+                14.5455,
+                14.5652,
+                14.3469,
+                14.0236,
+                13.9284,
+                13.8691,
+                13.9788,
+                13.9464,
+                13.9354,
+                14.0229,
+                13.9935,
+                13.9633,
+                14.036,
+                13.8169,
+                13.6505,
+                13.6969,
+                13.6835,
+                13.745,
+                13.6587,
+                13.6523,
+                13.652,
+                13.6496,
+                13.6338,
+                13.717,
+                13.6891,
+                13.622,
+                13.5609,
+                13.593,
+                13.655,
+                13.7663,
+                14.0084,
+                14.1793,
+                14.2821,
+                14.2684,
+                14.2674,
+                14.2863,
+                14.3232,
+                14.2982,
+                14.303,
+                14.4535,
+                14.5503,
+                14.4638
+              ],
+              [
+                12.9421,
+                13.989,
+                14.1872,
+                14.4062,
+                14.6638,
+                14.6915,
+                14.6876,
+                14.6883,
+                14.624,
+                14.2882,
+                13.9598,
+                13.9671,
+                13.9638,
+                14.1556,
+                14.0595,
+                14.0772,
+                14.2193,
+                14.252,
+                14.24,
+                14.2254,
+                14.0848,
+                13.9093,
+                13.8593,
+                13.869,
+                13.9678,
+                13.8024,
+                13.8127,
+                13.843,
+                13.8413,
+                13.8412,
+                13.8734,
+                13.8311,
+                13.7345,
+                13.696,
+                13.766,
+                13.81,
+                13.9432,
+                14.1614,
+                14.2881,
+                14.3093,
+                14.2565,
+                14.2788,
+                14.2736,
+                14.2741,
+                14.3189,
+                14.3517,
+                14.4889,
+                14.5069,
+                14.3531
+              ],
+              [
+                14.4937,
+                14.6925,
+                14.7215,
+                14.7991,
+                14.8064,
+                14.751,
+                14.7578,
+                14.7676,
+                14.678,
+                14.386,
+                14.0462,
+                14.1016,
+                14.152,
+                14.2613,
+                14.1693,
+                14.2203,
+                14.3298,
+                14.3813,
+                14.4182,
+                14.375,
+                14.2406,
+                14.1165,
+                14.0319,
+                14.0623,
+                14.1177,
+                13.95,
+                13.9586,
+                13.9942,
+                14.0074,
+                14.0527,
+                14.0128,
+                13.9226,
+                13.898,
+                13.8768,
+                13.8896,
+                13.9622,
+                14.0917,
+                14.2645,
+                14.3396,
+                14.2828,
+                14.3151,
+                14.3017,
+                14.2215,
+                14.2474,
+                14.3446,
+                14.4355,
+                14.5117,
+                14.5134,
+                14.4911
+              ],
+              [
+                14.6501,
+                14.791,
+                14.844,
+                14.8558,
+                14.7604,
+                14.7103,
+                14.8144,
+                14.847,
+                14.7576,
+                14.5216,
+                14.2415,
+                14.3048,
+                14.3352,
+                14.3309,
+                14.2968,
+                14.3427,
+                14.4572,
+                14.4936,
+                14.5256,
+                14.4295,
+                14.317,
+                14.2413,
+                14.1962,
+                14.2936,
+                14.2717,
+                14.1122,
+                14.0882,
+                14.1081,
+                14.1683,
+                14.1979,
+                14.0982,
+                14.0404,
+                14.0573,
+                14.0381,
+                14.0198,
+                14.1222,
+                14.2924,
+                14.3588,
+                14.3366,
+                14.4418,
+                14.5283,
+                14.5048,
+                14.4123,
+                14.4303,
+                14.4825,
+                14.5149,
+                14.5432,
+                14.532,
+                14.5301
+              ],
+              [
+                14.9271,
+                14.9308,
+                14.9606,
+                14.9635,
+                14.9544,
+                14.925,
+                14.885,
+                14.8918,
+                14.8361,
+                14.7246,
+                14.5329,
+                14.5178,
+                14.4622,
+                14.4356,
+                14.4484,
+                14.5093,
+                14.5177,
+                14.5418,
+                14.5902,
+                14.4947,
+                14.4113,
+                14.352,
+                14.4353,
+                14.433,
+                14.4098,
+                14.2624,
+                14.2286,
+                14.2207,
+                14.293,
+                14.2943,
+                14.209,
+                14.1684,
+                14.1807,
+                14.1618,
+                14.1452,
+                14.2708,
+                14.4084,
+                14.4427,
+                14.5204,
+                14.5211,
+                14.5068,
+                14.5491,
+                14.5732,
+                14.5582,
+                14.5646,
+                14.5611,
+                14.5642,
+                14.5793,
+                14.6768
+              ],
+              [
+                15.0374,
+                15.0292,
+                15.0217,
+                15.0272,
+                15.0323,
+                15.0265,
+                15.0065,
+                14.946,
+                14.8917,
+                14.8529,
+                14.787,
+                14.7231,
+                14.6992,
+                14.6668,
+                14.6601,
+                14.6362,
+                14.6426,
+                14.5878,
+                14.6064,
+                14.5313,
+                14.4875,
+                14.4583,
+                14.5199,
+                14.517,
+                14.4682,
+                14.3761,
+                14.3117,
+                14.3248,
+                14.3915,
+                14.3411,
+                14.293,
+                14.2763,
+                14.2649,
+                14.2921,
+                14.2656,
+                14.311,
+                14.4693,
+                14.4547,
+                14.3977,
+                14.3407,
+                14.3091,
+                14.3409,
+                14.5783,
+                14.7023,
+                14.7178,
+                14.7333,
+                14.8018,
+                14.869,
+                14.9144
+              ],
+              [
+                15.0469,
+                15.0467,
+                15.047,
+                15.0489,
+                15.0501,
+                15.05,
+                15.0456,
+                15.0249,
+                14.9807,
+                14.9016,
+                14.8529,
+                14.8438,
+                14.8423,
+                14.7977,
+                14.7691,
+                14.7619,
+                14.7535,
+                14.6875,
+                14.6609,
+                14.5491,
+                14.5495,
+                14.5611,
+                14.5805,
+                14.5607,
+                14.4584,
+                14.3669,
+                14.328,
+                14.3331,
+                14.4026,
+                14.3904,
+                14.3717,
+                14.3694,
+                14.3867,
+                14.3954,
+                14.3802,
+                14.4546,
+                14.506,
+                14.4345,
+                14.3471,
+                14.314,
+                14.3596,
+                14.5539,
+                14.7111,
+                14.7821,
+                14.8366,
+                14.8557,
+                14.8819,
+                14.8912,
+                14.8888
+              ],
+              [
+                15.0529,
+                15.0537,
+                15.0546,
+                15.0554,
+                15.0563,
+                15.0572,
+                15.0563,
+                15.0523,
+                15.0196,
+                14.9725,
+                14.9217,
+                14.9076,
+                14.8614,
+                14.8298,
+                14.8512,
+                14.8246,
+                14.7697,
+                14.7275,
+                14.7339,
+                14.6923,
+                14.6371,
+                14.6396,
+                14.6416,
+                14.6137,
+                14.5604,
+                14.4617,
+                14.4135,
+                14.3936,
+                14.4193,
+                14.4158,
+                14.4038,
+                14.4564,
+                14.5027,
+                14.5178,
+                14.5374,
+                14.5238,
+                14.4757,
+                14.4333,
+                14.3338,
+                14.4093,
+                14.6644,
+                14.6926,
+                14.7189,
+                14.6805,
+                14.7019,
+                14.7505,
+                14.7717,
+                14.7769,
+                14.7923
+              ],
+              [
+                15.0594,
+                15.0611,
+                15.0625,
+                15.0625,
+                15.0627,
+                15.0635,
+                15.0641,
+                15.0624,
+                15.0443,
+                15.0172,
+                14.9733,
+                14.9006,
+                14.9093,
+                14.8696,
+                14.8243,
+                14.8049,
+                14.803,
+                14.7948,
+                14.7824,
+                14.636,
+                14.6656,
+                14.7167,
+                14.7235,
+                14.6915,
+                14.63,
+                14.5693,
+                14.509,
+                14.4961,
+                14.5246,
+                14.4859,
+                14.5234,
+                14.5637,
+                14.5467,
+                14.5158,
+                14.4876,
+                14.4721,
+                14.4508,
+                14.4035,
+                14.4269,
+                14.6367,
+                14.7094,
+                14.6554,
+                14.5759,
+                14.5681,
+                14.5244,
+                14.5859,
+                14.7083,
+                14.7269,
+                14.7705
+              ],
+              [
+                15.066,
+                15.0681,
+                15.0698,
+                15.0703,
+                15.0706,
+                15.0709,
+                15.0709,
+                15.0704,
+                15.0677,
+                15.0548,
+                15.0244,
+                14.9535,
+                14.9097,
+                14.8694,
+                14.8254,
+                14.8366,
+                14.8472,
+                14.8481,
+                14.7853,
+                14.5402,
+                14.6595,
+                14.7105,
+                14.6134,
+                14.623,
+                14.6142,
+                14.5696,
+                14.5457,
+                14.5486,
+                14.5652,
+                14.5687,
+                14.5685,
+                14.5405,
+                14.507,
+                14.4637,
+                14.473,
+                14.5059,
+                14.4941,
+                14.4834,
+                14.5735,
+                14.6963,
+                14.6701,
+                14.6096,
+                14.5771,
+                14.5797,
+                14.532,
+                14.5718,
+                14.6889,
+                14.7118,
+                14.7815
+              ],
+              [
+                15.0719,
+                15.0746,
+                15.0762,
+                15.0777,
+                15.0776,
+                15.0781,
+                15.0787,
+                15.0788,
+                15.0787,
+                15.0758,
+                15.0513,
+                14.9911,
+                14.938,
+                14.8951,
+                14.8767,
+                14.8913,
+                14.8968,
+                14.8828,
+                14.8012,
+                14.4956,
+                14.6416,
+                14.6326,
+                14.4108,
+                14.4568,
+                14.5021,
+                14.5649,
+                14.6222,
+                14.5928,
+                14.5907,
+                14.5905,
+                14.5872,
+                14.5467,
+                14.4877,
+                14.5274,
+                14.5951,
+                14.5813,
+                14.5784,
+                14.5956,
+                14.6895,
+                14.7213,
+                14.6925,
+                14.6782,
+                14.6584,
+                14.6225,
+                14.595,
+                14.6159,
+                14.6545,
+                14.7355,
+                14.7715
+              ],
+              [
+                15.0792,
+                15.082,
+                15.0836,
+                15.0845,
+                15.0853,
+                15.0864,
+                15.0869,
+                15.0866,
+                15.0866,
+                15.0875,
+                15.0769,
+                15.0293,
+                14.946,
+                14.9264,
+                14.9392,
+                14.9568,
+                14.9402,
+                14.9115,
+                14.8104,
+                14.5842,
+                14.6635,
+                14.576,
+                14.2449,
+                14.4011,
+                14.4106,
+                14.5297,
+                14.6184,
+                14.6323,
+                14.657,
+                14.6635,
+                14.6474,
+                14.5891,
+                14.5765,
+                14.6609,
+                14.636,
+                14.5932,
+                14.5755,
+                14.5927,
+                14.6728,
+                14.7358,
+                14.7607,
+                14.7485,
+                14.6456,
+                14.6431,
+                14.6157,
+                14.6106,
+                14.6502,
+                14.7337,
+                14.7214
+              ],
+              [
+                15.0859,
+                15.0887,
+                15.0908,
+                15.092,
+                15.0936,
+                15.094,
+                15.095,
+                15.095,
+                15.0959,
+                15.0964,
+                15.0902,
+                15.0496,
+                14.9684,
+                14.9664,
+                14.9911,
+                14.9545,
+                14.9419,
+                14.9408,
+                14.9136,
+                14.7489,
+                14.7586,
+                14.5791,
+                14.3326,
+                14.5079,
+                14.427,
+                14.4495,
+                14.5891,
+                14.6163,
+                14.6979,
+                14.7148,
+                14.6606,
+                14.6053,
+                14.6455,
+                14.7155,
+                14.6563,
+                14.6201,
+                14.6164,
+                14.5788,
+                14.597,
+                14.7203,
+                14.7951,
+                14.7957,
+                14.7305,
+                14.644,
+                14.6365,
+                14.5846,
+                14.633,
+                14.7265,
+                14.6977
+              ],
+              [
+                15.0931,
+                15.0958,
+                15.0983,
+                15.1,
+                15.1012,
+                15.1027,
+                15.1034,
+                15.1039,
+                15.106,
+                15.1062,
+                15.1003,
+                15.0732,
+                15.0375,
+                15.0306,
+                15.0114,
+                14.9947,
+                15.007,
+                14.9999,
+                14.9549,
+                14.8974,
+                14.8817,
+                14.657,
+                14.5857,
+                14.6384,
+                14.4467,
+                14.4438,
+                14.6058,
+                14.6819,
+                14.7032,
+                14.699,
+                14.6715,
+                14.6759,
+                14.7288,
+                14.7288,
+                14.6999,
+                14.6989,
+                14.6455,
+                14.564,
+                14.6169,
+                14.7351,
+                14.732,
+                14.7142,
+                14.7496,
+                14.7197,
+                14.619,
+                14.5678,
+                14.6039,
+                14.7038,
+                14.6673
+              ],
+              [
+                15.1005,
+                15.103,
+                15.1053,
+                15.107,
+                15.1089,
+                15.1113,
+                15.1123,
+                15.114,
+                15.1168,
+                15.1181,
+                15.1102,
+                15.0968,
+                15.0835,
+                15.0771,
+                15.0614,
+                15.0653,
+                15.0426,
+                15.0052,
+                14.9885,
+                14.9901,
+                14.9629,
+                14.8048,
+                14.7507,
+                14.6663,
+                14.496,
+                14.4775,
+                14.6028,
+                14.7185,
+                14.6986,
+                14.7389,
+                14.7701,
+                14.7786,
+                14.7821,
+                14.7778,
+                14.7536,
+                14.6874,
+                14.6324,
+                14.6285,
+                14.6897,
+                14.7657,
+                14.731,
+                14.6426,
+                14.6945,
+                14.7779,
+                14.7525,
+                14.4753,
+                14.5852,
+                14.6472,
+                14.595
+              ],
+              [
+                15.1086,
+                15.1108,
+                15.1135,
+                15.1152,
+                15.1175,
+                15.1193,
+                15.1218,
+                15.1244,
+                15.1278,
+                15.1263,
+                15.1193,
+                15.098,
+                15.0133,
+                15.0153,
+                15.0587,
+                15.0705,
+                15.0636,
+                15.0482,
+                15.0322,
+                15.0192,
+                15.0156,
+                14.9884,
+                14.9291,
+                14.8029,
+                14.6578,
+                14.5375,
+                14.61,
+                14.7462,
+                14.7557,
+                14.7883,
+                14.8111,
+                14.8162,
+                14.8204,
+                14.8241,
+                14.7588,
+                14.693,
+                14.7102,
+                14.7192,
+                14.7747,
+                14.7437,
+                14.7279,
+                14.6216,
+                14.5771,
+                14.7321,
+                14.9569,
+                14.5682,
+                14.5043,
+                14.5892,
+                14.556
+              ],
+              [
+                15.1166,
+                15.1189,
+                15.1216,
+                15.1232,
+                15.1265,
+                15.1293,
+                15.1317,
+                15.1346,
+                15.1375,
+                15.1362,
+                15.1315,
+                15.1001,
+                14.9848,
+                14.9294,
+                14.984,
+                15.0278,
+                15.0658,
+                15.0695,
+                15.0541,
+                15.033,
+                15.0171,
+                15.0105,
+                14.9853,
+                14.9391,
+                14.8106,
+                14.6419,
+                14.6893,
+                14.8236,
+                14.8514,
+                14.8363,
+                14.8403,
+                14.8219,
+                14.8135,
+                14.8314,
+                14.8114,
+                14.7531,
+                14.7256,
+                14.6983,
+                14.7166,
+                14.7155,
+                14.6023,
+                14.5406,
+                14.501,
+                14.7909,
+                15.0218,
+                14.9307,
+                14.4427,
+                14.5249,
+                14.5263
+              ],
+              [
+                15.1246,
+                15.1277,
+                15.1296,
+                15.1313,
+                15.1346,
+                15.137,
+                15.1409,
+                15.144,
+                15.147,
+                15.1486,
+                15.1474,
+                15.1087,
+                15.0099,
+                14.9602,
+                14.946,
+                14.9713,
+                14.9938,
+                15.0098,
+                15.0163,
+                14.9915,
+                14.9905,
+                15.0012,
+                15.0089,
+                14.9882,
+                14.9273,
+                14.7993,
+                14.8607,
+                14.8891,
+                14.8555,
+                14.8309,
+                14.8691,
+                14.8729,
+                14.8123,
+                14.8562,
+                14.8289,
+                14.7519,
+                14.7155,
+                14.7382,
+                14.7531,
+                14.6913,
+                14.5581,
+                14.4649,
+                14.443,
+                14.6257,
+                15.0243,
+                15.0316,
+                14.6522,
+                14.5518,
+                14.5289
+              ],
+              [
+                15.1331,
+                15.1367,
+                15.1394,
+                15.1406,
+                15.1428,
+                15.1462,
+                15.1497,
+                15.1537,
+                15.1567,
+                15.1595,
+                15.1615,
+                15.1094,
+                15.0258,
+                15.002,
+                14.9481,
+                14.9267,
+                14.9134,
+                14.942,
+                14.9637,
+                14.9345,
+                14.9109,
+                14.9601,
+                14.9826,
+                14.9841,
+                14.9709,
+                14.9011,
+                14.9085,
+                14.9046,
+                14.8592,
+                14.8422,
+                14.8609,
+                14.8399,
+                14.8516,
+                14.8406,
+                14.8072,
+                14.7866,
+                14.7562,
+                14.7884,
+                14.7751,
+                14.6936,
+                14.5683,
+                14.4433,
+                14.4085,
+                14.5969,
+                14.9865,
+                15.0421,
+                14.9699,
+                14.7242,
+                14.5644
+              ],
+              [
+                15.1411,
+                15.1452,
+                15.1474,
+                15.1493,
+                15.152,
+                15.1551,
+                15.1588,
+                15.162,
+                15.1649,
+                15.1676,
+                15.1701,
+                15.1416,
+                15.0757,
+                15.0413,
+                14.992,
+                14.954,
+                14.9747,
+                15.0101,
+                14.9909,
+                14.9349,
+                14.899,
+                14.9122,
+                14.9376,
+                14.9323,
+                14.9478,
+                14.9134,
+                14.9302,
+                14.9114,
+                14.8764,
+                14.8372,
+                14.8195,
+                14.7887,
+                14.8589,
+                14.8696,
+                14.798,
+                14.783,
+                14.8005,
+                14.7767,
+                14.8359,
+                14.8407,
+                14.6973,
+                14.4753,
+                14.4449,
+                14.5762,
+                14.8801,
+                15.0291,
+                15.028,
+                14.9255,
+                14.7618
+              ],
+              [
+                15.1492,
+                15.1526,
+                15.1551,
+                15.1582,
+                15.1604,
+                15.1641,
+                15.1667,
+                15.1698,
+                15.1717,
+                15.1745,
+                15.1767,
+                15.1503,
+                15.1022,
+                15.0841,
+                15.057,
+                15.0705,
+                15.0643,
+                15.0077,
+                14.932,
+                14.8659,
+                14.8571,
+                14.88,
+                14.9068,
+                14.9065,
+                14.9285,
+                14.9382,
+                14.9644,
+                14.9502,
+                14.9047,
+                14.8422,
+                14.8273,
+                14.8203,
+                14.8784,
+                14.8905,
+                14.8498,
+                14.8483,
+                14.8479,
+                14.8052,
+                14.8297,
+                14.895,
+                14.8956,
+                14.7503,
+                14.609,
+                14.4939,
+                14.9405,
+                14.9924,
+                15.0427,
+                15.0318,
+                14.8585
+              ],
+              [
+                15.1563,
+                15.1595,
+                15.1624,
+                15.1653,
+                15.1682,
+                15.1713,
+                15.1738,
+                15.1763,
+                15.1779,
+                15.1811,
+                15.1835,
+                15.1445,
+                15.0737,
+                15.0517,
+                15.075,
+                15.0708,
+                15.0165,
+                14.9482,
+                14.8446,
+                14.8037,
+                14.7847,
+                14.7484,
+                14.8109,
+                14.8727,
+                14.8932,
+                14.9552,
+                14.9645,
+                14.9491,
+                14.9288,
+                14.8808,
+                14.8595,
+                14.8407,
+                14.876,
+                14.8927,
+                14.9474,
+                14.9599,
+                14.9699,
+                14.9732,
+                14.9665,
+                14.9514,
+                14.9792,
+                14.9348,
+                14.7672,
+                14.7623,
+                15.0136,
+                15.0273,
+                15.038,
+                15.0322,
+                14.7199
+              ],
+              [
+                15.1635,
+                15.1667,
+                15.1696,
+                15.1723,
+                15.1758,
+                15.1783,
+                15.1805,
+                15.1826,
+                15.1846,
+                15.1872,
+                15.1901,
+                15.1531,
+                15.0824,
+                15.0198,
+                15.0307,
+                15.0305,
+                14.9177,
+                14.877,
+                14.8229,
+                14.8038,
+                14.7699,
+                14.7542,
+                14.8219,
+                14.8504,
+                14.889,
+                14.9309,
+                14.9284,
+                14.8945,
+                14.8661,
+                14.8182,
+                14.7879,
+                14.8515,
+                14.8693,
+                14.8781,
+                14.947,
+                14.965,
+                14.9735,
+                14.9784,
+                14.9838,
+                14.9909,
+                14.994,
+                15.0043,
+                14.9116,
+                14.9438,
+                15.0238,
+                15.0273,
+                15.032,
+                15.0185,
+                14.7559
+              ],
+              [
+                15.1695,
+                15.1734,
+                15.1766,
+                15.1794,
+                15.1821,
+                15.1852,
+                15.1881,
+                15.1891,
+                15.1913,
+                15.1938,
+                15.1954,
+                15.153,
+                15.0778,
+                15.0155,
+                14.9952,
+                15.0026,
+                14.8461,
+                14.8254,
+                14.7652,
+                14.7132,
+                14.6393,
+                14.6761,
+                14.806,
+                14.809,
+                14.8529,
+                14.8424,
+                14.8561,
+                14.8228,
+                14.8378,
+                14.806,
+                14.7616,
+                14.8063,
+                14.8318,
+                14.8331,
+                14.8719,
+                14.933,
+                14.9545,
+                14.9096,
+                14.9108,
+                14.9355,
+                14.9868,
+                15.0085,
+                14.9675,
+                14.9226,
+                15.0178,
+                15.0219,
+                14.9766,
+                14.8972,
+                14.8152
+              ],
+              [
+                15.1763,
+                15.1797,
+                15.1836,
+                15.1864,
+                15.1892,
+                15.1915,
+                15.194,
+                15.1965,
+                15.1985,
+                15.1993,
+                15.1919,
+                15.1424,
+                15.0929,
+                15.0068,
+                14.969,
+                14.9298,
+                14.7873,
+                14.6758,
+                14.7544,
+                14.6227,
+                14.5338,
+                14.4077,
+                14.6395,
+                14.7436,
+                14.7787,
+                14.8128,
+                14.8757,
+                14.8541,
+                14.823,
+                14.7618,
+                14.736,
+                14.7842,
+                14.8023,
+                14.786,
+                14.8055,
+                14.835,
+                14.8726,
+                14.7959,
+                14.7069,
+                14.7559,
+                14.9502,
+                15.0043,
+                14.9767,
+                14.9141,
+                15.0142,
+                15.0174,
+                14.767,
+                14.6214,
+                14.738
+              ],
+              [
+                15.1816,
+                15.1856,
+                15.1896,
+                15.1929,
+                15.1954,
+                15.1978,
+                15.2009,
+                15.2029,
+                15.2044,
+                15.2038,
+                15.1789,
+                15.1229,
+                15.1065,
+                15.0365,
+                14.9923,
+                14.9236,
+                14.7828,
+                14.6771,
+                14.6939,
+                14.7403,
+                14.6776,
+                14.5622,
+                14.3536,
+                14.5412,
+                14.711,
+                14.7223,
+                14.7971,
+                14.8137,
+                14.8031,
+                14.7429,
+                14.6754,
+                14.769,
+                14.8305,
+                14.7744,
+                14.7481,
+                14.7921,
+                14.8549,
+                14.8087,
+                14.7074,
+                14.6657,
+                14.773,
+                14.9434,
+                14.9624,
+                14.9379,
+                14.9852,
+                14.9339,
+                14.7369,
+                14.5872,
+                14.7052
+              ],
+              [
+                15.1878,
+                15.1916,
+                15.1957,
+                15.1986,
+                15.2013,
+                15.2033,
+                15.2053,
+                15.2071,
+                15.2085,
+                15.2083,
+                15.1934,
+                15.114,
+                15.0842,
+                15.0663,
+                14.9847,
+                14.9162,
+                14.8045,
+                14.7457,
+                14.67,
+                14.4264,
+                14.2782,
+                14.5761,
+                14.5512,
+                14.4285,
+                14.6311,
+                14.6662,
+                14.7474,
+                14.8001,
+                14.8296,
+                14.7941,
+                14.726,
+                14.7633,
+                14.8644,
+                14.8584,
+                14.751,
+                14.7859,
+                14.8836,
+                14.9394,
+                14.8547,
+                14.6789,
+                14.7241,
+                14.939,
+                14.9908,
+                14.9137,
+                14.7147,
+                14.5691,
+                14.6363,
+                14.6747,
+                14.7619
+              ],
+              [
+                15.194,
+                15.1971,
+                15.2011,
+                15.2043,
+                15.2061,
+                15.2071,
+                15.2079,
+                15.2093,
+                15.2099,
+                15.2092,
+                15.1889,
+                15.1328,
+                15.0739,
+                15.0281,
+                15.0177,
+                14.9932,
+                14.9307,
+                14.8452,
+                14.7282,
+                14.4415,
+                13.8896,
+                13.9253,
+                14.5863,
+                14.4407,
+                14.5025,
+                14.6646,
+                14.7206,
+                14.7798,
+                14.7493,
+                14.7128,
+                14.6891,
+                14.7026,
+                14.8446,
+                14.9214,
+                14.8935,
+                14.7979,
+                14.8567,
+                14.9719,
+                14.9779,
+                14.8477,
+                14.8841,
+                14.9853,
+                15.0041,
+                14.8051,
+                14.5016,
+                14.5049,
+                14.5665,
+                14.7122,
+                14.7887
+              ],
+              [
+                15.1989,
+                15.2028,
+                15.2063,
+                15.2089,
+                15.2096,
+                15.209,
+                15.208,
+                15.2095,
+                15.208,
+                15.1897,
+                15.167,
+                15.1362,
+                15.0971,
+                15.0609,
+                15.0666,
+                15.037,
+                14.9907,
+                14.9164,
+                14.8593,
+                14.7527,
+                14.0087,
+                13.548,
+                14.3051,
+                14.4044,
+                14.2556,
+                14.604,
+                14.7144,
+                14.7799,
+                14.7923,
+                14.7942,
+                14.7701,
+                14.7435,
+                14.8185,
+                14.9623,
+                14.9804,
+                14.9067,
+                14.8437,
+                14.9037,
+                14.9887,
+                15.0015,
+                15.0046,
+                15.0185,
+                14.9985,
+                14.7266,
+                14.515,
+                14.5141,
+                14.6081,
+                14.7455,
+                14.8683
+              ],
+              [
+                15.2033,
+                15.2067,
+                15.2095,
+                15.2105,
+                15.2057,
+                15.1899,
+                15.1794,
+                15.1688,
+                15.1721,
+                15.1626,
+                15.1455,
+                15.1442,
+                15.1267,
+                15.1095,
+                15.1014,
+                15.0711,
+                15.0258,
+                14.9715,
+                14.9501,
+                14.8262,
+                14.4708,
+                13.9114,
+                13.8475,
+                14.3048,
+                14.1629,
+                14.544,
+                14.7308,
+                14.8326,
+                14.8372,
+                14.786,
+                14.7507,
+                14.6608,
+                14.732,
+                14.9583,
+                14.9885,
+                14.9868,
+                14.9528,
+                14.9645,
+                14.9985,
+                15.0128,
+                15.0169,
+                15.0091,
+                14.9804,
+                14.6574,
+                14.5131,
+                14.5612,
+                14.6625,
+                14.7734,
+                14.8823
+              ],
+              [
+                15.207,
+                15.2095,
+                15.2067,
+                15.1986,
+                15.185,
+                15.1547,
+                15.1364,
+                15.1486,
+                15.1623,
+                15.1624,
+                15.1572,
+                15.1776,
+                15.1816,
+                15.1682,
+                15.1435,
+                15.1091,
+                15.0926,
+                15.0342,
+                14.9545,
+                14.9185,
+                14.8137,
+                14.5474,
+                13.8719,
+                13.8167,
+                13.9951,
+                14.3271,
+                14.5614,
+                14.7969,
+                14.8469,
+                14.8061,
+                14.7876,
+                14.7282,
+                14.7238,
+                14.9176,
+                14.9974,
+                14.9629,
+                14.9283,
+                14.9658,
+                14.9731,
+                15.0075,
+                15.0136,
+                14.9964,
+                14.9645,
+                14.712,
+                14.5544,
+                14.6203,
+                14.6802,
+                14.7958,
+                14.8816
+              ],
+              [
+                15.2093,
+                15.207,
+                15.199,
+                15.1924,
+                15.1879,
+                15.1712,
+                15.1732,
+                15.1765,
+                15.1922,
+                15.2068,
+                15.2139,
+                15.221,
+                15.2229,
+                15.2177,
+                15.2038,
+                15.1773,
+                15.1411,
+                15.0583,
+                15.0258,
+                14.9829,
+                14.8832,
+                14.7436,
+                14.5056,
+                13.8761,
+                13.8549,
+                14.0122,
+                14.2539,
+                14.6442,
+                14.7618,
+                14.7777,
+                14.7132,
+                14.6988,
+                14.6921,
+                14.7746,
+                14.9816,
+                14.9801,
+                14.8325,
+                14.7264,
+                14.7577,
+                14.9179,
+                14.9926,
+                15.0162,
+                14.9683,
+                14.7924,
+                14.5957,
+                14.6441,
+                14.7105,
+                14.827,
+                14.8848
+              ],
+              [
+                15.2121,
+                15.2066,
+                15.2054,
+                15.2054,
+                15.2037,
+                15.1995,
+                15.2102,
+                15.2199,
+                15.2238,
+                15.2271,
+                15.2276,
+                15.2279,
+                15.2293,
+                15.2314,
+                15.2314,
+                15.222,
+                15.1881,
+                15.1452,
+                15.1117,
+                15.0075,
+                14.9205,
+                14.8504,
+                14.7727,
+                14.3807,
+                14.0476,
+                14.0305,
+                13.9088,
+                14.1798,
+                14.621,
+                14.652,
+                14.6552,
+                14.6856,
+                14.6994,
+                14.7251,
+                14.9192,
+                14.9782,
+                14.8345,
+                14.6659,
+                14.5372,
+                14.7564,
+                15.0078,
+                15.0076,
+                14.9717,
+                14.8738,
+                14.7134,
+                14.6504,
+                14.739,
+                14.8307,
+                14.8526
+              ],
+              [
+                15.2167,
+                15.2184,
+                15.2168,
+                15.2163,
+                15.2192,
+                15.2267,
+                15.2296,
+                15.2305,
+                15.2311,
+                15.2316,
+                15.2319,
+                15.232,
+                15.2328,
+                15.2344,
+                15.2372,
+                15.2375,
+                15.2188,
+                15.1952,
+                15.1664,
+                15.1148,
+                15.0482,
+                14.9253,
+                14.8227,
+                14.7455,
+                14.4412,
+                14.316,
+                13.9839,
+                13.6318,
+                14.1466,
+                14.4882,
+                14.6413,
+                14.6923,
+                14.6156,
+                14.5587,
+                14.6698,
+                14.9833,
+                14.9512,
+                14.8484,
+                14.6651,
+                14.8615,
+                14.9765,
+                14.8907,
+                14.9119,
+                14.8828,
+                14.7638,
+                14.8085,
+                14.8171,
+                14.8128,
+                14.8398
+              ],
+              [
+                15.2184,
+                15.2224,
+                15.2243,
+                15.2252,
+                15.2276,
+                15.2308,
+                15.2334,
+                15.2345,
+                15.2356,
+                15.2359,
+                15.2364,
+                15.2362,
+                15.2369,
+                15.2382,
+                15.2407,
+                15.244,
+                15.242,
+                15.2287,
+                15.2128,
+                15.1735,
+                15.082,
+                15.0232,
+                14.9295,
+                14.9228,
+                14.8658,
+                14.648,
+                14.2518,
+                13.8857,
+                13.9615,
+                14.06,
+                14.2923,
+                14.5958,
+                14.5491,
+                14.4442,
+                14.4499,
+                14.841,
+                15.0265,
+                15.1544,
+                14.8916,
+                14.8881,
+                14.8426,
+                14.7056,
+                14.7482,
+                14.8089,
+                14.8112,
+                14.8932,
+                14.831,
+                14.8343,
+                14.834
+              ],
+              [
+                15.2198,
+                15.2237,
+                15.2263,
+                15.2269,
+                15.2295,
+                15.232,
+                15.2352,
+                15.2365,
+                15.237,
+                15.2379,
+                15.2376,
+                15.238,
+                15.239,
+                15.2406,
+                15.2432,
+                15.2469,
+                15.2505,
+                15.253,
+                15.2303,
+                15.1996,
+                15.1794,
+                15.1149,
+                15.05,
+                15.0204,
+                14.9996,
+                14.9296,
+                14.6941,
+                14.4878,
+                14.424,
+                14.5973,
+                14.2847,
+                14.3091,
+                14.3962,
+                14.309,
+                14.3028,
+                14.5515,
+                14.9583,
+                15.184,
+                14.9837,
+                14.8387,
+                14.7058,
+                14.5472,
+                14.6535,
+                14.7838,
+                14.7836,
+                14.799,
+                14.8074,
+                14.8043,
+                14.8184
+              ],
+              [
+                15.2187,
+                15.2257,
+                15.2289,
+                15.2297,
+                15.2329,
+                15.2355,
+                15.2366,
+                15.2372,
+                15.2374,
+                15.2375,
+                15.2381,
+                15.2387,
+                15.2394,
+                15.2413,
+                15.2449,
+                15.2492,
+                15.2528,
+                15.2578,
+                15.2504,
+                15.235,
+                15.1997,
+                15.1843,
+                15.1358,
+                15.107,
+                15.065,
+                15.0973,
+                15.0675,
+                14.8684,
+                14.8383,
+                14.8646,
+                14.6703,
+                14.582,
+                14.4491,
+                14.3178,
+                14.2469,
+                14.4254,
+                14.861,
+                15.1763,
+                15.0689,
+                14.8638,
+                14.6384,
+                14.5782,
+                14.7314,
+                14.7289,
+                14.7267,
+                14.74,
+                14.7863,
+                14.8,
+                14.8355
+              ],
+              [
+                15.221,
+                15.2267,
+                15.2289,
+                15.2317,
+                15.2349,
+                15.2373,
+                15.2386,
+                15.2392,
+                15.2389,
+                15.2384,
+                15.2393,
+                15.2403,
+                15.2415,
+                15.2438,
+                15.2464,
+                15.25,
+                15.2542,
+                15.2595,
+                15.2641,
+                15.2572,
+                15.2367,
+                15.2367,
+                15.2296,
+                15.2087,
+                15.1937,
+                15.1897,
+                15.1771,
+                15.1687,
+                15.0921,
+                14.9738,
+                14.8076,
+                14.7761,
+                14.5837,
+                14.3874,
+                14.3352,
+                14.4965,
+                14.946,
+                15.1904,
+                15.1597,
+                14.9601,
+                14.7073,
+                14.796,
+                14.9182,
+                14.7293,
+                14.671,
+                14.7283,
+                14.7656,
+                14.7989,
+                14.8483
+              ],
+              [
+                15.2224,
+                15.2265,
+                15.2303,
+                15.2334,
+                15.2375,
+                15.2399,
+                15.2409,
+                15.2415,
+                15.2409,
+                15.2406,
+                15.2409,
+                15.2425,
+                15.2449,
+                15.2464,
+                15.2482,
+                15.251,
+                15.2548,
+                15.2598,
+                15.2662,
+                15.2668,
+                15.259,
+                15.2591,
+                15.2579,
+                15.2538,
+                15.2527,
+                15.2555,
+                15.2577,
+                15.253,
+                15.1851,
+                15.0074,
+                14.994,
+                14.9348,
+                14.8372,
+                14.4869,
+                14.5167,
+                14.6868,
+                15.0278,
+                15.183,
+                15.1793,
+                15.0289,
+                14.8407,
+                14.9833,
+                14.9359,
+                14.7407,
+                14.6524,
+                14.6919,
+                14.6719,
+                14.6975,
+                14.7838
+              ],
+              [
+                15.2216,
+                15.2269,
+                15.2311,
+                15.2351,
+                15.2387,
+                15.2418,
+                15.2426,
+                15.2432,
+                15.2427,
+                15.2412,
+                15.2418,
+                15.2436,
+                15.2464,
+                15.2479,
+                15.2502,
+                15.2523,
+                15.2548,
+                15.2586,
+                15.2653,
+                15.2703,
+                15.2747,
+                15.2742,
+                15.2772,
+                15.2774,
+                15.2893,
+                15.2918,
+                15.2967,
+                15.2994,
+                15.2955,
+                15.1849,
+                15.0458,
+                14.9014,
+                14.6996,
+                14.5511,
+                14.6165,
+                14.5844,
+                14.8637,
+                15.0679,
+                15.1401,
+                15.1181,
+                15.0592,
+                15.0596,
+                14.9129,
+                14.8488,
+                14.7259,
+                14.6253,
+                14.588,
+                14.6238,
+                14.6725
+              ],
+              [
+                15.2216,
+                15.2264,
+                15.2299,
+                15.2342,
+                15.2385,
+                15.2418,
+                15.2429,
+                15.2442,
+                15.244,
+                15.2425,
+                15.2425,
+                15.2436,
+                15.2456,
+                15.2476,
+                15.2503,
+                15.2527,
+                15.2552,
+                15.2577,
+                15.2618,
+                15.2683,
+                15.2749,
+                15.2798,
+                15.2852,
+                15.2911,
+                15.2968,
+                15.2989,
+                15.2978,
+                15.2897,
+                15.2922,
+                15.2793,
+                15.1151,
+                15.0146,
+                14.6211,
+                14.553,
+                14.5309,
+                14.519,
+                14.7463,
+                14.6929,
+                14.815,
+                15.1279,
+                15.1666,
+                15.1018,
+                14.8715,
+                14.8545,
+                14.7926,
+                14.6234,
+                14.5723,
+                14.6284,
+                14.6555
+              ],
+              [
+                15.2208,
+                15.2247,
+                15.2287,
+                15.2327,
+                15.2372,
+                15.2413,
+                15.2437,
+                15.2449,
+                15.2443,
+                15.2437,
+                15.2434,
+                15.244,
+                15.2447,
+                15.2465,
+                15.2486,
+                15.2517,
+                15.2543,
+                15.2567,
+                15.2593,
+                15.2625,
+                15.2681,
+                15.2748,
+                15.2809,
+                15.2854,
+                15.2919,
+                15.2983,
+                15.3019,
+                15.3039,
+                15.3124,
+                15.2826,
+                15.2518,
+                15.114,
+                14.8384,
+                14.6191,
+                14.3489,
+                14.4078,
+                14.6407,
+                14.3965,
+                14.4288,
+                14.8589,
+                15.1992,
+                15.1679,
+                14.8391,
+                14.7259,
+                14.6389,
+                14.5687,
+                14.5321,
+                14.6132,
+                14.5877
+              ],
+              [
+                15.2198,
+                15.2236,
+                15.2275,
+                15.2315,
+                15.236,
+                15.2403,
+                15.2432,
+                15.2446,
+                15.2448,
+                15.2438,
+                15.2438,
+                15.2447,
+                15.2451,
+                15.2454,
+                15.2474,
+                15.2493,
+                15.2514,
+                15.2536,
+                15.2552,
+                15.2572,
+                15.26,
+                15.2641,
+                15.27,
+                15.2751,
+                15.2829,
+                15.2906,
+                15.2986,
+                15.3075,
+                15.3154,
+                15.3071,
+                15.2753,
+                15.2526,
+                15.0004,
+                14.9034,
+                14.4126,
+                14.4637,
+                14.7497,
+                14.2543,
+                14.2403,
+                14.4501,
+                15.0945,
+                15.186,
+                14.7223,
+                14.5008,
+                14.4887,
+                14.5135,
+                14.4896,
+                14.5562,
+                14.5732
+              ],
+              [
+                15.2188,
+                15.2225,
+                15.226,
+                15.2305,
+                15.2348,
+                15.2389,
+                15.2429,
+                15.2448,
+                15.2456,
+                15.2444,
+                15.2438,
+                15.245,
+                15.2451,
+                15.2451,
+                15.2459,
+                15.2467,
+                15.2483,
+                15.2498,
+                15.2507,
+                15.2516,
+                15.2528,
+                15.2554,
+                15.2578,
+                15.2631,
+                15.2705,
+                15.2799,
+                15.2905,
+                15.3014,
+                15.3118,
+                15.3213,
+                15.327,
+                15.3219,
+                15.2084,
+                15.0145,
+                14.9573,
+                14.9324,
+                14.997,
+                14.7337,
+                14.5059,
+                14.624,
+                15.0169,
+                15.2848,
+                15.0162,
+                14.5599,
+                14.5482,
+                14.5899,
+                14.527,
+                14.4305,
+                14.549
+              ],
+              [
+                15.2182,
+                15.222,
+                15.2251,
+                15.2287,
+                15.2328,
+                15.2377,
+                15.2418,
+                15.2449,
+                15.2457,
+                15.2454,
+                15.2443,
+                15.2444,
+                15.2454,
+                15.2446,
+                15.2444,
+                15.2446,
+                15.2451,
+                15.2456,
+                15.2459,
+                15.2467,
+                15.2469,
+                15.2477,
+                15.2499,
+                15.253,
+                15.2606,
+                15.2698,
+                15.2811,
+                15.2924,
+                15.3045,
+                15.3171,
+                15.3273,
+                15.3252,
+                15.2881,
+                15.0529,
+                14.765,
+                14.5496,
+                14.5169,
+                14.7255,
+                14.8,
+                14.9297,
+                15.1872,
+                15.2773,
+                15.3022,
+                14.9057,
+                14.6851,
+                14.7372,
+                14.6411,
+                14.4357,
+                14.6833
+              ],
+              [
+                15.2173,
+                15.2214,
+                15.2246,
+                15.2278,
+                15.2313,
+                15.2358,
+                15.2401,
+                15.2442,
+                15.2453,
+                15.2455,
+                15.2449,
+                15.2445,
+                15.2457,
+                15.2456,
+                15.2437,
+                15.2426,
+                15.2417,
+                15.2414,
+                15.241,
+                15.2418,
+                15.2422,
+                15.2417,
+                15.2433,
+                15.2474,
+                15.2536,
+                15.2636,
+                15.2755,
+                15.2881,
+                15.3007,
+                15.3133,
+                15.3257,
+                15.3321,
+                15.3209,
+                15.1754,
+                15.0542,
+                14.8683,
+                14.6739,
+                14.6014,
+                14.5813,
+                14.5925,
+                14.7732,
+                15.0309,
+                15.2369,
+                15.2053,
+                14.83,
+                14.6966,
+                14.6619,
+                14.8073,
+                14.9785
+              ],
+              [
+                15.2174,
+                15.2212,
+                15.225,
+                15.2276,
+                15.2305,
+                15.234,
+                15.2388,
+                15.2429,
+                15.245,
+                15.2451,
+                15.2455,
+                15.2451,
+                15.2457,
+                15.2457,
+                15.2435,
+                15.2412,
+                15.2392,
+                15.2378,
+                15.237,
+                15.2366,
+                15.2372,
+                15.2364,
+                15.237,
+                15.2416,
+                15.2488,
+                15.258,
+                15.2703,
+                15.2844,
+                15.2975,
+                15.3103,
+                15.3232,
+                15.3316,
+                15.332,
+                15.2028,
+                15.0132,
+                14.9134,
+                14.8116,
+                14.7541,
+                14.5121,
+                14.539,
+                14.5799,
+                14.8504,
+                14.9349,
+                15.1853,
+                14.7215,
+                14.3214,
+                14.498,
+                15.0384,
+                14.949
+              ],
+              [
+                15.2183,
+                15.2215,
+                15.2255,
+                15.2279,
+                15.2302,
+                15.2337,
+                15.2376,
+                15.241,
+                15.2441,
+                15.2448,
+                15.2452,
+                15.2457,
+                15.2459,
+                15.2454,
+                15.2433,
+                15.2406,
+                15.2377,
+                15.2354,
+                15.2333,
+                15.232,
+                15.2314,
+                15.2299,
+                15.2288,
+                15.2335,
+                15.2421,
+                15.2531,
+                15.2651,
+                15.2804,
+                15.2944,
+                15.3081,
+                15.3212,
+                15.33,
+                15.3353,
+                15.3068,
+                15.2267,
+                15.2227,
+                15.1361,
+                14.9154,
+                14.5531,
+                14.3592,
+                14.3223,
+                14.5338,
+                14.6946,
+                15.0002,
+                14.7438,
+                13.9085,
+                14.2357,
+                14.9619,
+                14.6345
+              ],
+              [
+                15.2196,
+                15.2227,
+                15.2258,
+                15.2292,
+                15.2313,
+                15.234,
+                15.2371,
+                15.2408,
+                15.2433,
+                15.2445,
+                15.2452,
+                15.2458,
+                15.2449,
+                15.2446,
+                15.2431,
+                15.2397,
+                15.2363,
+                15.2326,
+                15.2302,
+                15.2278,
+                15.2256,
+                15.2227,
+                15.2208,
+                15.2256,
+                15.2353,
+                15.247,
+                15.2607,
+                15.2756,
+                15.2905,
+                15.3046,
+                15.3191,
+                15.3286,
+                15.3344,
+                15.3234,
+                15.3116,
+                15.325,
+                15.3092,
+                15.1827,
+                15.0381,
+                14.6983,
+                14.3161,
+                14.3648,
+                14.6231,
+                14.6649,
+                15.0123,
+                14.3934,
+                14.3541,
+                14.5382,
+                14.2723
+              ],
+              [
+                15.221,
+                15.2241,
+                15.2275,
+                15.2301,
+                15.2327,
+                15.2347,
+                15.2376,
+                15.2411,
+                15.2429,
+                15.2443,
+                15.2446,
+                15.2446,
+                15.2438,
+                15.2426,
+                15.241,
+                15.238,
+                15.2347,
+                15.231,
+                15.2266,
+                15.2236,
+                15.2207,
+                15.2168,
+                15.2144,
+                15.2183,
+                15.2285,
+                15.2417,
+                15.2558,
+                15.2709,
+                15.2857,
+                15.3012,
+                15.3155,
+                15.3267,
+                15.3333,
+                15.3348,
+                15.3359,
+                15.3395,
+                15.3387,
+                15.3321,
+                15.226,
+                15.0788,
+                14.7767,
+                14.553,
+                14.5415,
+                14.5906,
+                14.7244,
+                15.0882,
+                14.8409,
+                14.5335,
+                14.3768
+              ],
+              [
+                15.2225,
+                15.226,
+                15.2291,
+                15.2316,
+                15.2338,
+                15.2361,
+                15.2393,
+                15.2421,
+                15.2432,
+                15.245,
+                15.245,
+                15.2446,
+                15.2434,
+                15.241,
+                15.2393,
+                15.236,
+                15.2319,
+                15.2291,
+                15.2245,
+                15.2201,
+                15.2162,
+                15.2128,
+                15.2098,
+                15.2127,
+                15.2222,
+                15.237,
+                15.2519,
+                15.265,
+                15.2809,
+                15.2975,
+                15.3127,
+                15.3245,
+                15.3319,
+                15.3367,
+                15.3405,
+                15.3422,
+                15.3419,
+                15.3401,
+                15.2857,
+                15.1529,
+                15.0588,
+                14.67,
+                14.6837,
+                14.6715,
+                14.6952,
+                14.7523,
+                15.1332,
+                15.0777,
+                14.7207
+              ],
+              [
+                15.2241,
+                15.2273,
+                15.2298,
+                15.233,
+                15.2359,
+                15.2382,
+                15.2409,
+                15.2431,
+                15.2442,
+                15.246,
+                15.2462,
+                15.246,
+                15.2444,
+                15.2407,
+                15.2377,
+                15.2342,
+                15.23,
+                15.2259,
+                15.2223,
+                15.2178,
+                15.2137,
+                15.2101,
+                15.2065,
+                15.2076,
+                15.215,
+                15.2307,
+                15.2465,
+                15.26,
+                15.2749,
+                15.2927,
+                15.3098,
+                15.3228,
+                15.3294,
+                15.3356,
+                15.3413,
+                15.3437,
+                15.3441,
+                15.3424,
+                15.3297,
+                15.2263,
+                15.1843,
+                15.0394,
+                14.8035,
+                14.7929,
+                14.7749,
+                14.7936,
+                14.8425,
+                15.2519,
+                15.1185
+              ],
+              [
+                15.2256,
+                15.2284,
+                15.2314,
+                15.2344,
+                15.2372,
+                15.2398,
+                15.2422,
+                15.2445,
+                15.2457,
+                15.2463,
+                15.2468,
+                15.2463,
+                15.2449,
+                15.2419,
+                15.2373,
+                15.2329,
+                15.2284,
+                15.2241,
+                15.2198,
+                15.2159,
+                15.2112,
+                15.2075,
+                15.2036,
+                15.2017,
+                15.2071,
+                15.2226,
+                15.2397,
+                15.2549,
+                15.2704,
+                15.2859,
+                15.3025,
+                15.3174,
+                15.3273,
+                15.3358,
+                15.3413,
+                15.3434,
+                15.3441,
+                15.3443,
+                15.3372,
+                15.2642,
+                15.12,
+                15.0838,
+                14.9887,
+                14.9377,
+                14.9409,
+                14.7604,
+                14.6377,
+                15.0046,
+                15.31
+              ],
+              [
+                15.2269,
+                15.2297,
+                15.2325,
+                15.2357,
+                15.2385,
+                15.2413,
+                15.2439,
+                15.246,
+                15.2472,
+                15.2477,
+                15.2479,
+                15.2474,
+                15.2458,
+                15.2424,
+                15.2376,
+                15.2335,
+                15.2285,
+                15.2226,
+                15.2178,
+                15.2127,
+                15.2091,
+                15.2038,
+                15.2002,
+                15.1971,
+                15.2007,
+                15.2156,
+                15.2324,
+                15.2491,
+                15.2649,
+                15.28,
+                15.2951,
+                15.3135,
+                15.3271,
+                15.3356,
+                15.3405,
+                15.3434,
+                15.3439,
+                15.3438,
+                15.3426,
+                15.3185,
+                15.209,
+                15.0875,
+                15.039,
+                14.8909,
+                14.8692,
+                14.7864,
+                14.7055,
+                14.7955,
+                15.245
+              ],
+              [
+                15.2282,
+                15.2311,
+                15.2342,
+                15.2366,
+                15.2393,
+                15.2429,
+                15.2452,
+                15.2471,
+                15.2478,
+                15.2484,
+                15.2487,
+                15.2485,
+                15.2471,
+                15.2437,
+                15.2381,
+                15.2341,
+                15.2289,
+                15.2233,
+                15.2166,
+                15.2109,
+                15.206,
+                15.2007,
+                15.1954,
+                15.1906,
+                15.194,
+                15.2102,
+                15.226,
+                15.2426,
+                15.2578,
+                15.2731,
+                15.2886,
+                15.3085,
+                15.3247,
+                15.3342,
+                15.3399,
+                15.342,
+                15.3433,
+                15.3428,
+                15.3414,
+                15.3327,
+                15.2788,
+                15.1126,
+                15.084,
+                14.7963,
+                14.5959,
+                14.6669,
+                14.8661,
+                14.5696,
+                14.9483
+              ]
+            ]
+          },
+          "axis_x": {
+            "op": "const",
+            "args": [],
+            "value": [
+              -125.0,
+              -124.375,
+              -123.75,
+              -123.125,
+              -122.5,
+              -121.875,
+              -121.25,
+              -120.625,
+              -120.0,
+              -119.375,
+              -118.75,
+              -118.125,
+              -117.5,
+              -116.875,
+              -116.25,
+              -115.625,
+              -115.0,
+              -114.375,
+              -113.75,
+              -113.125,
+              -112.5,
+              -111.875,
+              -111.25,
+              -110.625,
+              -110.0,
+              -109.375,
+              -108.75,
+              -108.125,
+              -107.5,
+              -106.875,
+              -106.25,
+              -105.625,
+              -105.0,
+              -104.375,
+              -103.75,
+              -103.125,
+              -102.5,
+              -101.875,
+              -101.25,
+              -100.625,
+              -100.0,
+              -99.375,
+              -98.75,
+              -98.125,
+              -97.5,
+              -96.875,
+              -96.25,
+              -95.625,
+              -95.0,
+              -94.375,
+              -93.75,
+              -93.125,
+              -92.5,
+              -91.875,
+              -91.25,
+              -90.625,
+              -90.0,
+              -89.375,
+              -88.75,
+              -88.125,
+              -87.5,
+              -86.875,
+              -86.25,
+              -85.625,
+              -85.0,
+              -84.375,
+              -83.75,
+              -83.125,
+              -82.5,
+              -81.875,
+              -81.25,
+              -80.625,
+              -80.0,
+              -79.375,
+              -78.75,
+              -78.125,
+              -77.5,
+              -76.875,
+              -76.25,
+              -75.625,
+              -75.0,
+              -74.375,
+              -73.75,
+              -73.125,
+              -72.5,
+              -71.875,
+              -71.25,
+              -70.625,
+              -70.0,
+              -69.375,
+              -68.75,
+              -68.125,
+              -67.5,
+              -66.875
+            ]
+          },
+          "axis_y": {
+            "op": "const",
+            "args": [],
+            "value": [
+              25.0,
+              25.5,
+              26.0,
+              26.5,
+              27.0,
+              27.5,
+              28.0,
+              28.5,
+              29.0,
+              29.5,
+              30.0,
+              30.5,
+              31.0,
+              31.5,
+              32.0,
+              32.5,
+              33.0,
+              33.5,
+              34.0,
+              34.5,
+              35.0,
+              35.5,
+              36.0,
+              36.5,
+              37.0,
+              37.5,
+              38.0,
+              38.5,
+              39.0,
+              39.5,
+              40.0,
+              40.5,
+              41.0,
+              41.5,
+              42.0,
+              42.5,
+              43.0,
+              43.5,
+              44.0,
+              44.5,
+              45.0,
+              45.5,
+              46.0,
+              46.5,
+              47.0,
+              47.5,
+              48.0,
+              48.5,
+              49.0
+            ]
+          },
+          "x": "lon_deg",
+          "y": "lat_deg",
+          "nx": 94,
+          "ny": 49
+        }
+      }
+    },
+    {
+      "lhs": "t_utc",
+      "rhs": {
+        "op": "+",
+        "args": [
+          "t",
+          "t_ref"
+        ]
+      }
+    },
+    {
+      "lhs": "month_utc",
+      "rhs": {
+        "op": "fn",
+        "name": "datetime.month",
+        "args": [
+          "t_utc"
+        ]
+      }
+    },
+    {
+      "lhs": "is_leap_year_utc",
+      "rhs": {
+        "op": "fn",
+        "name": "datetime.is_leap_year",
+        "args": [
+          "t_utc"
+        ]
+      }
+    },
+    {
+      "lhs": "days_in_month",
+      "rhs": {
+        "op": "+",
+        "args": [
+          {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
+                "op": "const",
+                "args": [],
+                "value": [
+                  31,
+                  28,
+                  31,
+                  30,
+                  31,
+                  30,
+                  31,
+                  31,
+                  30,
+                  31,
+                  30,
+                  31
+                ]
+              },
+              "axis": {
+                "op": "const",
+                "args": [],
+                "value": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5,
+                  6,
+                  7,
+                  8,
+                  9,
+                  10,
+                  11,
+                  12
+                ]
+              },
+              "x": "month_utc",
+              "n": 12
+            }
+          },
+          {
+            "op": "*",
+            "args": [
+              "is_leap_year_utc",
+              {
+                "op": "apply_expression_template",
+                "args": [],
+                "name": "linear",
+                "bindings": {
+                  "table": {
+                    "op": "const",
+                    "args": [],
+                    "value": [
+                      0,
+                      1,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0,
+                      0
+                    ]
+                  },
+                  "axis": {
+                    "op": "const",
+                    "args": [],
+                    "value": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5,
+                      6,
+                      7,
+                      8,
+                      9,
+                      10,
+                      11,
+                      12
+                    ]
+                  },
+                  "x": "month_utc",
+                  "n": 12
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "lhs": "ACET",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ACET",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ACROLEIN",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ACROLEIN",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ALD2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ALD2",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ALD2_PRIMARY",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ALD2_PRIMARY",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ALDX",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ALDX",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "APIN",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_APIN",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "BENZ",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_BENZ",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "BPIN",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_BPIN",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "BUTADIENE13",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_BUTADIENE13",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "CH4",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_CH4",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "CH4_INV",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_CH4_INV",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "CL2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_CL2",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "CO",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "flux_CO",
+                          "days_in_month"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "Δz"
+                        ]
+                      },
+                      "scale"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "g0_100",
+                      "delp_dry_surface"
+                    ]
+                  }
+                ]
+              },
+              "dayofweek_co",
+              "diurnal_factor"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "CO2_INV",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_CO2_INV",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ETH",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ETH",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ETHA",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ETHA",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ETHY",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ETHY",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ETOH",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_ETOH",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "FORM",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "flux_FORM",
+                          "days_in_month"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "Δz"
+                        ]
+                      },
+                      "scale"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "g0_100",
+                      "delp_dry_surface"
+                    ]
+                  }
+                ]
+              },
+              "diurnal_factor"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "FORM_PRIMARY",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_FORM_PRIMARY",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "HCL",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_HCL",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "HONO",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_HONO",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "IOLE",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_IOLE",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "ISOP",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "flux_ISOP",
+                          "days_in_month"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "Δz"
+                        ]
+                      },
+                      "scale"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "g0_100",
+                      "delp_dry_surface"
+                    ]
+                  }
+                ]
+              },
+              "diurnal_factor_isop"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "KET",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_KET",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "MEOH",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_MEOH",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "N2O_INV",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_N2O_INV",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NAPH",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NAPH",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NH3",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NH3",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NH3_FERT",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NH3_FERT",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NO",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "flux_NO",
+                          "days_in_month"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "Δz"
+                        ]
+                      },
+                      "scale"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "g0_100",
+                      "delp_dry_surface"
+                    ]
+                  }
+                ]
+              },
+              "dayofweek_nox",
+              "diurnal_factor_nox"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NO2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "*",
+            "args": [
+              {
+                "op": "/",
+                "args": [
+                  {
+                    "op": "*",
+                    "args": [
+                      {
+                        "op": "/",
+                        "args": [
+                          "flux_NO2",
+                          "days_in_month"
+                        ]
+                      },
+                      {
+                        "op": "/",
+                        "args": [
+                          1.0,
+                          "Δz"
+                        ]
+                      },
+                      "scale"
+                    ]
+                  },
+                  {
+                    "op": "*",
+                    "args": [
+                      "g0_100",
+                      "delp_dry_surface"
+                    ]
+                  }
+                ]
+              },
+              "dayofweek_nox",
+              "diurnal_factor_nox"
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NOX",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NOX",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NR",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NR",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "NVOL",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_NVOL",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "OLE",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_OLE",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PAL",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PAL",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PAR",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PAR",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PCA",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PCA",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PCL",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PCL",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PEC",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PEC",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PFE",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PFE",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PH2O",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PH2O",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PK",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PK",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PM2_5",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PM2_5",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PMC",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PMC",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PMG",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PMG",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PMN",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PMN",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PMOTHR",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PMOTHR",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PNA",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PNA",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PNCOM",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PNCOM",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PNH4",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PNH4",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PNO3",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PNO3",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "POC",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_POC",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PRPA",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PRPA",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PSI",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PSI",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PSO4",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PSO4",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "PTI",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_PTI",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "SESQ",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_SESQ",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "SO2",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_SO2",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "SOAALK",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_SOAALK",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "SULF",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_SULF",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "TERP",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_TERP",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "TOL",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_TOL",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "UNK",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_UNK",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "UNR",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_UNR",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "VOC_BEIS",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_VOC_BEIS",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "VOC_INV",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_VOC_INV",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    },
+    {
+      "lhs": "XYLMN",
+      "rhs": {
+        "op": "ifelse",
+        "args": [
+          {
+            "op": "<",
+            "args": [
+              "lev",
+              2.0
+            ]
+          },
+          {
+            "op": "/",
+            "args": [
+              {
+                "op": "*",
+                "args": [
+                  {
+                    "op": "/",
+                    "args": [
+                      "flux_XYLMN",
+                      "days_in_month"
+                    ]
+                  },
+                  {
+                    "op": "/",
+                    "args": [
+                      1.0,
+                      "Δz"
+                    ]
+                  },
+                  "scale"
+                ]
+              },
+              {
+                "op": "*",
+                "args": [
+                  "g0_100",
+                  "delp_dry_surface"
+                ]
+              }
+            ]
+          },
+          0.0
+        ]
+      }
+    }
+  ],
+  "tests": []
+}
+```
+
+</details>

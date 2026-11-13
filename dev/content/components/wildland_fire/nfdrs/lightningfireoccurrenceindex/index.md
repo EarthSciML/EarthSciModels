@@ -1,0 +1,1514 @@
+---
+title: "LightningFireOccurrenceIndex"
+slug: "lightningfireoccurrenceindex"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/lightning_fire_occurrence.esm"
+reference: "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station (Lightning Fire Occurrence Index)."
+tags: ["wildland_fire", "nfdrs", "model"]
+---
+
+## Reference
+
+Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station (Lightning Fire Occurrence Index).
+
+_TODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs
+TODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[11].rhs
+
+Equations checked against PSW-82 (pp. 13-14) and Fuquay, Baughman & Latham (1979), A model for predicting lightning fire ignition in wildland fuels, USDA FS Res. Pap. INT-217 (Fig. 3):
+- CGRATE follows the PSW-82 LAL table (LAL 2/3/4/5 -> 12.5/25/50/100 strikes/min); LAL 6 sets LRISK = LOI = 100.
+- FINSID is the racetrack-area ratio FI = (4DUS + pi S^2)/(4DUL + pi L^2) of Fuquay et al., with S = STMDIA, L = TOTWID and the swept distance D*U = STMSPD*LGTDUR (LGTDUR in minutes, so 60 s/min). PSW-82 prints the denominator's first term as STMDIA*STMSPD*TOTWID, which has no duration in it and returns fractions above 1 (15.9 at LAL 3); that is a typo for TOTWID*STMSPD*LGTDUR. FINSID is a ratio of areas, so it is evaluated in metres directly.
+- LOI keeps only the carry-over 0.25*YLOI when there is no lightning OR when it is raining at the observation time; otherwise LOI = 10*LRISK*ICBAR + 0.25*YLOI, limited to 100. IRND rounding is not applied.
+- MC1 is a fraction, the convention of IgnitionComponent, so FMF's 76 percent wetted-surface moisture appears as (76 + 2.7*RAIDUR_h)/100.
+- Simplification kept from the original transcription: PSW-82 evaluates ICR with the full IC function at FMF; here ICR = IC*max(0, 1 - 10*(FMF - MC1))._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `ms_to_mph` |  | `2.23694` | m/s to mph conversion (dimensionless) |
+| `IC` |  | `50.0` | Ignition component 0-100 (dimensionless). An input from IgnitionComponent; the default is a mid-range value so the model builds standalone |
+| `is_lightning` |  | `0.0` | Flag: 1 if lightning occurring (dimensionless) |
+| `m_to_mi` |  | `0.000621371` | meters to miles conversion (dimensionless) |
+| `s_zero` |  | `0.0` | Zero time for conditional expressions |
+| `s_ref` |  | `1.0` | Reference time for non-dimensionalization |
+| `mi_to_m` |  | `1609.344` | miles to meters conversion (dimensionless) |
+| `L_ref` |  | `1.0` | Reference length for non-dimensionalization |
+| `MC1` |  | `0.1` | 1-hour fuel moisture content, as a fraction (dimensionless; the same convention as IgnitionComponent.MC1) |
+| `V_ref` |  | `1.0` | Reference velocity for non-dimensionalization |
+| `LRSF` |  | `1.0` | Lightning risk scaling factor (dimensionless) |
+| `LAL` |  | `1.0` | NFDRS Lightning Activity Level 1-6 (dimensionless) |
+| `L_zero` |  | `0.0` | Zero length for conditional expressions |
+| `is_raining` |  | `0.0` | Flag: 1 if raining at observation time (dimensionless) |
+| `YLOI` |  | `0.0` | Previous day's LOI (dimensionless) |
+| `STMSPD` |  | `13.4112` | Storm translational speed (m/s; NFDRS uses a constant 30 mph = 13.4112 m/s) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `FOTSID` |  |  | Fraction of corridor without rain (dimensionless) |
+| `FINSID` |  |  | Fraction of corridor with rain (dimensionless) |
+| `ICBAR` |  |  | Area-weighted average ignition component (dimensionless) |
+| `STMDIA` |  |  | Width of rain-lightning corridor |
+| `CGRATE` |  |  | Cloud-to-ground lightning discharge rate, strikes/min (dimensionless) |
+| `LGTDUR` |  |  | Duration of lightning at a point within the affected area, in minutes (dimensionless number of minutes) |
+| `TOTWID` |  |  | Total width of affected corridor |
+| `LRISK` |  |  | Lightning risk 0-100 (dimensionless) |
+| `LOI` |  |  | Lightning-caused fire occurrence index 0-100 (dimensionless) |
+| `RAIDUR` |  |  | Rain duration at a point within the rain-lightning corridor, STMDIA/STMSPD |
+| `FMF` |  |  | 1-hour fuel moisture inside rain area (dimensionless) |
+| `ICR` |  |  | Ignition component inside rain area (dimensionless) |
+
+## Observed expressions
+
+$$
+FOTSID = 1.0 + \left(-1\right) \cdot FINSID
+$$
+_Fraction of corridor without rain (dimensionless)_
+
+$$
+FINSID = \mathrm{ifelse}\left(\mathrm{<}\left(0.0, \frac{TOTWID}{L_{ref}}\right), \frac{STMDIA \cdot 60.0 \cdot STMSPD \cdot LGTDUR \cdot s_{ref} + 0.7854 \cdot STMDIA^{2}}{\mathrm{max}\left(1 \times 10^{-10} \cdot L_{ref}^{2}, TOTWID \cdot 60.0 \cdot STMSPD \cdot LGTDUR \cdot s_{ref} + 0.7854 \cdot TOTWID^{2}\right)}, 0.0\right)
+$$
+_Fraction of corridor with rain (dimensionless)_
+
+$$
+ICBAR = \frac{FOTSID \cdot IC + FINSID \cdot ICR}{100.0}
+$$
+_Area-weighted average ignition component (dimensionless)_
+
+$$
+STMDIA = \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 1.5\right), L_{zero}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 2.5\right), 3.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 3.5\right), 4.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 4.5\right), 5.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 5.5\right), 7.0 \cdot mi_{to\,m} \cdot L_{ref}, 7.0 \cdot mi_{to\,m} \cdot L_{ref}\right)\right)\right)\right)\right)
+$$
+_Width of rain-lightning corridor_
+
+$$
+CGRATE = \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 1.5\right), 0.0, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 2.5\right), 12.5, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 3.5\right), 25.0, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 4.5\right), 50.0, 100.0\right)\right)\right)\right)
+$$
+_Cloud-to-ground lightning discharge rate, strikes/min (dimensionless)_
+
+$$
+LGTDUR = \mathrm{ifelse}\left(\mathrm{<}\left(0.0, CGRATE\right), -86.83 + 153.41 \cdot CGRATE^{0.1437}, 0.0\right)
+$$
+_Duration of lightning at a point within the affected area, in minutes (dimensionless number of minutes)_
+
+$$
+TOTWID = \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 1.5\right), L_{zero}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 2.5\right), 7.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 3.5\right), 8.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 4.5\right), 9.0 \cdot mi_{to\,m} \cdot L_{ref}, \mathrm{ifelse}\left(\mathrm{<}\left(LAL, 5.5\right), 11.0 \cdot mi_{to\,m} \cdot L_{ref}, 11.0 \cdot mi_{to\,m} \cdot L_{ref}\right)\right)\right)\right)\right)
+$$
+_Total width of affected corridor_
+
+$$
+LRISK = \mathrm{ifelse}\left(\mathrm{>=}\left(LAL, 5.5\right), 100.0, \mathrm{min}\left(100.0, CGRATE \cdot LRSF\right)\right)
+$$
+_Lightning risk 0-100 (dimensionless)_
+
+$$
+LOI = \mathrm{ifelse}\left(\mathrm{>=}\left(LAL, 5.5\right), 100.0, \mathrm{ifelse}\left(\mathrm{<}\left(is_{lightning}, 0.5\right), \mathrm{min}\left(100.0, 0.25 \cdot YLOI\right), \mathrm{ifelse}\left(\mathrm{>=}\left(is_{raining}, 0.5\right), \mathrm{min}\left(100.0, 0.25 \cdot YLOI\right), \mathrm{min}\left(100.0, 0.25 \cdot YLOI + 10.0 \cdot ICBAR \cdot LRISK\right)\right)\right)\right)
+$$
+_Lightning-caused fire occurrence index 0-100 (dimensionless)_
+
+$$
+RAIDUR = \mathrm{ifelse}\left(\mathrm{<}\left(0.0, \frac{STMSPD \cdot ms_{to\,mph}}{V_{ref}}\right), \frac{3600.0 \cdot m_{to\,mi} \cdot STMDIA \cdot V_{ref} \cdot s_{ref}}{STMSPD \cdot ms_{to\,mph} \cdot L_{ref}}, s_{zero}\right)
+$$
+_Rain duration at a point within the rain-lightning corridor, STMDIA/STMSPD_
+
+$$
+FMF = MC1 + \left(\frac{76.0 + \frac{2.7 \cdot RAIDUR}{3600.0 \cdot s_{ref}}}{100.0} + \left(-1\right) \cdot MC1\right) \cdot \left(1.0 + \left(-1\right) \cdot e^{\frac{\left(-1\right) \cdot RAIDUR}{3600.0 \cdot s_{ref}}}\right)
+$$
+_1-hour fuel moisture inside rain area (dimensionless)_
+
+$$
+ICR = IC \cdot \mathrm{max}\left(0.0, 1.0 + \left(-10.0\right) \cdot \left(FMF + \left(-1\right) \cdot MC1\right)\right)
+$$
+_Ignition component inside rain area (dimensionless)_
+
+## Analyses
+
+### default_lightning_fire_occurrence
+
+Default LightningFireOccurrenceIndex run with moderate lightning activity (LAL=3), no rain, and typical fuel/ignition conditions.
+
+**Time span:** 0 → 1
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "FOTSID": {
+      "type": "unknown",
+      "description": "Fraction of corridor without rain (dimensionless)"
+    },
+    "FINSID": {
+      "type": "unknown",
+      "description": "Fraction of corridor with rain (dimensionless)"
+    },
+    "ICBAR": {
+      "type": "unknown",
+      "description": "Area-weighted average ignition component (dimensionless)"
+    },
+    "ms_to_mph": {
+      "default": 2.23694,
+      "type": "parameter",
+      "description": "m/s to mph conversion (dimensionless)"
+    },
+    "STMDIA": {
+      "type": "unknown",
+      "description": "Width of rain-lightning corridor"
+    },
+    "CGRATE": {
+      "type": "unknown",
+      "description": "Cloud-to-ground lightning discharge rate, strikes/min (dimensionless)"
+    },
+    "LGTDUR": {
+      "type": "unknown",
+      "description": "Duration of lightning at a point within the affected area, in minutes (dimensionless number of minutes)"
+    },
+    "IC": {
+      "type": "parameter",
+      "description": "Ignition component 0-100 (dimensionless). An input from IgnitionComponent; the default is a mid-range value so the model builds standalone",
+      "default": 50.0
+    },
+    "TOTWID": {
+      "type": "unknown",
+      "description": "Total width of affected corridor"
+    },
+    "LRISK": {
+      "type": "unknown",
+      "description": "Lightning risk 0-100 (dimensionless)"
+    },
+    "is_lightning": {
+      "default": 0.0,
+      "type": "parameter",
+      "description": "Flag: 1 if lightning occurring (dimensionless)"
+    },
+    "m_to_mi": {
+      "default": 0.000621371,
+      "type": "parameter",
+      "description": "meters to miles conversion (dimensionless)"
+    },
+    "LOI": {
+      "type": "unknown",
+      "description": "Lightning-caused fire occurrence index 0-100 (dimensionless)"
+    },
+    "s_zero": {
+      "default": 0.0,
+      "type": "parameter",
+      "description": "Zero time for conditional expressions"
+    },
+    "s_ref": {
+      "default": 1.0,
+      "type": "parameter",
+      "description": "Reference time for non-dimensionalization"
+    },
+    "mi_to_m": {
+      "default": 1609.344,
+      "type": "parameter",
+      "description": "miles to meters conversion (dimensionless)"
+    },
+    "L_ref": {
+      "default": 1.0,
+      "type": "parameter",
+      "description": "Reference length for non-dimensionalization"
+    },
+    "MC1": {
+      "type": "parameter",
+      "description": "1-hour fuel moisture content, as a fraction (dimensionless; the same convention as IgnitionComponent.MC1)",
+      "default": 0.1
+    },
+    "RAIDUR": {
+      "type": "unknown",
+      "description": "Rain duration at a point within the rain-lightning corridor, STMDIA/STMSPD"
+    },
+    "V_ref": {
+      "default": 1.0,
+      "type": "parameter",
+      "description": "Reference velocity for non-dimensionalization"
+    },
+    "FMF": {
+      "type": "unknown",
+      "description": "1-hour fuel moisture inside rain area (dimensionless)"
+    },
+    "LRSF": {
+      "default": 1.0,
+      "type": "parameter",
+      "description": "Lightning risk scaling factor (dimensionless)"
+    },
+    "ICR": {
+      "type": "unknown",
+      "description": "Ignition component inside rain area (dimensionless)"
+    },
+    "LAL": {
+      "default": 1.0,
+      "type": "parameter",
+      "description": "NFDRS Lightning Activity Level 1-6 (dimensionless)"
+    },
+    "L_zero": {
+      "default": 0.0,
+      "type": "parameter",
+      "description": "Zero length for conditional expressions"
+    },
+    "is_raining": {
+      "default": 0.0,
+      "type": "parameter",
+      "description": "Flag: 1 if raining at observation time (dimensionless)"
+    },
+    "YLOI": {
+      "default": 0.0,
+      "type": "parameter",
+      "description": "Previous day's LOI (dimensionless)"
+    },
+    "STMSPD": {
+      "default": 13.4112,
+      "type": "parameter",
+      "description": "Storm translational speed (m/s; NFDRS uses a constant 30 mph = 13.4112 m/s)"
+    }
+  },
+  "reference": {
+    "citation": "Cohen, J. D., & Deeming, J. E. (1985). The National Fire-Danger Rating System: basic equations. Gen. Tech. Rep. PSW-82. Berkeley, CA: USDA Forest Service, Pacific Southwest Forest and Range Experiment Station (Lightning Fire Occurrence Index).",
+    "notes": "TODO_GAP: gt-p3ep - non-standard op 'max' likely requires a registered function declaration — see gt-p3ep @ equations[5].rhs\nTODO_GAP: gt-p3ep - non-standard op 'min' likely requires a registered function declaration — see gt-p3ep @ equations[11].rhs\n\nEquations checked against PSW-82 (pp. 13-14) and Fuquay, Baughman & Latham (1979), A model for predicting lightning fire ignition in wildland fuels, USDA FS Res. Pap. INT-217 (Fig. 3):\n- CGRATE follows the PSW-82 LAL table (LAL 2/3/4/5 -> 12.5/25/50/100 strikes/min); LAL 6 sets LRISK = LOI = 100.\n- FINSID is the racetrack-area ratio FI = (4DUS + pi S^2)/(4DUL + pi L^2) of Fuquay et al., with S = STMDIA, L = TOTWID and the swept distance D*U = STMSPD*LGTDUR (LGTDUR in minutes, so 60 s/min). PSW-82 prints the denominator's first term as STMDIA*STMSPD*TOTWID, which has no duration in it and returns fractions above 1 (15.9 at LAL 3); that is a typo for TOTWID*STMSPD*LGTDUR. FINSID is a ratio of areas, so it is evaluated in metres directly.\n- LOI keeps only the carry-over 0.25*YLOI when there is no lightning OR when it is raining at the observation time; otherwise LOI = 10*LRISK*ICBAR + 0.25*YLOI, limited to 100. IRND rounding is not applied.\n- MC1 is a fraction, the convention of IgnitionComponent, so FMF's 76 percent wetted-surface moisture appears as (76 + 2.7*RAIDUR_h)/100.\n- Simplification kept from the original transcription: PSW-82 evaluates ICR with the full IC function at FMF; here ICR = IC*max(0, 1 - 10*(FMF - MC1))."
+  },
+  "equations": [
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "LAL",
+              1.5
+            ],
+            "op": "<"
+          },
+          0.0,
+          {
+            "args": [
+              {
+                "args": [
+                  "LAL",
+                  2.5
+                ],
+                "op": "<"
+              },
+              12.5,
+              {
+                "args": [
+                  {
+                    "args": [
+                      "LAL",
+                      3.5
+                    ],
+                    "op": "<"
+                  },
+                  25.0,
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "LAL",
+                          4.5
+                        ],
+                        "op": "<"
+                      },
+                      50.0,
+                      100.0
+                    ],
+                    "op": "ifelse"
+                  }
+                ],
+                "op": "ifelse"
+              }
+            ],
+            "op": "ifelse"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "CGRATE"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "LAL",
+              1.5
+            ],
+            "op": "<"
+          },
+          "L_zero",
+          {
+            "args": [
+              {
+                "args": [
+                  "LAL",
+                  2.5
+                ],
+                "op": "<"
+              },
+              {
+                "args": [
+                  3.0,
+                  "mi_to_m",
+                  "L_ref"
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      "LAL",
+                      3.5
+                    ],
+                    "op": "<"
+                  },
+                  {
+                    "args": [
+                      4.0,
+                      "mi_to_m",
+                      "L_ref"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "LAL",
+                          4.5
+                        ],
+                        "op": "<"
+                      },
+                      {
+                        "args": [
+                          5.0,
+                          "mi_to_m",
+                          "L_ref"
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              "LAL",
+                              5.5
+                            ],
+                            "op": "<"
+                          },
+                          {
+                            "args": [
+                              7.0,
+                              "mi_to_m",
+                              "L_ref"
+                            ],
+                            "op": "*"
+                          },
+                          {
+                            "args": [
+                              7.0,
+                              "mi_to_m",
+                              "L_ref"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "ifelse"
+                      }
+                    ],
+                    "op": "ifelse"
+                  }
+                ],
+                "op": "ifelse"
+              }
+            ],
+            "op": "ifelse"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "STMDIA"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "LAL",
+              1.5
+            ],
+            "op": "<"
+          },
+          "L_zero",
+          {
+            "args": [
+              {
+                "args": [
+                  "LAL",
+                  2.5
+                ],
+                "op": "<"
+              },
+              {
+                "args": [
+                  7.0,
+                  "mi_to_m",
+                  "L_ref"
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      "LAL",
+                      3.5
+                    ],
+                    "op": "<"
+                  },
+                  {
+                    "args": [
+                      8.0,
+                      "mi_to_m",
+                      "L_ref"
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "LAL",
+                          4.5
+                        ],
+                        "op": "<"
+                      },
+                      {
+                        "args": [
+                          9.0,
+                          "mi_to_m",
+                          "L_ref"
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              "LAL",
+                              5.5
+                            ],
+                            "op": "<"
+                          },
+                          {
+                            "args": [
+                              11.0,
+                              "mi_to_m",
+                              "L_ref"
+                            ],
+                            "op": "*"
+                          },
+                          {
+                            "args": [
+                              11.0,
+                              "mi_to_m",
+                              "L_ref"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "ifelse"
+                      }
+                    ],
+                    "op": "ifelse"
+                  }
+                ],
+                "op": "ifelse"
+              }
+            ],
+            "op": "ifelse"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "TOTWID"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0.0,
+              "CGRATE"
+            ],
+            "op": "<"
+          },
+          {
+            "args": [
+              -86.83,
+              {
+                "args": [
+                  153.41,
+                  {
+                    "args": [
+                      "CGRATE",
+                      0.1437
+                    ],
+                    "op": "^"
+                  }
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "+"
+          },
+          0.0
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "LGTDUR"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0.0,
+              {
+                "args": [
+                  "TOTWID",
+                  "L_ref"
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "<"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      "STMDIA",
+                      {
+                        "args": [
+                          60.0,
+                          "STMSPD",
+                          "LGTDUR",
+                          "s_ref"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      0.7854,
+                      {
+                        "args": [
+                          "STMDIA",
+                          2
+                        ],
+                        "op": "^"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      1e-10,
+                      {
+                        "args": [
+                          "L_ref",
+                          2
+                        ],
+                        "op": "^"
+                      }
+                    ],
+                    "op": "*"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "TOTWID",
+                          {
+                            "args": [
+                              60.0,
+                              "STMSPD",
+                              "LGTDUR",
+                              "s_ref"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "*"
+                      },
+                      {
+                        "args": [
+                          0.7854,
+                          {
+                            "args": [
+                              "TOTWID",
+                              2
+                            ],
+                            "op": "^"
+                          }
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "+"
+                  }
+                ],
+                "op": "max"
+              }
+            ],
+            "op": "/"
+          },
+          0.0
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "FINSID"
+    },
+    {
+      "rhs": {
+        "args": [
+          1.0,
+          {
+            "args": [
+              -1,
+              "FINSID"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "+"
+      },
+      "lhs": "FOTSID"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0.0,
+              {
+                "args": [
+                  {
+                    "args": [
+                      "STMSPD",
+                      "ms_to_mph"
+                    ],
+                    "op": "*"
+                  },
+                  "V_ref"
+                ],
+                "op": "/"
+              }
+            ],
+            "op": "<"
+          },
+          {
+            "args": [
+              {
+                "args": [
+                  3600.0,
+                  "m_to_mi",
+                  "STMDIA",
+                  "V_ref",
+                  "s_ref"
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  "STMSPD",
+                  "ms_to_mph",
+                  "L_ref"
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "/"
+          },
+          "s_zero"
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "RAIDUR"
+    },
+    {
+      "rhs": {
+        "args": [
+          "MC1",
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          76.0,
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  2.7,
+                                  "RAIDUR"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  3600.0,
+                                  "s_ref"
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "+"
+                      },
+                      100.0
+                    ],
+                    "op": "/"
+                  },
+                  {
+                    "args": [
+                      -1,
+                      "MC1"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              },
+              {
+                "args": [
+                  1.0,
+                  {
+                    "args": [
+                      -1,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  -1,
+                                  "RAIDUR"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  3600.0,
+                                  "s_ref"
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "/"
+                          }
+                        ],
+                        "op": "exp"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "+"
+      },
+      "lhs": "FMF"
+    },
+    {
+      "rhs": {
+        "args": [
+          "IC",
+          {
+            "args": [
+              0.0,
+              {
+                "args": [
+                  1.0,
+                  {
+                    "args": [
+                      -10.0,
+                      {
+                        "args": [
+                          "FMF",
+                          {
+                            "args": [
+                              -1,
+                              "MC1"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "+"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "max"
+          }
+        ],
+        "op": "*"
+      },
+      "lhs": "ICR"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  "FOTSID",
+                  "IC"
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  "FINSID",
+                  "ICR"
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "+"
+          },
+          100.0
+        ],
+        "op": "/"
+      },
+      "lhs": "ICBAR"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "LAL",
+              5.5
+            ],
+            "op": ">="
+          },
+          100.0,
+          {
+            "args": [
+              100.0,
+              {
+                "args": [
+                  "CGRATE",
+                  "LRSF"
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "min"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "LRISK"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              "LAL",
+              5.5
+            ],
+            "op": ">="
+          },
+          100.0,
+          {
+            "args": [
+              {
+                "args": [
+                  "is_lightning",
+                  0.5
+                ],
+                "op": "<"
+              },
+              {
+                "args": [
+                  100.0,
+                  {
+                    "args": [
+                      0.25,
+                      "YLOI"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "min"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      "is_raining",
+                      0.5
+                    ],
+                    "op": ">="
+                  },
+                  {
+                    "args": [
+                      100.0,
+                      {
+                        "args": [
+                          0.25,
+                          "YLOI"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "min"
+                  },
+                  {
+                    "args": [
+                      100.0,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              0.25,
+                              "YLOI"
+                            ],
+                            "op": "*"
+                          },
+                          {
+                            "args": [
+                              10.0,
+                              "ICBAR",
+                              "LRISK"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "+"
+                      }
+                    ],
+                    "op": "min"
+                  }
+                ],
+                "op": "ifelse"
+              }
+            ],
+            "op": "ifelse"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "LOI"
+    }
+  ],
+  "tests": [
+    {
+      "id": "cgrate_lal_low",
+      "description": "LAL = 1.0 (< 1.5): CGRATE = 0 (no lightning activity at very low LAL).",
+      "parameter_overrides": {
+        "LAL": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "CGRATE",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "cgrate_lal_mid",
+      "description": "LAL = 3.0 (in [2.5, 3.5)): CGRATE = 25 strikes/min (PSW-82 LAL table).",
+      "parameter_overrides": {
+        "LAL": 3.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "CGRATE",
+          "time": 0.0,
+          "expected": 25.0
+        }
+      ]
+    },
+    {
+      "id": "cgrate_lal_high",
+      "description": "LAL = 5.0 (>= 4.5): CGRATE = 100 strikes/min (PSW-82 LAL table).",
+      "parameter_overrides": {
+        "LAL": 5.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "CGRATE",
+          "time": 0.0,
+          "expected": 100.0
+        }
+      ]
+    },
+    {
+      "id": "cgrate_lal_max",
+      "description": "LAL = 6.0: CGRATE stays at the LAL 5 value of 100 strikes/min (LAL 6 forces LRISK and LOI to 100 separately).",
+      "parameter_overrides": {
+        "LAL": 6.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "CGRATE",
+          "time": 0.0,
+          "expected": 100.0
+        }
+      ]
+    },
+    {
+      "id": "stmdia_lal_low",
+      "description": "LAL = 1.0 (< 1.5): STMDIA = 0 (no storm diameter at very low LAL).",
+      "parameter_overrides": {
+        "LAL": 1.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "STMDIA",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "stmdia_lal_mid",
+      "description": "LAL = 3.0 (in [2.5, 3.5)): STMDIA = 4 mi converted to meters = 4 * 1609.344 = 6437.376.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "STMDIA",
+          "time": 0.0,
+          "expected": 6437.376
+        }
+      ]
+    },
+    {
+      "id": "stmdia_lal_high",
+      "description": "LAL = 6.0 (>= 5.5): STMDIA = 7 mi = 7 * 1609.344 = 11265.408 meters.",
+      "parameter_overrides": {
+        "LAL": 6.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "STMDIA",
+          "time": 0.0,
+          "expected": 11265.408
+        }
+      ]
+    },
+    {
+      "id": "totwid_lal_low",
+      "description": "LAL = 1.0 (< 1.5): TOTWID = 0 (no total width at very low LAL).",
+      "parameter_overrides": {
+        "LAL": 1.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "TOTWID",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "totwid_lal_mid",
+      "description": "LAL = 3.0 (in [2.5, 3.5)): TOTWID = 8 mi = 8 * 1609.344 = 12874.752 meters.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "TOTWID",
+          "time": 0.0,
+          "expected": 12874.752
+        }
+      ]
+    },
+    {
+      "id": "totwid_lal_high",
+      "description": "LAL = 6.0 (>= 5.5): TOTWID = 11 mi = 11 * 1609.344 = 17702.784 meters.",
+      "parameter_overrides": {
+        "LAL": 6.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "TOTWID",
+          "time": 0.0,
+          "expected": 17702.784
+        }
+      ]
+    },
+    {
+      "id": "lgtdur_cgrate_positive",
+      "description": "LAL = 3.0 gives CGRATE = 25 (> 0): LGTDUR = -86.83 + 153.41 * 25^0.1437 = 156.80386179214958 min.",
+      "parameter_overrides": {
+        "LAL": 3.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LGTDUR",
+          "time": 0.0,
+          "expected": 156.80386179214958
+        }
+      ]
+    },
+    {
+      "id": "lgtdur_cgrate_zero",
+      "description": "LAL = 1.0 gives CGRATE = 0 (not > 0): LGTDUR = 0.",
+      "parameter_overrides": {
+        "LAL": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LGTDUR",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "lrisk_cgrate_low",
+      "description": "LAL = 3.0 (CGRATE = 25), LRSF = 1: LRISK = min(100, 25 * 1) = 25.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "LRSF": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LRISK",
+          "time": 0.0,
+          "expected": 25.0
+        }
+      ]
+    },
+    {
+      "id": "lrisk_cgrate_high",
+      "description": "LAL = 6.0, LRSF = 1: LAL 6 sets LRISK = 100.",
+      "parameter_overrides": {
+        "LAL": 6.0,
+        "LRSF": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LRISK",
+          "time": 0.0,
+          "expected": 100.0
+        }
+      ]
+    },
+    {
+      "id": "fotsid_finsid_complement",
+      "description": "LAL = 3: STMDIA = 4 mi, TOTWID = 8 mi, LGTDUR = 156.804 min, STMSPD = 13.4112 m/s (30 mph), so the swept distance is 60*STMSPD*LGTDUR = 126,173 m. FINSID = (STMDIA*sweep + 0.7854*STMDIA^2)/(TOTWID*sweep + 0.7854*TOTWID^2) = 0.4814512892242243 (Fuquay et al. 1979 racetrack geometry) and FOTSID = 1 - FINSID. Both lie in [0, 1], as a fraction of the corridor must.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "mi_to_m": 1609.344,
+        "L_ref": 1.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "FOTSID",
+          "time": 0.0,
+          "expected": 0.5185487107757758
+        },
+        {
+          "variable": "FINSID",
+          "time": 0.0,
+          "expected": 0.48145128922422425
+        }
+      ]
+    },
+    {
+      "id": "loi_no_lightning",
+      "description": "is_lightning = 0, LAL = 5.0: LOI = min(100, 0.25 * YLOI) = 0 (no lightning).",
+      "parameter_overrides": {
+        "LAL": 5.0,
+        "is_lightning": 0.0,
+        "YLOI": 0.0,
+        "is_raining": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LOI",
+          "time": 0.0,
+          "expected": 0.0
+        }
+      ]
+    },
+    {
+      "id": "loi_high_lal_no_rain",
+      "description": "LAL >= 5.5: LOI = 100 regardless of other factors.",
+      "parameter_overrides": {
+        "LAL": 6.0,
+        "is_lightning": 0.0,
+        "YLOI": 0.0,
+        "is_raining": 0.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LOI",
+          "time": 0.0,
+          "expected": 100.0
+        }
+      ]
+    },
+    {
+      "id": "loi_with_lightning_no_rain",
+      "description": "Lightning, no rain at the observation time, LAL = 3, IC = 50, MC1 = 0.10, YLOI = 0: the ICBAR*LRISK branch. RAIDUR = 480 s, FMF = 0.18283483228597777, ICR = 50*max(0, 1 - 10*(FMF - MC1)) = 8.582583857011116, ICBAR = (FOTSID*IC + FINSID*ICR)/100 = 0.3005953160162181, LRISK = 25, LOI = 10*ICBAR*LRISK = 75.14882900405452.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "is_lightning": 1.0,
+        "is_raining": 0.0,
+        "YLOI": 0.0,
+        "IC": 50.0,
+        "MC1": 0.1,
+        "STMSPD": 13.4112
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "FMF",
+          "time": 0.0,
+          "expected": 0.18283483228597777
+        },
+        {
+          "variable": "ICR",
+          "time": 0.0,
+          "expected": 8.582583857011116
+        },
+        {
+          "variable": "ICBAR",
+          "time": 0.0,
+          "expected": 0.3005953160162181
+        },
+        {
+          "variable": "LOI",
+          "time": 0.0,
+          "expected": 75.14882900405452
+        }
+      ]
+    },
+    {
+      "id": "finsid_lal5",
+      "description": "LAL = 5: STMDIA = 7 mi, TOTWID = 11 mi, LGTDUR = 210.510 min. FINSID = 0.6188105521031806, between the LAL 3 value and 1, growing with storm size.",
+      "parameter_overrides": {
+        "LAL": 5.0
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "FINSID",
+          "time": 0.0,
+          "expected": 0.6188105521031806
+        },
+        {
+          "variable": "FOTSID",
+          "time": 0.0,
+          "expected": 0.3811894478968194
+        }
+      ]
+    },
+    {
+      "id": "loi_lightning_carryover",
+      "description": "As loi_with_lightning_no_rain but IC = 40, LRSF = 0.5 and YLOI = 20: ICR = 6.8660670856088934, ICBAR = 0.2404762528129745, LRISK = 12.5, LOI = 0.25*20 + 10*ICBAR*LRISK = 35.05953160162181.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "is_lightning": 1.0,
+        "is_raining": 0.0,
+        "YLOI": 20.0,
+        "IC": 40.0,
+        "MC1": 0.1,
+        "LRSF": 0.5
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "ICBAR",
+          "time": 0.0,
+          "expected": 0.2404762528129745
+        },
+        {
+          "variable": "LOI",
+          "time": 0.0,
+          "expected": 35.05953160162181
+        }
+      ]
+    },
+    {
+      "id": "loi_raining_at_observation",
+      "description": "Lightning, but raining at the afternoon observation: PSW-82 keeps only the carry-over, LOI = 0.25*YLOI = 5 for YLOI = 20.",
+      "parameter_overrides": {
+        "LAL": 3.0,
+        "is_lightning": 1.0,
+        "is_raining": 1.0,
+        "YLOI": 20.0,
+        "IC": 50.0,
+        "MC1": 0.1
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 0.0
+      },
+      "assertions": [
+        {
+          "variable": "LOI",
+          "time": 0.0,
+          "expected": 5.0
+        }
+      ]
+    }
+  ],
+  "tolerance": {
+    "rel": 1e-10,
+    "abs": 1e-12
+  },
+  "analyses": [
+    {
+      "id": "default_lightning_fire_occurrence",
+      "description": "Default LightningFireOccurrenceIndex run with moderate lightning activity (LAL=3), no rain, and typical fuel/ignition conditions.",
+      "time_span": {
+        "start": 0,
+        "end": 1
+      },
+      "parameters": {
+        "LAL": 3.0,
+        "is_lightning": 1.0,
+        "is_raining": 0.0,
+        "IC": 50.0,
+        "MC1": 0.1,
+        "YLOI": 0.0,
+        "STMSPD": 13.4112
+      }
+    }
+  ]
+}
+```
+
+</details>

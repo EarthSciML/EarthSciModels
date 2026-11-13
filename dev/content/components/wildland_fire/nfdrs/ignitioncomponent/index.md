@@ -1,0 +1,665 @@
+---
+title: "IgnitionComponent"
+slug: "ignitioncomponent"
+domains: ["wildland_fire"]
+component_types: ["model"]
+subdomains: ["nfdrs"]
+domain: "wildland_fire"
+subdomain: "nfdrs"
+component_type: "model"
+esm_version: "1.0.0"
+esm_path: "components/wildland_fire/nfdrs/ignition_component.esm"
+reference: "Cohen, J.D., and Deeming, J.E. (1985). The National Fire-Danger Rating System: The Ignition Component. General Technical Report INT-188. Ogden, UT: U.S. Department of Agriculture, Forest Service, Intermountain Forest and Range Experiment Station. 26 p."
+description: "NFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire"
+tags: ["wildland_fire", "nfdrs", "model", "wildland-fire", "ignition"]
+---
+
+## Description
+
+NFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire
+
+## Reference
+
+Cohen, J.D., and Deeming, J.E. (1985). The National Fire-Danger Rating System: The Ignition Component. General Technical Report INT-188. Ogden, UT: U.S. Department of Agriculture, Forest Service, Intermountain Forest and Range Experiment Station. 26 p.
+
+_source_ref: WildlandFire.jl/src/nfdrs.jl:1291
+NFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire
+
+TODO_GAP: gt-p3ep - registered function needed for 'max' operator
+TODO_GAP: gt-p3ep - registered function needed for 'min' operator
+
+Test inputs are parameters and go in `parameter_overrides`. They were previously written as `initial_conditions`, which do not set parameters (and which leave MC1, TMPPRM, SC and SCM, none of which has a default, without a value: esm-spec §10.10), and the stored expected values (IC = 0 in every test, the same P(I) for two different inputs) did not correspond to the inputs. They are now the closed-form values for the stated inputs.
+
+SCN is capped at 100, as in the NFDRS4 reference implementation (firelab/NFDRS4, nfdrs4.cpp: `if (SCN > 100.0) SCN = 100.0;`), so that P(F/I) = sqrt(SCN) <= 10 and IC <= P(I) <= 100. WildlandFire.jl omits the cap._
+
+## Parameters
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `MC1` |  |  | 1-hour fuel moisture content (dimensionless) |
+| `TMPPRM` |  |  | Temperature at fuel-atmosphere interface |
+| `SC` |  |  | Spread component |
+| `V_ref` |  | `1` | Reference velocity for non-dimensionalization |
+| `K_ref` |  | `1` | Reference temperature for non-dimensionalization |
+| `SCM` |  |  | Spread component threshold for reportable fires |
+| `PNORM3` |  | `1.85e-05` | P(I) scaling factor 3 (dimensionless) |
+| `PNORM1` |  | `0.00232` | P(I) scaling factor 1 (dimensionless) |
+| `PNORM2` |  | `0.99767` | P(I) scaling factor 2 (dimensionless) |
+| `K_to_C` |  | `273.15` | Kelvin to Celsius offset (dimensionless) |
+
+## Observed
+
+| Name | Units | Default | Description |
+| --- | --- | --- | --- |
+| `QIGN` |  |  | Heat of ignition (dimensionless) |
+| `CHI` |  |  | Intermediate variable (dimensionless) |
+| `PI` |  |  | Probability of ignition 0-100 (dimensionless) |
+| `PFI` |  |  | Probability of reportable fire given ignition (dimensionless) |
+| `IC` |  |  | Ignition component 0-100 (dimensionless) |
+| `SCN` |  |  | Normalized spread component, capped at 100 (dimensionless) |
+
+## Observed expressions
+
+$$
+QIGN = 144.5 + 18.54 \cdot \left(1 + \left(-1\right) \cdot e^{\left(-15.1\right) \cdot MC1}\right) + \left(-0.00058\right) \cdot \left(\frac{TMPPRM}{K_{ref}} + \left(-1\right) \cdot K_{to\,C}\right)^{2} + \left(-1\right) \cdot \left(\frac{TMPPRM}{K_{ref}} + \left(-1\right) \cdot K_{to\,C}\right) \cdot MC1 + \left(-0.266\right) \cdot \left(\frac{TMPPRM}{K_{ref}} + \left(-1\right) \cdot K_{to\,C}\right) + 640 \cdot MC1
+$$
+_Heat of ignition (dimensionless)_
+
+$$
+CHI = \mathrm{max}\left(0, \frac{344 + \left(-1\right) \cdot QIGN}{10}\right)
+$$
+_Intermediate variable (dimensionless)_
+
+$$
+PI = \mathrm{ifelse}\left(\mathrm{<=}\left(PNORM3 \cdot CHI^{3.6}, PNORM1\right), 0, \mathrm{max}\left(0, \mathrm{min}\left(100, \frac{100 \cdot \left(\left(-1\right) \cdot PNORM1 + PNORM3 \cdot CHI^{3.6}\right)}{PNORM2}\right)\right)\right)
+$$
+_Probability of ignition 0-100 (dimensionless)_
+
+$$
+PFI = \sqrt{\mathrm{max}\left(0, SCN\right)}
+$$
+_Probability of reportable fire given ignition (dimensionless)_
+
+$$
+IC = 0.1 \cdot PI \cdot PFI
+$$
+_Ignition component 0-100 (dimensionless)_
+
+$$
+SCN = \mathrm{min}\left(100, \frac{100 \cdot SC}{\mathrm{max}\left(1 \times 10^{-10}, \frac{SCM}{V_{ref}}\right) \cdot V_{ref}}\right)
+$$
+_Normalized spread component, capped at 100 (dimensionless)_
+
+## Analyses
+
+### typical_summer_conditions
+
+Typical summer conditions with moderate temperature and fuel moisture
+
+**Time span:** 0.0 → 1.0
+
+### high_risk_conditions
+
+High fire risk with high temperature and low fuel moisture
+
+**Time span:** 0.0 → 1.0
+
+### low_risk_conditions
+
+Low fire risk with low temperature and high fuel moisture
+
+**Time span:** 0.0 → 1.0
+
+## Raw .esm
+
+<details><summary>Raw .esm JSON (this component)</summary>
+
+```json
+{
+  "variables": {
+    "QIGN": {
+      "type": "unknown",
+      "description": "Heat of ignition (dimensionless)"
+    },
+    "CHI": {
+      "type": "unknown",
+      "description": "Intermediate variable (dimensionless)"
+    },
+    "MC1": {
+      "type": "parameter",
+      "description": "1-hour fuel moisture content (dimensionless)"
+    },
+    "TMPPRM": {
+      "type": "parameter",
+      "description": "Temperature at fuel-atmosphere interface"
+    },
+    "SC": {
+      "type": "parameter",
+      "description": "Spread component"
+    },
+    "PI": {
+      "type": "unknown",
+      "description": "Probability of ignition 0-100 (dimensionless)"
+    },
+    "PFI": {
+      "type": "unknown",
+      "description": "Probability of reportable fire given ignition (dimensionless)"
+    },
+    "V_ref": {
+      "default": 1,
+      "type": "parameter",
+      "description": "Reference velocity for non-dimensionalization"
+    },
+    "K_ref": {
+      "default": 1,
+      "type": "parameter",
+      "description": "Reference temperature for non-dimensionalization"
+    },
+    "SCM": {
+      "type": "parameter",
+      "description": "Spread component threshold for reportable fires"
+    },
+    "IC": {
+      "type": "unknown",
+      "description": "Ignition component 0-100 (dimensionless)"
+    },
+    "SCN": {
+      "type": "unknown",
+      "description": "Normalized spread component, capped at 100 (dimensionless)"
+    },
+    "PNORM3": {
+      "default": 1.85e-05,
+      "type": "parameter",
+      "description": "P(I) scaling factor 3 (dimensionless)"
+    },
+    "PNORM1": {
+      "default": 0.00232,
+      "type": "parameter",
+      "description": "P(I) scaling factor 1 (dimensionless)"
+    },
+    "PNORM2": {
+      "default": 0.99767,
+      "type": "parameter",
+      "description": "P(I) scaling factor 2 (dimensionless)"
+    },
+    "K_to_C": {
+      "default": 273.15,
+      "type": "parameter",
+      "description": "Kelvin to Celsius offset (dimensionless)"
+    }
+  },
+  "reference": {
+    "notes": "source_ref: WildlandFire.jl/src/nfdrs.jl:1291\nNFDRS Ignition Component (IC) - calculates probability of ignition and reportable fire\n\nTODO_GAP: gt-p3ep - registered function needed for 'max' operator\nTODO_GAP: gt-p3ep - registered function needed for 'min' operator\n\nTest inputs are parameters and go in `parameter_overrides`. They were previously written as `initial_conditions`, which do not set parameters (and which leave MC1, TMPPRM, SC and SCM, none of which has a default, without a value: esm-spec §10.10), and the stored expected values (IC = 0 in every test, the same P(I) for two different inputs) did not correspond to the inputs. They are now the closed-form values for the stated inputs.\n\nSCN is capped at 100, as in the NFDRS4 reference implementation (firelab/NFDRS4, nfdrs4.cpp: `if (SCN > 100.0) SCN = 100.0;`), so that P(F/I) = sqrt(SCN) <= 10 and IC <= P(I) <= 100. WildlandFire.jl omits the cap.",
+    "citation": "Cohen, J.D., and Deeming, J.E. (1985). The National Fire-Danger Rating System: The Ignition Component. General Technical Report INT-188. Ogden, UT: U.S. Department of Agriculture, Forest Service, Intermountain Forest and Range Experiment Station. 26 p."
+  },
+  "equations": [
+    {
+      "rhs": {
+        "args": [
+          144.5,
+          {
+            "args": [
+              18.54,
+              {
+                "args": [
+                  1,
+                  {
+                    "args": [
+                      -1,
+                      {
+                        "args": [
+                          {
+                            "args": [
+                              -15.1,
+                              "MC1"
+                            ],
+                            "op": "*"
+                          }
+                        ],
+                        "op": "exp"
+                      }
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              -0.00058,
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          "TMPPRM",
+                          "K_ref"
+                        ],
+                        "op": "/"
+                      },
+                      {
+                        "args": [
+                          -1,
+                          "K_to_C"
+                        ],
+                        "op": "*"
+                      }
+                    ],
+                    "op": "+"
+                  },
+                  2
+                ],
+                "op": "^"
+              }
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              -1,
+              {
+                "args": [
+                  {
+                    "args": [
+                      "TMPPRM",
+                      "K_ref"
+                    ],
+                    "op": "/"
+                  },
+                  {
+                    "args": [
+                      -1,
+                      "K_to_C"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              },
+              "MC1"
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              -0.266,
+              {
+                "args": [
+                  {
+                    "args": [
+                      "TMPPRM",
+                      "K_ref"
+                    ],
+                    "op": "/"
+                  },
+                  {
+                    "args": [
+                      -1,
+                      "K_to_C"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              }
+            ],
+            "op": "*"
+          },
+          {
+            "args": [
+              640,
+              "MC1"
+            ],
+            "op": "*"
+          }
+        ],
+        "op": "+"
+      },
+      "lhs": "QIGN"
+    },
+    {
+      "rhs": {
+        "args": [
+          0,
+          {
+            "args": [
+              {
+                "args": [
+                  344,
+                  {
+                    "args": [
+                      -1,
+                      "QIGN"
+                    ],
+                    "op": "*"
+                  }
+                ],
+                "op": "+"
+              },
+              10
+            ],
+            "op": "/"
+          }
+        ],
+        "op": "max"
+      },
+      "lhs": "CHI"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  "PNORM3",
+                  {
+                    "args": [
+                      "CHI",
+                      3.6
+                    ],
+                    "op": "^"
+                  }
+                ],
+                "op": "*"
+              },
+              "PNORM1"
+            ],
+            "op": "<="
+          },
+          0,
+          {
+            "args": [
+              0,
+              {
+                "args": [
+                  100,
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          100,
+                          {
+                            "args": [
+                              {
+                                "args": [
+                                  -1,
+                                  "PNORM1"
+                                ],
+                                "op": "*"
+                              },
+                              {
+                                "args": [
+                                  "PNORM3",
+                                  {
+                                    "args": [
+                                      "CHI",
+                                      3.6
+                                    ],
+                                    "op": "^"
+                                  }
+                                ],
+                                "op": "*"
+                              }
+                            ],
+                            "op": "+"
+                          }
+                        ],
+                        "op": "*"
+                      },
+                      "PNORM2"
+                    ],
+                    "op": "/"
+                  }
+                ],
+                "op": "min"
+              }
+            ],
+            "op": "max"
+          }
+        ],
+        "op": "ifelse"
+      },
+      "lhs": "PI"
+    },
+    {
+      "rhs": {
+        "args": [
+          100,
+          {
+            "args": [
+              {
+                "args": [
+                  100,
+                  "SC"
+                ],
+                "op": "*"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      1e-10,
+                      {
+                        "args": [
+                          "SCM",
+                          "V_ref"
+                        ],
+                        "op": "/"
+                      }
+                    ],
+                    "op": "max"
+                  },
+                  "V_ref"
+                ],
+                "op": "*"
+              }
+            ],
+            "op": "/"
+          }
+        ],
+        "op": "min"
+      },
+      "lhs": "SCN"
+    },
+    {
+      "rhs": {
+        "args": [
+          {
+            "args": [
+              0,
+              "SCN"
+            ],
+            "op": "max"
+          }
+        ],
+        "op": "sqrt"
+      },
+      "lhs": "PFI"
+    },
+    {
+      "rhs": {
+        "args": [
+          0.1,
+          "PI",
+          "PFI"
+        ],
+        "op": "*"
+      },
+      "lhs": "IC"
+    }
+  ],
+  "tests": [
+    {
+      "id": "high_temperature_low_moisture",
+      "description": "High temperature (40°C) and low fuel moisture (5%) should produce high IC Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 172.758, CHI = 17.1242, P(I) = 50.9571, SCN = min(100, 100*SC/SCM) = 100 (uncapped 200), IC = 0.1*P(I)*sqrt(SCN) = P(I) = 50.9571.",
+      "parameter_overrides": {
+        "TMPPRM": 313.15,
+        "MC1": 0.05,
+        "SC": 0.01,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IC",
+          "time": 1.0,
+          "expected": 50.95706989270966,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "PI",
+          "time": 1.0,
+          "expected": 50.95706989270966,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    },
+    {
+      "id": "low_temperature_high_moisture",
+      "description": "Low temperature (10°C) and high fuel moisture (20%) should produce low IC Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 285.417, CHI = 5.85828, P(I) = 0.844312, SCN = min(100, 100*SC/SCM) = 20, IC = 0.1*P(I)*sqrt(SCN) = 0.377588.",
+      "parameter_overrides": {
+        "TMPPRM": 283.15,
+        "MC1": 0.2,
+        "SC": 0.001,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IC",
+          "time": 1.0,
+          "expected": 0.37758762097684717,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        }
+      ]
+    },
+    {
+      "id": "moderate_conditions",
+      "description": "Moderate temperature (25°C) and moderate fuel moisture (10%) Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 213.432, CHI = 13.0568, P(I) = 19.0515, SCN = min(100, 100*SC/SCM) = 100, IC = 0.1*P(I)*sqrt(SCN) = 19.0515.",
+      "parameter_overrides": {
+        "TMPPRM": 298.15,
+        "MC1": 0.1,
+        "SC": 0.005,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IC",
+          "time": 1.0,
+          "expected": 19.051549041232047,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "QIGN",
+          "time": 1.0,
+          "expected": 213.43182900863312,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    },
+    {
+      "id": "boundary_ic_range",
+      "description": "Verify IC and PI produce reasonable values across conditions Closed form (PSW-82 with MC1 as a fraction, TMPPRM in K): QIGN = 197.798, CHI = 14.6202, P(I) = 28.7418, SCN = min(100, 100*SC/SCM) = 100 (uncapped 300), IC = 0.1*P(I)*sqrt(SCN) = P(I) = 28.7418.",
+      "parameter_overrides": {
+        "TMPPRM": 303.15,
+        "MC1": 0.08,
+        "SC": 0.015,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      },
+      "assertions": [
+        {
+          "variable": "IC",
+          "time": 1.0,
+          "expected": 28.74175844715137,
+          "tolerance": {
+            "rel": 1e-06
+          }
+        },
+        {
+          "variable": "PI",
+          "time": 1.0,
+          "expected": 28.74175844715137,
+          "tolerance": {
+            "rel": 1e-05
+          }
+        }
+      ]
+    }
+  ],
+  "analyses": [
+    {
+      "id": "typical_summer_conditions",
+      "description": "Typical summer conditions with moderate temperature and fuel moisture",
+      "parameters": {
+        "TMPPRM": 298.15,
+        "MC1": 0.1,
+        "SC": 0.01,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      }
+    },
+    {
+      "id": "high_risk_conditions",
+      "description": "High fire risk with high temperature and low fuel moisture",
+      "parameters": {
+        "TMPPRM": 313.15,
+        "MC1": 0.05,
+        "SC": 0.02,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      }
+    },
+    {
+      "id": "low_risk_conditions",
+      "description": "Low fire risk with low temperature and high fuel moisture",
+      "parameters": {
+        "TMPPRM": 283.15,
+        "MC1": 0.2,
+        "SC": 0.001,
+        "SCM": 0.005
+      },
+      "time_span": {
+        "start": 0.0,
+        "end": 1.0
+      }
+    }
+  ]
+}
+```
+
+</details>
