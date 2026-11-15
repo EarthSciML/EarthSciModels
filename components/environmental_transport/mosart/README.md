@@ -26,7 +26,8 @@ and the boundary/subassembly plan in `stage1/boundaries.md` (§1.5, §2.6).
 | `mosart_subnetwork.esm` | Model `Subnetwork` — Euler step 2: subnetworkRouting + updateState_subnetwork, `erlateral` | `mosart_physics.F90`: Euler 114-132, subnetworkRouting 243-269, updateState_subnetwork 364-381 |
 | `mosart_channel.esm` | Model `Channel` — Euler step 4: Routing_KW + updateState_mainchannel, `flow` | `mosart_physics.F90`: Euler 175-209, Routing_KW 273-348, updateState_mainchannel 385-402 |
 | `mosart_coupling.esm` | Model `RofCap` — med↔rof cap unit conversions only | `rof_import_export.F90`: state_getimport 589-595, state_setexport 636-643, fields 88-117, areacor 209-210, tdepth_max 401 |
-| `mosart_routing.esm` | Top-level assembly: mounts RofCap/Hillslope/Subnetwork/Channel by reference + inline `Control` (mosart_run steps 2-8, subtimestep logic, aggregation), 29 `variable_map` coupling entries, enums, solver block | `mosart_driver.F90`: mosart_run 375-873; `mosart_tspatialunit_type.F90`: set_subtimesteps 624-684 |
+| `mosart_routing_coupling.esm` | Coupling library (esm-spec §10.9-10.10): the single source of the 29 `variable_map` `param_to_var` edges wiring the assembly (Euler-cascade data flow + cap stream conversions), imported by `coupling_import` in `mosart_routing.esm` | `mosart_physics.F90` Euler cascade 74-209; `mosart_driver.F90`: mosart_run 375-873; `rof_import_export.F90`: 389-402, 636-643 |
+| `mosart_routing.esm` | Top-level assembly: mounts RofCap/Hillslope/Subnetwork/Channel by reference + inline `Control` (mosart_run steps 2-8, subtimestep logic, aggregation), the 29 coupling edges via the `mosart_routing_coupling.esm` library (`coupling_import`, bind: RofCap/Control/Hillslope/Subnetwork/Channel), enums, solver block | `mosart_driver.F90`: mosart_run 375-873; `mosart_tspatialunit_type.F90`: set_subtimesteps 624-684 |
 
 The routing steps are written as storage ODEs (`D(wh)/dt`, `D(wt)/dt`, `D(wr)/dt`)
 with the pointwise laws as observed variables via `apply_expression_template` —
@@ -198,7 +199,7 @@ with
     esm test components/environmental_transport/mosart/mosart_*.esm
 
 (tests of mounted models run when their own file is a target; the assembly run
-additionally reports its 4 mounts). `esm validate` passes for all six files.
+additionally reports its 4 mounts). `esm validate` passes for all seven files.
 
 | File | Tests | Assertions | What is pinned |
 |---|---|---|---|
@@ -206,6 +207,7 @@ additionally reports its 4 mounts). `esm validate` passes for all six files.
 | `mosart_subnetwork.esm` | 8 | 30 | GRMR/GRHT/GRPT/GRRR chain pointwise (incl. the TINYVALUE zero guards) + Manning velocity + one-step etin/erlateral trace of `d(wt)/dt` |
 | `mosart_channel.esm` | 4 | 33 | dry-cell GRMR/GRHR/GRPR/GRRR chain and dry routing branches pointwise (2 cells + zero guard) + one-step `d(wr)/dt = erlateral` accumulation trace |
 | `mosart_coupling.esm` | 1 | 16 | med↔rof conversions: `Flrl_rofsur → qsur_m3s`, `volr/volrmch → Flrr_volr/volrmch`, all-zero streams |
+| `mosart_routing_coupling.esm` | — | — | coupling library (esm-spec §10.9): the 29 edges carry no standalone tests; exercised through the `mosart_routing.esm` assembly test |
 | `mosart_routing.esm` | 1 | 16 | one coupling period of the full assembly: mass-conserved `volr`, hillslope fill `wh`, subcycling diagnostics, zero branches |
 
 ### Derived inputs and conversions
