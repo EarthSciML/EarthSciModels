@@ -27,9 +27,10 @@ where these files were developed and reviewed in `stage2/`. Sources:
 
 | File | Contents | Fortran source |
 |---|---|---|
-| `clm_templates.esm` | Expression-template library (36 templates: the subset of the stage-2 library used by these components — the QSat laws, the Monin-Obukhov surface-layer laws of the bare-ground fluxes, the Meier2022 roughness laws, the soil/snow thermal laws and the SoilFluxes laws; see [The template library](#the-template-library)) | `BareGroundFluxesMod.F90`, `FrictionVelocityMod.F90`, `SoilTemperatureMod.F90` (SoilThermProp :604-903), `SoilFluxesMod.F90`, `QSatMod.F90`, `clm_varcon.F90` |
+| `clm_templates.esm` | Expression-template library (35 templates: the subset of the stage-2 library used by these components — the QSat laws, the Monin-Obukhov surface-layer laws of the bare-ground fluxes, the Meier2022 roughness laws, the soil/snow thermal laws and the SoilFluxes laws; see [The template library](#the-template-library)) | `BareGroundFluxesMod.F90`, `FrictionVelocityMod.F90`, `SoilTemperatureMod.F90` (SoilThermProp :604-903), `SoilFluxesMod.F90`, `QSatMod.F90`, `clm_varcon.F90` |
 | `clm_bareground_step.esm` | Model `BareGroundStep` — **one** pass of the stability do-while of BareGroundFluxes, authored once and mounted 3× (esm-spec §4.7): the three profile heights zldis_u/zldis_t/zldis_2m, ustar/temp1/temp12m from the four-branch profile templates (zeta passed in), temp2 = temp1 and temp22m = temp12m (equality branches), tstar/qstar, the Meier2022 z0h, thvstar (virtual_potential_scale), zeta_raw, the stability clamp (clamp_zeta), wc (0.333 exponent, base nondimensionalized; unconditional — see divergences), um (monin_obukhov_initial_wind) and obu; 17 equations | `BareGroundFluxesMod.F90:342-388` |
-| `clm_bareground.esm` | Model `BareGroundFluxes` — the derived inputs (ur, dth, dqh, dthv, z0mg, zldis), the MoninObukIni initialization (um_ini, rib, zeta_ini, obu_ini), the exit state (= step3 outputs), and the flux laws: ram/rah/raw, raih, forc_esat/forc_e/forc_dewpoint, the raiw selection, ram1, cgrnds/cgrndl/cgrnd, taux/tauy (wind_stress_component), eflx_sh_grnd/soil/snow/h2osfc (sensible_heat_flux), qflx_evap_soi/ev_snow/ev_soil/ev_h2osfc (evaporation_flux), t_ref2m/q_ref2m (ref2m_profile)/qsat_ref2m (qsat_qs)/rh_ref2m, kbm1; 45 equations + top-level mounts step1..step3 and 66 `variable_map` couplings (19 update-invariant fields × 3 steps feed every mount; um/obu/z0h thread the state with 9 chained edges; the zldis and wc chains are dropped as dead) + 5 tests | `BareGroundFluxesMod.F90:325-329,331,342-388,396-499` |
+| `clm_bareground.esm` | Model `BareGroundFluxes` — the derived inputs (ur, dth, dqh, dthv, z0mg, zldis), the MoninObukIni initialization (um_ini, rib, zeta_ini, obu_ini), the exit state (= step3 outputs), and the flux laws: ram/rah/raw, raih, forc_esat/forc_e/forc_dewpoint, the raiw selection, ram1, cgrnds/cgrndl/cgrnd, taux/tauy (wind_stress_component), eflx_sh_grnd/soil/snow/h2osfc and qflx_evap_soi/ev_snow/ev_soil/ev_h2osfc (one law: `aerodynamic_surface_flux`), t_ref2m/q_ref2m (ref2m_profile)/qsat_ref2m (qsat_qs)/rh_ref2m, kbm1; 45 equations + top-level mounts step1..step3 wired by the 66 `variable_map` couplings of `clm_bareground_steps_coupling.esm` (imported by `coupling_import` with bind; 19 update-invariant fields × 3 steps feed every mount; um/obu/z0h thread the state with 9 chained edges; the zldis and wc chains are dropped as dead) + 5 tests | `BareGroundFluxesMod.F90:325-329,331,342-388,396-499` |
+| `clm_bareground_steps_coupling.esm` | Coupling library (esm-spec §10.9): the single source of the 66 `variable_map` `param_to_var` edges wiring `BareGroundFluxes` to its three `BareGroundStep` mounts (step1..step3) — the 19 iteration-invariant pointwise fields feed every step and the iteration state chains step1 → step2 → step3 (um, obu, z0h). Imported by `coupling_import` in `clm_bareground.esm` (and by the EqESM stage-2 `clm_biogeophys.esm` component) | `BareGroundFluxesMod.F90:342-388` |
 | `clm_soiltemp_discretization.esm` | ESD-format rewrite rule `varcoeff_face_laplacian_lev_flux_bc_capr` (priority 11): the conservative variable-coefficient vertical diffusion `D(K·D(u, lev), lev)` of `varcoeff_face_laplacian_lev_flux_bc` with the CLM top-row measure `M = 0.5·(ze[NLEV+1] − zc[NLEV] + capr·(ze[NLEV+1] − zc[NLEV−1]))` in place of `dz[NLEV]`; imports the two ESD stencils by reference | `SoilTemperatureMod.F90`: ComputeHeatDiffFluxAndFactor :1895, SetMatrix_Snow :2617-2710 |
 | `clm_soiltemp.esm` | Model `SoilTemperature` — the heat-conduction PDE `cv·∂T/∂t = dz·D(K·D(T,lev),lev) + sabg` with the state T, the SoilThermProp property laws (consuming `t_entry`, as in CLM), the harmonic-mean interface conductivities on the face axis, the linearized surface flux `kdudz_top = hs + dhsdT·(T[NLEV] − t_entry[NLEV])`, the bottom flux `kdudz_bot = eflx_bot`, the observeds `fn_esd`, `dTdt`, `cn_balance`; 3 tests × 202 pinned/derived assertions | `SoilTemperatureMod.F90`: SoilThermProp :604-903, ComputeGroundHeatFluxAndDeriv :1545-1798, the implicit solve :1825-2859 |
 | `clm_soilfluxes.esm` | Model `SoilFluxes` — the full SoilFluxes update, 32 equations (the top-layer water h2osoi_liq+h2osoi_ice is named once as the `h2osoi_top` intermediate, shared by the evaporation limit and the partition); the shared laws imported by reference from `clm_templates.esm`; 4 tests | `SoilFluxesMod.F90`:38-518 |
@@ -63,8 +64,8 @@ couplings in the single-top-level-model build path.
   and sharing the stable branches as `stable_profile_integral`), the Meier2022
   roughness laws (`z0hg_meier2022`, `z0mg_meier2022_snowmelt`), the Magnus
   dewpoint law, `virtual_potential_scale` (shared by dthv and thvstar) and
-  the BareGroundFluxes flux laws (`sensible_heat_flux`, `evaporation_flux`,
-  `wind_stress_component`, `ref2m_profile`).
+  the BareGroundFluxes flux laws (`aerodynamic_surface_flux` — the merged
+  sensible-heat/evaporation law, `wind_stress_component`, `ref2m_profile`).
 - **Soil/snow thermal laws** (soil temperature): `snow_bulk_density`,
   `snow_thermal_cond_sturm1997` (with the float32-rounded coefficients of
   EqESM bugs.md #33), `snow_heat_capacity` (with the thin-layer floor),
@@ -105,10 +106,12 @@ The esm has no loop construct, so the stability do-while of
 17-equation update law is authored **once** in the one-step model
 `BareGroundStep` (`clm_bareground_step.esm`) and mounted three times by
 reference as top-level models `step1..step3`, with the chained inputs
-coupled by `variable_map` (um_ini/obu_ini/z0mg seed step1; each step's state
-feeds the next). The parent keeps the external names of the Fortran locals:
-ustar/temp1/temp2/temp12m/temp22m/z0h/um = the step3 outputs (the exit state
-of the 3-iteration loop).
+coupled by the 66 `variable_map` edges of the
+`clm_bareground_steps_coupling.esm` coupling library (imported by
+`coupling_import` with bind: um_ini/obu_ini/z0mg seed step1; each step's
+state feeds the next). The parent keeps the external names of the Fortran
+locals: ustar/temp1/temp2/temp12m/temp22m/z0h/um = the step3 outputs (the
+exit state of the 3-iteration loop).
 
 ### Soil temperature
 
