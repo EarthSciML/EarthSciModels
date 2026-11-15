@@ -2,7 +2,7 @@
  "esm": "1.3.0",
  "metadata": {
   "name": "cmeps_aoflux",
-  "description": "CMEPS atmosphere-ocean bulk flux component (stage 2 of the EqESM project): the pointwise laws of flux_atmOcn_large in cesm/flux_atmocn/flux_atmocn_Large.F90 (the Large & Pond / Large & Yeager scheme of the CESM mediator, cesm3.0-alphabranch checkout) transcribed exactly, with the expression templates of ./cmeps_templates.esm imported by reference. The traced configuration (the C_JRA_t62 DATM+MOM6 case, nuopc.runconfig of the instrumented run): add_gusts = .false., coldair_outbreak_mod = .false., aofluxes_use_shr_wv_sat = .true. (the shr_wv_sat Goff & Gratch / qsat path), minwind = 0.5 m/s (seq_flux_atmocn_minwind), flux_convergence = 0.01 and flux_max_iteration = 5 (the do-while of F90:242-290). Structure, in the order of the Fortran: (a) the 12 raw inputs zbot/ubot/vbot/thbot/qbot/rainc/rbot/tbot/pslv/us/vs/ts (the flux_atmOcn_large argument list, F90:50-67); (b) the derived inputs of F90:193-229: du = ubot - us and dv = vbot - vs (the relative-wind components), vmag (the minwind-clamped relative wind), wind0 = vmag (the resolved wind of F90:204; with add_gusts = .false. the Fortran computes wind0 = max(minwind, sqrt(du^2 + dv^2)) identically to vmag, so the alias is exact), esat_raw (Goff & Gratch at ts), esat = min(esat_raw, pslv), qsat from the RAW es (shr_wv_sat_qsat_liquid calls svp_to_qsat with the unminned es, shr_wv_sat_mod.F90:439-441), ssq = 0.98*qsat, delt, delq, alz = ln(zbot/10), al2 = ln(zref/ztref), cp = cpdair*(1 + cpvir*ssq), with the CESM constants cpdair = 1004.64 J/kg/K and cpvir = 1810/1004.64 - 1 declared once as named parameters of this component (shr_const_mod.F90:46, 48); (c) the neutral coefficients of F90:236-244 (stable0 = 0.5 + sign(0.5, delt) as a 0/1 selection, rdn0 = sqrt(cdn(vmag)), rhn0 = (1-stable0)*0.0327 + stable0*0.018, ren0 = 0.0346, ustar0/tstar0/qstar0); (d) the stability iteration of F90:242-290. The esm has no loop construct, so the iteration is represented compositionally: the 16-equation update law is authored ONCE in the one-step model AoFluxStep of ./cmeps_aoflux_step.esm (a single pass of the do-while: hol_raw (the unclamped Monin-Obukhov parameter of F90:252-253), hol = stability_parameter_clamp(hol_raw) (the |hol| <= 10 sign-preserving clamp of F90:254), the stability selection, xsq/xqq, the psi functions, the clamped wind-shift rdw of F90:272, u10n = vmag*rdw/rdn_prev, the updated neutral coefficients rdn = sqrt(cdn(u10n)) and rhn, the height-shifted rd/rh/re of F90:282-284, ustar/tstar/qstar, the per-update convergence flag conv = |(ustar - ustar_prev)/ustar| <= 0.01, and 4 frozen-state fields (ustar/tstar/qstar/rdn) pinning the first-converged state) and mounted six times by reference as top-level models step1..step5 and exit (esm-spec section 4.7; top-level mounts are required because the pinned CLI silently drops couplings in the single-top-level-model build path, see README.md), with the chained inputs coupled by variable_map: ustar0/tstar0/qstar0/rdn0 seed step1, each step's state feeds the next (ustar/tstar/qstar/rdn), conv and the 4 frozen fields thread the convergence state, and the fixed pointwise fields vmag/delt/delq/alz/zbot/thbot/qbot feed every step (ren stays the constant 0.0346 of F90:277, not coupled; the CESM constants karman = 0.4, cpdair, cpvir, latvap = 2.501e6 J/kg and stebol = 5.67e-8 W/m^2/K^4 are declared once as named parameters of this component, shr_const_mod.F90:32, 46, 48, 52, 22). The 6th mount exit recomputes the exit-state fields from step5's frozen state: the exit-state fields of the first-converged update k are deterministic functions of the pre-converged state (the update k-1 outputs ustar/tstar/qstar/rdn) plus the fixed fields (Fortran do-while trace), so only these 4 states need to be threaded — exit is fed by step5.frozen_ustar_prev/frozen_tstar_prev/frozen_qstar_prev/frozen_rdn_prev (conv_prev stays at its 0 default, so the frozen selection inside exit is the identity) and the 7 fixed fields, and the parent aliases the 15 exit-state fields from its fresh unknowns (hol, stable, xsq, xqq, psimh, psixh, rd, u10n, rdn, rhn, rh, re, ustar, tstar, qstar), which coincide bit-identically with the Fortran exit state. The parent keeps the same external names as the pre-refactor unrolled model so the pinned tests are unchanged: conv_1..4 = step1..4.conv, iter = the first converged k, else 5 (nested ifelse on conv_1..4), and the 16 exit-state fields = the 15 exit.* fields (the first-converged update's values, recomputed by the exit mount from the pinned 4-state; in the no-convergence case the fresh 5th-update values) plus ren; (e) the fluxes of F90:299-311 (tau/taux/tauy/sen/lat/lwup/evap); (f) the 2-m diagnostics of F90:316-333 (hol2/xsq2/xqq2/psix2/fac_t/fac_q/tref/qref/duu10n/u10res), which consume the exit state exactly as the Fortran leaves it after the do-while.",
+  "description": "CMEPS atmosphere-ocean bulk flux component (stage 2 of the EqESM project): the pointwise laws of flux_atmOcn_large in cesm/flux_atmocn/flux_atmocn_Large.F90 (the Large & Pond / Large & Yeager scheme of the CESM mediator, cesm3.0-alphabranch checkout) transcribed exactly, with the expression templates of ./cmeps_templates.esm imported by reference. The traced configuration (the C_JRA_t62 DATM+MOM6 case, nuopc.runconfig of the instrumented run): add_gusts = .false., coldair_outbreak_mod = .false., aofluxes_use_shr_wv_sat = .true. (the shr_wv_sat Goff & Gratch / qsat path), minwind = 0.5 m/s (seq_flux_atmocn_minwind), flux_convergence = 0.01 and flux_max_iteration = 5 (the do-while of F90:242-290). Structure, in the order of the Fortran: (a) the 12 raw inputs zbot/ubot/vbot/thbot/qbot/rainc/rbot/tbot/pslv/us/vs/ts (the flux_atmOcn_large argument list, F90:50-67); (b) the derived inputs of F90:193-229: du = ubot - us and dv = vbot - vs (the relative-wind components), vmag (the minwind-clamped relative wind), wind0 = vmag (the resolved wind of F90:204; with add_gusts = .false. the Fortran computes wind0 = max(minwind, sqrt(du^2 + dv^2)) identically to vmag, so the alias is exact), esat_raw (Goff & Gratch at ts), esat = min(esat_raw, pslv), qsat from the RAW es (shr_wv_sat_qsat_liquid calls svp_to_qsat with the unminned es, shr_wv_sat_mod.F90:439-441), ssq = 0.98*qsat, delt, delq, alz = ln(zbot/10), al2 = ln(zref/ztref), cp = cpdair*(1 + cpvir*ssq), with the CESM constants cpdair = 1004.64 J/kg/K and cpvir = 1810/1004.64 - 1 declared once as named parameters of this component (shr_const_mod.F90:46, 48); (c) the neutral coefficients of F90:236-244 (stable0 = 0.5 + sign(0.5, delt) as a 0/1 selection, rdn0 = sqrt(cdn(vmag)), rhn0 = (1-stable0)*0.0327 + stable0*0.018, ren0 = 0.0346, ustar0/tstar0/qstar0); (d) the stability iteration of F90:242-290. The esm has no loop construct, so the iteration is represented compositionally: the 16-equation update law is authored ONCE in the one-step model AoFluxStep of ./cmeps_aoflux_step.esm (a single pass of the do-while: hol_raw (the unclamped Monin-Obukhov parameter of F90:252-253), hol = stability_parameter_clamp(hol_raw) (the |hol| <= 10 sign-preserving clamp of F90:254), the stability selection, xsq/xqq, the psi functions, the clamped wind-shift rdw of F90:272, u10n = vmag*rdw/rdn_prev, the updated neutral coefficients rdn = sqrt(cdn(u10n)) and rhn, the height-shifted rd/rh/re of F90:282-284, ustar/tstar/qstar, the per-update convergence flag conv = |(ustar - ustar_prev)/ustar| <= 0.01, and 4 frozen-state fields (ustar/tstar/qstar/rdn) pinning the first-converged state) and mounted six times by reference as top-level models step1..step5 and exit (esm-spec section 4.7; top-level mounts are required because the pinned CLI silently drops couplings in the single-top-level-model build path, see README.md), with the chained inputs coupled by variable_map (imported from the ./cmeps_aoflux_steps_coupling.esm coupling library, esm-spec sections 10.9-10.10, so the same 86 edges are reused by reference by the m9_ocn_flux.esm subassembly): ustar0/tstar0/qstar0/rdn0 seed step1, each step's state feeds the next (ustar/tstar/qstar/rdn), conv and the 4 frozen fields thread the convergence state, and the fixed pointwise fields vmag/delt/delq/alz/zbot/thbot/qbot feed every step (ren stays the constant 0.0346 of F90:277, not coupled; the CESM constants karman = 0.4, cpdair, cpvir, latvap = 2.501e6 J/kg and stebol = 5.67e-8 W/m^2/K^4 are declared once as named parameters of this component, shr_const_mod.F90:32, 46, 48, 52, 22). The 6th mount exit recomputes the exit-state fields from step5's frozen state: the exit-state fields of the first-converged update k are deterministic functions of the pre-converged state (the update k-1 outputs ustar/tstar/qstar/rdn) plus the fixed fields (Fortran do-while trace), so only these 4 states need to be threaded — exit is fed by step5.frozen_ustar_prev/frozen_tstar_prev/frozen_qstar_prev/frozen_rdn_prev (conv_prev stays at its 0 default, so the frozen selection inside exit is the identity) and the 7 fixed fields, and the parent aliases the 15 exit-state fields from its fresh unknowns (hol, stable, xsq, xqq, psimh, psixh, rd, u10n, rdn, rhn, rh, re, ustar, tstar, qstar), which coincide bit-identically with the Fortran exit state. The parent keeps the same external names as the pre-refactor unrolled model so the pinned tests are unchanged: conv_1..4 = step1..4.conv, iter = the first converged k, else 5 (nested ifelse on conv_1..4), and the 16 exit-state fields = the 15 exit.* fields (the first-converged update's values, recomputed by the exit mount from the pinned 4-state; in the no-convergence case the fresh 5th-update values) plus ren; (e) the fluxes of F90:299-311 (tau/taux/tauy/sen/lat/lwup/evap); (f) the 2-m diagnostics of F90:316-333 (hol2/xsq2/xqq2/psix2/fac_t/fac_q/tref/qref/duu10n/u10res), which consume the exit state exactly as the Fortran leaves it after the do-while.",
   "tags": [
    "coupler",
    "cmeps",
@@ -29,7 +29,9 @@
  "models": {
   "AoFlux": {
    "expression_template_imports": [
-    { "ref": "./cmeps_templates.esm" }
+    {
+     "ref": "./cmeps_templates.esm"
+    }
    ],
    "variables": {
     "zbot": {
@@ -527,7 +529,10 @@
      "lhs": "esat",
      "rhs": {
       "op": "min",
-      "args": ["esat_raw", "pslv"]
+      "args": [
+       "esat_raw",
+       "pslv"
+      ]
      }
     },
     {
@@ -561,14 +566,20 @@
      "lhs": "delt",
      "rhs": {
       "op": "-",
-      "args": ["thbot", "ts"]
+      "args": [
+       "thbot",
+       "ts"
+      ]
      }
     },
     {
      "lhs": "delq",
      "rhs": {
       "op": "-",
-      "args": ["qbot", "ssq"]
+      "args": [
+       "qbot",
+       "ssq"
+      ]
      }
     },
     {
@@ -608,7 +619,10 @@
          },
          {
           "op": "*",
-          "args": ["cpvir", "ssq"]
+          "args": [
+           "cpvir",
+           "ssq"
+          ]
          }
         ]
        }
@@ -687,21 +701,30 @@
      "lhs": "ustar0",
      "rhs": {
       "op": "*",
-      "args": ["rdn0", "vmag"]
+      "args": [
+       "rdn0",
+       "vmag"
+      ]
      }
     },
     {
      "lhs": "tstar0",
      "rhs": {
       "op": "*",
-      "args": ["rhn0", "delt"]
+      "args": [
+       "rhn0",
+       "delt"
+      ]
      }
     },
     {
      "lhs": "qstar0",
      "rhs": {
       "op": "*",
-      "args": ["ren0", "delq"]
+      "args": [
+       "ren0",
+       "delq"
+      ]
      }
     },
     {
@@ -952,7 +975,10 @@
        "tau",
        {
         "op": "/",
-        "args": ["tstar", "ustar"]
+        "args": [
+         "tstar",
+         "ustar"
+        ]
        }
       ]
      }
@@ -966,7 +992,10 @@
        "tau",
        {
         "op": "/",
-        "args": ["qstar", "ustar"]
+        "args": [
+         "qstar",
+         "ustar"
+        ]
        }
       ]
      }
@@ -978,7 +1007,9 @@
       "args": [
        {
         "op": "-",
-        "args": ["stebol"]
+        "args": [
+         "stebol"
+        ]
        },
        {
         "op": "^",
@@ -999,7 +1030,10 @@
      "lhs": "evap",
      "rhs": {
       "op": "/",
-      "args": ["lat", "latvap"]
+      "args": [
+       "lat",
+       "latvap"
+      ]
      }
     },
     {
@@ -1074,7 +1108,9 @@
      "lhs": "xqq2",
      "rhs": {
       "op": "sqrt",
-      "args": ["xsq2"]
+      "args": [
+       "xsq2"
+      ]
      }
     },
     {
@@ -1155,7 +1191,10 @@
          "thbot",
          {
           "op": "*",
-          "args": ["delt", "fac_t"]
+          "args": [
+           "delt",
+           "fac_t"
+          ]
          }
         ]
        },
@@ -1216,7 +1255,10 @@
        "qbot",
        {
         "op": "*",
-        "args": ["delq", "fac_q"]
+        "args": [
+         "delq",
+         "fac_q"
+        ]
        }
       ]
      }
@@ -1244,7 +1286,10 @@
        "u10n",
        {
         "op": "/",
-        "args": ["wind0", "vmag"]
+        "args": [
+         "wind0",
+         "vmag"
+        ]
        }
       ]
      }
@@ -2979,7 +3024,6 @@
       }
      ]
     },
-
     {
      "id": "wide_maxwind_cell",
      "description": "Instantaneous pin of the full flux_atmOcn_large chain (flux_atmocn_Large.F90, Large & Yeager scheme as configured in the C_JRA_t62_inst run: add_gusts = .false., aofluxes_use_shr_wv_sat = .true., minwind = 0.5 m/s, flux_convergence = 0.01, flux_max_iteration = 5) from stage1/dumps/cmeps/cmeps_aoflux_wide.csv row (step 4, gid 42667, PET-0 local ogrid index n = 7117, lat  -6.90324828501366454E+001, lon  -2.82666666666666742E+002): the strongest-wind row of the wide dump (step 4, gid 42667, n 7117, ~69.0 S): the wind-ranked selection's domain maximum vmag 4.81 m/s, the strongest wind this run's PET-0 slice offers (the cdn 33 m/s cap of F90:153-154 is not reached anywhere in the run), converged at iteration 2 with hol -1.16. time_span {0,0} evaluates the pointwise laws at the dumped inputs; every dumped column is asserted at full dump precision, and the convergence flags conv_k = |(u_k - u_{k-1})/u_k| <= 0.01 (k = 1..4) and the iteration count iter = first converged k, else 5, are asserted from the replay (which reproduces the dump rows to <= 4.4e-15 relative; see stage1/analysis/validate_cmeps_dump.py).",
@@ -3844,531 +3888,41 @@
       }
      ]
     }
-    ]
+   ]
   },
-  "step1": { "ref": "./cmeps_aoflux_step.esm" },
-  "step2": { "ref": "./cmeps_aoflux_step.esm" },
-  "step3": { "ref": "./cmeps_aoflux_step.esm" },
-  "step4": { "ref": "./cmeps_aoflux_step.esm" },
-  "step5": { "ref": "./cmeps_aoflux_step.esm" },
-  "exit": { "ref": "./cmeps_aoflux_step.esm" }
+  "step1": {
+   "ref": "./cmeps_aoflux_step.esm"
+  },
+  "step2": {
+   "ref": "./cmeps_aoflux_step.esm"
+  },
+  "step3": {
+   "ref": "./cmeps_aoflux_step.esm"
+  },
+  "step4": {
+   "ref": "./cmeps_aoflux_step.esm"
+  },
+  "step5": {
+   "ref": "./cmeps_aoflux_step.esm"
+  },
+  "exit": {
+   "ref": "./cmeps_aoflux_step.esm"
+  }
  },
  "coupling": [
   {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "step1.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "step1.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "step1.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "step1.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "step1.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "step1.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "step1.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "step2.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "step2.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "step2.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "step2.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "step2.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "step2.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "step2.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "step3.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "step3.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "step3.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "step3.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "step3.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "step3.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "step3.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "step4.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "step4.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "step4.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "step4.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "step4.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "step4.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "step4.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "step5.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "step5.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "step5.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "step5.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "step5.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "step5.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "step5.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.ustar0",
-   "to": "step1.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.tstar0",
-   "to": "step1.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qstar0",
-   "to": "step1.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.rdn0",
-   "to": "step1.rdn_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.ustar",
-   "to": "step2.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.tstar",
-   "to": "step2.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.qstar",
-   "to": "step2.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.rdn",
-   "to": "step2.rdn_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.conv",
-   "to": "step2.conv_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.ustar",
-   "to": "step3.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.tstar",
-   "to": "step3.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.qstar",
-   "to": "step3.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.rdn",
-   "to": "step3.rdn_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.conv",
-   "to": "step3.conv_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.ustar",
-   "to": "step4.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.tstar",
-   "to": "step4.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.qstar",
-   "to": "step4.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.rdn",
-   "to": "step4.rdn_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.conv",
-   "to": "step4.conv_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.ustar",
-   "to": "step5.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.tstar",
-   "to": "step5.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.qstar",
-   "to": "step5.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.rdn",
-   "to": "step5.rdn_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.conv",
-   "to": "step5.conv_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.frozen_ustar_prev",
-   "to": "step2.frozen_ustar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.frozen_tstar_prev",
-   "to": "step2.frozen_tstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.frozen_qstar_prev",
-   "to": "step2.frozen_qstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step1.frozen_rdn_prev",
-   "to": "step2.frozen_rdn_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.frozen_ustar_prev",
-   "to": "step3.frozen_ustar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.frozen_tstar_prev",
-   "to": "step3.frozen_tstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.frozen_qstar_prev",
-   "to": "step3.frozen_qstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step2.frozen_rdn_prev",
-   "to": "step3.frozen_rdn_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.frozen_ustar_prev",
-   "to": "step4.frozen_ustar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.frozen_tstar_prev",
-   "to": "step4.frozen_tstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.frozen_qstar_prev",
-   "to": "step4.frozen_qstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step3.frozen_rdn_prev",
-   "to": "step4.frozen_rdn_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.frozen_ustar_prev",
-   "to": "step5.frozen_ustar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.frozen_tstar_prev",
-   "to": "step5.frozen_tstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.frozen_qstar_prev",
-   "to": "step5.frozen_qstar_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step4.frozen_rdn_prev",
-   "to": "step5.frozen_rdn_prev_in",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.vmag",
-   "to": "exit.vmag",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delt",
-   "to": "exit.delt",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.delq",
-   "to": "exit.delq",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.alz",
-   "to": "exit.alz",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.zbot",
-   "to": "exit.zbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.thbot",
-   "to": "exit.thbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "AoFlux.qbot",
-   "to": "exit.qbot",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step5.frozen_ustar_prev",
-   "to": "exit.ustar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step5.frozen_tstar_prev",
-   "to": "exit.tstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step5.frozen_qstar_prev",
-   "to": "exit.qstar_prev",
-   "transform": "param_to_var"
-  },
-  {
-   "type": "variable_map",
-   "from": "step5.frozen_rdn_prev",
-   "to": "exit.rdn_prev",
-   "transform": "param_to_var"
+   "type": "coupling_import",
+   "ref": "./cmeps_aoflux_steps_coupling.esm",
+   "bind": {
+    "AoFlux": "AoFlux",
+    "step1": "step1",
+    "step2": "step2",
+    "step3": "step3",
+    "step4": "step4",
+    "step5": "step5",
+    "exit": "exit"
+   },
+   "description": "the 86 variable_map param_to_var edges wiring AoFlux to its five AoFluxStep mounts (step1..step5) and the exit-state mount (the chained inputs of flux_atmOcn_large F90:242-290: the 7 fixed pointwise fields and the neutral seeds into every step, each step's ustar/tstar/qstar/rdn/conv into the next, the frozen first-converged state into the exit mount), imported from the ./cmeps_aoflux_steps_coupling.esm coupling library (esm-spec sections 10.9-10.10) so the iteration wiring is authored once and shared with the m9_ocn_flux.esm subassembly"
   }
  ]
 }
