@@ -2,7 +2,7 @@
  "esm": "1.3.0",
  "metadata": {
   "name": "cism_thermo",
-  "description": "Stage-2 implementation of the CISM prognostic ice temperature step (stage 2 of the EqESM project; CISM = cismwrap_3_00_002 / cism_main_3.00.002 as built in CESM cesm3.0-alphabranch, reference run T1850Gg/f09_g17_gris20, whichtemp = TEMP_PROGNOSTIC): the vertical heat equation rhoi*shci*dT/dt = d/dz(coni*dT/dz) + rhoi*shci*Phi on CISM's sigma grid, lowered by the local EarthSciDiscretizations-format rule cism_sigma_diffusion (./cism_thermo_discretization.esm, the exact dups stencil of glissade_temperature_matrix_elements, glissade_therm.F90:1324-1507). State: temp on the UPN-1 INTERIOR temperature nodes (index set lev = the CISM layer midpoints, the dump's temp_001..010 columns) with d(temp)/dt = dTdt. The surface and bed nodes are ALGEBRAIC in CISM, not diffusion rows: the matrix rows 1 and upn+1 are the surface Dirichlet pin temp(0) = min(0, artm) (F90:843, 1405-1408) and the basal flux-balance / pressure-melting-point row (frozen: temp(upn) - temp(upn-1) = (bfricflx + bhydroflx - bheatflx)*dsigbot*thck/coni, F90:1473-1476; thawed: temp(upn) = bpmp, F90:1497-1504). They are carried as the algebraic unknowns temp_sfc and temp_bed, and enter the interior stencil as the boundary values through the rule's free-name contract - so the boundary laws FEED BACK into the interior operator (the stencil at the nodes adjacent to the boundaries reads temp_sfc/temp_bed, not state rows). The pointwise laws of the step: temp_sfc = min(0, artm) (F90:843); the pressure melting point bpmp/pmptemp = -rhoi*grav*pmlt*depth (the standard Clapeyron law, imported by reference from EqIce as pressure_melting_temperature applied to overburden_pressure with the CISM constants T_melting = 0 degC and beta_Clausius_Clapeyron = pmlt bound at the call sites, F90:2163-2174, 2178-2192); the basal temperature and melt of the frozen/thawed bed rows and of glissade_basal_melting_ground (cism_basal_melt_rate / cism_basal_freeze_on / cism_basal_melt_cap, F90:1930-2012), with the flux balance bflx_mlt and the source flux bflx_src named once and shared between the melt rate and the frozen-row law; and the internal melt cap of glissade_basal_melting_internal (melt_internal = the whole-column integral of the layer melt-energy density rhoi*shci*max(0, temp - pmptemp) over the CISM layer thickness measure, divided by rhoi*lhci*dttem, F90:2127-2155; the paired temperature reset temp -> pmptemp is a post-solve state mutation, documented in README.md, not transcribed). The thin-ice bypass (ice_mask = 0 where thck <= thklim_temp = 1 m; the dump's ice_mask column): the column skips the solve and is set to min(0, artm) on all nodes, and the basal outputs are not computed (F90:1205) - the pmp and the basal laws are gated by ice_mask == 1. The operator is pinned INSTANTANEOUSLY at the exit state: since the CISM step is one backward-Euler solve of the tridiagonal system, the exact identity (T_exit - T_entry)/dttem = L*T_exit + Phi holds for the interior rows (the dump round-trips at 1e-13..6e-9 relative; the harness integrators cannot reproduce one exact backward-Euler step of this stiff relaxation, so the entry->exit map itself is documented in README.md, not integrated), and dTdt at the exit state is asserted against (T_exit - T_entry)/dttem with the ICs set to the exit profile and the dumped dissip.",
+  "description": "Stage-2 implementation of the CISM prognostic ice temperature step (stage 2 of the EqESM project; CISM = cismwrap_3_00_002 / cism_main_3.00.002 as built in CESM cesm3.0-alphabranch, reference run T1850Gg/f09_g17_gris20, whichtemp = TEMP_PROGNOSTIC): the vertical heat equation rhoi*shci*dT/dt = d/dz(coni*dT/dz) + rhoi*shci*Phi on CISM's sigma grid, lowered by the EarthSciDiscretizations rule varcoeff_face_laplacian_lev_value_bc (${ESD_ROOT}/grids/column_nonuniform_1d/rules/, the exact dups stencil of glissade_temperature_matrix_elements, glissade_therm.F90:1324-1507, contributed to ESD from this file; the CISM sigma column maps onto the ESD column grid positionally - the CISM layer faces are the grid interfaces ze in metres, zc[l] = thck*sigma_node[l+1] and dz[l] = thck*dsigma_cv[l+1], z_sfc = 0 at the ice surface and z_top = thck at the bed, and the boundary values u_sfc/u_top are the surface/bed algebraic nodes, so no array reversal is needed; the scalar coni enters as the interface broadcast coni_face). State: temp on the UPN-1 INTERIOR temperature nodes (index set lev = the CISM layer midpoints, the dump's temp_001..010 columns) with d(temp)/dt = dTdt. The surface and bed nodes are ALGEBRAIC in CISM, not diffusion rows: the matrix rows 1 and upn+1 are the surface Dirichlet pin temp(0) = min(0, artm) (F90:843, 1405-1408) and the basal flux-balance / pressure-melting-point row (frozen: temp(upn) - temp(upn-1) = (bfricflx + bhydroflx - bheatflx)*dsigbot*thck/coni, F90:1473-1476; thawed: temp(upn) = bpmp, F90:1497-1504). They are carried as the algebraic unknowns u_sfc and u_top, and enter the interior stencil as the boundary values through the rule's free-name contract - so the boundary laws FEED BACK into the interior operator (the stencil at the nodes adjacent to the boundaries reads u_sfc/u_top, not state rows). The pointwise laws of the step: u_sfc = min(0, artm) (F90:843); the pressure melting point bpmp/pmptemp = -rhoi*grav*pmlt*depth (the standard Clapeyron law, imported by reference from EqIce as pressure_melting_temperature applied to overburden_pressure with the CISM constants T_melting = 0 degC and beta_Clausius_Clapeyron = pmlt bound at the call sites, F90:2163-2174, 2178-2192); the basal temperature and melt of the frozen/thawed bed rows and of glissade_basal_melting_ground (cism_basal_melt_rate / cism_basal_freeze_on / cism_basal_melt_cap, F90:1930-2012), with the flux balance bflx_mlt and the source flux bflx_src named once and shared between the melt rate and the frozen-row law; and the internal melt cap of glissade_basal_melting_internal (melt_internal = the whole-column integral of the layer melt-energy density rhoi*shci*max(0, temp - pmptemp) over the CISM layer thickness measure, divided by rhoi*lhci*dttem, F90:2127-2155; the paired temperature reset temp -> pmptemp is a post-solve state mutation, documented in README.md, not transcribed). The thin-ice bypass (ice_mask = 0 where thck <= thklim_temp = 1 m; the dump's ice_mask column): the column skips the solve and is set to min(0, artm) on all nodes, and the basal outputs are not computed (F90:1205) - the pmp and the basal laws are gated by ice_mask == 1. The operator is pinned INSTANTANEOUSLY at the exit state: since the CISM step is one backward-Euler solve of the tridiagonal system, the exact identity (T_exit - T_entry)/dttem = L*T_exit + Phi holds for the interior rows (the dump round-trips at 1e-13..6e-9 relative; the harness integrators cannot reproduce one exact backward-Euler step of this stiff relaxation, so the entry->exit map itself is documented in README.md, not integrated), and dTdt at the exit state is asserted against (T_exit - T_entry)/dttem with the ICs set to the exit profile and the dumped dissip.",
   "license": "MIT",
   "tags": [
    "cryosphere",
@@ -30,6 +30,35 @@
    "EqESM project contributors"
   ]
  },
+ "metaparameters": {
+  "UPN": {
+   "type": "integer",
+   "default": 11,
+   "description": "Number of CISM sigma levels (layer interfaces); the temperature nodes number UPN+1 (k = 0 surface .. k = UPN bed: the layer midpoints plus the two boundary faces) and the interior temperature nodes number UPN-1. Declared at the file top level (previously carried by the local cism_thermo_discretization.esm) because the esm CLI rejects faq-range metaparameter references when a template library is imported with bindings (RangeSpec round-trip parse bug, see PROGRESS.md); the ESD rule import binds NLEV = UPN-1."
+  }
+ },
+ "index_sets": {
+  "lev_nodes": {
+   "kind": "interval",
+   "size": {
+    "op": "+",
+    "args": [
+     "UPN",
+     1
+    ]
+   }
+  },
+  "lev": {
+   "kind": "interval",
+   "size": {
+    "op": "-",
+    "args": [
+     "UPN",
+     1
+    ]
+   }
+  }
+ },
  "models": {
   "IceTemperatureColumn": {
    "expression_template_imports": [
@@ -37,7 +66,49 @@
      "ref": "./cism_templates.esm"
     },
     {
-     "ref": "./cism_thermo_discretization.esm"
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/varcoeff_face_laplacian_lev_value_bc.esm",
+     "bindings": {
+      "NLEV": {
+       "op": "-",
+       "args": [
+        "UPN",
+        1
+       ]
+      }
+     },
+     "rename": {
+      "lev_nodes": "lay_nodes"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/stencils/interface_flux_K_lev_value_bc.esm",
+     "bindings": {
+      "NLEV": {
+       "op": "-",
+       "args": [
+        "UPN",
+        1
+       ]
+      }
+     },
+     "rename": {
+      "lev_nodes": "lay_nodes"
+     }
+    },
+    {
+     "ref": "${ESD_ROOT}/grids/column_nonuniform_1d/rules/integral_lev_whole.esm",
+     "bindings": {
+      "NLEV": {
+       "op": "-",
+       "args": [
+        "UPN",
+        1
+       ]
+      }
+     },
+     "rename": {
+      "lev_nodes": "lay_nodes"
+     }
     },
     {
      "ref": "./eqice_basal_templates.esm"
@@ -54,7 +125,7 @@
      ],
      "units": "degC",
      "default": 0.0,
-     "description": "Ice temperature on the INTERIOR sigma nodes (lev = the CISM layer midpoints stagsigma(1..10), the dump's temp_001..010 columns), degC; the ODE state of the heat equation d(temp)/dt = dTdt. The surface and bed nodes are algebraic in CISM (the matrix rows 1 and upn+1, F90:1405-1408 and 1473-1504) and are carried as temp_sfc/temp_bed, entering the interior stencil as boundary values through the cism_sigma_diffusion free-name contract"
+     "description": "Ice temperature on the INTERIOR sigma nodes (lev = the CISM layer midpoints stagsigma(1..10), the dump's temp_001..010 columns), degC; the ODE state of the heat equation d(temp)/dt = dTdt. The surface and bed nodes are algebraic in CISM (the matrix rows 1 and upn+1, F90:1405-1408 and 1473-1504) and are carried as u_sfc/u_top, entering the interior stencil as boundary values through the varcoeff_face_laplacian_lev_value_bc free-name contract (u_sfc at z_sfc, u_top at z_top)"
     },
     "dTdt": {
      "type": "unknown",
@@ -63,7 +134,7 @@
      ],
      "units": "degC/s",
      "default": 0.0,
-     "description": "Interior temperature rate dT/dt = L*temp + dissip, with L the cism_sigma_diffusion operator (the dups stencil of glissade_temperature_matrix_elements, F90:151-163, 1410-1418, with the boundary faces built from the algebraic temp_sfc/temp_bed) and dissip the strain heating on the interior nodes (the dumped dissip_001..010 columns; the Fortran RHS temp + dissip*dttem, F90:1418)"
+     "description": "Interior temperature rate dT/dt = L*temp + dissip, with L the varcoeff_face_laplacian_lev_value_bc operator of the imported ESD rule (the dups stencil of glissade_temperature_matrix_elements, F90:151-163, 1410-1418, with the boundary faces built from the algebraic u_sfc/u_top) and dissip the strain heating on the interior nodes (the dumped dissip_001..010 columns; the Fortran RHS temp + dissip*dttem, F90:1418)"
     },
     "pmptemp": {
      "type": "unknown",
@@ -80,17 +151,17 @@
      "default": 0.0,
      "description": "Basal pressure melting point = -rhoi*grav*pmlt*thck (glissade_pressure_melting_point with depth = thck, F90:2163-2174); the thawed-bed row holds temp(upn) at this value (F90:1497-1504). 0 for ice_mask = 0 cells (the basal outputs are not computed, F90:1205)"
     },
-    "temp_sfc": {
+    "u_sfc": {
      "type": "unknown",
      "units": "degC",
      "default": 0.0,
-     "description": "Surface temperature Dirichlet value min(0, artm) (F90:843); the surface matrix row holds temp(0) there (F90:1405-1408) and the cism_sigma_diffusion stencil reads it at the surface face - the law is pinned on all 128 exit rows of cism_thermo.csv (temp_000 = min(0, artm); the entry rows of steps 1 and 3 carry the previous value - the initial 0 and the previous year's artm - because the re-pin happens inside the solve, after the entry trace)"
+     "description": "Boundary value of temp at the surface face (the imported varcoeff_face_laplacian_lev_value_bc rule's free name u_sfc at ze[1] = z_sfc = 0): the CISM surface Dirichlet value min(0, artm) (F90:843); the surface matrix row holds temp(0) there (F90:1405-1408) and the rule's surface-face flux reads it - the law is pinned on all 128 exit rows of cism_thermo.csv (temp_000 = min(0, artm); the entry rows of steps 1 and 3 carry the previous value - the initial 0 and the previous year's artm - because the re-pin happens inside the solve, after the entry trace)"
     },
-    "temp_bed": {
+    "u_top": {
      "type": "unknown",
      "units": "degC",
      "default": 0.0,
-     "description": "Bed temperature from the basal matrix row (F90:1473-1476 frozen: temp(upn) - temp(upn-1) = (bfricflx + bhydroflx - bheatflx)*dsigbot*thck/coni, the backward-Euler flux boundary condition; F90:1497-1504 thawed: temp(upn) = bpmp), selected by the pre-solve bed state btemp_ground_entry (the entry-diagnosed temp(upn), F90:1095: the bed row is thawed where btemp_ground >= bpmp - pmp_threshold or bwat > 0, F90:1461); the cism_sigma_diffusion stencil reads it at the bed face. For ice_mask = 0 cells the column bypasses the solve and temp(upn) = min(0, artm) (F90:1205)"
+     "description": "Boundary value of temp at the bed face (the imported varcoeff_face_laplacian_lev_value_bc rule's free name u_top at ze[NLEV+1] = z_top = thck): the basal temperature from the basal matrix row (F90:1473-1476 frozen: temp(upn) - temp(upn-1) = (bfricflx + bhydroflx - bheatflx)*dsigbot*thck/coni, the backward-Euler flux boundary condition; F90:1497-1504 thawed: temp(upn) = bpmp), selected by the pre-solve bed state btemp_ground_entry (the entry-diagnosed temp(upn), F90:1095: the bed row is thawed where btemp_ground >= bpmp - pmp_threshold or bwat > 0, F90:1461); the rule's top-face flux reads it at the bed face. For ice_mask = 0 cells the column bypasses the solve and temp(upn) = min(0, artm) (F90:1205)"
     },
     "dsigbot": {
      "type": "unknown",
@@ -108,7 +179,7 @@
      "type": "unknown",
      "units": "W/m^2",
      "default": 0.0,
-     "description": "Conductive heat flux from the ice interior to the bed, positive down: -G[UPN+1], the cism_interface_flux at the bed face (F90:1070 with dTbot = btemp_ground - temp(upn-1) and 1 - stagsigma(upn-1) = dsigbot)"
+     "description": "Conductive heat flux from the ice interior to the bed, positive down: -G[UPN+1], the interface_flux_K_lev_value_bc at the bed face (F90:1070 with dTbot = btemp_ground - temp(upn-1) and 1 - stagsigma(upn-1) = dsigbot)"
     },
     "bflx_mlt": {
      "type": "unknown",
@@ -138,7 +209,7 @@
      "type": "unknown",
      "units": "degC",
      "default": 0.0,
-     "description": "Basal temperature for grounded ice after the pressure-melting-point cap and the freeze-on reset (cism_basal_melt_cap, F90:1979, 2007-2012): min(temp_bed, bpmp), dropped to min(bpmp - 2*pmp_threshold, bpmp - eps08) when freeze-on fires with no basal water. 0 for ice_mask = 0 cells (F90:1205)"
+     "description": "Basal temperature for grounded ice after the pressure-melting-point cap and the freeze-on reset (cism_basal_melt_cap, F90:1979, 2007-2012): min(u_top, bpmp), dropped to min(bpmp - 2*pmp_threshold, bpmp - eps08) when freeze-on fires with no basal water. 0 for ice_mask = 0 cells (F90:1205)"
     },
     "f_melt": {
      "type": "unknown",
@@ -153,7 +224,16 @@
      "type": "unknown",
      "units": "m/s",
      "default": 0.0,
-     "description": "Column internal melt rate of the TEMP_PROGNOSTIC cap (F90:2127-2155): the whole-column integral of the layer melt-energy density f_melt over the CISM layer thickness measure dz = thck*dsigma_cv[l+1], divided by rhoi*lhci*dttem (the composite midpoint sum over the layers of the Fortran's layer_melt_rate = rhoi*shci*max(0, temp-pmptemp)*layer_thck/(rhoi*lhci*dt), F90:2144); the paired temperature reset (temp -> pmptemp, F90:2148) is a post-solve state mutation, documented in README.md, not transcribed (0 in the reference window: every dumped temperature lies below its pmptemp)"
+     "description": "Column internal melt rate of the TEMP_PROGNOSTIC cap (F90:2127-2155): the whole-column integral of the layer melt-energy density f_melt over the CISM layer thickness measure dz = thck*dsigma_cv[l+1], divided by rhoi*lhci*dttem (the composite midpoint sum over the layers of the Fortran's layer_melt_rate = rhoi*shci*max(0, temp-pmptemp)*layer_thck/(rhoi*lhci*dt), F90:2144); the paired temperature reset (temp -> pmptemp, F90:2148) is a post-solve state mutation, documented in README-cism.md, not transcribed (0 in the reference window: every dumped temperature lies below its pmptemp)"
+    },
+    "zc": {
+     "type": "unknown",
+     "shape": [
+      "lev"
+     ],
+     "units": "m",
+     "default": 0.0,
+     "description": "Layer-centre coordinates in metres: zc[l] = thck*sigma_node[l+1] (the CISM temperature-node coordinates thck*stagsigma(l); the grid's column_cell_center law applied to the CISM layer faces, supplied directly from the dump), the free-name geometry observed of the imported varcoeff_face_laplacian_lev_value_bc rule"
     },
     "dz": {
      "type": "unknown",
@@ -162,7 +242,7 @@
      ],
      "units": "m",
      "default": 0.0,
-     "description": "CISM layer thickness in metres: dz[l] = thck*dsigma_cv[l+1] (cism_layer_thickness; the layer [sigma(l), sigma(l+1)] width), the integral measure of the melt_internal column integral"
+     "description": "CISM layer thickness in metres: dz[l] = thck*dsigma_cv[l+1] (the layer [sigma(l), sigma(l+1)] width, the grid's column_cell_thickness law supplied directly from the dumped layer widths), the free-name geometry observed of the imported varcoeff_face_laplacian_lev_value_bc rule and the integral measure of the melt_internal column integral"
     },
     "z_sfc": {
      "type": "unknown",
@@ -295,7 +375,7 @@
       0.0,
       0.0
      ],
-     "description": "Interior strain heating on the temperature nodes, deg/s (the dumped dissip_001..010 columns at nodes 2..11): the dissipative heating divided by rhoi*shci, added to the RHS of the implicit step (F90:1418). The dump extension is required: a dissip = 0 reproduction fails the operator identity at 3-5% of the step-1 temperature change (see README.md)"
+     "description": "Interior strain heating on the temperature nodes, deg/s (the dumped dissip_001..010 columns at nodes 2..11): the dissipative heating divided by rhoi*shci, added to the RHS of the implicit step (F90:1418). The dump extension is required: a dissip = 0 reproduction fails the operator identity at 3-5% of the step-1 temperature change (see README-cism.md)"
     },
     "rhoi": {
      "type": "parameter",
@@ -332,6 +412,15 @@
      "units": "W/(m K)",
      "default": 2.1,
      "description": "Ice thermal conductivity (glide_types coni = 2.1 W/m/K)"
+    },
+    "coni_face": {
+     "type": "unknown",
+     "shape": [
+      "lay_nodes"
+     ],
+     "units": "W/(m K)",
+     "default": 0.0,
+     "description": "Ice thermal conductivity broadcast onto the NLEV+1 = UPN sigma faces (the imported varcoeff_face_laplacian_lev_value_bc rule requires the coefficient on the interfaces; CISM's dups stencil multiplies every face flux by the same scalar coni, F90:1410-1418): coni_face[l] = coni over lay_nodes"
     },
     "shci": {
      "type": "parameter",
@@ -401,7 +490,7 @@
            {
             "op": "*",
             "args": [
-             "coni",
+             "coni_face",
              {
               "op": "D",
               "args": [
@@ -548,7 +637,7 @@
      }
     },
     {
-     "lhs": "temp_sfc",
+     "lhs": "u_sfc",
      "rhs": {
       "op": "min",
       "args": [
@@ -607,7 +696,7 @@
      }
     },
     {
-     "lhs": "temp_bed",
+     "lhs": "u_top",
      "rhs": {
       "op": "ifelse",
       "args": [
@@ -691,7 +780,7 @@
          }
         ]
        },
-       "temp_sfc"
+       "u_sfc"
       ]
      }
     },
@@ -703,10 +792,10 @@
        {
         "op": "apply_expression_template",
         "args": [],
-        "name": "cism_interface_flux",
+        "name": "interface_flux_K_lev_value_bc",
         "bindings": {
-         "K": "coni",
-         "uL": {
+         "u_bc": "u_top",
+         "u_adj": {
           "op": "index",
           "args": [
            "temp",
@@ -719,28 +808,27 @@
            }
           ]
          },
-         "uR": "temp_bed",
-         "zL": {
+         "K_face": {
           "op": "index",
           "args": [
-           "sigma_node",
+           "coni_face",
            "UPN"
           ]
          },
-         "zR": {
+         "z_bc": "z_top",
+         "z_adj": {
           "op": "index",
           "args": [
-           "sigma_node",
+           "zc",
            {
-            "op": "+",
+            "op": "-",
             "args": [
              "UPN",
              1
             ]
            }
           ]
-         },
-         "thck": "thck"
+         }
         }
        }
       ]
@@ -802,7 +890,7 @@
       "bindings": {
        "bmlt": "bmlt_raw",
        "bwat": "bwat",
-       "btemp_in": "temp_bed",
+       "btemp_in": "u_top",
        "bpmp": "bpmp",
        "eps08": "eps08"
       }
@@ -857,7 +945,7 @@
         "args": [],
         "name": "cism_basal_melt_cap",
         "bindings": {
-         "btemp_in": "temp_bed",
+         "btemp_in": "u_top",
          "bpmp": "bpmp",
          "pmp_threshold": "pmp_threshold",
          "eps08": "eps08",
@@ -888,15 +976,95 @@
      }
     },
     {
+     "lhs": "zc",
+     "rhs": {
+      "op": "faq",
+      "output_idx": [
+       "l"
+      ],
+      "args": [
+       "thck",
+       "sigma_node"
+      ],
+      "ranges": {
+       "l": {
+        "from": "lev"
+       }
+      },
+      "expr": {
+       "op": "*",
+       "args": [
+        "thck",
+        {
+         "op": "index",
+         "args": [
+          "sigma_node",
+          {
+           "op": "+",
+           "args": [
+            "l",
+            1
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     }
+    },
+    {
      "lhs": "dz",
      "rhs": {
-      "op": "apply_expression_template",
-      "args": [],
-      "name": "cism_layer_thickness",
-      "bindings": {
-       "thck": "thck",
-       "dsigma_cv": "dsigma_cv"
+      "op": "faq",
+      "output_idx": [
+       "l"
+      ],
+      "args": [
+       "thck",
+       "dsigma_cv"
+      ],
+      "ranges": {
+       "l": {
+        "from": "lev"
+       }
+      },
+      "expr": {
+       "op": "*",
+       "args": [
+        "thck",
+        {
+         "op": "index",
+         "args": [
+          "dsigma_cv",
+          {
+           "op": "+",
+           "args": [
+            "l",
+            1
+           ]
+          }
+         ]
+        }
+       ]
       }
+     }
+    },
+    {
+     "lhs": "coni_face",
+     "rhs": {
+      "op": "faq",
+      "output_idx": [
+       "l"
+      ],
+      "args": [
+       "coni"
+      ],
+      "ranges": {
+       "l": {
+        "from": "lay_nodes"
+       }
+      },
+      "expr": "coni"
      }
     },
     {
@@ -955,7 +1123,7 @@
    "tests": [
     {
      "id": "operator_pin_step1_cell2714",
-     "description": "The operator identity at the exit state, pinned from cism_thermo.csv step 1, cell (27,14) (the thickest traced cell, thck = 699.2999877929688 m; artm = -9.678254083449986 degC; the step-1 relaxation is the strongest in the window, bed warming by 0.0122 K). Since the CISM step is one backward-Euler solve, (T_exit - T_entry)/dttem = L*T_exit + Phi exactly for the interior rows; dTdt is evaluated at the exit profile (initial_conditions temp = the exit temp_001..010 columns on the interior nodes) with the dumped dissip and asserted against (T_exit - T_entry)/dttem with dttem = 1.5768e7 s on the 10 interior nodes (CISM layers 1..10; the surface and bed nodes are algebraic - the Dirichlet and the basal-BC rows - pinned separately below as temp_sfc/temp_bed, and the interior stencil reads them at the boundary faces). The surface law temp_sfc = min(0, artm) = -9.678254083449986 degC (the exit temp_000), the pmp law bpmp = -0.61283055916793 degC (exit bpmp), the basal matrix row temp_bed = -5.600667536641113 degC (exit temp_011) with btemp_ground_entry = -5.61283055916793 (the entry temp_011; frozen row: the flux-balance condition holds to 6.2e-17 W/m2, far below eps11), the conductive flux lcondflx_ground = -bfricflx = -8.298816394880562e-05 W/m2 and the resulting bmlt_ground = 0 (the dump's bmlt_ground column is 0 on every row; the m/yr dump value is bmlt_ground*scyr) are asserted in the same run. The per-node residuals of the identity are <= 5.1e-10 relative (the dump's 17-digit round-trip and the tridiagonal solve round-off), hence the per-assertion rel 1e-8.",
+     "description": "The operator identity at the exit state, pinned from cism_thermo.csv step 1, cell (27,14) (the thickest traced cell, thck = 699.2999877929688 m; artm = -9.678254083449986 degC; the step-1 relaxation is the strongest in the window, bed warming by 0.0122 K). Since the CISM step is one backward-Euler solve, (T_exit - T_entry)/dttem = L*T_exit + Phi exactly for the interior rows; dTdt is evaluated at the exit profile (initial_conditions temp = the exit temp_001..010 columns on the interior nodes) with the dumped dissip and asserted against (T_exit - T_entry)/dttem with dttem = 1.5768e7 s on the 10 interior nodes (CISM layers 1..10; the surface and bed nodes are algebraic - the Dirichlet and the basal-BC rows - pinned separately below as u_sfc/u_top, and the interior stencil reads them at the boundary faces). The surface law u_sfc = min(0, artm) = -9.678254083449986 degC (the exit temp_000), the pmp law bpmp = -0.61283055916793 degC (exit bpmp), the basal matrix row u_top = -5.600667536641113 degC (exit temp_011) with btemp_ground_entry = -5.61283055916793 (the entry temp_011; frozen row: the flux-balance condition holds to 6.2e-17 W/m2, far below eps11), the conductive flux lcondflx_ground = -bfricflx = -8.298816394880562e-05 W/m2 and the resulting bmlt_ground = 0 (the dump's bmlt_ground column is 0 on every row; the m/yr dump value is bmlt_ground*scyr) are asserted in the same run. The per-node residuals of the identity are <= 5.1e-10 relative (the dump's 17-digit round-trip and the tridiagonal solve round-off), hence the per-assertion rel 1e-8.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1114,7 +1282,7 @@
        }
       },
       {
-       "variable": "temp_sfc",
+       "variable": "u_sfc",
        "time": 0.0,
        "expected": -9.678254083449986,
        "tolerance": {
@@ -1132,7 +1300,7 @@
        }
       },
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -5.600667536641113,
        "tolerance": {
@@ -1167,7 +1335,7 @@
     },
     {
      "id": "operator_pin_step4_cell2714",
-     "description": "The operator identity at the exit state, step 4, cell (27,14) (thck = 702.2826282602563 m, artm = -9.41413761466157 degC - the second year's artm; a quasi-equilibrated step with changes ~1e-2 K; the worst per-node residual in the window, 6.0e-9 relative at node 4 where the rate nearly cancels, still far below the 1e-8 tolerance). bpmp = -0.6154443919396614, temp_bed = -5.598750297431368 (exit temp_011), lcondflx_ground = -bfricflx = -8.360314641151767e-05.",
+     "description": "The operator identity at the exit state, step 4, cell (27,14) (thck = 702.2826282602563 m, artm = -9.41413761466157 degC - the second year's artm; a quasi-equilibrated step with changes ~1e-2 K; the worst per-node residual in the window, 6.0e-9 relative at node 4 where the rate nearly cancels, still far below the 1e-8 tolerance). bpmp = -0.6154443919396614, u_top = -5.598750297431368 (exit temp_011), lcondflx_ground = -bfricflx = -8.360314641151767e-05.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1326,7 +1494,7 @@
        }
       },
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -5.598750297431368,
        "tolerance": {
@@ -1361,7 +1529,7 @@
     },
     {
      "id": "operator_pin_step1_cell2713",
-     "description": "The operator identity at the exit state, step 1, cell (27,13) (thck = 433.39990234375 m, artm = -8.149297277841129 degC; a mid-thickness relaxation column; per-node residuals <= 6.9e-10 relative). bpmp = -0.37980939386957197, temp_bed = -5.3715497809137736, lcondflx_ground = -bfricflx = -1.2133658457198669e-04.",
+     "description": "The operator identity at the exit state, step 1, cell (27,13) (thck = 433.39990234375 m, artm = -8.149297277841129 degC; a mid-thickness relaxation column; per-node residuals <= 6.9e-10 relative). bpmp = -0.37980939386957197, u_top = -5.3715497809137736, lcondflx_ground = -bfricflx = -1.2133658457198669e-04.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1520,7 +1688,7 @@
        }
       },
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -5.3715497809137736,
        "tolerance": {
@@ -1552,7 +1720,7 @@
        }
       },
       {
-       "variable": "temp_sfc",
+       "variable": "u_sfc",
        "time": 0.0,
        "expected": -8.149297277841129,
        "tolerance": {
@@ -1564,7 +1732,7 @@
     },
     {
      "id": "operator_pin_step4_cell1913",
-     "description": "The operator identity at the exit state, step 4, cell (19,13) (thck = 8.021186956165007 m - a thin solved column just above thklim_temp = 1 m; artm = -1.2203347369404582 degC; the whole column relaxes strongly, rates ~2.7e-8 degC/s; per-node residuals <= 1.9e-13 relative). bpmp = -0.007029355889238773, temp_bed = -1.8645063204301333, lcondflx_ground = -bfricflx = -1.1325741957610504e-05. This column shows the frozen-row structure: entry temp_011 = -2.283083597048193, far below bpmp - 1e-3.",
+     "description": "The operator identity at the exit state, step 4, cell (19,13) (thck = 8.021186956165007 m - a thin solved column just above thklim_temp = 1 m; artm = -1.2203347369404582 degC; the whole column relaxes strongly, rates ~2.7e-8 degC/s; per-node residuals <= 1.9e-13 relative). bpmp = -0.007029355889238773, u_top = -1.8645063204301333, lcondflx_ground = -bfricflx = -1.1325741957610504e-05. This column shows the frozen-row structure: entry temp_011 = -2.283083597048193, far below bpmp - 1e-3.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1723,7 +1891,7 @@
        }
       },
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -1.8645063204301333,
        "tolerance": {
@@ -1757,7 +1925,7 @@
     },
     {
      "id": "operator_pin_step1_cell2511",
-     "description": "The operator identity at the exit state, step 1, cell (25,11) (thck = 1.3000489473342896 m - the thinnest solved column of the window, just above thklim_temp = 1 m; artm = -1.7167278948400053 degC; the column relaxes from the -5 degC initial state toward the surface value, rates ~2e-7 degC/s; per-node residuals <= 4.3e-13 relative). The step-1 entry temp_011 = -5.001139296063561 (the initial bed state) drives the frozen-row condition; bpmp = -0.0011392960635606664, temp_bed = -1.8729999558722863 (exit temp_011), lcondflx_ground = -bfricflx = -2.2106383533321997e-06. The lcondflx_ground assertion carries rel 1e-8 instead of 1e-12: on this thin column the conductive flux is the ratio of two tiny differences (temp_bed - temp[10] = 2.5e-8 K from temperatures ~1.87 degC, ~8 lost digits of cancellation; the ratio is then re-expanded by (coni/thck)/dsigbot ~ 90), so the decimal round-trip of the dump reproduces the flux to 1.5e-9 relative only.",
+     "description": "The operator identity at the exit state, step 1, cell (25,11) (thck = 1.3000489473342896 m - the thinnest solved column of the window, just above thklim_temp = 1 m; artm = -1.7167278948400053 degC; the column relaxes from the -5 degC initial state toward the surface value, rates ~2e-7 degC/s; per-node residuals <= 4.3e-13 relative). The step-1 entry temp_011 = -5.001139296063561 (the initial bed state) drives the frozen-row condition; bpmp = -0.0011392960635606664, u_top = -1.8729999558722863 (exit temp_011), lcondflx_ground = -bfricflx = -2.2106383533321997e-06. The lcondflx_ground assertion carries rel 1e-8 instead of 1e-12: on this thin column the conductive flux is the ratio of two tiny differences (u_top - temp[10] = 2.5e-8 K from temperatures ~1.87 degC, ~8 lost digits of cancellation; the ratio is then re-expanded by (coni/thck)/dsigbot ~ 90), so the decimal round-trip of the dump reproduces the flux to 1.5e-9 relative only.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1916,7 +2084,7 @@
        }
       },
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -1.8729999558722863,
        "tolerance": {
@@ -1939,7 +2107,7 @@
        "expected": 0.0
       },
       {
-       "variable": "temp_sfc",
+       "variable": "u_sfc",
        "time": 0.0,
        "expected": -1.7167278948400053,
        "tolerance": {
@@ -1951,7 +2119,7 @@
     },
     {
      "id": "surface_law_thin_cell2811",
-     "description": "The surface Dirichlet law and the thin-ice bypass on an ice-free traced column, pinned from cism_thermo.csv step 1, cell (28,11) (thck = 0.0199584998190403 m <= thklim_temp = 1 m, ice_mask = 0, artm = -2.389185071557904 degC): the column bypasses the temperature solve entirely and is set to min(0, artm) on all 12 nodes (F90:1205; the exit temp_000..011 columns are all -2.389185071557904), so temp_sfc = min(0, artm) holds there as everywhere and the bed temperature (the last node of the bypassed column) is min(0, artm) as well; the pmp and the basal outputs are not computed for ice_mask = 0 cells (the exit bpmp and btemp_ground columns are 0, hence bpmp = 0 and btemp_ground = 0), and the basal melt chain is zero (bmlt_ground = 0; melt_internal = 0: temp = min(0, artm) <= 0 while pmptemp = 0). The dTdt = 0 rows (the interior stencil sees a constant column, dissip = 0) assert the bypassed profile. The dissip of the unsolved column is 0 (the dumped dissip_001..010 columns).",
+     "description": "The surface Dirichlet law and the thin-ice bypass on an ice-free traced column, pinned from cism_thermo.csv step 1, cell (28,11) (thck = 0.0199584998190403 m <= thklim_temp = 1 m, ice_mask = 0, artm = -2.389185071557904 degC): the column bypasses the temperature solve entirely and is set to min(0, artm) on all 12 nodes (F90:1205; the exit temp_000..011 columns are all -2.389185071557904), so u_sfc = min(0, artm) holds there as everywhere and the bed temperature (the last node of the bypassed column) is min(0, artm) as well; the pmp and the basal outputs are not computed for ice_mask = 0 cells (the exit bpmp and btemp_ground columns are 0, hence bpmp = 0 and btemp_ground = 0), and the basal melt chain is zero (bmlt_ground = 0; melt_internal = 0: temp = min(0, artm) <= 0 while pmptemp = 0). The dTdt = 0 rows (the interior stencil sees a constant column, dissip = 0) assert the bypassed profile. The dissip of the unsolved column is 0 (the dumped dissip_001..010 columns).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -1991,7 +2159,7 @@
      },
      "assertions": [
       {
-       "variable": "temp_sfc",
+       "variable": "u_sfc",
        "time": 0.0,
        "expected": -2.389185071557904,
        "tolerance": {
@@ -2039,7 +2207,7 @@
     },
     {
      "id": "thawed_bed_branch",
-     "description": "The thawed basal matrix row (F90:1497-1504) pinned from the SOURCE FORMULA (no traced row has a thawed bed: every entry btemp_ground < bpmp - pmp_threshold with the worst margin -1.425 degC): with btemp_ground_entry = bpmp - 0.5*pmp_threshold (>= bpmp - pmp_threshold, so the bed row is thawed) and bwat = 0, the basal temperature is held at the pressure melting point, temp_bed = bpmp = -rhoi*grav*pmlt*thck = -0.61283055916793 degC at thck = 699.2999877929688 m (the step-1 cell (27,14) geometry), and the interior stencil at the bottom node reads that value at the bed face (the boundary values feed the interior operator). The frozen-row value at the same state (temp_bed = temp[10] + (bfric+bhydro-bheat)*dsigbot*thck/coni) is documented in the operator pins; the bmlt_ground chain is not asserted here (the bmlt = 0 balance is exercised at the frozen state in the operator pins).",
+     "description": "The thawed basal matrix row (F90:1497-1504) pinned from the SOURCE FORMULA (no traced row has a thawed bed: every entry btemp_ground < bpmp - pmp_threshold with the worst margin -1.425 degC): with btemp_ground_entry = bpmp - 0.5*pmp_threshold (>= bpmp - pmp_threshold, so the bed row is thawed) and bwat = 0, the basal temperature is held at the pressure melting point, u_top = bpmp = -rhoi*grav*pmlt*thck = -0.61283055916793 degC at thck = 699.2999877929688 m (the step-1 cell (27,14) geometry), and the interior stencil at the bottom node reads that value at the bed face (the boundary values feed the interior operator). The frozen-row value at the same state (u_top = temp[10] + (bfric+bhydro-bheat)*dsigbot*thck/coni) is documented in the operator pins; the bmlt_ground chain is not asserted here (the bmlt = 0 balance is exercised at the frozen state in the operator pins).",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -2078,7 +2246,7 @@
      },
      "assertions": [
       {
-       "variable": "temp_bed",
+       "variable": "u_top",
        "time": 0.0,
        "expected": -0.61283055916793,
        "tolerance": {
@@ -2099,7 +2267,7 @@
     },
     {
      "id": "internal_melt_rate",
-     "description": "The TEMP_PROGNOSTIC internal melt cap (glissade_basal_melting_internal, F90:2127-2155) pinned from the SOURCE FORMULA (no traced layer exceeds its pmptemp: the window temperatures lie 1.3..9.7 degC below the local pmp): with the state raised 1 degC above the local pressure melting point in the bottom layer (temp[10] = pmptemp[10] + 1 = 0.3982037860802461 degC, pmptemp[10] = -rhoi*grav*pmlt*thck*sigma_node[11] = -0.6017962139197539 degC at thck = 699.2999877929688 m) and all other layers exactly at their pmptemp (the initial conditions are the exact pmptemp profile -rhoi*grav*pmlt*thck*sigma_node[l+1] on the interior nodes), the melt-energy density f_melt[10] = rhoi*shci*1 (J/m3) integrates over the bottom layer dz[10] = thck*dsigma_cv[11] = thck*(sigma(11) - sigma(10)) = 25.182548036865903 m (the bottom CISM layer width, F90:2142-2143) to melt_internal = integral(f_melt, z_sfc..z_top)/(rhoi*lhci*dttem) = rhoi*shci*1*dz[10]/(rhoi*lhci*dttem) = 1.013311793138945e-08 m/s (all other layers contribute 0). The temperature reset (temp -> pmptemp, F90:2148) is a post-solve state mutation, documented in README.md, not transcribed.",
+     "description": "The TEMP_PROGNOSTIC internal melt cap (glissade_basal_melting_internal, F90:2127-2155) pinned from the SOURCE FORMULA (no traced layer exceeds its pmptemp: the window temperatures lie 1.3..9.7 degC below the local pmp): with the state raised 1 degC above the local pressure melting point in the bottom layer (temp[10] = pmptemp[10] + 1 = 0.3982037860802461 degC, pmptemp[10] = -rhoi*grav*pmlt*thck*sigma_node[11] = -0.6017962139197539 degC at thck = 699.2999877929688 m) and all other layers exactly at their pmptemp (the initial conditions are the exact pmptemp profile -rhoi*grav*pmlt*thck*sigma_node[l+1] on the interior nodes), the melt-energy density f_melt[10] = rhoi*shci*1 (J/m3) integrates over the bottom layer dz[10] = thck*dsigma_cv[11] = thck*(sigma(11) - sigma(10)) = 25.182548036865903 m (the bottom CISM layer width, F90:2142-2143) to melt_internal = integral(f_melt, z_sfc..z_top)/(rhoi*lhci*dttem) = rhoi*shci*1*dz[10]/(rhoi*lhci*dttem) = 1.013311793138945e-08 m/s (all other layers contribute 0). The temperature reset (temp -> pmptemp, F90:2148) is a post-solve state mutation, documented in README-cism.md, not transcribed.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -2150,7 +2318,7 @@
     },
     {
      "id": "freeze_on_branch",
-     "description": "The freeze-on branch of glissade_basal_melting_ground (F90:2007-2012) pinned from the SOURCE FORMULA (the traced window is frozen and melting-free: bmlt_ground = 0 and btemp_ground < bpmp - eps08 on every row): with the bed at the melting point (temp_bed = bpmp = -0.61283055916793 degC at thck = 699.2999877929688 m) and a negative flux balance (bfricflx = bhydroflx = bheatflx = 0, and the model's conductive flux lcondflx_ground = -(coni/thck)*(temp_bed - temp[10])/dsigbot = -0.8319652613445396 W/m2, so bflx_mlt = -0.8319652613445396 W/m2 and bmlt_raw = -0.8319652613445396/(lhci*rhoi) = -2.7188149568011927e-09 m/s < 0), bwat = 0, the freeze_on predicate fires: bmlt_ground is zeroed and btemp_ground is dropped to min(bpmp - 2*pmp_threshold, bpmp - eps08) = min(-0.61483055916793, -0.61283056916793) = -0.61483055916793 degC (pmp_threshold = 1e-3 dominates eps08 = 1e-8). The paired eps11 guard (F90:1927-1929) is exercised in the eps11_zeroing test.",
+     "description": "The freeze-on branch of glissade_basal_melting_ground (F90:2007-2012) pinned from the SOURCE FORMULA (the traced window is frozen and melting-free: bmlt_ground = 0 and btemp_ground < bpmp - eps08 on every row): with the bed at the melting point (u_top = bpmp = -0.61283055916793 degC at thck = 699.2999877929688 m) and a negative flux balance (bfricflx = bhydroflx = bheatflx = 0, and the model's conductive flux lcondflx_ground = -(coni/thck)*(u_top - temp[10])/dsigbot = -0.8319652613445396 W/m2, so bflx_mlt = -0.8319652613445396 W/m2 and bmlt_raw = -0.8319652613445396/(lhci*rhoi) = -2.7188149568011927e-09 m/s < 0), bwat = 0, the freeze_on predicate fires: bmlt_ground is zeroed and btemp_ground is dropped to min(bpmp - 2*pmp_threshold, bpmp - eps08) = min(-0.61483055916793, -0.61283056916793) = -0.61483055916793 degC (pmp_threshold = 1e-3 dominates eps08 = 1e-8). The paired eps11 guard (F90:1927-1929) is exercised in the eps11_zeroing test.",
      "time_span": {
       "start": 0.0,
       "end": 0.0
@@ -2206,7 +2374,7 @@
     },
     {
      "id": "eps11_zeroing",
-     "description": "The eps11 rounding-error guard of glissade_basal_melting_ground (F90:1927-1929) pinned from the SOURCE FORMULA: a flux imbalance below eps11 = 1e-11 W/m2 is zeroed before the division: with bfricflx = 5e-12 and bhydroflx = bheatflx = 0, the frozen-row law gives temp_bed = temp[10] + bfricflx*dsigbot*thck/coni = -5.601165120759974 degC and hence lcondflx_ground = -(coni/thck)*(temp_bed - temp[10])/dsigbot = -bfricflx = -5e-12 by construction, so bflx_mlt = bflx_src + lcondflx_ground = 0 up to rounding, far below eps11, and bmlt_raw = 0 exactly (without the guard it would be at most ~1.6e-20 m/s); with the bed frozen (temp_bed far below bpmp) and bmlt_raw = 0, the freeze_on predicate stays 0 and btemp_ground = min(temp_bed, bpmp) = temp_bed = -5.601165120759974. The traced window exercises the same guard: the closed basal balances of the operator pins have |bfricflx + lcondflx_ground| <= 1.5e-15 W/m2, zeroed to bmlt = 0.",
+     "description": "The eps11 rounding-error guard of glissade_basal_melting_ground (F90:1927-1929) pinned from the SOURCE FORMULA: a flux imbalance below eps11 = 1e-11 W/m2 is zeroed before the division: with bfricflx = 5e-12 and bhydroflx = bheatflx = 0, the frozen-row law gives u_top = temp[10] + bfricflx*dsigbot*thck/coni = -5.601165120759974 degC and hence lcondflx_ground = -(coni/thck)*(u_top - temp[10])/dsigbot = -bfricflx = -5e-12 by construction, so bflx_mlt = bflx_src + lcondflx_ground = 0 up to rounding, far below eps11, and bmlt_raw = 0 exactly (without the guard it would be at most ~1.6e-20 m/s); with the bed frozen (u_top far below bpmp) and bmlt_raw = 0, the freeze_on predicate stays 0 and btemp_ground = min(u_top, bpmp) = u_top = -5.601165120759974. The traced window exercises the same guard: the closed basal balances of the operator pins have |bfricflx + lcondflx_ground| <= 1.5e-15 W/m2, zeroed to bmlt = 0.",
      "time_span": {
       "start": 0.0,
       "end": 0.0

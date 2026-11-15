@@ -9,8 +9,9 @@ CISM_LANE.md §2 marks **same law** as EqIce — the pseudo-plastic basal drag
 (row 8), the Bueler–van Pelt effective pressure (row 9), and the Paterson–Budd
 flow factor (row 4) — plus the CESM-only **cap coupling boundary** (row 15,
 missing in EqIce), the **temperature step** (row 5, the prognostic ice
-temperature solve on CISM's σ grid, `cism_thermo.esm` +
-`cism_thermo_discretization.esm`), the **SMB application / tracer surface-bed
+temperature solve on CISM's σ grid, `cism_thermo.esm` — the PDE lowered by
+the EarthSciDiscretizations rule `varcoeff_face_laplacian_lev_value_bc`
+(imported from `${ESD_ROOT}`), the **SMB application / tracer surface-bed
 handling / post-transport cleanup** slice of the thickness/tracer solve
 (`cism_transport.esm`, rows 6/7/14), and the **DIVA velocity-solve pointwise
 laws** (`cism_velo.esm` + `cism_velo_discretization.esm`, row 2).
@@ -82,8 +83,7 @@ W/m/K, pmp_threshold = 1e-3 degC, eps08 = 1e-8, eps11 = 1e-11, dttem =
 | `cism_cap.esm` | Models `GlcCapImport` (the cap import transformations: the named intermediate tsfc_c = tsfc_raw − tkfrz and the −250 °C sentinel clamp via the one-parameter `cism_tsfc_import`, qsmb pass-through) and `GlcCapExport` (the export laws: topo = usrf on the active grid, ice_covered = (thck > 0) ∧ (usrf > 0), and the coupling-interval averages rofi/rofl/hflx written as storage ODEs — the continuous limit of the Fortran's per-dynamics-step accumulation, see the cap section below) | `glc_import_export.F90`: 326-333; `glad_output_states.F90`: 48-158; `glad_output_fluxes.F90`: 77-172; `glad_main.F90`: 971-1027 |
 | `cism_basal.esm` | Models `Effecpress` (cell-centered N: overburden P = ρᵢgH, the Bueler–van Pelt N0(δP/N0)^s·10^((e0/Cc)(1−s)) law with s = clamp(bwat/bwat_till_max, 0, 1) imported by reference from `eqice_basal_templates.esm` `mohr_coulomb_N_interior`, the bwat=0 → N = P branch, the min(·, P) cap and the floating-cell zero) and `BasalTraction` (φ ramp → tanφ, speed = √(u²+v²+0.01²), τ_c = tanφ·N_stag, β = τ_c/(u0^q·speed^(1−q)) — the drag law itself imported from `eqice_basal_templates.esm` `pseudo_plastic_drag`) | `glissade_basal_traction.F90`: calc_effecpress 668-1114 (BWAT_BVP 944-985, init 784, stagger 1096-1098, cap 1082-1086), calcbeta 69-664 (PSEUDO_PLASTIC_OLD 250-292, smallnum 136/189) |
 | `cism_flowlaw.esm` | Model `FlowFactor` — flwa = E·a·exp(−Q/(RT*)) with T* = tempcor + 273.15, the (a, Q) pair switching at T* = 263.15 K; the softness law imported by reference from `eqice_ice_rheology_templates.esm` `pb_softness`, the CISM constants (arrmlh/arrmll/actenh/actenl/gascon) bound at the call site, the T* construction CISM-specific | `glissade_therm.F90`: 2408-2640 (FLWA_PATERSON_BUDD 2585-2606, pmptemp 2170); `glimmer_physcon.F90`: 89-102 |
-| `cism_thermo_discretization.esm` | Local ESD-format rule file: the `cism_sigma_diffusion` lowering rule + the `cism_interface_flux` stencil template + the `cism_layer_thickness` integral measure, with the UPN/lev_nodes grid contract; imports the ESD `integral_lev_whole` rule (NLEV = UPN−1, lev_nodes renamed to lay_nodes) | `glissade_therm.F90`: 1324-1507, 151-163 |
-| `cism_thermo.esm` | Model `IceTemperatureColumn` — the vertical heat equation ρᵢcᵢ ∂T/∂t = ∂/∂z(kᵢ ∂T/∂z) + ρᵢcᵢΦ with the ODE state on the UPN−1 = 10 INTERIOR σ nodes (PDE with the `cism_sigma_diffusion` rule; the surface and bed nodes are algebraic in CISM and are carried as temp_sfc/temp_bed, feeding the interior stencil as boundary values), the pmp profile (EqIce imports), and the basal/internal melt laws + 10 tests | `glissade_therm.F90`: glissade_therm_driver, glissade_temperature_matrix_elements 1324-1507, glissade_basal_melting_ground 1930-2012, glissade_basal_melting_internal 2032-2159, glissade_pressure_melting_point 2163-2192 |
+| `cism_thermo.esm` | Model `IceTemperatureColumn` — the vertical heat equation ρᵢcᵢ ∂T/∂t = ∂/∂z(kᵢ ∂T/∂z) + ρᵢcᵢΦ with the ODE state on the UPN−1 = 10 INTERIOR σ nodes (PDE lowered by the EarthSciDiscretizations rule `varcoeff_face_laplacian_lev_value_bc`, imported from `${ESD_ROOT}` — the exact dups stencil of glissade_temperature_matrix_elements, contributed to ESD from this port; the surface and bed nodes are algebraic in CISM and are carried as u_sfc/u_top, feeding the interior stencil as boundary values through the rule's free-name contract), the pmp profile (EqIce imports), and the basal/internal melt laws + 10 tests | `glissade_therm.F90`: glissade_therm_driver, glissade_temperature_matrix_elements 1324-1507, glissade_basal_melting_ground 1930-2012, glissade_basal_melting_internal 2032-2159, glissade_pressure_melting_point 2163-2192 |
 | `cism_transport.esm` | Models `GladSmb` — the cap qsmb→acab conversion acab = qsmb·tstep_mbal·hours2seconds/rhoi·windows_per_year with the named glad/glimmer constants and the glad-level zeroing (ice-free ablation, ice-free ocean via the `cism_ocean` predicate); `MassBalance` — the SMB application: the rate law d(thck)/dt = ifelse(thck ≤ 0 ∧ net < 0, 0, net) with net = acab − bmlt, the per-step algebraic maps of the dumped entry state (melt_potential, the applied rates, the layer-1/layer-10 tracer blends via `cism_tracer_mix`, the column-mean law, the tracer zeroing of melted columns), and the ice-age increment d(age)/dt = 1 where thck > 0; `SurfaceUpdate` — calc_lsrf_usrf: lsrf = topg where grounded, lsrf = eus − (rhoi/rhoo)·thck where floating, usrf = lsrf + thck. Declares a `solver` block (stiffness low, abstol 1e-10, reltol 1e-6) for the non-smooth clip — see 'The clip and the solver block' | `glad_main.F90`: 810-824; `glad_timestep.F90`: 171-187; `glissade_mass_balance.F90`: 819-1571; `glissade.F90`: 1203-1213; `glissade_transport.F90`: 139-208; `glimmer_utils.F90`: 344-378 |
 | `cism_velo_discretization.esm` | Local ESD-format rule file: the σ-column `NLAYERS = 10` / `lev` / `lev_nodes` grid contract, the `cism_sigma_measure` / `cism_sigma_midpoint` templates, and the `integral_lev_whole` / `integral_lev_nodes_cumulative_to_top` rules imported by reference from EarthSciDiscretizations with `NLEV = NLAYERS` | `glissade_velo_higher.F90`: compute_integrals_diva 5570-5696 |
 | `cism_velo.esm` | Models `DivaGeometry` (the hybrid-margin surface gradient with the max_slope clamp, the 4-cell mean staggered thickness, the driving stress taudx = −rhoi·grav·stagthck·dusrf_dx, the DIVA slope angle θ = atan(\|dz_dx\|) and slope factor F = cos²θ + 4 sin²θ, and the bwat = 0 effective-pressure identity effecpress_stag = rhoi·g·stagthck), `DivaIntegrals` (the Goldberg (2011) σ-column integrals: efvs as the quad-point mean, omega_k and omega written as ESD integral operators, the `cism_stagger_masked_mean` vertex staggers, the active-cell guard), and `DivaVelocity` (beta_internal = f_ground·beta, the effective basal friction beta_eff = F·β/(F + β·ω·cosθ), btractx = β_internal·uvel_basal, the basal-velocity recovery uvel_basal = uvel_2d·beta_eff/beta_internal, and the 3-D profile uvel[k] = uvel_basal + btractx·stag_omega_k[k]·cosθ/F), plus the top-level mount of `BasalTraction` and the `variable_map` edges feeding `DivaVelocity` | `glissade_velo_higher.F90`: glissade_velo_higher_solve, load_vector_gravity 4353-4384, compute_integrals_diva 5570-5696, compute_3d_velocity_diva 5700-5821, F90:5091, 5266-5272, 5578-5583, 5756-5770, 5780, 5800-5821; `glissade_grid_operators.F90`: surface_elevation_gradient 999-1079, glissade_stagger 69-157, glissade_slope_angle_staggered 1482+ |
@@ -293,8 +293,12 @@ integrate one coupling interval [0, 3.1536e7 s] with constant integrands
 The prognostic temperature solve (`whichtemp = TEMP_PROGNOSTIC`) as
 `IceTemperatureColumn` (`cism_thermo.esm`): the vertical heat equation
 ρᵢcᵢ ∂T/∂t = ∂/∂z(kᵢ ∂T/∂z) + ρᵢcᵢΦ on CISM's σ coordinate, the pointwise laws of
-the step, and the local EarthSciDiscretizations-format rule that lowers the
-diffusion term (`cism_thermo_discretization.esm`, a candidate ESD PR). Pinned
+the step, and the EarthSciDiscretizations rule that lowers the diffusion
+term (`varcoeff_face_laplacian_lev_value_bc`, imported from `${ESD_ROOT}` —
+the exact dups stencil of glissade_temperature_matrix_elements,
+F90:1324-1507, contributed to ESD from this port; the old local
+`cism_thermo_discretization.esm` rule was deleted when stage2 adopted the ESD
+rule). Pinned
 against the extended `cism_thermo.csv` dump (256 rows × 78 columns). The dump
 extension — `dttem`, `dissip_001..010`, `sigma_001..011`, `stagsigma_001..010`
 (fork branch `instrument/cism-dumps`, committed at all three submodule levels,
@@ -316,24 +320,24 @@ diffusion rows: the surface row pins the Dirichlet value T(0) = min(0, artm)
 balance; thawed: T = bpmp; F90:1473-1476, 1497-1504). The model therefore
 carries the ODE state on the UPN−1 = 10 INTERIOR nodes (index set `lev` = the
 dumped temp_001..010 columns) with d(temp)/dt = dTdt, and the two boundary
-nodes as the algebraic unknowns `temp_sfc` and `temp_bed` — so the boundary
+nodes as the algebraic unknowns `u_sfc` and `u_top` — so the boundary
 laws FEED BACK into the interior operator: the rule's stencil reads
-temp_sfc/temp_bed at the surface/bed faces instead of state rows. The full
+u_sfc/u_top at the surface/bed faces instead of state rows. The full
 12-node geometry (sigma_node = [0, stagsigma, 1], the layer widths dsigma_cv,
 thck) enters as parameters from the dump extension.
 
-The diffusion term lowers, by the rule `cism_sigma_diffusion` (priority 10,
-match-scoped to lev-shaped u, fired on D(coni·D(temp, lev), lev)), to the exact
-dups stencil of glissade_temperature_matrix_elements: L·T[n] =
-(G[n+2] − G[n+1])/(thck·dsigma_cv[n+1]) over the CISM layer control volume
-[σ(n), σ(n+1)], with the interface flux G[m] =
-cism_interface_flux(coni, u[m−1], u[m], σ[m−1], σ[m], thck) =
+The diffusion term lowers, by the EarthSciDiscretizations rule
+`varcoeff_face_laplacian_lev_value_bc` (imported from `${ESD_ROOT}`, the
+exact dups stencil of glissade_temperature_matrix_elements — contributed to
+ESD from this port), to L·T[n] = (G[n+2] − G[n+1])/(thck·dsigma_cv[n+1]) over
+the CISM layer control volume [σ(n), σ(n+1)], with the interface flux G[m] =
 coni·(u[m] − u[m−1])/(thck·(σ[m] − σ[m−1])) (the node-to-node gradient;
 stagsigma(0) ≡ σ(1), stagsigma(upn) ≡ σ(upn), F90:151-163) — at the surface
-face m = 1 and the bed face m = UPN+1 the flux reads the algebraic
-temp_sfc/temp_bed. The same pointwise cism_interface_flux builds the basal
-conductive flux lcondflx_ground = −G[UPN+1] (F90:1070). dTdt = L·T/(ρᵢcᵢ) +
-dissip on the interior nodes; there are no boundary dTdt rows.
+face m = 1 and the bed face m = UPN+1 the flux reads the algebraic u_sfc/u_top
+through the rule's free-name contract. The same pointwise interface-flux
+template builds the basal conductive flux lcondflx_ground = −G[UPN+1]
+(F90:1070). dTdt = L·T/(ρᵢcᵢ) + dissip on the interior nodes; there are no
+boundary dTdt rows.
 
 ### Pin strategy: the instantaneous operator identity at the exit state
 
@@ -348,22 +352,22 @@ the ICs set to the exit profile and the dumped dissip. Five such pins span the
 window (step 1 and step 4 of cell (27,14), step 1 of cells (27,13) and (25,11) —
 the thinnest solved column at thck = 1.3 m — and step 4 of cell (19,13));
 per-node residuals ≤ 6.0e-9 relative → rel 1e-8 tolerances. The algebraic laws
-of the step are pinned at rel 1e-12: temp_sfc = min(0, artm) (all 128 exit
-rows), bpmp = −ρᵢg·pmlt·thck, the frozen basal row temp_bed = temp[10] +
+of the step are pinned at rel 1e-12: u_sfc = min(0, artm) (all 128 exit
+rows), bpmp = −ρᵢg·pmlt·thck, the frozen basal row u_top = temp[10] +
 (bfricflx + bhydroflx − bheatflx)·dsigbot·thck/coni (the bflx_src named
 intermediate; closes to 6.2e-17 W/m² in flux terms), lcondflx_ground =
-−cism_interface_flux at the bed face (one thin-column assertion at rel 1e-8 —
-there the flux is the ratio of two cancelling differences, temp_bed − temp[10]
+−G[UPN+1] at the bed face (one thin-column assertion at rel 1e-8 —
+there the flux is the ratio of two cancelling differences, u_top − temp[10]
 = 2.5e-8 K from ~1.87 degC values), and the melt chain bmlt_raw / bmlt_ground /
 btemp_ground (all-zero in the window: the closed basal balance |bfricflx +
 lcondflx_ground| ≤ 1.5e-15 W/m² is zeroed by the eps11 guard on the FLUX,
 F90:1927-1929). The operator pins close the boundary feedback: the stencil at
-the node adjacent to each boundary reads temp_sfc/temp_bed, so the pinned
+the node adjacent to each boundary reads u_sfc/u_top, so the pinned
 algebraic values enter the asserted dTdt. The thawed-bed row, the freeze-on
 branch, and the internal-melt cap are pinned synthetically from the source
 formulas (see gaps); the thin-cell surface law is pinned on cell (28,11)
 (thck = 0.02 m ≤ thklim_temp = 1 m: the column bypasses the solve — temp =
-min(0, artm) on all nodes, bpmp/temp_bed/bflx_mlt/btemp_ground = 0 via the
+min(0, artm) on all nodes, bpmp/u_top/bflx_mlt/btemp_ground = 0 via the
 ice_mask gate, dissip = 0).
 
 ### Files
@@ -371,8 +375,7 @@ ice_mask gate, dissip = 0).
 | File | Contents | Fortran source |
 |---|---|---|
 | `cism_templates.esm` | +4 thermo templates: `cism_internal_melt_rate` (layer melt-energy density rhoi·shci·max(0, T−Tpmp), J/m³ — the Fortran's melt_energy per unit layer thickness), `cism_basal_melt_rate` (flux-balance rate bflx_mlt/(lhci·rhoi) with the eps11 zeroing applied to the FLUX, F90:1927-1929), `cism_basal_freeze_on` (predicate bmlt < 0 ∧ bwat = 0 ∧ btemp ≥ bpmp − eps08, evaluated ONCE as the named intermediate freeze_on), `cism_basal_melt_cap` (btemp_ground = min(btemp, bpmp); freeze-on drop to min(bpmp − 2·pmp_threshold, bpmp − eps08), consuming freeze_on). The Clapeyron pmp is imported from the temporary EqIce copies (no CISM pmp template) | `glissade_therm.F90`: 2127-2155, 1930-1967, 2007-2012, 1979 |
-| `cism_thermo_discretization.esm` | Local ESD-format rule file: the `cism_sigma_diffusion` lowering rule (interior-state stencil, algebraic boundary values via the free-name contract), the pointwise `cism_interface_flux` face-flux template (reused by the stencil and by lcondflx_ground), `cism_layer_thickness` (dz = thck·dsigma_cv, the integral measure), and the ESD `integral_lev_whole` import (NLEV = UPN−1, lev_nodes renamed to lay_nodes) | `glissade_therm.F90`: 1324-1507, 151-163 |
-| `cism_thermo.esm` | Model `IceTemperatureColumn` (the ODE d(temp)/dt = dTdt on the UPN−1 interior nodes, the algebraic temp_sfc/temp_bed laws feeding the operator, the pmp profile from EqIce, the basal/internal melt laws — melt_internal as the whole-column integral of f_melt over z_sfc..z_top divided by rhoi·lhci·dttem, F90:2127-2155) + 10 tests (5 operator pins, thin-cell law, thawed bed, internal melt, freeze-on, eps11) | `glissade_therm.F90` as above |
+| `cism_thermo.esm` | Model `IceTemperatureColumn` (the ODE d(temp)/dt = dTdt on the UPN−1 interior nodes, lowered by the ESD rule `varcoeff_face_laplacian_lev_value_bc` (${ESD_ROOT}; the algebraic u_sfc/u_top laws feed the operator through the rule's free-name contract), the pmp profile from EqIce, the basal/internal melt laws — melt_internal as the whole-column integral of f_melt over z_sfc..z_top divided by rhoi·lhci·dttem, F90:2127-2155) + 10 tests (5 operator pins, thin-cell law, thawed bed, internal melt, freeze-on, eps11) | `glissade_therm.F90` as above |
 
 ### Gaps and deferrals
 
@@ -388,7 +391,7 @@ ice_mask gate, dissip = 0).
   waterfrac columns are all 0); the enthalpy scheme (waterfrac > 0) is deferred.
 - **Thin-ice bypass**: cells with thck ≤ thklim_temp = 1 m skip the solve
   entirely (temp = min(0, artm) on all nodes; F90:1205). Transcribed as the
-  ice_mask gate: the pmptemp/bpmp/temp_bed/bflx_mlt/btemp_ground laws return 0
+  ice_mask gate: the pmptemp/bpmp/u_top/bflx_mlt/btemp_ground laws return 0
   where ice_mask = 0 (the dumped column), so the gate itself is dump-pinned on
   cell (28,11); the temp = min(0, artm) column profile is pinned there too.
   21 of 128 traced rows are such cells.
@@ -865,11 +868,13 @@ Run the suite with
 
     esm test components/cryosphere/cism
 
-(`esm validate` and `esm units` pass for all eleven files; the two
-discretization files and the velocity/thermo files that lower them need
-`export ESD_ROOT=/path/to/EarthSciDiscretizations` for the `${ESD_ROOT}`
-ref expansion — the pinned rules `integral_lev_whole` and
-`integral_lev_nodes_cumulative_to_top` are both on ESD `main`). Suite
+(`esm validate` and `esm units` pass for all ten files; the velocity
+discretization file, the thermo file and the velo file that lowers/lower
+them need `export ESD_ROOT=/path/to/EarthSciDiscretizations` for the
+`${ESD_ROOT}` ref expansion — the pinned rules `integral_lev_whole` and
+`integral_lev_nodes_cumulative_to_top` are on ESD `main`, and
+`varcoeff_face_laplacian_lev_value_bc` (contributed to ESD from this port)
+is on the ESD `eqesm-integration` branch). Suite
 counts: **94 tests / 380 assertions** (basal 15/41, cap 22/48, flowlaw
 10/19, thermo 10/88, transport 22/29, velo 15/155).
 
@@ -879,12 +884,12 @@ counts: **94 tests / 380 assertions** (basal 15/41, cap 22/48, flowlaw
 | `eqice_basal_templates.esm` / `eqice_ice_rheology_templates.esm` | — | — | temporary EqIce copies (validated, no models; bodies identical to eqice/stage2) |
 | `cism_basal.esm` | 15 | 41 | **Effecpress** (7 tests): the bwat=0 overburden branch at three dump cells/steps, the Bueler–van Pelt mid-range plateau (min(·,P) cap at work), full saturation, the s clamp, and the floating zero — the last four from the source formula; **BasalTraction** (8 tests): φ ramp + tanφ + speed + τ_c + β on dump rows covering both ramp-branch (φ = 34.33°, bed = 538 m) and phimax-branch (φ = 40°) cells, a 3-iteration Picard chain of one vertex (N/φ/τ_c invariant, β tracking the speed), the largest-N vertex (N = 1.79e6 Pa), a step-2 row, and the last iteration of the last step |
 | `cism_flowlaw.esm` | 10 | 19 | warm-branch flwa at 6 (cell, layer, step) dump rows (incl. the largest \|pmptemp\| = 0.072 K traced), the cold branch, the branch boundary at T* = 263.15 K exactly, and both tempcor clamp bounds — the last four from the source formula |
-| `cism_thermo.esm` | 10 | 88 | **IceTemperatureColumn**: the instantaneous operator identity at the exit state (5 pins, the 10 interior dTdt nodes each), temp_sfc/bpmp/temp_bed/lcondflx_ground/bmlt_ground/btemp_ground at the pinned cells, the thin-ice surface law (the ice_mask gate zeroing bpmp/temp_bed/bflx_mlt/btemp_ground), and the thawed-bed / internal-melt / freeze-on / eps11 branches from the source formula |
+| `cism_thermo.esm` | 10 | 88 | **IceTemperatureColumn**: the instantaneous operator identity at the exit state (5 pins, the 10 interior dTdt nodes each), u_sfc/bpmp/u_top/lcondflx_ground/bmlt_ground/btemp_ground at the pinned cells, the thin-ice surface law (the ice_mask gate zeroing bpmp/u_top/bflx_mlt/btemp_ground), and the thawed-bed / internal-melt / freeze-on / eps11 branches from the source formula |
 | `cism_transport.esm` | 22 | 29 | **GladSmb** (5 tests): the qsmb→acab chain at cap rows, the ice-free-ablation zeroing at thck = 0 and its non-firing at thck = 1.65e-5 m; **MassBalance** (14 tests): d(thck)/dt = net on accumulation/ablation/full-melt dump rows (rel 1e-6..3e-4, the advection residual), the melt_potential conservation check, acab_applied in the clipped branch, the layer-1 blend (rel 1e-5..2.5e-4), the tracer zeroing on full melt, and the ice-age increment; **SurfaceUpdate** (3 tests): lsrf/usrf on grounded, ice-free, and thin-ice rows |
 | `cism_velo.esm` | 15 | 155 | **DivaGeometry** (4 tests): dusrf/taud at rel 1e-11, θ/F/effecpress_stag at rel 1e-12, the max_slope clamp from the source formula; **DivaIntegrals** (5 tests): efvs, omega_k, omega, the staggers and the inactive-cell guard; **DivaVelocity** (6 tests): the exact β chain at rel 0.0 and the 3-D profile at ≤ 2.9e-16 |
 | `cism_cap.esm` | 22 | 48 | see the cap section's test table |
 
-(`esm units --check` is clean on all eleven files; basal and velo report
+(`esm units --check` is clean on all ten files; basal and velo report
 the standard "no dimensional mismatch found; run without --check to see why
 equations were not checked" message for their fractional-exponent rows,
 unchanged from stage2.)
