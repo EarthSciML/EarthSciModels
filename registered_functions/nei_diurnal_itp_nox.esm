@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "2.0.0",
   "metadata": {
     "name": "diurnal_itp_NOx",
     "description": "NEI 2016 NOx diurnal emission scale factor. Migrated from EarthSciData.jl@830435a src/nei2016monthly.jl (`diurnal_itp_NOx(t, lon)` @register_symbolic). Returns the NOx-specific emission scale factor for the given UTC timestamp `t_utc` (seconds since Unix epoch) and longitude `lon` (radians), using a 24-entry lookup table indexed by local solar hour (0-23). The @register_symbolic gap is resolved via datetime.hour(t_local) + interp.linear.",
@@ -29,6 +29,20 @@
   },
   "models": {
     "diurnal_itp_NOx": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/calendar.esm",
+          "only": [
+            "hour"
+          ]
+        },
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: EarthSciData.jl@830435a065f27e99f10bba91107ca1730322cc6b:src/nei2016monthly.jl\n\nUpstream definition:\n  const DIURNAL_FACTORS_NOx = [0.39598674,0.31852847,0.30128068,0.29590213,0.33177775,0.43871498,0.9094625,1.5850095,1.6223788,1.3429453,1.2265036,1.1937649,1.254314,1.3282939,1.331211,1.4135737,1.6848333,1.710925,1.3491899,1.0586671,0.84439224,0.761263,0.72693235,0.5741503]\n  function diurnal_itp_NOx(t, lon)\n      dt = floor(rad2deg(lon) / 15)  # timezone offset in hours\n      t_local = t + dt * 3600\n      hour_of_day = Dates.hour(Dates.unix2datetime(t_local)) + 1  # 1-based\n      return DIURNAL_FACTORS_NOx[hour_of_day]\n  end\n  @register_symbolic diurnal_itp_NOx(t, lon)\n\nThe @register_symbolic gap is resolved by composing:\n  1. t_local = t_utc + floor((lon * (180/π)) / 15) * 3600\n  2. hour = datetime.hour(t_local)  — UTC hour of local time in [0,23]\n  3. interp.linear(DIURNAL_FACTORS_NOx, [0..23], hour) — exact table lookup\n\nParameter rename: upstream `t` → ESM `t_utc` to avoid collision with the\nsimulation independent variable `t`.\n\nDIURNAL_FACTORS_NOx (24 entries, local hours 0-23):\n  hour  0: 0.39598674\n  hour  1: 0.31852847\n  hour  2: 0.30128068\n  hour  3: 0.29590213\n  hour  4: 0.33177775\n  hour  5: 0.43871498\n  hour  6: 0.9094625\n  hour  7: 1.5850095\n  hour  8: 1.6223788\n  hour  9: 1.3429453\n  hour 10: 1.2265036\n  hour 11: 1.1937649\n  hour 12: 1.254314\n  hour 13: 1.3282939\n  hour 14: 1.331211\n  hour 15: 1.4135737\n  hour 16: 1.6848333\n  hour 17: 1.710925\n  hour 18: 1.3491899\n  hour 19: 1.0586671\n  hour 20: 0.84439224\n  hour 21: 0.761263\n  hour 22: 0.72693235\n  hour 23: 0.5741503"
       },
@@ -58,10 +72,11 @@
         {
           "lhs": "diurnal_itp_NOx",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "value": [
                   0.39598674,
@@ -91,7 +106,7 @@
                 ],
                 "args": []
               },
-              {
+              "axis": {
                 "op": "const",
                 "value": [
                   0,
@@ -121,11 +136,12 @@
                 ],
                 "args": []
               },
-              {
-                "op": "fn",
-                "name": "datetime.hour",
-                "args": [
-                  {
+              "x": {
+                "op": "apply_expression_template",
+                "args": [],
+                "name": "hour",
+                "bindings": {
+                  "t": {
                     "op": "+",
                     "args": [
                       "t_utc",
@@ -155,9 +171,10 @@
                       }
                     ]
                   }
-                ]
-              }
-            ]
+                }
+              },
+              "n": 24
+            }
           }
         }
       ],
