@@ -37,7 +37,7 @@ Sources:
 
 | File | Contents | Fortran source |
 |---|---|---|
-| `mom6_templates.esm` | Expression-template library (28 templates): `wright_alpha0`, `wright_p0`, `wright_lambda` (the three shared polynomials), `wright_density`, `wright_drho_dT`, `wright_drho_dS`, the 15 constant fragments `wright_coeff_a0..c5` (the single shared source of the fit coefficients), the `wright_rho` composition (the whole in-situ law in one application, used by KPPBLD), `masked_pair_average` (the AGRID h-point stress average; consumer not ported), `linear_tfreeze`, `interface_entrainment`, `tridiagonal_residual`, `surface_mix`, `layer_content_change` | `MOM_EOS_Wright_full.F90`: density_elem_Wright_full 75-91, calculate_density_derivs_elem_Wright_full 179-204, constants 23-37; `mom_surface_forcing_nuopc.F90`: 943-951; `MOM_TFreeze.F90`: calculate_TFreeze_linear_scalar 51-64; `MOM_diabatic_driver.F90`: 1728-1739; `MOM_tracer_diabatic.F90`: 384-413; `MOM_diabatic_aux.F90`: 1170-1171 |
+| `mom6_templates.esm` | Expression-template library (27 templates): `wright_alpha0`, `wright_poly` (the shared bivariate polynomial, bound with the b- and c-coefficient sets for the p0 and lambda sub-polynomials), `wright_density`, `wright_drho_dT`, `wright_drho_dS`, the 15 constant fragments `wright_coeff_a0..c5` (the single shared source of the fit coefficients), the `wright_rho` composition (the whole in-situ law in one application, used by KPPBLD), `masked_pair_average` (the AGRID h-point stress average; consumer not ported), `linear_tfreeze`, `interface_entrainment`, `tridiagonal_residual`, `surface_mix`, `layer_content_change` | `MOM_EOS_Wright_full.F90`: density_elem_Wright_full 75-91, calculate_density_derivs_elem_Wright_full 179-204, constants 23-37; `mom_surface_forcing_nuopc.F90`: 943-951; `MOM_TFreeze.F90`: calculate_TFreeze_linear_scalar 51-64; `MOM_diabatic_driver.F90`: 1728-1739; `MOM_tracer_diabatic.F90`: 384-413; `MOM_diabatic_aux.F90`: 1170-1171 |
 | `mom6_eos.esm` | Model `WrightEOS` — rho(T, S, p), drho/dT, drho/dS via the templates (imported by reference), with the 15 coefficients bound by reference from the `wright_coeff_a0..c5` fragments, `I_denom2`; 15 dump-pinned tests | `MOM_EOS_Wright_full.F90` as above; the EOS calls themselves are `calculate_density`/`calculate_density_derivs_scalar` in `MOM_CVMix_KPP.F90:1437` |
 | `mom6_kpp_templates.esm` | Expression-template library for the KPP laws (16 templates): the LMD94 stability functions phi_m^-1/phi_s^-1 with the Large-et-al.-1994 coefficients (`kpp_phi_coeffs_m_a/c/s_a/s_c`, `kpp_phi_inv_m/s`), the turbulent velocity scales w_m/w_s (`kpp_wm`, `kpp_ws`), the unresolved shear Vt² with the Danabasoglu et al. 2006 Cv (`kpp_unresolved_shear`), the bulk Richardson number (`kpp_bulk_richardson`), the KPP shape function G(σ) (`kpp_shape_cubic`), the OBL-depth quadratic (`kpp_quad_interp_c/b/a`, `kpp_quad_root`), the KPP_IS_ADDITIVE=False replacement (`kpp_override_nonzero`) | `cvmix_kpp.F90`: compute_phi_inv 2910-3005, turbulent_scales_1d_OBL 2416-2604, unresolved_shear 2611-2903, bulk_Richardson 2031-2132, shape_function_coeffs 3079-3112; `cvmix_math.F90`: linear_through_cubic_poly_interp 103-138, cubic_root_find 260-294, evaluate_cubic 300-340 |
 | `mom6_column_discretization.esm` | Local EarthSciDiscretizations-format rules: the layer/interface grid of the MOM6 column (index sets `layer`/`iface`, metaparameters `N_LAYER`/`N_IFACE` = 75/76) and the two `column_nonuniform_1d` cumulative-integral rules imported by reference at a 9.7.7 renaming edge (`integral_lev_nodes_cumulative_from_bottom` — the surface-to-interface exclusive prefix; `integral_lev_cumulative_from_bottom` — the surface-to-layer-centre midpoint-rule integral) | `MOM_CVMix_KPP.F90`: the iFaceHeight/cellHeight loops 1237-1243, the pRef hydrostatic accumulation 1282-1283/1452-1456; ESD `grids/column_nonuniform_1d/rules/` |
@@ -343,19 +343,40 @@ The two local rule files (`mom6_column_discretization.esm`,
 follow the corpus conventions of the CISM port's
 `cism_velo_discretization.esm`.
 
+## Pin-lint (`tools/esm-pin-lint.py` of the EqESM project)
+
+`python3 tools/esm-pin-lint.py` on this directory reports **20 findings
+(9 non-warning)** — every one triaged by the EqESM `mom6-prune-esm` slice
+(disposition record: `stage2/README-mom6-prune-esm.md` in the EqESM
+project).  No assertion was dropped: all 31 flagged assertions are real,
+failable tests.  The port's original `wright_lambda` ≡ `wright_p0`
+`duplicate-template` finding is gone — the re-port (below) copies the
+EqESM stage-2 files after their `wright_poly` refactor, which merged the
+pair into one template.
+
+| finding | disposition |
+|---|---|
+| `override-copy` ×3 — KPPCoefs `Kv_out` pass-through pins at the first restoration interface kwup+1 | **branch-selection pins** of the `kpp_override_nonzero` else-branch (Kv_out = Kv_in where the KPP viscosity is zero): fail on an inverted ifelse condition, a shifted pass-through index, or a kwup off-by-one; the value equals the Kv_in element *because the law's else-branch is a pass-through*; kept one per row by the EqESM review trim (`README-mom6.md`) |
+| `override-copy` + `zero-pin` ×4 — bflux `heat_residual` pins | the column heat budget closure `dHeat_col = netHeat + penSW_total − leftover` across four independently computed terms at abs 1e-12; fails if any term is wrong; the conservation pin the EqESM review kept when the mass/salt residual pins were dropped (`README-mom6-frazil-bflux.md`) |
+| `zero-pin` ×4 tests — frazil `supercooling` (×2) and `fraz_col` | the **no-formation branch law** of the frazil scan: supercooling = max(0, T_freeze − T_before) pinned on the two closest-to-freezing layers (margins 0.175/0.178 degC), fraz_col = Σ hc·supercooling; fail on a missing max clamp, a wrong freezing point, a wrong heat capacity, or any spurious supercooling (the formation branch is a documented coverage gap — every traced column is warm) |
+| `zero-pin` ×3 tests — vertdiff `tri_res_T/S` | the scaled residual of the implicit vertical-diffusion solve (`tridiagonal_residual`), pinned at mixed-layer and bottom layers at abs tolerances scaled to each row's conditioning; the lane's check that the PDE discretization reproduces the MOM6 tridiagonal solve — fails on any operator/solve/ent error; zero-valued on these rows *because the solve is consistent*, the property being asserted |
+| `inline-repeat` ×2 — KPPBLD `max(-(i,1),1)` index clamp and KPPCoefs `and(>=(i,2), <=(i,kwup))` guard | **false positives**, documented: the F90's `max(k−1,1)` floor in index position and the `k >= 2 .and. k <= kwup` loop guard in the Kd_heat/Kd_salt/Kv ifelse conditions — index expressions and index-set predicates cannot be named intermediates in esm, and the guard's kwup bound is a test parameter so the faq range cannot express it; both mirror the F90 structure |
+
 ## Test results across runners
 
 | runner | result |
 |---|---|
 | Rust CLI (esm 0.7.0, the EqESM main `./esm` copy) | **417P / 0F / 0E** |
 | Rust CLI (release v0.10.0 binary) | **417P / 0F / 0E** |
+| Rust CLI (esm 0.12.1, EarthSciAST main — the binary the esm-2.0.0 corpus migration used) | **417P / 0F / 0E** |
 | Python inline gate (`tools/run_esm_inline_tests.py`) | **49P / 0F / 372E** — every error is one of the two known python-runner limitation classes (shaped `parameter_overrides` do not resolve in the flattened python system: `Unresolved symbol: '…T_before'/'…h'/'…sw_pen_band'` — bflux 28E, frazil 52E, shortwave 78E; array-state/index-set-size handling: `index 75/76 is out of bounds for axis 0 with size 75/76` — kpp 158E, vertdiff 56E).  The same limitation classes are documented by the CICE and CISM ports; the Rust runner passes every one of these assertions.  Zero FAILs. |
 
-`esm validate` passes on all ten files under both Rust binaries; `esm units`
-shows no `units_dimensionless_literal_mismatch` on any file under either
-(the informational "consider SI base units" note on the degC/ppt-carrying
-files is inherited from stage2 — degC and ppt are accepted unit strings in
-esm 1.3.0).
+`esm validate` passes on all ten files under all three Rust binaries (with
+`ESD_ROOT` pointing at EarthSciDiscretizations main, as the upstream CI
+does); `esm units` shows no `units_dimensionless_literal_mismatch` on any
+file under either (the informational "consider SI base units" note on the
+degC/ppt-carrying files is inherited from stage2 — degC and ppt are
+accepted unit strings in esm 1.3.0).
 
 ## Next steps
 
