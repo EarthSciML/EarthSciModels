@@ -1,5 +1,5 @@
 {
-    "esm": "1.0.0",
+    "esm": "2.0.0",
     "metadata": {
         "name": "LevelSetFireSpread",
         "description": "Level-set fire front propagation PDE: Hamilton-Jacobi equation ∂ψ/∂t + S(n̂)|∇ψ| = 0, where S(n̂) is the Rothermel/Mandel (2011) direction-dependent spread rate projected onto the fire-front normal. Migrated from WildlandFire.jl src/level_set_fire_spread.jl:73. v0.8.0: a DISCRETIZATION-AGNOSTIC library PDE leaf. (1) Spatial derivatives are bare `D` ops (op:D, wrt:x / wrt:y) instead of the `grad` sugar. (2) This leaf imports NO discretization of its own — the scheme is chosen by the ASSEMBLER that mounts this component, which carries the rule imports on its model-ref edge (esm-spec §9.7.10 form A: the edge's `expression_template_imports` register into this component's own template scope). The reference assembler (wildlandfire.esm/level_set_hj_2d.esm) mounts the first-order Godunov (Rouy-Tourin / Osher-Sethian) rule godunov_norm_D2_periodic, which fires by compound match on the gradient-magnitude term sqrt(D(psi,x)² + D(psi,y)²), plus the central rules central_D1x/D1y for the individual ∂ψ/∂x, ∂ψ/∂y in the wind/slope normal projections — but any grid + scheme satisfying the same D-op / grid-geometry contract composes here unchanged. (3) The direction-dependent right-hand side is authored as READABLE INTERMEDIATE array-shaped observed fields over the [x,y] index sets — psi_x, psi_y (central ∂ψ), grad_mag (Godunov |∇ψ|), grad_safe, U_n, tanphi_n (wind/slope normal projections), phi_W, phi_S, and S_n (the spread rate) — so the state equation is simply D(psi,t) = −S_n·grad_mag. Both toolkits evaluate these per cell: the Julia evaluator folds the elementwise ones into the state RHS (leaving the producer stencils psi_x/grad_mag for its index beta-reduction), and the Rust array runtime materializes each as a companion buffer in dependency order — identical numerics either way (front radii match to 4 places at NX=NY=32). The producer observeds (psi_x, psi_y, grad_mag) carry the bare D ops the mounted discretization lowers; grad_mag's exponent is the integer 2 on the bare D ops so the Godunov compound matches. Only the scalar grid observeds (dx, dy) remain scalar. (4) Grid geometry (index sets x,y; spacing dx=Lx/NX, dy=Ly/NY; extent x0,y0) is the consumer-supplied contract of grids/cartesian_uniform_2d/grid.esm (metaparameters NX,NY bound at load; extent Lx,Ly parameters), and BCs come from the mounted discretization. The initial perimeter is supplied by the ASSEMBLER (a §11.4.1 dedicated IC model), not baked here. The D ops assume Cartesian (x,y in meters) coordinates; geographic (lon/lat) usage needs metric-tensor scaling not yet expressible in ESM (other:P3-A-metric-tensor-coord-transforms gap).",
@@ -556,7 +556,7 @@
                         "type": "expression",
                         "values": {
                             "psi": {
-                                "op": "aggregate",
+                                "op": "faq",
                                 "args": [],
                                 "expr": {
                                     "op": "-",
