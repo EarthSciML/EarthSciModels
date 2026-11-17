@@ -133,7 +133,7 @@
           "type": "unknown",
           "units": "K",
           "shape": ["lev"],
-          "description": "Layer temperature (WRF t3d), the prognostic state, initialised from `input_T` and heated by dTdt."
+          "description": "Layer temperature (WRF t3d), the consumer-supplied column the heating acts on, read through `input_T`. This component does NOT own it: WRF's radiation driver is handed t3d and returns a tendency, and in an assembly the temperature is the consumer's state, integrated under the sum of every scheme's tendency rather than under dTdt alone (see the state-ownership rule in CLAUDE.md). Nothing in this component reads T; it is here because it names what dTdt is a tendency OF."
         },
         "g_over_cp": {
           "type": "unknown",
@@ -161,6 +161,13 @@
           "type": "unknown",
           "units": "W/m^2",
           "description": "WRF's OLR diagnostic: the upwelling longwave flux at the MODEL TOP, F_up[NLEV+1] (RRTM OLR = TOTUFLUX(kte)), which is not the flux at the top of the extended RRTM column (TOTUFLUX(NLAYERS), 3-7 W/m^2 lower in the reference run because the buffer layers above p_top absorb). Template wrf_olr of rrtm_flux_diagnostics.esm, shared with rtrn_sweep.esm."
+        },
+        "T_in": {
+         "type": "parameter",
+         "units": "K",
+         "shape": ["lev"],
+         "default": 0.0,
+         "description": "Coupling target (assembly input path): a shaped parameter that receives the layer temperature (WRF t3d) from the column geometry (components/atmospheric_dynamics/wrf_arw/column_geometry.esm, output `T`) through a document-level `coupling.variable_map` (param_to_var); a mount-edge template library lowers this component's `input_T` rewrite target to it (esm-spec 9.7.10, 10.4). Unused by this component's own inline tests, which lower `input_T` to dumped constants instead."
         }
       },
       "equations": [
@@ -193,7 +200,7 @@
         { "lhs": "F_dn", "rhs": { "op": "input_F_dn", "args": [] } },
         { "lhs": "F_net", "rhs": { "op": "-", "args": ["F_up", "F_dn"] } },
         { "lhs": "exner", "rhs": { "op": "input_exner", "args": [] } },
-        { "lhs": { "op": "ic", "args": ["T"] }, "rhs": { "op": "input_T", "args": [] } },
+        {"lhs": "T", "rhs": {"op": "input_T", "args": []}},
         {
           "lhs": "g_over_cp",
           "rhs": {
@@ -215,7 +222,6 @@
             ]
           }
         },
-        { "lhs": { "op": "D", "args": ["T"], "wrt": "t" }, "rhs": "dTdt" },
         { "lhs": "dthdt", "rhs": { "op": "/", "args": ["dTdt", "exner"] } },
         { "lhs": "glw", "rhs": {"op": "apply_expression_template", "args": [], "name": "wrf_glw", "bindings": {"F_dn": "F_dn"}} },
         {
