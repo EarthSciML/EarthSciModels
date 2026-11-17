@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "2.0.0",
   "metadata": {
     "name": "A_table",
     "description": "Characteristic collector radius A [m] for aerosol quasi-laminar sublayer resistance (Seinfeld & Pandis 2006, Table 19.2). Two-argument lookup A(iSeason, iLandUse) over 5 seasons × 5 Seinfeld land-use categories. Migrated from AtmosphericDeposition.jl@e4468c79 src/dry_deposition.jl:180 (@register_symbolic). Used by RbParticle to compute impaction and gravitational-settling terms in particle dry deposition. The gt-p3ep (@register_symbolic) gap is resolved by expressing the lookup as interp.linear over the 25-entry column-major flattening of the 5×5 season × land-use table on integer axis [1..25], queried at table_index = (iLandUse-1)*5 + iSeason.",
@@ -28,6 +28,14 @@
   },
   "models": {
     "A_table": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/dry_deposition.jl:180\n\nUpstream definition:\n  @register_symbolic A_table(iSeason, iLandUse)\n\nThe function is a 2D lookup into S&P Table 19.2, the 5×5 matrix of characteristic collector radii A (mm) by season and Seinfeld land-use category.\n\nSeason index (iSeason):\n  1 = seinfeldMidsummer   (lush midsummer vegetation)\n  2 = seinfeldAutumn      (autumn, cropland not yet harvested)\n  3 = seinfeldLateAutumn  (late autumn after frost, before snow)\n  4 = seinfeldWinter      (winter, snow on ground)\n  5 = seinfeldTransitional (spring transitional)\n\nLand-use index (iLandUse):\n  1 = seinfeldEvergreen  (needleleaf evergreen trees)\n  2 = seinfeldDeciduous  (broadleaf deciduous trees)\n  3 = seinfeldGrass      (grassland)\n  4 = seinfeldDesert     (desert/bare soil, A = Inf)\n  5 = seinfeldShrubs     (shrubs and interrupted woodlands)\n\nRaw table values (mm), rows=seasons, cols=land-use:\n              Evergreen  Deciduous  Grass   Desert  Shrubs\n  Midsummer:    2.0        5.0      2.0     Inf     10.0\n  Autumn:       2.0        5.0      2.0     Inf     10.0\n  LateAutumn:   2.0       10.0      5.0     Inf     10.0\n  Winter:       2.0       10.0      2.0     Inf     10.0\n  Transitional: 2.0        5.0      2.0     Inf     10.0\n\nUpstream stores these as SA_F32 (Float32 static array). Values 2, 5, 10 are exact in Float32; after the upstream *1.0e-3 mm-to-m conversion at the call site, the entries are 0.002, 0.005, 0.010 (clean decimals, exact in Float32). The desert column is Julia `Inf` (Float32(Inf)), which after *1.0e-3 remains Inf. JSON cannot represent Inf; it is stored as the finite sentinel 1.0e25. interp.linear returns 1.0e25 exactly at an integer-axis knot (zero blend weight), making the impaction term 0.5*(Dp/1.0e25)^2 ≈ 0 and the Stokes-number impaction term (St/(α+St))^2 ≈ 0 at any physical Stokes number, faithfully reproducing the upstream Inf→0 behaviour to ~50 digits.\n\nThe upstream *1.0e-3 mm→m conversion is baked into the stored entries so callers receive meters directly, matching the convention in the sibling dry_aerosol.esm inlining of the same table.\n\nThe @register_symbolic gap (gt-p3ep) is resolved by composing interp.linear over the 25-entry column-major flattening of the 5×5 grid on integer axis [1..25], evaluated at table_index = (iLandUse-1)*5 + iSeason. iSeason in 1..5 and iLandUse in 1..5 are categorical integers, so every lookup lands exactly on an integer axis knot — interp.linear returns the exact table entry with zero blend weight, bit-identical to the upstream direct array indexing.\n\nNaming note: the file is named 'wesley_A_table' to distinguish it from any other A_table definitions (e.g. the S&P aerosol model's own inline). The @register_symbolic function is simply `A_table` in the upstream source.\n\nTolerance (rel=1e-12): interp.linear at an exact integer grid knot is a point evaluation with zero blend weight — a direct table read with one IEEE-754 operation. rel=1e-12 sits safely above the one-ULP float64 floor."
       },
@@ -84,10 +92,11 @@
         {
           "lhs": "A_table",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -118,7 +127,7 @@
                   0.01
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -149,8 +158,9 @@
                   25
                 ]
               },
-              "table_index"
-            ]
+              "x": "table_index",
+              "n": 25
+            }
           }
         }
       ],

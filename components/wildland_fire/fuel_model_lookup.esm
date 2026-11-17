@@ -1,5 +1,5 @@
 {
-    "esm": "1.0.0",
+    "esm": "2.0.0",
     "metadata": {
         "name": "FuelModelLookup",
         "description": "Anderson (1982) 13 fuel-model parameter lookup: maps integer fuel model code (1–13) to the six Rothermel fire spread fuel properties (σ, w₀, δ, Mₓ, h, Tᶠ). Aggregates the six registered fuel_* functions (fuel_savr, fuel_load, fuel_depth, fuel_mce, fuel_heat, fuel_weight) into a single observed-variable component. Out-of-range codes (including LANDFIRE non-burnable codes 91–99) return fuel-model-1 defaults for σ, w₀, δ, Mₓ, and Tᶠ, and 0 J/kg for h. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:155 (`FuelModelLookup` @mtkmodel). Resolves the gt-p3ep blocking gap via ifelse + interp.linear for the five variable-valued properties and a simple ifelse for the constant heat content.",
@@ -29,6 +29,14 @@
     },
     "models": {
         "FuelModelLookup": {
+            "expression_template_imports": [
+                {
+                    "ref": "esm:std/interp.esm",
+                    "only": [
+                        "linear"
+                    ]
+                }
+            ],
             "reference": {
                 "citation": "Anderson, H.E. (1982). Aids to determining fuel models for estimating fire behavior. USDA Forest Service Gen. Tech. Rep. INT-122.",
                 "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:155\n\nUpstream `FuelModelLookup` is an MTK `@mtkmodel` whose single input is `code` (`@parameters code=1`) and whose six outputs are `@variables sigma(t), w_0(t), delta(t), M_x(t), h(t), T_f(t)` defined by `@observed` equations that call the six `@register_symbolic` fuel functions:\n\n  sigma ~ fuel_savr(code)\n  w_0   ~ fuel_load(code)\n  delta ~ fuel_depth(code)\n  M_x   ~ fuel_mce(code)\n  h     ~ fuel_heat(code)\n  T_f   ~ fuel_weight(code)\n\nEach fuel_* registered function maps the integer Anderson code to a physical property in SI units, falling back to the fuel-model-1 default for out-of-range codes. The sole exception is fuel_heat, which maps codes 1–13 to the shared value 18,608,000 J/kg and all other codes (including LANDFIRE non-burnable 91–99) to 0 J/kg.\n\nSI unit conversions (applied in the registered function ESMs, preserved here):\n  sigma  (σ): 1/ft → 1/m via ÷ 0.3048\n  w_0 (w₀): upstream mixed units → kg/m² via × (0.45359237 / 0.09290304)\n  delta (δ): ft → m via × 0.3048\n  M_x:  already dimensionless fraction in source\n  h:    BTU/lb → J/kg via × 2326 (8000 BTU/lb for all Anderson models)\n  T_f:  s (weight / 0.8514 where weight is the source time constant)\n\ngt-p3ep resolution: each property except h is expressed as\n  ifelse(AND(code>=1, code<=13), interp.linear(values, [1..13], code), default)\nwhere interp.linear on integer-valued code returns the exact table value.\nh uses the degenerate form ifelse(AND(code>=1, code<=13), 18608000.0, 0.0)\nbecause all 13 Anderson models share the same heat content.\n\nAnderson fuel model parameter table (SI units):\n  code |  sigma (m⁻¹) |  w_0 (kg/m²) | delta (m) |  M_x  |  h (J/kg) |  T_f (s)\n  1    | 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 18608000  | 8.221752\n  2    |  9842.519685 | 0.449183343  | 0.3048    | 0.15  | 18608000  | 8.221752\n  3    |  4921.259843 | 0.673775014  | 0.762     | 0.25  | 18608000  | 8.221752\n  4    |  5705.380577 | 1.122958356  | 1.8288    | 0.20  | 18608000  | 211.41649\n  5    |  5521.653543 | 0.224591671  | 0.6096    | 0.20  | 18608000  | 29.36340\n  6    |  5131.233596 | 0.336887507  | 0.762     | 0.25  | 18608000  | 29.36340\n  7    |  5124.671916 | 0.253886237  | 0.762     | 0.40  | 18608000  | 29.36340\n  8    |  6197.506562 | 0.336887507  | 0.06096   | 0.30  | 18608000  | 1057.08245\n  9    |  8149.606299 | 0.654245303  | 0.06096   | 0.25  | 18608000  | 1057.08245\n  10   |  5787.401575 | 0.673775014  | 0.3048    | 0.25  | 18608000  | 1057.08245\n  11   |  3877.952756 | 0.336887507  | 0.3048    | 0.15  | 18608000  | 1057.08245\n  12   |  3756.561680 | 0.898366685  | 0.70104   | 0.20  | 18608000  | 1057.08245\n  13   |  3802.493438 | 1.572141699  | 0.9144    | 0.25  | 18608000  | 1057.08245\n  other| 11482.939633 | 0.166002540  | 0.3048    | 0.12  | 0         | 8.221752\n\nTolerance rationale (model-level rel=1e-12): all six outputs are computed\nvia ifelse + interp.linear at integer-valued code inputs, which returns\nexact table values at grid knots. 1e-12 covers the one-ULP float64\nrounding without admitting any physical imprecision."
@@ -105,10 +113,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             11482.939632545931,
@@ -127,7 +136,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -146,8 +155,9 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
                             11482.939632545931
                         ]
@@ -178,10 +188,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             0.16600253963702372,
@@ -200,7 +211,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -219,8 +230,9 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
                             0.16600253963702372
                         ]
@@ -251,10 +263,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             0.3048,
@@ -273,7 +286,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -292,8 +305,9 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
                             0.3048
                         ]
@@ -324,10 +338,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             0.12,
@@ -346,7 +361,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -365,8 +380,9 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
                             0.12
                         ]
@@ -426,10 +442,11 @@
                                 ]
                             },
                             {
-                                "op": "fn",
-                                "name": "interp.linear",
-                                "args": [
-                                    {
+                                "op": "apply_expression_template",
+                                "args": [],
+                                "name": "linear",
+                                "bindings": {
+                                    "table": {
                                         "op": "const",
                                         "value": [
                                             8.221752407798919,
@@ -448,7 +465,7 @@
                                         ],
                                         "args": []
                                     },
-                                    {
+                                    "axis": {
                                         "op": "const",
                                         "value": [
                                             1.0,
@@ -467,8 +484,9 @@
                                         ],
                                         "args": []
                                     },
-                                    "code"
-                                ]
+                                    "x": "code",
+                                    "n": 13
+                                }
                             },
                             8.221752407798919
                         ]
