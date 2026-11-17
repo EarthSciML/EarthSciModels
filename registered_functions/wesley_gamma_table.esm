@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "2.0.0",
   "metadata": {
     "name": "wesley_gamma_table",
     "description": "Seinfeld & Pandis (2006) Brownian-diffusion exponent γ lookup table indexed by land-use category. Migrated from AtmosphericDeposition.jl@e4468c79 src/dry_deposition.jl:190 (`γ_table(iLandUse)`, @register_symbolic). Returns γ for five Seinfeld land-use categories (1=Evergreen, 2=Deciduous, 3=Grass, 4=Desert, 5=Shrubs) from the 5-entry Float32 row vector SA_F32[0.56 0.56 0.54 0.54 0.54]. γ is the Brownian-diffusion exponent used in the quasi-laminar particle resistance term R_b (Seinfeld & Pandis 2006 Eq. 19.27): term_1 = Sc^(-γ). The gt-p3ep (@register_symbolic) gap is resolved by expressing the lookup as a 1D interp.linear over integer land-use axis [1..5].",
@@ -29,6 +29,14 @@
   },
   "models": {
     "γ_table": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/dry_deposition.jl:190\n\nUpstream definition:\n  γ_table(iLandUse) = SA_F32[0.56 0.56 0.54 0.54 0.54][iLandUse]\n  @register_symbolic γ_table(iLandUse)\n  ModelingToolkit.get_unit(::typeof(γ_table)) = 1.0\n  γ_table(::DynamicQuantities.Quantity) = 1.0\n\nThe source is a 5-entry Float32 static array (StaticArrays.SA_F32) indexed\nby the integer land-use category iLandUse in [1, 5]:\n  iLandUse = 1 (Evergreen):  γ = Float32(0.56) → Float64 = 0.5600000023841858\n  iLandUse = 2 (Deciduous):  γ = Float32(0.56) → Float64 = 0.5600000023841858\n  iLandUse = 3 (Grass):      γ = Float32(0.54) → Float64 = 0.5400000214576721\n  iLandUse = 4 (Desert):     γ = Float32(0.54) → Float64 = 0.5400000214576721\n  iLandUse = 5 (Shrubs):     γ = Float32(0.54) → Float64 = 0.5400000214576721\n\nγ is the Brownian-diffusion exponent appearing in the quasi-laminar\nboundary layer resistance for particles (Seinfeld & Pandis 2006 Eq. 19.27).\nThe term Sc^(-γ) captures size-dependent Brownian diffusion: smaller\nparticles have larger Sc^(-γ) and thus more efficient diffusional deposition.\nVegetated canopy classes (Evergreen, Deciduous) use γ=0.56; open/sparse\nclasses (Grass, Desert, Shrubs) use γ=0.54. γ is used in RbParticle() as:\n  term_1 = Sc^(-γ)\n\nThe @register_symbolic gap (gt-p3ep) is resolved by expressing the lookup\nas a 1D interp.linear over the 5-entry float64-promoted table values with\ninteger axis [1.0, 2.0, 3.0, 4.0, 5.0]. For integer inputs in [1, 5],\ninterp.linear at an exact grid knot returns the exact table value (blend\nweight = 0 or 1 at both endpoints). Out-of-range inputs are clamped to the\nboundary values (γ=0.5600000023841858 for iLandUse < 1, γ=0.5400000214576721\nfor iLandUse > 5).\n\nFloat32 → Float64 promotion: Float32(0.56) promotes to 0.5600000023841858;\nFloat32(0.54) promotes to 0.5400000214576721. These are the exact Float64\nrepresentations of the Float32 bit patterns used in the upstream SA_F32 array.\n\nTolerance (rel=1e-12): interp.linear at an exact integer grid knot is a\ndirect table read with zero blend weight — a single IEEE-754 operation.\nrel=1e-12 sits safely above the one-ULP float64 floor without admitting\nany physical imprecision."
       },
@@ -52,10 +60,11 @@
         {
           "lhs": "γ_table",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "value": [
                   0.5600000023841858,
@@ -66,7 +75,7 @@
                 ],
                 "args": []
               },
-              {
+              "axis": {
                 "op": "const",
                 "value": [
                   1.0,
@@ -77,8 +86,9 @@
                 ],
                 "args": []
               },
-              "iLandUse"
-            ]
+              "x": "iLandUse",
+              "n": 5
+            }
           }
         }
       ],
