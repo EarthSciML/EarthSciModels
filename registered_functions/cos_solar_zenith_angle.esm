@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "2.0.0",
   "metadata": {
     "name": "cos_solar_zenith_angle",
     "description": "Cosine of the solar zenith angle as a function of UTC time, latitude, and longitude. Migrated from GasChem.jl src/Fast-JX.jl:1049 (`cos_solar_zenith_angle(lat, lon, t_utc)`, @register_symbolic). Implements the NOAA Spencer-Fourier solar position algorithm: computes the fractional-year angle γ from the UTC day-of-year and hour, evaluates the Spencer Fourier series for solar declination δ and equation of time EoT, converts to true solar time and hour angle ω, and returns clamp(sin φ sin δ + cos φ cos δ cos ω, -1, 1) where φ is latitude in radians. The gt-p3ep (@register_symbolic) gap is resolved by expressing the function as a closed-form AST composition of the `datetime.*` registry functions and elementary trig ops, identical to the formula used by lib/solar.esm `Solar.cos_zenith`.",
@@ -31,6 +31,17 @@
   },
   "models": {
     "cos_solar_zenith_angle": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/calendar.esm",
+          "only": [
+            "day_of_year",
+            "hour",
+            "minute",
+            "second"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: GasChem.jl@8c12c048482b515fb8eb2110bf8ab4b4f4e71309:src/Fast-JX.jl:1049\n\nUpstream definition:\n  function cos_solar_zenith_angle(lat, lon, t_utc)\n      # Spencer-Fourier solar position algorithm\n      dt = unix2datetime(t_utc)\n      DOY = dayofyear(dt)\n      H = hour(dt); Mn = minute(dt); S = second(dt)\n      γ = 0.01721420632103996 * ((DOY - 1) + (H - 12)/24.0)\n      δ = 0.006918 - 0.399912*cos(γ) + 0.070257*sin(γ) - 0.006758*cos(2γ)\n            + 0.000907*sin(2γ) - 0.002697*cos(3γ) + 0.00148*sin(3γ)\n      EoT = 229.18 * (0.000075 + 0.001868*cos(γ) - 0.032077*sin(γ)\n                      - 0.014615*cos(2γ) - 0.040849*sin(2γ))\n      TST = H*60.0 + Mn + S/60.0 + EoT + 4.0*lon\n      ω = 0.017453292519943295 * (TST/4.0 - 180.0)\n      φ = 0.017453292519943295 * lat\n      return clamp(sin(φ)*sin(δ) + cos(φ)*cos(δ)*cos(ω), -1.0, 1.0)\n  end\n  @register_symbolic cos_solar_zenith_angle(lat, lon, t_utc)\n\nThe @register_symbolic gap (gt-p3ep) is resolved by expressing the function\nas a pure AST composition using the closed function registry `datetime.*`\nops (day_of_year, hour, minute, second) and elementary trig/arithmetic ops.\nThe formula is bit-identical to the one in lib/solar.esm `Solar.cos_zenith`\n(the FastJX ESM model sources cos_sza via that library rather than calling\nthis registered function directly).\n\nIntermediate observed variables follow the same decomposition as solar.esm:\n  γ (gamma): NOAA fractional-year angle, 0 at Jan 1 noon, 2π at Dec 31 noon\n  δ (solar_declination): Spencer (1971) 6-term Fourier series, accurate ~0.0006 rad\n  EoT (equation_of_time): apparent minus mean solar time in minutes\n  TST (true_solar_time): minutes since UTC midnight at the local meridian\n  ω (hour_angle): radians, zero at local solar noon, positive in afternoon\n  φ (lat_rad): latitude in radians\n\nTolerance (rel=1e-10): the computation chains ~15 trig evaluations through\nthe Spencer series and the zenith-angle dot product. Cross-binding differences\nbetween Python/Julia libm trig implementations accumulate to ≤ 10 ULP on the\ntranscendental composition (consistent with lib/solar.esm's tolerance claim);\nrel=1e-10 sits safely above the ~5e-15 empirical floor while being strict\nenough to catch any expression rewrite errors."
       },
@@ -116,41 +127,45 @@
         {
           "lhs": "day_of_year",
           "rhs": {
-            "op": "fn",
-            "name": "datetime.day_of_year",
-            "args": [
-              "t_utc"
-            ]
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "day_of_year",
+            "bindings": {
+              "t": "t_utc"
+            }
           }
         },
         {
           "lhs": "hour",
           "rhs": {
-            "op": "fn",
-            "name": "datetime.hour",
-            "args": [
-              "t_utc"
-            ]
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "hour",
+            "bindings": {
+              "t": "t_utc"
+            }
           }
         },
         {
           "lhs": "minute",
           "rhs": {
-            "op": "fn",
-            "name": "datetime.minute",
-            "args": [
-              "t_utc"
-            ]
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "minute",
+            "bindings": {
+              "t": "t_utc"
+            }
           }
         },
         {
           "lhs": "second",
           "rhs": {
-            "op": "fn",
-            "name": "datetime.second",
-            "args": [
-              "t_utc"
-            ]
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "second",
+            "bindings": {
+              "t": "t_utc"
+            }
           }
         },
         {
