@@ -1,5 +1,5 @@
 {
-  "esm": "1.0.0",
+  "esm": "2.0.0",
   "metadata": {
     "name": "fuel_mce",
     "description": "Anderson 13 fuel model lookup table: dead fuel moisture content of extinction Mx (dimensionless fraction) from the fuel model code. Migrated from WildlandFire.jl@126976f2 src/coupling.jl:126 (`fuel_mce` @register_symbolic interface). Maps integer fuel model code (1-13) to Mx (dimensionless dry-weight-basis fraction), using the Anderson (1982) Mx values from the WRF-SFIRE table (Mandel et al. 2011 Table 1). Codes outside [1, 13] — including LANDFIRE non-burnable codes (91, 92, 93, 98, 99) — return the fuel model 1 default: 0.12. The gt-p3ep (@register_symbolic) gap is resolved by expressing the lookup as interp.linear over the 13 Anderson codes with an ifelse guard for out-of-range codes.",
@@ -27,6 +27,14 @@
   },
   "models": {
     "fuel_mce": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "notes": "source_ref: WildlandFire.jl@126976f2508ceacca6c486b21ae6da5b168c6f46:src/coupling.jl:126\n\nUpstream definition:\n  const _FUEL_MCE = Dict(k => v.mce for (k, v) in ANDERSON_FUEL_DATA)\n  fuel_mce(code) = _lookup_fuel(_FUEL_MCE, code, 0.12)\n  @register_symbolic fuel_mce(code)\n\nwhere ANDERSON_FUEL_DATA.mce values (dimensionless fraction, dry-weight basis) are:\n  code 1:         mce = 0.12   (short grass)\n  code 2:         mce = 0.15   (timber/grass/shrub mix)\n  code 3:         mce = 0.25   (tall grass)\n  code 4:         mce = 0.20   (chaparral)\n  code 5:         mce = 0.20   (brush)\n  code 6:         mce = 0.25   (dormant brush / hardwood slash)\n  code 7:         mce = 0.40   (southern rough)\n  code 8:         mce = 0.30   (closed timber litter)\n  code 9:         mce = 0.25   (hardwood litter)\n  code 10:        mce = 0.25   (timber litter with understory)\n  code 11:        mce = 0.15   (light logging slash)\n  code 12:        mce = 0.20   (medium logging slash)\n  code 13:        mce = 0.25   (heavy logging slash)\n\nThe @register_symbolic gap (gt-p3ep) is resolved by composing the closed\nfunction registry: an ifelse guard selects between the 13-entry interp.linear\ntable for in-range codes and the fuel-model-1 default for everything else.\nFor integer inputs 1–13, interp.linear evaluated at an exact grid knot returns\nthe exact table value (blend weight = 0 or 1 at both endpoints).\n\nNon-burnable codes (91, 92, 93, 98, 99) are intentionally out of the [1, 13]\nrange and therefore return the default 0.12. This matches the upstream\nbehavior: the dictionary has no entry for non-burnable codes so get() falls back\nto the default.\n\nTolerance rationale (rel=1e-12): ifelse + interp.linear on float64 hardware is\nexact for in-range integer codes (single table access at a grid knot) and exact\nfor the default branch (literal constant). 1e-12 covers the one-ULP float64\nrounding without admitting any physical imprecision."
       },
@@ -72,10 +80,11 @@
                 ]
               },
               {
-                "op": "fn",
-                "name": "interp.linear",
-                "args": [
-                  {
+                "op": "apply_expression_template",
+                "args": [],
+                "name": "linear",
+                "bindings": {
+                  "table": {
                     "op": "const",
                     "value": [
                       0.12,
@@ -94,7 +103,7 @@
                     ],
                     "args": []
                   },
-                  {
+                  "axis": {
                     "op": "const",
                     "value": [
                       1.0,
@@ -113,8 +122,9 @@
                     ],
                     "args": []
                   },
-                  "code"
-                ]
+                  "x": "code",
+                  "n": 13
+                }
               },
               0.12
             ]
