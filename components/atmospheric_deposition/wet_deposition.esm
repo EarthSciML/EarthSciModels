@@ -23,6 +23,14 @@
   },
   "models": {
     "WetDeposition": {
+      "expression_template_imports": [
+        {
+          "ref": "esm:std/interp.esm",
+          "only": [
+            "linear"
+          ]
+        }
+      ],
       "reference": {
         "citation": "EMEP (2003). EMEP MSC-W Status Report 2003: Transboundary Acidification, Eutrophication and Ground Level Ozone in Europe. EMEP Report 1/2003, Part I. https://www.emep.int/publ/reports/2003/emep_report_1_part1_2003.pdf.",
         "notes": "source_ref: AtmosphericDeposition.jl@e4468c79c8dd4aae88646cd16d6bcf290874742c:src/wet_deposition.jl:147\n\nUpstream `WetDeposition` is an MTK builder — `System(eqs, t, vars, params; name)` — with four @parameters (cloudFrac, qrain, ρ_air, lev) and three @variables (k_particle, k_SO2, k_othergas [1/s]), related by three algebraic equations built from the `_WetDeposition` helper (src/wet_deposition.jl:101). The helper is a plain Julia function computing subcloud and in-cloud scavenging rates using six local constants (E=0.1, wSubSO2=0.15, wSubOther=0.5, wInSO2=0.3, wInParticle=1.0, wInOther=1.4) and three module-level @constants (A_wd=5.2, ρwater=1000.0, Vdr=5.0). These local constants are folded into the inline expression arithmetic as fixed numeric literals; the module @constants become fixed-default parameters per the rig convention.\n\nThe gt-p3ep blocking gap: `get_lev_depth(lev)` (src/wet_deposition.jl:82) is a `@register_symbolic` wrapper around a 72-entry constant Julia array `lev_depth` (src/wet_deposition.jl:7-80) indexed by lev. The registered-symbolic call `get_lev_depth(lev) * Δz_unit` supplies the layer depth Dz to the _WetDeposition helper. Resolution: exactly as done for FastJX_interpolation_troposphere (components/gaschem/fastjx/fastjx_interp_troposphere.esm, esm-09u), the registered function is replaced by an `interp.linear` AST expression over the full 72-entry table on a 1-indexed integer axis. For integer lev in 1..72 the query always lands exactly on an axis knot, so interp.linear returns the exact table entry with zero blend weight, reproducing the upstream direct array indexing. The Δz_unit @constant equals 1 m and folds away, so the looked-up value is already in metres.\n\nThe `_WetDeposition` helper logic verbatim:\n  i = ifelse(qrain > 0, 1, 0)                  -- guard against non-positive qrain\n  AE = A_wd * E = 5.2 * 0.1 = 0.52             -- precombined constant\n  wInParticleVdrPerrhowater = 1.0*5.0/1000.0 = 0.005\n  wSubSO2VdrPerrhowater = 0.15*5.0/1000.0 = 7.5e-4\n  wSubOtherVdrPerrhowater = 0.5*5.0/1000.0 = 2.5e-3\n  k_particle = i * qrain * rho_air * (AE + cloudFrac * (wInParticleVdrPerrhowater / Dz))\n  k_SO2      = i * (wSubSO2VdrPerrhowater + cloudFrac * wSubSO2VdrPerrhowater) * qrain * rho_air / Dz\n  k_othergas = i * (wSubOtherVdrPerrhowater + cloudFrac * wSubOtherVdrPerrhowater) * qrain * rho_air / Dz\nNote: the upstream `wdSO2` formula uses (wSubSO2VdrPerrhowater + cloudFrac * wSubSO2VdrPerrhowater) = wSubSO2VdrPerrhowater * (1 + cloudFrac). The wInSO2VdrPerrhowater constant appears in the precombinations block of _WetDeposition but is not referenced in any of the three output expressions (verified by inspection of src/wet_deposition.jl:123-128); it is therefore omitted from the ESM.\n\nAll three output variables (k_particle, k_SO2, k_othergas) are expressed as `type: observed` with inline expression trees. No time derivative exists anywhere; `system_kind` is left unset (observed-only algebraic, matching dry_aerosol.esm and WetDepositionFlux.esm siblings).\n\nThe `ρ_air` Julia parameter name is migrated as `rho_air` (ASCII) for JSON compatibility. The upstream coupler metadata (WetDepositionCoupler) is informational only and is not carried into the ESM per rig convention.\n\nInputs and defaults: cloudFrac (default 0.5, dimensionless), qrain (default 0.5, dimensionless rain mixing ratio), rho_air (default 1.204 kg/m^3, upstream default), lev (default 1, level index 1-72). Module @constants become fixed-default parameters: A_wd=5.2 m^3/(kg*s), rho_water=1000.0 kg/m^3, Vdr=5.0 m/s.\n\nTolerance rationale (model-level rel=1e-9): a closed-form algebraic system evaluated by topological substitution of the interp.linear lookup and arithmetic on float64 constants. The interp.linear query lands on integer knots, returning exact table entries; subsequent arithmetic (+, *, /, ifelse) accumulates float64 round-off ~1e-15 per op, ~1e-13 for the full cascade. rel=1e-9 gives comfortable headroom."
@@ -76,7 +84,7 @@
         "Dz": {
           "type": "unknown",
           "units": "m",
-          "description": "Layer depth at level lev, looked up from the 72-entry GEOS-Chem model-level thickness table (lev_depth [m]) via interp.linear on the integer axis 1..72. Resolves the gt-p3ep gap: the upstream @register_symbolic get_lev_depth(lev) is expressed as an AST interp.linear composition, matching the FastJX_interpolation_troposphere precedent (esm-09u). For integer lev the query lands exactly on an axis knot (zero blend weight), reproducing the direct array indexing of the upstream Julia code."
+          "description": "Layer depth at level lev, looked up from the 72-entry GEOS-Chem model-level thickness table (lev_depth [m]) via the `linear` template of esm:std/interp.esm (the pure-AST form of interp.linear) on the integer axis 1..72. Resolves the gt-p3ep gap: the upstream @register_symbolic get_lev_depth(lev) is expressed as an AST interp.linear composition, matching the FastJX_interpolation_troposphere precedent (esm-09u). For integer lev the query lands exactly on an axis knot (zero blend weight), reproducing the direct array indexing of the upstream Julia code."
         },
         "i_rain": {
           "type": "unknown",
@@ -103,10 +111,11 @@
         {
           "lhs": "Dz",
           "rhs": {
-            "op": "fn",
-            "name": "interp.linear",
-            "args": [
-              {
+            "op": "apply_expression_template",
+            "args": [],
+            "name": "linear",
+            "bindings": {
+              "table": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -184,7 +193,7 @@
                   4343.478215407085
                 ]
               },
-              {
+              "axis": {
                 "op": "const",
                 "args": [],
                 "value": [
@@ -262,8 +271,9 @@
                   72
                 ]
               },
-              "lev"
-            ]
+              "x": "lev",
+              "n": 72
+            }
           }
         },
         {

@@ -210,7 +210,7 @@ consumer repo) instead.
 
 ## 3. Documentation / plotting builds
 
-Tooling under `tools/` (e.g. `tools/render_example_plots.py`,
+Tooling under `tools/` (e.g. `tools/render_example_plots.jl`,
 `tools/esm_to_docs.py`) and any future docs-build script is bound by §1.
 
 If a docs build needs simulation output to render plots, it **MUST** drive an
@@ -220,25 +220,29 @@ official ESS runner. Specifically:
   ODE analyses, the toolkit's official integration entry point. Do **NOT**
   introduce `sympy.lambdify` + `scipy.solve_ivp` (or any equivalent homebrew
   ODE pipeline) in `tools/`.
-- Julia plot rendering: use `EarthSciModels.load_esm` (or
-  `EarthSciAST.load` for multi-component files) and integrate with
-  `ModelingToolkit` / `OrdinaryDiffEq` — not a hand-rolled walker.
+- Julia plot rendering: build with `EarthSciAST.esm_problem` and integrate
+  with SciML `solve` (or materialize through `EarthSciModels.load_esm` and
+  `ModelingToolkit`) — not a hand-rolled walker.
 
 CI pipelines that exercise `tools/` count as runtime for the purposes of §1:
 the parallel-evaluator anti-pattern is just as forbidden in
 `.github/workflows/*` as in `src/`.
 
-`tools/render_example_plots.py`'s time-series path now drives
-`earthsci_ast.simulation.simulate` — the canonical Python ESS runner —
-for every ODE integration (mdl-5xp). The renderer keeps its own resolution
-plan only to recover *observed* variables from the integrated state via
-`earthsci_ast.evaluate` (the canonical AST evaluator). Do not add a
-homebrew `sympy.lambdify` / `scipy.solve_ivp` branch back in; if simulate
-lacks a feature the doc-build needs, file a bead to extend simulate rather
-than re-introducing a side channel.
+The plot renderer is `tools/render_example_plots.jl`, in its own
+environment (`tools/plots/`). Every number it plots comes from the Julia
+runner: `esm_problem` builds each component once, `remake` swaps parameter
+values between sweep points, `solve` integrates (FBDF, Rodas5P as fallback),
+and `observed_field` reads observed quantities — at a grid point for an
+algebraic component, at each saved state for an ODE one. It keeps no
+resolution plan, classification or evaluator of its own. It replaced the
+Python renderer, whose LSODA integration of `gaschem/geoschem_fullchem.esm`
+alone took about five hours of every docs build. If the runner lacks a
+feature the docs build needs, file a bead against EarthSciAST rather than
+adding a side channel here.
 
-Both generators read the **esm 1.0.0** vocabulary, and both take their
-variable classification from `earthsci_ast.classification` per §1:
+Both generators read the **esm 1.0.0** vocabulary. The page generator takes
+its variable classification from `earthsci_ast.classification` per §1; the
+plot renderer needs none, because the runner decides what is a state:
 
 - The illustrative-run block on a Model / ReactionSystem is `analyses`
   (esm-spec §6.7), not `examples`. The `Analysis` `$def` is
@@ -256,8 +260,9 @@ variable classification from `earthsci_ast.classification` per §1:
   `shape`. `esm_to_docs.py` still emits a page per source, carrying its I/O
   descriptor rather than a variables table.
 - There is no `variables[v].expression`. An observed quantity is defined by a
-  bare-variable-LHS equation in the model's `equations`, and both generators
-  recover it through `classification.observed_definitions`.
+  bare-variable-LHS equation in the model's `equations`. The page generator
+  recovers it through `classification.observed_definitions`; the plot renderer
+  reads its value with `observed_field`.
 
 ## 4. `scripts/_archive/*` is historical
 
