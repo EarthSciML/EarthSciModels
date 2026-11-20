@@ -98,7 +98,7 @@ mm/s of water).
 | Temperatures | `zTin`, `zTsn`, `Tmlts`, `Tbot`, `Tsfc`, `Tf`, `sst` | degC; `potT`, `Tair`, `Si_t` in K |
 | Conductivities / conductances | `kilyr`, `kslyr`; `kh_top`, `kh_snowice`, `kh_bot` | W/m/K; W/m²/K |
 | Fluxes | `fswsfc`, `fswpen`, `fswthru`, `fsurfn`, `fsensn`, `flatn`, `flwoutn`, `fbot`, `fhocnn`, `frzmlt`, sw bands, Faii_*/Fioi_* | W/m² |
-| Water fluxes | `evapn`, `freshn`, `fsaltn`, `fsnow` | kg/m²/s; `frain` in m/s (cap conversion by rhofresh) |
+| Water fluxes | `evapn`, `freshn`, `fsaltn`, `fsnow`, `frain` | kg/m²/s |
 | Stresses | `strength`, `stressp/m/12`, `sigma*`, `rep_prs` | N/m; `tau`, `strairx/y`, `taux/y`, `strintx/y`, `strtltx/y`, `Cb` | N/m² |
 | Strain rates | `divu`, `tension`, `shear`, `Delta`, `deltaminEVP` | 1/s (T-point rates); m²/s in the lowered B-grid dynamics — the corner strain rates of `strain_rates` are area-weighted ("NOTE these are actually strain rates * area (m^2/s)", ice_dyn_shared.F90:2119-2120), and `DminTarea = deltaminEVP·dxT·dyT` |
 | Mass | `m` (Tmass) | kg/m² |
@@ -131,7 +131,7 @@ mm/s of water).
   hin/hsn are summed (F90:1641-1672) — leaving
   `freshn = −(rhoi·(congeln + meltbn + melttn) + rhos·meltsn)`; the rain is
   added at the cell level (`fresh = fresh + frain·aice`,
-  icepack_therm_itd.F90:2043, with the model's m/s frain × rhofresh).
+  icepack_therm_itd.F90:2179, frain in kg/m²/s).
 - The dumped volume tendencies (dsnow, congel, meltb, meltt, melts) are per
   step [m] — the instrumented dump column carries the accumulated step
   change — while the .esm laws are continuous rates [m/s]; the assertion
@@ -284,10 +284,15 @@ descriptions. Representative transcriptions:
    stresses (ice_import_export.F90:962-968), the `aiU` division of the
    T-point ocean-stress average (ice_step_mod.F90:1051-1072), and the tmask
    ocean-mask guards; each collapse is annotated at the affected variable.
-9. **`frain` in m/s.** The cap converts Faxa_rain kg/m²/s to m/s by rhofresh
-   for the melt-pond term `frain·dt` (icepack_meltpond_lvl.F90:160), matching
-   the skeleton's rate-form meltt/melts; the Fortran's per-step lengths vs
-   the esm rate convention is documented in the melt-pond template.
+9. **`frain` in kg/m²/s.** The cap stores `frain = Faxa_rain·med2mod_areacor`
+   in kg/m²/s with no rhofresh conversion (ice_import_export.F90:556-557): the
+   melt-pond volume change divides the water equivalent `meltt·ρi + melts·ρs +
+   frain·dt` by rhofresh inside the pond law (icepack_meltpond_lvl.F90:158-160),
+   and the ocean rain drain adds `frain·aice` directly
+   (icepack_therm_itd.F90:2179). An earlier revision divided by rhofresh in the
+   cap and multiplied by 1000 in `fresh`, which left the rain into the pond
+   laws 1000× too small; the frain pin's Faxa_rain was inverted through that
+   wrong law, so it passed circularly (ported from EqESM 7b32882).
 
 ## Bugs found in the Fortran code
 
@@ -383,7 +388,7 @@ at `4ea6f83`).
 
 | file | tests | assertions | what is pinned |
 |---|---|---|---|
-| `cice_coupling.esm` | 40 | 69 | the import laws (areacor scaling, frain/rhofresh, potT/rhoa branch wiring), the freezing-temperature law, the export state fields, the per-category albedo aggregation, the scale_fluxes `/aice` flux aggregation, the air-ice stress exports, the similarity reference-height exports Si_tref/Si_qref/Si_u10 (4 cells × 2 steps), the Rothrock strength law (2 dump rows), the EVP stress pointwise laws Delta/zetax2/etax2/rep_prs and the newp/newm/new12 subcycle maps (2 dump rows, different cells/corners/ksub), and the stepu ocean-ice stress laws vrel/taux/tauy/Cb (2 dump rows) |
+| `cice_coupling.esm` | 40 | 69 | the import laws (areacor scaling, potT/rhoa branch wiring), the freezing-temperature law, the export state fields, the per-category albedo aggregation, the scale_fluxes `/aice` flux aggregation, the air-ice stress exports, the similarity reference-height exports Si_tref/Si_qref/Si_u10 (4 cells × 2 steps), the Rothrock strength law (2 dump rows), the EVP stress pointwise laws Delta/zetax2/etax2/rep_prs and the newp/newm/new12 subcycle maps (2 dump rows, different cells/corners/ksub), and the stepu ocean-ice stress laws vrel/taux/tauy/Cb (2 dump rows) |
 | `cice_thermodynamics.esm` | 17 | 30 | the dEdd shortwave laws against `cice_albedo.csv`: the snow fraction on bare ice and snow (vsnon = 0 / > 0), the effective pond area apeffn through the infiltration, hypsometry, hpmin and taper branches, the ice/snow broadband albedos, and the shortwave conservation fswintn = swabs − fswsfc − fswthrun; the mushy enthalpy↔temperature inversions zTin/zTsn (eqs 1-2) against the `cice_thermo_state.csv` zTin_1..8/zTsn_1..3 columns (all `rel 1e-12`); the step-1 surface energy-block aggregates flwout/fsens against `cice_thermo_flux.csv` (the similarity-driven shcoef/lhcoef at the entry Tsfcn, fluxes at the exit Tsfcn, ε = 0.95; `rel 1e-9`, cells (3,5) and (2,4)); the step-1 latent-heat and sublimation/condensation aggregates flat/evap/dsnow (cell (2,4), `rel 1e-6`; the evapn `esub + econ` closure and the dsnow [m/step]→[m/s] rate convention, transcription fixes #9-#11); the step-2 radiation aggregates fswabs/fswthru testing the prep_radiation rescale `albedo_dump(1) × netsw(2)/netsw(1)` (icepack_shortwave.F90:3893-3922; `rel 1e-12`, cells (3,5) and (4,5)); and the per-category surface energy balance residual fsurf_bal = fsurfn − fcondtopn at the step-2 exit state (cell (2,4), cats 2-5, `abs 1e-2` ≈ 1.5× the largest measured residual 6.7e-3; the implicit solve's own convergence, see the balance test description) |
 | `cice_shortwave.esm` | 2 | 171 | the delta-Eddington column against `stage1/dumps/cice/cice_dedd.csv` (step 1, cell (2,4), snow group ncat 2 srftyp 1 with hs = 0.15364 m, frsnw = 290.36 µm and aerosols in all four slots; bare group ncat 1 srftyp 0 with hs = 0; both at `coszen = 0.21184`, `rel 1e-12`): the layer geometry `dzk`/`frsnw`, the SNICAR-table IOPs `Qs/ws_snw/gs_snw/ks_snw`, the mixed `tau/w0/g`, the guard-zeroed layer props `m_*` (incl. pins below the trmin cutoff), the downward chain `trndir/trntdr/rdndif/trndif` at the top/bottom of band 1 and the first guarded interface of bands 2/3, the upward chain `rupdir/rupdif`, the flux fractions `dfdir/dfdif`, the scalar band sums `avdr/avdf/aidr/aidf`, `fsfc/fint/fthru`, `fthruvdr/fthruvdf` and the band-3 `fthruidr/fthruidf`, and `Sabs`/`Iabs`/`fthrul` (interface quantities at `rel 1e-9` — the 13-layer recurrence round-off amplification; see the file's README notes below) |
 | `cice_dynamics.esm` | 2 | 89 | `cice_dynamics_bgrid_pins` (53, `time_span {0,0}`, `rel 1e-12`, full-domain overrides so m > 0 and DminTarea > 0 everywhere) — the lowered B-grid laws at the step-1 first-subcycle state: the four-corner strain rates divu/tension/shear at T cell (3,5) (12 values; the `strain_rates` corner combinations, ice_dyn_shared.F90:2148-2175, area-weighted m²/s), the stress integrals strintx/strinty at U(2,4) (the stepu `uarear·(str1 − str2 + str3 − str4)` sums, ice_dyn_evp.F90:1698-1765), the kstrength = 1 Rothrock strength at all 15 T cells against `cice_ice_strength.csv` (P(2,4) = 321248.8660482337; thin-ice cells 65.6–257.3 N/m), the viscosity chain Delta/zetax2/etax2/rep_prs and the plastic target stressp_target at (3,5) corners 1-4 against the ksub-1 `cice_evp_stress.csv` rows, and the full dyn_finish ocean-ice stress vrel/taux/tauy/Cb at U(2,4) with the dump's aiX/uocn/vocn (F90:1345-1348); `cice_dynamics_evp_subcycle_integrated` (36) — the coupled momentum + stress ODEs integrated over one EVP subcycle [0, 30] s (one subcycle = one backward-Euler step of dte = Td·arlx1i of the relaxation ODE) from the ksub-1 oldp/oldm/old12 and velocity, with strairx/strairy = the momentum dump's forcex/forcey and fcor = fm/umass, asserting stressp/stressm/stress12 at the three interior T cells (global (3,5..7)), corners 1-4, against the dumped newp/newm/new12 with per-assertion abs tolerance 0.6·\|newp − oldp\| (a frozen model fails every assertion; measured residuals 0.001–0.46 of the increment — the Fortran freezes the velocity during the stress update and uses the U-cell umass, the model integrates both continuously with the T-cell Tmass). Not asserted: boundary cells (halo-copy closure, residuals 1–21× the increment) and velocities (the continuous momentum ODE is not stepu's semi-implicit pseudo-time update; at (3,5) the dumped uvel increment is not reproduced even in sign) |
@@ -434,8 +439,8 @@ must reproduce the dumped value:
 
 - `Faxa_*` / `Fioo_q` = dumped import / `med2mod_areacor`. The mesh areacor ≈
   1.00033 (not 1), so the scaling genuinely bites (e.g. `flw = Faxa_lwdn·areacor`).
-- `Faxa_rain` = dumped frain × 1000 / areacor (the kg/m²/s → m/s rhofresh
-  conversion; pinned with the nonzero step-2 rain rows — step 1 is rain-free).
+- `Faxa_rain` = dumped frain / areacor (frain is dumped in kg/m²/s; pinned
+  with the nonzero step-2 rain rows — step 1 is rain-free).
 - `Sa_ptem` / `Sa_dens` = the dumped potT / rhoa. The dump rows have
   `potT = Tair` exactly, so the run used the Sa_ptem/Sa_dens branch; the
   Sa_pbot fallback is not exercised (inverting the dumped rhoa gives
@@ -543,7 +548,7 @@ must reproduce the dumped value:
    no separate /dt — the per-step dt divides out). Dump-proven: at step-1
    (3,5), `Σ aicen·freshn + frain·aice` reproduces the dumped fresh to
    3e-17 (the rain term is the "let rain drain through to the ocean" line of
-   icepack_therm_itd.F90:2043, with the model's m/s frain × rhofresh), and
+   icepack_therm_itd.F90:2179, frain in kg/m²/s), and
    `Σ aicen·fsaltn` reproduces the dumped fsalt exactly (ratio 1.0;
    evapin = 0 at step 1, all sublimation from snow). The per-category
    `dsnown = fsnow/ρs − meltsn + evapsn/ρs` rate law is added alongside.
