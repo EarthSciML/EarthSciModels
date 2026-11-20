@@ -2,7 +2,7 @@
  "esm": "2.0.0",
  "metadata": {
   "name": "mosart_hillslope",
-  "description": "MOSART hillslope routing step (stage 2 of the EqESM project): the per-cell Euler step 1 of mosart_physics.F90:Euler (F90:74-80) composed of hillslopeRouting (F90:225-239) and updateState_hillslope (F90:352-360), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran: ehout_manning = -CREHT_nosqrt(hslpsqrt, nh, Gxr, yh) (F90:232); the dry-cell clamp replaces ehout by -(qsur + wh/delt) when ehout < 0 and wh + (qsur + ehout)*delt < TINYVALUE (F90:233-236); dwh = qsur + ehout (F90:237); d(wh)/dt = dwh (the Euler storage advance wh += dwh*DeltaT, F90:77, in continuous limit); yh = wh (updateState_hillslope, F90:358); and the lateral inflow to the subnetwork etin = (-ehout + qsub)*area*frac (F90:79). Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wh, yh [m]; dwh, qsur, qsub, ehout [m/s]; etin [m3/s]; hslpsqrt [1]; Gxr [1/m]; area [m2]; frac [1]; nh is the hillslope Manning roughness (SI dimension s/m^(1/3), see mosart_templates.esm); delt is Tctl%DeltaT = delt_coupling/nsub (mosart_driver.F90:800). The qsur/qsub forcing arrives from the cap in m/s (mosart_driver.F90:806-813 converts the m3/s streams by /area). The tests block pins the overland law CREHT_nosqrt pointwise (instantaneous D-boundary tests, time_span {0,0}) and the one-substep storage traces in the continuous-ODE form, with numeric tuples from the stage-1 instrumentation dumps (stage1/dumps/mosart/creht_nosqrt.csv, mosart_euler.csv); the trace assertions carry the measured Euler-vs-continuous scheme gaps (see README.md (Testing)). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13).",
+  "description": "MOSART hillslope routing step (stage 2 of the EqESM project): the per-cell Euler step 1 of mosart_physics.F90:Euler (F90:74-80) composed of hillslopeRouting (F90:225-239) and updateState_hillslope (F90:352-360), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran: ehout_manning = -CREHT_nosqrt(hslpsqrt, nh, Gxr, yh) (F90:232); the dry-cell clamp replaces ehout by -(qsur + wh/delt) when ehout < 0 and wh + (qsur + ehout)*delt < TINYVALUE (F90:233-236); dwh = qsur + ehout (F90:237); d(wh)/dt = dwh (the Fortran advances wh += dwh*DeltaT explicitly once per substep, F90:77; here a continuous ODE, not the limit of that scheme - see README.md, 'Continuous ODEs vs the Fortran 3600-s Euler stepping'); yh = wh (updateState_hillslope, F90:358); and the lateral inflow to the subnetwork etin = (-ehout + qsub)*area*frac (F90:79). Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wh, yh [m]; dwh, qsur, qsub, ehout [m/s]; etin [m3/s]; hslpsqrt [1]; Gxr [1/m]; area [m2]; frac [1]; nh is the hillslope Manning roughness (SI dimension s/m^(1/3), see mosart_templates.esm); delt is Tctl%DeltaT = delt_coupling/nsub (mosart_driver.F90:800). The qsur/qsub forcing arrives from the cap in m/s (mosart_driver.F90:806-813 converts the m3/s streams by /area). The tests block pins the overland law CREHT_nosqrt pointwise (instantaneous D-boundary tests, time_span {0,0}) and the one-substep storage traces in the continuous-ODE form, with numeric tuples from the EqESM instrumented-CESM dumps (stage1/dumps/mosart/ dry lane window: creht_nosqrt.csv, mosart_euler.csv, area from mosart_run_imports_wide.csv; stage1/dumps/mosart_wet/ wet window: the wet_overland_* pins); the trace assertions carry the measured Euler-vs-continuous scheme gaps (see README.md (Testing)). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13).",
    "tags": [
     "environmental_transport",
     "mosart",
@@ -178,7 +178,7 @@
    "tests": [
     {
      "id": "overland_law_step1_sub2_cell100312",
-     "description": "Instantaneous pin of the overland-flow law CREHT_nosqrt at the hillslope (mosart_physics.F90:426-437) from stage1/dumps/mosart/creht_nosqrt.csv row (step 1, ns 2, nr 1, gindex 100312): yh = wh = 9.32660989523826711e-11 m, sqrthslp = 3.78813938497516212e-01, nh = 7.74544477462768555e-02, Gxr = 2.99999999999999974e-04 give ehout_manning = -CREHT_nosqrt = eht_raw = -2.81432250323167531e-20 m/s, and etin = (-ehout + qsub)*area*frac = 8.16213652457282613e-11 m3/s with area = 2.900213644740529e9 m2 (the qsur_m3s/qsur_ms ratio of the step-1 dump rows; qsur = 2.59072497089951852e-14 m/s from mosart_euler.csv row (1,2,entry,100312)). time_span {0,0} keeps wh at its initial condition so the law is evaluated pointwise; the dry-cell clamp does not fire (wh + (qsur + ehout)*delt = 1.87e-10 > TINYVALUE). The Fortran value is reproduced to round-off (rel 1e-12; cross-language pow() ulps).",
+     "description": "Instantaneous pin of the overland-flow law CREHT_nosqrt at the hillslope (mosart_physics.F90:426-437) from stage1/dumps/mosart/creht_nosqrt.csv row (step 1, ns 2, nr 1, gindex 100312): yh = wh = 9.32660989523826711e-11 m, sqrthslp = 3.78813938497516212e-01, nh = 7.74544477462768555e-02, Gxr = 2.99999999999999974e-04 give ehout_manning = -CREHT_nosqrt = eht_raw = -2.81432250323167531e-20 m/s, and etin = (-ehout + qsub)*area*frac = 8.16213652457282613e-11 m3/s with area = 2.900213644740529e9 m2 (the area column of mosart_run_imports_wide.csv, equal to the qsur_m3s/qsur_ms ratio of the step-1 dump rows; qsur = 2.59072497089951852e-14 m/s from mosart_euler.csv row (1,2,entry,100312)). time_span {0,0} keeps wh at its initial condition so the law is evaluated pointwise; the dry-cell clamp does not fire (wh + (qsur + ehout)*delt = 1.87e-10 > TINYVALUE). The Fortran value is reproduced to round-off (rel 1e-12; cross-language pow() ulps).",
      "time_span": { "start": 0.0, "end": 0.0 },
      "parameter_overrides": {
       "qsur": 2.59072497089951852e-14,
@@ -191,7 +191,7 @@
       "delt": 3600.0
      },
      "initial_conditions": { "wh": 9.32660989523826711e-11 },
-     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "tolerance": { "rel": 1e-12, "abs": 1e-32 },
      "assertions": [
       { "variable": "yh", "time": 0.0, "expected": 9.32660989523826711e-11 },
       { "variable": "ehout_manning", "time": 0.0, "expected": -2.81432250323167531e-20 },
@@ -212,7 +212,7 @@
       "delt": 3600.0
      },
      "initial_conditions": { "wh": 2.79791921922257878e-10 },
-     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "tolerance": { "rel": 1e-12, "abs": 1e-32 },
      "assertions": [
       { "variable": "yh", "time": 0.0, "expected": 2.79791921922257878e-10 },
       { "variable": "ehout_manning", "time": 0.0, "expected": -1.83998326708271600e-19 },
@@ -232,7 +232,7 @@
       "delt": 3600.0
      },
      "initial_conditions": { "wh": 1.39897800399400462e-10 },
-     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "tolerance": { "rel": 1e-12, "abs": 1e-32 },
      "assertions": [
       { "variable": "yh", "time": 0.0, "expected": 1.39897800399400462e-10 },
       { "variable": "ehout_manning", "time": 0.0, "expected": -3.87267332350159691e-20 },
@@ -254,7 +254,7 @@
       "delt": 3600.0
      },
      "initial_conditions": { "wh": 0.0 },
-     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "tolerance": { "rel": 1e-12, "abs": 1e-32 },
      "assertions": [
       { "variable": "yh", "time": 0.0, "expected": 0.0 },
       { "variable": "ehout_manning", "time": 0.0, "expected": 0.0 },
@@ -280,8 +280,8 @@
      "tolerance": { "rel": 1e-5, "abs": 1e-16 },
      "assertions": [
       { "variable": "wh", "time": 3600.0, "expected": 1.86532096589155226e-10 },
-      { "variable": "ehout", "time": 0.0, "expected": -2.81432250323167531e-20 },
-      { "variable": "etin", "time": 0.0, "expected": 8.16213652457282613e-11 }
+      { "variable": "ehout", "time": 0.0, "expected": -2.81432250323167531e-20, "tolerance": { "rel": 1e-12, "abs": 1e-32 } },
+      { "variable": "etin", "time": 0.0, "expected": 8.16213652457282613e-11, "tolerance": { "rel": 1e-12, "abs": 1e-32 } }
      ]
     },
     {
@@ -302,8 +302,81 @@
      "tolerance": { "rel": 1e-7, "abs": 1e-17 },
      "assertions": [
       { "variable": "wh", "time": 3600.0, "expected": 2.79797241651524941e-10 },
-      { "variable": "ehout", "time": 0.0, "expected": -1.75620358877005223e-19 },
-      { "variable": "etin", "time": 0.0, "expected": 5.09336561109318995e-10 }
+      { "variable": "ehout", "time": 0.0, "expected": -1.75620358877005223e-19, "tolerance": { "rel": 1e-12, "abs": 1e-32 } },
+      { "variable": "etin", "time": 0.0, "expected": 5.09336561109318995e-10, "tolerance": { "rel": 1e-12, "abs": 1e-32 } }
+     ]
+    },
+    {
+     "id": "wet_overland_cell106268",
+     "description": "Instantaneous pin of the wet hillslope overland-flow law ehout = -CREHT_nosqrt(hslpsqrt, nh, Gxr, yh) = -Gxr*yh*(yh^2)^(1/3)*hslpsqrt/nh (hillslopeRouting, mosart_physics.F90:63-84) at the first wet state of the cell-106268 hillslope, from stage1/dumps/mosart_wet/creht_nosqrt.csv row (step 1, ns 2, m 0, gindex 106268): wh = yh = 0.00011923842106852279 m (the hillslope has been filling with qsur since the cold start) gives ehout_manning = ehout = -1.4493945879189655e-10 m/s (the dry-cell clamp cannot fire: wh + (qsur + ehout)*delt > 0); the subnetwork inflow etin = (-ehout + qsub)*area*frac = 4.30149076384016338e-01 m3/s, the dumped exit-row value (mosart_euler.csv row step 1, ns 2, exit, gindex 106268), reproduced by the .esm with the cell area 2967784480.288577 m2 = qgwl_area/qgwl = 1.99127871364415199e2 m3/s / 6.70964730380464462e-08 m/s of the step-1 dump rows (crvrman_chan.csv qgwl_area at step 1, ns 1, m 1, gindex 106268 over the mosart_euler.csv entry-row qgwl at step 1, ns 1, gindex 106268; identical to the area column of the dry-lane mosart_run_imports_wide.csv for this gindex). Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": { "start": 0.0, "end": 0.0 },
+     "parameter_overrides": {
+      "qsur": 0.0,
+      "qsub": 0.0,
+      "hslpsqrt": 0.1216552506059644,
+      "nh": 0.07273763418197632,
+      "Gxr": 0.0003,
+      "area": 2967784480.288577,
+      "frac": 1.0,
+      "delt": 3600.0
+     },
+     "initial_conditions": {
+      "wh": 0.0001192384210685228
+     },
+     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "assertions": [
+      { "variable": "yh", "time": 0.0, "expected": 0.0001192384210685228 },
+      { "variable": "ehout_manning", "time": 0.0, "expected": -1.4493945879189655e-10 },
+      { "variable": "ehout", "time": 0.0, "expected": -1.4493945879189655e-10 },
+      { "variable": "etin", "time": 0.0, "expected": 0.43014907638401634 }
+     ]
+    },
+    {
+     "id": "wet_overland_cell223003",
+     "description": "Instantaneous pin of the wet hillslope overland-flow law on the cell-223003 hillslope, from stage1/dumps/mosart_wet/creht_nosqrt.csv row (step 1, ns 2, m 0, gindex 223003): wh = yh = 1.0392437428203876e-06 m gives ehout_manning = ehout = -7.4254016341044596e-14 m/s (Gxr = 0.0007). Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": { "start": 0.0, "end": 0.0 },
+     "parameter_overrides": {
+      "qsur": 0.0,
+      "qsub": 0.0,
+      "hslpsqrt": 0.0648074069840786,
+      "nh": 0.06514260172843933,
+      "Gxr": 0.0007,
+      "area": 10000000.0,
+      "frac": 1.0,
+      "delt": 3600.0
+     },
+     "initial_conditions": {
+      "wh": 1.0392437428203876e-06
+     },
+     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "assertions": [
+      { "variable": "yh", "time": 0.0, "expected": 1.0392437428203876e-06 },
+      { "variable": "ehout_manning", "time": 0.0, "expected": -7.42540163410446e-14 },
+      { "variable": "ehout", "time": 0.0, "expected": -7.42540163410446e-14 }
+     ]
+    },
+    {
+     "id": "wet_overland_cell99771",
+     "description": "Instantaneous pin of the wet hillslope overland-flow law on the cell-99771 hillslope, from stage1/dumps/mosart_wet/creht_nosqrt.csv row (step 1, ns 2, m 0, gindex 99771): wh = yh = 4.8191255559909953e-06 m gives ehout_manning = ehout = -2.8503549525741766e-13 m/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": { "start": 0.0, "end": 0.0 },
+     "parameter_overrides": {
+      "qsur": 0.0,
+      "qsub": 0.0,
+      "hslpsqrt": 0.0282842712474619,
+      "nh": 0.04093056172132492,
+      "Gxr": 0.0003,
+      "area": 10000000.0,
+      "frac": 1.0,
+      "delt": 3600.0
+     },
+     "initial_conditions": {
+      "wh": 4.819125555990995e-06
+     },
+     "tolerance": { "rel": 1e-12, "abs": 1e-26 },
+     "assertions": [
+      { "variable": "yh", "time": 0.0, "expected": 4.819125555990995e-06 },
+      { "variable": "ehout_manning", "time": 0.0, "expected": -2.8503549525741766e-13 },
+      { "variable": "ehout", "time": 0.0, "expected": -2.8503549525741766e-13 }
      ]
     }
    ]

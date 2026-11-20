@@ -2,7 +2,7 @@
  "esm": "2.0.0",
  "metadata": {
   "name": "mosart_routing_coupling",
-  "description": "Coupling library (esm-spec 10.9-10.10) for the MOSART river-routing subassembly (stage 2 of the EqESM project): the single source of the 29 variable_map param_to_var wiring edges of mosart_routing.esm, written against the five roles RofCap, Control, Hillslope, Subnetwork, Channel. The edges are the data flow of the Euler cascade of mosart_physics.F90 (hillslope -> subnetwork -> main channel) plus the med<->rof cap stream conversions: the cap runoff streams qsur/qsub/qgwl/qirrig/qsur_ice/qglc_liq/qglc_ice (m3/s) into the Control orchestration (mosart_run, mosart_driver.F90:375-873 steps 1-8), the converted m/s streams and Euler substep delt into the hillslope step (F90:74-80), the hillslope lateral inflow etin into the subnetwork step (F90:79), the subnetwork lateral outflow erlateral into the main-channel step (F90:125-127), the channel outflow erout and storages wr/wt/wh back into the orchestration for the irrigation/flood/qgwl-threshold rules and the volr aggregation (F90:497, 513-517, 637-684, 854), and the Control export streams (rofl/rofi/rofl_glc/rofi_glc/flood/volr_m3/volrmch_m3/tdepth/tdepth_max) into the cap export conversions (rof_import_export.F90:636-643, 389-402). Consumed by coupling_import in mosart_routing.esm (bind: the subassembly's own five models), so the wiring is authored once and imported by reference everywhere.",
+  "description": "Coupling library (esm-spec 10.9-10.10) for the MOSART river-routing subassembly (stage 2 of the EqESM project): the single source of the 43 variable_map param_to_var wiring edges of mosart_routing.esm, written against the five roles RofCap, Control, Hillslope, Subnetwork, Channel. The edges are the data flow of the Euler cascade of mosart_physics.F90 (hillslope -> subnetwork -> main channel) plus the med<->rof cap stream conversions: the cap runoff streams qsur/qsub/qgwl/qirrig/qsur_ice/qglc_liq/qglc_ice (m3/s) into the Control orchestration (mosart_run, mosart_driver.F90:375-873 steps 1-8), the converted m/s streams and Euler substep delt into the hillslope step (F90:74-80), the hillslope lateral inflow etin into the subnetwork step (F90:79), the subnetwork lateral outflow erlateral into the main-channel step (F90:125-127), the actual irrigation withdrawal qirrig_actual out of the main-channel storage (mosart_driver.F90:497), the channel outflow erout and storages wr/wt/wh back into the orchestration for the irrigation/flood/qgwl-threshold rules and the volr aggregation (F90:497, 513-517, 637-684, 854), and the Control export streams (rofl/rofi/rofl_glc/rofi_glc/flood/volr_m3/volrmch_m3/tdepth/tdepth_max) into the cap export conversions (rof_import_export.F90:636-643, 389-402), plus 13 cell-geometry edges that make Control the single source of area, frac, rlen, rwidth, rdepth, areaTotal2, rslpsqrt, tlen, twidth and tslpsqrt for RofCap/Hillslope/Subnetwork/Channel, so the set_subtimesteps CFL and the routing laws always see the same cell. Consumed by coupling_import in mosart_routing.esm (bind: the subassembly's own five models), so the wiring is authored once and imported by reference everywhere.",
   "tags": [
    "environmental_transport",
    "mosart",
@@ -154,6 +154,13 @@
   },
   {
    "type": "variable_map",
+   "from": "Control.qirrig_actual",
+   "to": "Channel.qirrig",
+   "transform": "param_to_var",
+   "description": "actual irrigation withdrawal (<= 0) out of the main channel (mosart_run step 2: wr -= irrig_volume, mosart_driver.F90:497), so the water sent to the land leaves the channel storage"
+  },
+  {
+   "type": "variable_map",
    "from": "Channel.erout",
    "to": "Control.erout",
    "transform": "param_to_var",
@@ -249,6 +256,97 @@
    "to": "RofCap.tdepth_max_m",
    "transform": "param_to_var",
    "description": "maximum stream depth to the cap export conversion (Sr_tdepth_max)"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.area",
+   "to": "RofCap.area",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: cell area (ctl%area) into the cap conversions"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.area",
+   "to": "Hillslope.area",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: cell area (TUnit%area) into the hillslope etin"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.area",
+   "to": "Channel.area",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: cell area (TUnit%area) into the channel qgwl term"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.frac",
+   "to": "Hillslope.frac",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: cell study-area fraction (TUnit%frac) into the hillslope etin"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.frac",
+   "to": "Channel.frac",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: cell study-area fraction (TUnit%frac) into the channel qgwl term"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.rlen",
+   "to": "Channel.rlen",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: main-reach length (TUnit%rlen): the CFL phi_r and the channel routing see the same reach"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.rwidth",
+   "to": "Channel.rwidth",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: main-reach bankfull width (TUnit%rwidth)"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.rdepth",
+   "to": "Channel.rdepth",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: bankfull depth (TUnit%rdepth): Sr_tdepth_max and the channel cross section see the same value"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.areaTotal2",
+   "to": "Channel.areaTotal2",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: upstream drainage area (TUnit%areaTotal2): the CFL phi_r and the channel small-catchment branch see the same value"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.rslpsqrt",
+   "to": "Channel.rslpsqrt",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: sqrt main-reach slope (TUnit%rslpsqrt): the CFL phi_r and the channel Manning law see the same slope"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.tlen",
+   "to": "Subnetwork.tlen",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: tributary length (TUnit%tlen): the CFL phi_t and the subnetwork routing see the same value"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.twidth",
+   "to": "Subnetwork.twidth",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: tributary width (TUnit%twidth)"
+  },
+  {
+   "type": "variable_map",
+   "from": "Control.tslpsqrt",
+   "to": "Subnetwork.tslpsqrt",
+   "transform": "param_to_var",
+   "description": "cell geometry, single source in Control: sqrt tributary slope (TUnit%tslpsqrt): the CFL phi_t and the subnetwork Manning law see the same slope"
   }
  ]
 }

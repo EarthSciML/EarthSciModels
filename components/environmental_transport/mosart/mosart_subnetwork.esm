@@ -2,7 +2,7 @@
  "esm": "2.0.0",
  "metadata": {
   "name": "mosart_subnetwork",
-  "description": "MOSART subnetwork (tributary) routing step (stage 2 of the EqESM project): the per-cell Euler step 2 of mosart_physics.F90:Euler (F90:114-132) composed of subnetworkRouting (F90:243-269) and updateState_subnetwork (F90:364-381), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran: with no tributaries (tlen <= hlen) the subnetwork passes the inflow straight through, etout = -etin (F90:250-252); otherwise the Manning velocity vt = CRVRMAN_nosqrt(tslpsqrt, nt, rt) (F90:253) and etout = -vt*mt (F90:254), with the dry-cell clamp etout = -(etin + wt/localdelt) when wt + (etin + etout)*localdelt < TINYVALUE (F90:255-260), in which case vt = -etout/mt when mt > 0 (F90:257-259); dwt = etin + etout (F90:262); d(wt)/dt = dwt (the storage advance wt += dwt*localdelt, F90:123, in continuous limit); updateState_subnetwork (F90:370-380) sets mt = GRMR(wt, tlen), yt = GRHT(mt, twidth), pt = GRPT(yt, twidth), rt = GRRR(mt, pt) when tlen > 0 and wt > 0, and zeroes all four otherwise; and the lateral outflow to the main channel erlateral = -etout (the per-substep accumulation and averaging of F90:125-127, in continuous limit). Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wt [m3]; etin, etout, dwt, erlateral [m3/s]; vt [m/s]; mt [m2]; yt, rt, pt [m]; tslpsqrt [1]; tlen, hlen, twidth [m]; nt is the subnetwork Manning roughness (SI dimension s/m^(1/3)); localdelt = Tctl%DeltaT/DLevelH2R/numDT_t(nr) (F90:120). One deliberate divergence, documented for reviewers: when tlen <= hlen the Fortran leaves vt stale (it is unused in that branch) while here vt always takes the Manning value; and when the dry-cell clamp fires with mt <= 0 the Fortran also leaves vt at the Manning value, which is what the ifelse expresses. The tests block pins the geometry chain GRMR/GRHT/GRPT/GRRR pointwise (instantaneous tests, time_span {0,0}) and the one-substep storage traces in the continuous-ODE form, with numeric tuples from the stage-1 instrumentation dumps (stage1/dumps/mosart/gr_subnet.csv, crvrman_trib.csv, mosart_euler.csv); the trace assertions carry the measured Euler-vs-continuous scheme gaps (see README.md (Testing)). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13).",
+  "description": "MOSART subnetwork (tributary) routing step (stage 2 of the EqESM project): the per-cell Euler step 2 of mosart_physics.F90:Euler (F90:114-132) composed of subnetworkRouting (F90:243-269) and updateState_subnetwork (F90:364-381), written as a storage ODE with the pointwise laws imported from ./mosart_templates.esm. Equations, exactly as in the Fortran: with no tributaries (tlen <= hlen) the subnetwork passes the inflow straight through, etout = -etin (F90:250-252); otherwise the Manning velocity vt = CRVRMAN_nosqrt(tslpsqrt, nt, rt) (F90:253) and etout = -vt*mt (F90:254), with the dry-cell clamp etout = -(etin + wt/localdelt) when wt + (etin + etout)*localdelt < TINYVALUE (F90:255-260), in which case vt = -etout/mt when mt > 0 (F90:257-259); dwt = etin + etout (F90:262); d(wt)/dt = dwt (the Fortran advances wt += dwt*localdelt explicitly per substep, F90:123; here a continuous ODE, not the limit of that scheme - see README.md, 'Continuous ODEs vs the Fortran 3600-s Euler stepping'); updateState_subnetwork (F90:370-380) sets mt = GRMR(wt, tlen), yt = GRHT(mt, twidth), pt = GRPT(yt, twidth), rt = GRRR(mt, pt) when tlen > 0 and wt > 0, and zeroes all four otherwise; and the lateral outflow to the main channel erlateral = -etout (the instantaneous value of the Fortran's per-substep accumulation and numDT_t average, F90:125-127). Units per mosart_tstatusflux_type.F90 / mosart_tspatialunit_type.F90: wt [m3]; etin, etout, dwt, erlateral [m3/s]; vt [m/s]; mt [m2]; yt, rt, pt [m]; tslpsqrt [1]; tlen, hlen, twidth [m]; nt is the subnetwork Manning roughness (SI dimension s/m^(1/3)); localdelt = Tctl%DeltaT/DLevelH2R/numDT_t(nr) (F90:120). One deliberate divergence, documented for reviewers: when tlen <= hlen the Fortran leaves vt stale (it is unused in that branch) while here vt always takes the Manning value; and when the dry-cell clamp fires with mt <= 0 the Fortran also leaves vt at the Manning value, which is what the ifelse expresses. The tests block pins the geometry chain GRMR/GRHT/GRPT/GRRR pointwise (instantaneous tests, time_span {0,0}) and the one-substep storage traces in the continuous-ODE form, with numeric tuples from the EqESM instrumented-CESM dumps (stage1/dumps/mosart/ dry lane window: gr_subnet.csv, crvrman_trib.csv, mosart_euler.csv; stage1/dumps/mosart_wet/ wet window: wet_geometry_* and wet_manning_trib_* pins); the trace assertions carry the measured Euler-vs-continuous scheme gaps (see README.md (Testing)). Reference: stage1/cesm/components/mosart/src/riverroute/mosart_physics.F90 (mosart1.1.13).",
    "tags": [
     "environmental_transport",
     "mosart",
@@ -92,7 +92,7 @@
     "erlateral": {
      "type": "unknown",
      "units": "m^3/s",
-     "description": "lateral flow from the subnetwork into the main reach (TRunoff%erlateral) = -etout, the per-substep accumulation of F90:125-127 in continuous limit, [m3/s]"
+     "description": "lateral flow from the subnetwork into the main reach (TRunoff%erlateral) = -etout, the instantaneous value of the Fortran's per-substep accumulation and numDT_t average (F90:125-127), [m3/s]"
     },
     "etin": {
      "type": "parameter",
@@ -408,6 +408,90 @@
      "assertions": [
       {"variable": "wt", "time": 3600.0, "expected": 3.060321743884253e-06},
       {"variable": "etout", "time": 0.0, "expected": -1.8844603566294632e-19}
+     ]
+    },
+    {
+     "id": "wet_geometry_cell217950",
+     "description": "Instantaneous pin of the wet subnetwork geometry chain mt = GRMR(wt,tlen), yt = GRHT(mt,twidth), pt = GRPT(yt,twidth), rt = GRRR(mt,pt) (mosart_physics.F90:104-119) on the cell-217950 subnetwork after the first numDT_t substep of coupling step 1, ns 1, from stage1/dumps/mosart_wet/gr_subnet.csv row (step 1, ns 1, m 1, gindex 217950): wt = 3162.2739530139029 m3 (the tributary fills with etin = 17.568188627855015 m3/s over localdelt_t = 180 s) gives mt = wt/tlen = 0.2161250997158731 m2, yt = mt/twidth = 5.6441803202263181e-05 m, pt = twidth + 2*yt = 3829.1672807250302 m and rt = mt/pt = 5.6441801538362434e-05 m, all nonzero (wet-window branch; the dry guard yt = 0 is not hit). Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": {"start": 0.0, "end": 0.0},
+     "parameter_overrides": {
+      "tlen": 14631.683026039815,
+      "twidth": 3829.1671678414236
+     },
+     "initial_conditions": {
+      "wt": 3162.273953013903
+     },
+     "tolerance": {"rel": 1e-12, "abs": 1e-24},
+     "assertions": [
+      {"variable": "mt", "time": 0.0, "expected": 0.2161250997158731},
+      {"variable": "yt", "time": 0.0, "expected": 5.644180320226318e-05},
+      {"variable": "pt", "time": 0.0, "expected": 3829.16728072503},
+      {"variable": "rt", "time": 0.0, "expected": 5.6441801538362434e-05}
+     ]
+    },
+    {
+     "id": "wet_geometry_cell208214",
+     "description": "Instantaneous pin of the wet subnetwork geometry chain on the cell-208214 subnetwork, from stage1/dumps/mosart_wet/gr_subnet.csv row (step 1, ns 1, m 1, gindex 208214): wt = 428.59175773750707 m3 gives mt = wt/tlen = 0.063474578317007146 m2, yt = mt/twidth = 1.8926221008805886e-05 m, pt = twidth + 2*yt = 3353.7904372921425 m and rt = mt/pt = 1.8926220795195734e-05 m (wet-window branch). Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": {"start": 0.0, "end": 0.0},
+     "parameter_overrides": {
+      "tlen": 6752.179677303532,
+      "twidth": 3353.7903994397006
+     },
+     "initial_conditions": {
+      "wt": 428.59175773750707
+     },
+     "tolerance": {"rel": 1e-12, "abs": 1e-24},
+     "assertions": [
+      {"variable": "mt", "time": 0.0, "expected": 0.06347457831700715},
+      {"variable": "yt", "time": 0.0, "expected": 1.8926221008805886e-05},
+      {"variable": "pt", "time": 0.0, "expected": 3353.7904372921425},
+      {"variable": "rt", "time": 0.0, "expected": 1.8926220795195734e-05}
+     ]
+    },
+    {
+     "id": "wet_manning_trib_cell217950",
+     "description": "Instantaneous pin of the wet tributary Manning law (subnetworkRouting, mosart_physics.F90:120-143) on the cell-217950 subnetwork at its first flowing substep, from stage1/dumps/mosart_wet/crvrman_trib.csv row (step 1, ns 1, m 1, substep k=2 of numDT_t = 4, gindex 217950): wt = mt*tlen = 3162.2739530139029 m3 (recovered from the dumped pre-update mt = 0.2161250997158731 m2) gives rt = mt/(twidth + 2*yt) = 5.6441801538362434e-05 m; the wet Manning law returns vt = CRVRMAN_nosqrt(tslpsqrt, n_t, rt) = 0.00036500900904041633 m/s and etout = -vt*mt = -7.8887608476052007e-05 m3/s (tlen > hlen and the dry-cell clamp cannot fire: wt + (etin + etout)*localdelt > 0), so dwt = etin + etout = 17.568188627855015 - 7.8887608476052007e-05 = 17.568109740246538 m3/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": {"start": 0.0, "end": 0.0},
+     "parameter_overrides": {
+      "tslpsqrt": 0.01,
+      "nt": 0.040311627089977264,
+      "tlen": 14631.683026039815,
+      "twidth": 3829.1671678414236,
+      "etin": 17.568188627855015,
+      "localdelt": 180.0
+     },
+     "initial_conditions": {
+      "wt": 3162.273953013903
+     },
+     "tolerance": {"rel": 1e-12, "abs": 1e-24},
+     "assertions": [
+      {"variable": "rt", "time": 0.0, "expected": 5.6441801538362434e-05},
+      {"variable": "vt", "time": 0.0, "expected": 0.0003650090090404163},
+      {"variable": "etout", "time": 0.0, "expected": -7.888760847605201e-05},
+      {"variable": "dwt", "time": 0.0, "expected": 17.568109740246538}
+     ]
+    },
+    {
+     "id": "wet_manning_trib_cell208214",
+     "description": "Instantaneous pin of the wet tributary Manning law on the cell-208214 subnetwork at its first flowing substep, from stage1/dumps/mosart_wet/crvrman_trib.csv row (step 1, ns 1, m 1, substep k=2 of numDT_t = 4, gindex 208214): wt = mt*tlen = 428.59175773750707 m3 (mt = 0.063474578317007146 m2) gives rt = 1.8926220795195734e-05 m, vt = CRVRMAN_nosqrt(tslpsqrt, n_t, rt) = 0.00025166376699942622 m/s and etout = -vt*mt = -1.5974251487958117e-05 m3/s, so dwt = etin + etout = 2.3810653207639283 - 1.5974251487958117e-05 = 2.3810493465124405 m3/s. Expected values are the dumped outputs of the EqESM instrumented-CESM wet window (CESM run, not a standalone driver). time_span {0,0}; rel 1e-12.",
+     "time_span": {"start": 0.0, "end": 0.0},
+     "parameter_overrides": {
+      "tslpsqrt": 0.017320508075688773,
+      "nt": 0.048878274857997894,
+      "tlen": 6752.179677303532,
+      "twidth": 3353.7903994397006,
+      "etin": 2.3810653207639283,
+      "localdelt": 180.0
+     },
+     "initial_conditions": {
+      "wt": 428.59175773750707
+     },
+     "tolerance": {"rel": 1e-12, "abs": 1e-24},
+     "assertions": [
+      {"variable": "rt", "time": 0.0, "expected": 1.8926220795195734e-05},
+      {"variable": "vt", "time": 0.0, "expected": 0.0002516637669994262},
+      {"variable": "etout", "time": 0.0, "expected": -1.5974251487958117e-05},
+      {"variable": "dwt", "time": 0.0, "expected": 2.3810493465124405}
      ]
     }
    ]
