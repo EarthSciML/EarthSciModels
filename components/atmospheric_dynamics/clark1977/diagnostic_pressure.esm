@@ -25,7 +25,7 @@
     "models": {
         "DiagnosticPressure": {
             "reference": {
-                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/clark1977.jl:499\n\nDiagnosticPressure is a ModelingToolkit `@component` implementing the diagnostic pressure equation of Clark (1977), Section 4 — the elliptic equation (Eq. 4.2) for the pressure perturbation derived from the anelastic mass-continuity constraint. All three equations are algebraic (no time derivative): div_PF, laplacian_p, and pressure_residual are `@variables` bound by three `~` equations; g is an upstream `@constant`; C_a, G_sqrt, p_prime, d2p_dx2, d2p_dy2, d2p_dz2, F_source, dPFX_dx, dPFY_dy, dPFZ_dz are `@parameters`.\n\nConstant g: the upstream `@constant` g (gravitational acceleration) is serialized as a parameter-type variable with a fixed default — the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters, matching the sibling general_circulation.esm and surface_layer_profile.esm migrations.\n\nOmitted declarations: the upstream component also declares an `@constant` ρ_ref = 1.225 kg/m^3 and three `@parameters` PFX, PFY, PFZ (the un-differentiated pressure-gradient-force terms) that appear in no equation — the equations use the pre-differentiated divergences dPFX_dx, dPFY_dy, dPFZ_dz instead. MTK builds the system from the equations alone, so these four symbols are not in `parameters(sys)`; mtk2esm follows suit and they are not carried here, mirroring the omitted air-pressure parameter in general_circulation.esm.\n\nDimensional note (upstream `checks = false`): the upstream `System(...; checks = false)` disables MTK unit validation because the pressure_residual equation is dimensionally inconsistent — the pseudo-compressible term g*p_prime/C_a^2 has dimension Pa/m ((m/s^2)*Pa / (m/s)^2), whereas laplacian_p and F_source are Pa/m^2. The upstream source documents this as a deliberately simplified form (its comment: \"the full equation includes terrain-following metric terms\"). The .esm `units` fields are descriptive metadata only — the ESS Python runner of record (earthsci_ast.simulation.simulate) performs no dimensional analysis, and the Model schema object has no `checks` field — so the units are recorded faithfully as declared upstream and the inconsistency is preserved, not papered over.\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): an observed-only algebraic system with no ODE integration — every output is constant in time. rel=1e-6 covers float64 roundoff in the closed-form +, -, *, /, ^ expressions; abs=1e-9 covers the intended exact zeros (every output when its driving inputs are zero) and the anelastic_balance test, where pressure_residual cancels to a ~3e-17 floating-point residual.\n\nTests: the upstream clark1977_test.jl carries only a structure test for DiagnosticPressure (3 unknowns, 3 equations) with no numeric assertions. The .esm tests below are derived directly from the three algebraic equations, each exercised across a physically meaningful parameter regime: the pressure Laplacian, the pressure-gradient-force divergence with and without a terrain Jacobian, the pseudo-compressible and source terms of the residual, the anelastic-balance case where the residual vanishes, and a full combined check sampled at two times to confirm time-invariance."
+                "notes": "source_ref: AtmosphericDynamics.jl@816cc391:src/clark1977.jl:499\n\nDiagnosticPressure is a ModelingToolkit `@component` implementing the diagnostic pressure equation of Clark (1977), Section 4 — the elliptic equation (Eq. 4.2) for the pressure perturbation derived from the anelastic mass-continuity constraint. All three equations are algebraic (no time derivative): div_PF, laplacian_p, and pressure_residual are `@variables` bound by three `~` equations; g is an upstream `@constant`; C_a, G_sqrt, d2p_dx2, d2p_dy2, d2p_dz2, F_source, dPFX_dx, dPFY_dy, dPFZ_dz are `@parameters`.\n\nConstant g: the upstream `@constant` g (gravitational acceleration) is serialized as a parameter-type variable with a fixed default — the .esm schema has no dedicated constant variable type, and physical constants are carried as parameters, matching the sibling general_circulation.esm and surface_layer_profile.esm migrations.\n\nOmitted declarations: the upstream component also declares an `@constant` ρ_ref = 1.225 kg/m^3 and three `@parameters` PFX, PFY, PFZ (the un-differentiated pressure-gradient-force terms) that appear in no equation — the equations use the pre-differentiated divergences dPFX_dx, dPFY_dy, dPFZ_dz instead. MTK builds the system from the equations alone, so these four symbols are not in `parameters(sys)`; mtk2esm follows suit and they are not carried here, mirroring the omitted air-pressure parameter in general_circulation.esm.\n\nDimensional note (upstream `checks = false`): the upstream `System(...; checks = false)` disables MTK unit validation because its pressure_residual equation is dimensionally inconsistent — upstream writes the pseudo-compressible term as g*p_prime/C_a^2, which has dimension Pa/m ((m/s^2)*Pa / (m/s)^2), whereas laplacian_p and F_source are Pa/m^2. Clark (1977) Eq. 4.2 writes this term as g*delta_z(p/C^2): a vertical derivative of p/C^2, which upstream dropped. This .esm restores the derivative: the upstream parameter p_prime [Pa] is replaced by dp_dz [Pa/m], the vertical derivative of the pressure perturbation in the terrain-following coordinate (C_a is a constant parameter, so delta_z(p/C_a^2) = dp_dz/C_a^2), and the equation is dimensionally consistent. Like d2p_dz2, the derivative is supplied pre-computed as a parameter. The tests keep their numeric values; the overrides formerly given to p_prime [Pa] are given to dp_dz [Pa/m].\n\nTolerance rationale (model-level rel=1e-6, abs=1e-9): an observed-only algebraic system with no ODE integration — every output is constant in time. rel=1e-6 covers float64 roundoff in the closed-form +, -, *, /, ^ expressions; abs=1e-9 covers the intended exact zeros (every output when its driving inputs are zero) and the anelastic_balance test, where pressure_residual cancels to a ~3e-17 floating-point residual.\n\nTests: the upstream clark1977_test.jl carries only a structure test for DiagnosticPressure (3 unknowns, 3 equations) with no numeric assertions. The .esm tests below are derived directly from the three algebraic equations, each exercised across a physically meaningful parameter regime: the pressure Laplacian, the pressure-gradient-force divergence with and without a terrain Jacobian, the pseudo-compressible and source terms of the residual, the anelastic-balance case where the residual vanishes, and a full combined check sampled at two times to confirm time-invariance."
             },
             "tolerance": {
                 "rel": 1e-06,
@@ -50,11 +50,11 @@
                     "default": 1.0,
                     "description": "G^(1/2) Jacobian factor of the terrain-following coordinates (dimensionless)"
                 },
-                "p_prime": {
+                "dp_dz": {
                     "type": "parameter",
-                    "units": "Pa",
+                    "units": "Pa/m",
                     "default": 0.0,
-                    "description": "Pressure perturbation"
+                    "description": "Vertical derivative of the pressure perturbation in the terrain-following coordinate, dp'/dz (the delta_z(p/C^2) term of Clark 1977 Eq. 4.2, with C_a constant)"
                 },
                 "d2p_dx2": {
                     "type": "parameter",
@@ -152,7 +152,7 @@
                             {
                                 "op": "*",
                                 "args": [
-                                    {"op": "const", "args": [], "value": -1, "units": "1/m"},
+                                    -1,
                                     {
                                         "op": "/",
                                         "args": [
@@ -160,7 +160,7 @@
                                                 "op": "*",
                                                 "args": [
                                                     "g",
-                                                    "p_prime"
+                                                    "dp_dz"
                                                 ]
                                             },
                                             {
@@ -188,7 +188,7 @@
             "tests": [
                 {
                     "id": "default_parameters",
-                    "description": "All parameters at their declared defaults (every pressure-gradient-force divergence, second derivative, source, and the pressure perturbation are zero; G_sqrt = 1, C_a = 50, g = 9.81). All three outputs are zero. Guards the serialized parameter defaults.",
+                    "description": "All parameters at their declared defaults (every pressure-gradient-force divergence, second derivative, source, and the vertical pressure-perturbation gradient are zero; G_sqrt = 1, C_a = 50, g = 9.81). All three outputs are zero. Guards the serialized parameter defaults.",
                     "time_span": {
                         "start": 0.0,
                         "end": 1.0
@@ -213,7 +213,7 @@
                 },
                 {
                     "id": "pressure_laplacian",
-                    "description": "Pressure-perturbation Laplacian as the sum of the three second derivatives (laplacian_p = d2p_dx2 + d2p_dy2 + d2p_dz2 = 0.5 + 0.3 - 0.2 = 0.6 Pa/m^2). With p_prime = 0 and F_source = 0 the residual reduces to laplacian_p, so pressure_residual = 0.6 Pa/m^2; div_PF = 0 because no pressure-gradient-force divergence is set.",
+                    "description": "Pressure-perturbation Laplacian as the sum of the three second derivatives (laplacian_p = d2p_dx2 + d2p_dy2 + d2p_dz2 = 0.5 + 0.3 - 0.2 = 0.6 Pa/m^2). With dp_dz = 0 and F_source = 0 the residual reduces to laplacian_p, so pressure_residual = 0.6 Pa/m^2; div_PF = 0 because no pressure-gradient-force divergence is set.",
                     "parameter_overrides": {
                         "d2p_dx2": 0.5,
                         "d2p_dy2": 0.3,
@@ -305,9 +305,9 @@
                 },
                 {
                     "id": "compressibility_term",
-                    "description": "Pseudo-compressible term of the diagnostic pressure equation at the default acoustic speed (C_a = 50 m/s): with laplacian_p = 0 and F_source = 0, pressure_residual = -g * p_prime / C_a^2 = -9.81 * 100 / 2500 = -0.3924 Pa/m^2. Isolates the term that couples the pressure perturbation back into the residual.",
+                    "description": "Pseudo-compressible term of the diagnostic pressure equation at the default acoustic speed (C_a = 50 m/s): with laplacian_p = 0 and F_source = 0, pressure_residual = -g * dp_dz / C_a^2 = -9.81 * 100 / 2500 = -0.3924 Pa/m^2. Isolates the term that couples the pressure perturbation back into the residual.",
                     "parameter_overrides": {
-                        "p_prime": 100.0
+                        "dp_dz": 100.0
                     },
                     "time_span": {
                         "start": 0.0,
@@ -333,9 +333,9 @@
                 },
                 {
                     "id": "acoustic_speed_sensitivity",
-                    "description": "Effect of the pseudo-compressible acoustic speed: at C_a = 100 m/s (double the default) and p_prime = 500 Pa, pressure_residual = -g * p_prime / C_a^2 = -9.81 * 500 / 10000 = -0.4905 Pa/m^2. The 1 / C_a^2 dependence makes the compressibility correction shrink as the artificial sound speed grows.",
+                    "description": "Effect of the pseudo-compressible acoustic speed: at C_a = 100 m/s (double the default) and dp_dz = 500 Pa/m, pressure_residual = -g * dp_dz / C_a^2 = -9.81 * 500 / 10000 = -0.4905 Pa/m^2. The 1 / C_a^2 dependence makes the compressibility correction shrink as the artificial sound speed grows.",
                     "parameter_overrides": {
-                        "p_prime": 500.0,
+                        "dp_dz": 500.0,
                         "C_a": 100.0
                     },
                     "time_span": {
@@ -362,7 +362,7 @@
                 },
                 {
                     "id": "source_term",
-                    "description": "Source-term contribution: with the Laplacian and pressure perturbation zero, the residual is the negative of the momentum-divergence source, pressure_residual = -F_source = -0.35 Pa/m^2.",
+                    "description": "Source-term contribution: with the Laplacian and vertical pressure-perturbation gradient zero, the residual is the negative of the momentum-divergence source, pressure_residual = -F_source = -0.35 Pa/m^2.",
                     "parameter_overrides": {
                         "F_source": 0.35
                     },
@@ -390,9 +390,9 @@
                 },
                 {
                     "id": "anelastic_balance",
-                    "description": "Anelastic constraint satisfied: when the pressure Laplacian exactly balances the pseudo-compressible and source terms the residual vanishes (Eq. 4.2). Here laplacian_p = d2p_dx2 = 0.4924 Pa/m^2 equals g * p_prime / C_a^2 + F_source = 9.81 * 100 / 2500 + 0.1 = 0.3924 + 0.1, so pressure_residual cancels to zero (a ~3e-17 floating-point residual, covered by the model-level abs=1e-9 tolerance).",
+                    "description": "Anelastic constraint satisfied: when the pressure Laplacian exactly balances the pseudo-compressible and source terms the residual vanishes (Eq. 4.2). Here laplacian_p = d2p_dx2 = 0.4924 Pa/m^2 equals g * dp_dz / C_a^2 + F_source = 9.81 * 100 / 2500 + 0.1 = 0.3924 + 0.1, so pressure_residual cancels to zero (a ~3e-17 floating-point residual, covered by the model-level abs=1e-9 tolerance).",
                     "parameter_overrides": {
-                        "p_prime": 100.0,
+                        "dp_dz": 100.0,
                         "C_a": 50.0,
                         "F_source": 0.1,
                         "d2p_dx2": 0.4924
@@ -452,11 +452,11 @@
                 },
                 {
                     "id": "full_diagnostic",
-                    "description": "Comprehensive check exercising all three outputs with every driving input nonzero: C_a = 60 m/s, G_sqrt = 1.5, p_prime = 150 Pa, d2p_dx2 = 0.6, d2p_dy2 = 0.25, d2p_dz2 = -0.15, F_source = 0.05, dPFX_dx = 0.12, dPFY_dy = 0.08, dPFZ_dz = 0.3 Pa/m^2. div_PF = 0.12 + 0.08 + 0.3 / 1.5 = 0.4; laplacian_p = 0.6 + 0.25 - 0.15 = 0.7; pressure_residual = 0.7 - 9.81 * 150 / 3600 - 0.05 = 0.24125 Pa/m^2. Sampled at t = 0 and t = 1 to confirm the algebraic system is time-invariant.",
+                    "description": "Comprehensive check exercising all three outputs with every driving input nonzero: C_a = 60 m/s, G_sqrt = 1.5, dp_dz = 150 Pa/m, d2p_dx2 = 0.6, d2p_dy2 = 0.25, d2p_dz2 = -0.15, F_source = 0.05, dPFX_dx = 0.12, dPFY_dy = 0.08, dPFZ_dz = 0.3 Pa/m^2. div_PF = 0.12 + 0.08 + 0.3 / 1.5 = 0.4; laplacian_p = 0.6 + 0.25 - 0.15 = 0.7; pressure_residual = 0.7 - 9.81 * 150 / 3600 - 0.05 = 0.24125 Pa/m^2. Sampled at t = 0 and t = 1 to confirm the algebraic system is time-invariant.",
                     "parameter_overrides": {
                         "C_a": 60.0,
                         "G_sqrt": 1.5,
-                        "p_prime": 150.0,
+                        "dp_dz": 150.0,
                         "d2p_dx2": 0.6,
                         "d2p_dy2": 0.25,
                         "d2p_dz2": -0.15,
@@ -505,8 +505,8 @@
             ],
             "analyses": [
                 {
-                    "id": "pressure_residual_vs_pressure_perturbation",
-                    "description": "Diagnostic pressure residual as a function of the pressure perturbation p_prime, at the default acoustic speed C_a = 50 m/s with the Laplacian and source terms zero. The residual is the pure pseudo-compressible term pressure_residual = -g * p_prime / C_a^2 — a straight line through the origin, negative for p_prime > 0.",
+                    "id": "pressure_residual_vs_pressure_gradient",
+                    "description": "Diagnostic pressure residual as a function of the vertical pressure-perturbation gradient dp_dz, at the default acoustic speed C_a = 50 m/s with the Laplacian and source terms zero. The residual is the pure pseudo-compressible term pressure_residual = -g * dp_dz / C_a^2 — a straight line through the origin, negative for dp_dz > 0.",
                     "initial_state": {},
                     "parameters": {},
                     "time_span": {
@@ -517,7 +517,7 @@
                         "type": "cartesian",
                         "dimensions": [
                             {
-                                "parameter": "p_prime",
+                                "parameter": "dp_dz",
                                 "range": {
                                     "start": -200.0,
                                     "stop": 200.0,
@@ -529,12 +529,12 @@
                     },
                     "plots": [
                         {
-                            "id": "residual_vs_p_prime",
+                            "id": "residual_vs_dp_dz",
                             "type": "line",
-                            "description": "Diagnostic pressure residual vs pressure perturbation (pseudo-compressible term of Eq. 4.2).",
+                            "description": "Diagnostic pressure residual vs vertical pressure-perturbation gradient (pseudo-compressible term of Eq. 4.2).",
                             "x": {
-                                "variable": "p_prime",
-                                "label": "Pressure perturbation p' (Pa)"
+                                "variable": "dp_dz",
+                                "label": "Vertical pressure-perturbation gradient dp'/dz (Pa/m)"
                             },
                             "y": {
                                 "variable": "pressure_residual",
@@ -586,10 +586,10 @@
                 },
                 {
                     "id": "pressure_residual_vs_acoustic_speed",
-                    "description": "Diagnostic pressure residual as a function of the pseudo-compressible acoustic speed C_a, at a fixed pressure perturbation p_prime = 300 Pa with the Laplacian and source terms zero. The residual -g * p_prime / C_a^2 decays toward zero as C_a grows: increasing the artificial sound speed makes the pseudo-compressible scheme approach the true anelastic limit.",
+                    "description": "Diagnostic pressure residual as a function of the pseudo-compressible acoustic speed C_a, at a fixed vertical pressure-perturbation gradient dp_dz = 300 Pa/m with the Laplacian and source terms zero. The residual -g * dp_dz / C_a^2 decays toward zero as C_a grows: increasing the artificial sound speed makes the pseudo-compressible scheme approach the true anelastic limit.",
                     "initial_state": {},
                     "parameters": {
-                        "p_prime": 300.0
+                        "dp_dz": 300.0
                     },
                     "time_span": {
                         "start": 0.0,
